@@ -362,6 +362,122 @@ def run_strategy():
         logging.error(f"Run strategy error: {e}")
         return jsonify({"status": "ERROR", "message": str(e)})
 
+@app.route("/api/positions")
+@login_required
+def get_positions():
+    from models import AlpacaAccount
+    account_id = request.args.get("account_id")
+    if not account_id:
+        return jsonify({"positions": [], "error": "No account selected"})
+    
+    account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
+    if not account:
+        return jsonify({"positions": [], "error": "Account not found"})
+    
+    headers = get_alpaca_headers(account)
+    base_url = "https://paper-api.alpaca.markets" if account.is_paper else "https://api.alpaca.markets"
+    
+    try:
+        r = requests.get(f"{base_url}/v2/positions", headers=headers, timeout=10)
+        if r.status_code == 200:
+            positions = r.json()
+            result = []
+            for pos in positions:
+                entry_price = float(pos.get("avg_entry_price", 0))
+                current_price = float(pos.get("current_price", 0))
+                qty = int(pos.get("qty", 0))
+                unrealized_pl = float(pos.get("unrealized_pl", 0))
+                unrealized_plpc = float(pos.get("unrealized_plpc", 0)) * 100
+                market_value = float(pos.get("market_value", 0))
+                
+                result.append({
+                    "symbol": pos.get("symbol"),
+                    "qty": qty,
+                    "side": pos.get("side"),
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "unrealized_pl": unrealized_pl,
+                    "unrealized_plpc": unrealized_plpc,
+                    "market_value": market_value
+                })
+            return jsonify({"positions": result})
+        return jsonify({"positions": [], "error": f"API error: {r.status_code}"})
+    except Exception as e:
+        logging.error(f"Error fetching positions: {e}")
+        return jsonify({"positions": [], "error": str(e)})
+
+@app.route("/api/market_status")
+def market_status():
+    try:
+        eastern = pytz.timezone("America/New_York")
+        now = datetime.datetime.now(eastern)
+        weekday = now.weekday()
+        hour = now.hour
+        minute = now.minute
+        
+        is_weekday = weekday < 5
+        market_open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        orb_ready_time = now.replace(hour=9, minute=45, second=0, microsecond=0)
+        
+        is_market_open = is_weekday and market_open_time <= now <= market_close_time
+        is_orb_ready = is_weekday and now >= orb_ready_time and now <= market_close_time
+        
+        status = "closed"
+        message = "Market is closed"
+        if is_weekday:
+            if now < market_open_time:
+                status = "pre_market"
+                message = f"Market opens at 9:30 AM ET"
+            elif now >= market_open_time and now < orb_ready_time:
+                status = "opening"
+                message = "Market open - Waiting for ORB window (9:45 AM ET)"
+            elif is_orb_ready:
+                status = "orb_ready"
+                message = "ORB window active - Ready to trade"
+            elif now > market_close_time:
+                status = "closed"
+                message = "Market closed for today"
+        else:
+            message = "Market closed (weekend)"
+        
+        return jsonify({
+            "status": status,
+            "message": message,
+            "is_market_open": is_market_open,
+            "is_orb_ready": is_orb_ready,
+            "current_time": now.strftime("%H:%M:%S ET")
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/api/close_position", methods=["POST"])
+@login_required
+def close_position():
+    from models import AlpacaAccount
+    data = request.json
+    symbol = data.get("symbol")
+    account_id = data.get("account_id")
+    
+    if not symbol or not account_id:
+        return jsonify({"success": False, "error": "Missing symbol or account"})
+    
+    account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
+    if not account:
+        return jsonify({"success": False, "error": "Account not found"})
+    
+    headers = get_alpaca_headers(account)
+    base_url = "https://paper-api.alpaca.markets" if account.is_paper else "https://api.alpaca.markets"
+    
+    try:
+        r = requests.delete(f"{base_url}/v2/positions/{symbol}", headers=headers, timeout=10)
+        if r.status_code in [200, 204]:
+            return jsonify({"success": True, "message": f"Position {symbol} closed"})
+        return jsonify({"success": False, "error": f"Failed to close: {r.text}"})
+    except Exception as e:
+        logging.error(f"Error closing position: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
 with app.app_context():
     import models
     db.create_all()

@@ -1,27 +1,27 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Dashboard - ORB Auto Trader</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        .dashboard-container { max-width: 600px; }
-        .section { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .light-mode .section { background: #f0f0f0; }
-        .account-badge { display: inline-block; background: #00c56e; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; margin: 2px; }
-        .order-row { padding: 8px 0; border-bottom: 1px solid #333; font-size: 13px; }
-        .light-mode .order-row { border-color: #ddd; }
-        .order-row:last-child { border: none; }
-        .buy { color: #4caf50; }
-        .sell { color: #f44336; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 10px; background: #333; border: 1px solid #444; color: white; border-radius: 6px; }
-        .light-mode input[type="text"], .light-mode input[type="password"] { background: #fff; border-color: #ccc; color: #222; }
-        .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
-        .nav-links { display: flex; justify-content: space-between; margin-bottom: 15px; }
-        .nav-links a { color: #00c56e; text-decoration: none; }
-    </style>
-</head>
-<body>
+{% extends "layout.html" %}
 
+{% block title %}Dashboard - ORB Auto Trader{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard-container { max-width: 600px; }
+    .section { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+    .light-mode .section { background: #f0f0f0; }
+    .account-badge { display: inline-block; background: #00c56e; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; margin: 2px; }
+    .order-row { padding: 8px 0; border-bottom: 1px solid #333; font-size: 13px; }
+    .light-mode .order-row { border-color: #ddd; }
+    .order-row:last-child { border: none; }
+    .buy { color: #4caf50; }
+    .sell { color: #f44336; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 10px; background: #333; border: 1px solid #444; color: white; border-radius: 6px; }
+    .light-mode input[type="text"], .light-mode input[type="password"] { background: #fff; border-color: #ccc; color: #222; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+    .nav-links { display: flex; justify-content: space-between; margin-bottom: 15px; }
+    .nav-links a { color: #00c56e; text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="container dashboard-container">
     <div class="nav-links">
         <span>Welcome, {{ current_user.username }}</span>
@@ -120,27 +120,4 @@
 
     <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
 </div>
-
-<script>
-async function runORB() {
-    const symbol = document.getElementById("symbol").value;
-    const profit = document.getElementById("profit").value;
-    const accountEl = document.getElementById("account");
-    const account_id = accountEl ? accountEl.value : null;
-
-    const res = await fetch("/run_orb", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({symbol, take_profit: profit, account_id: account_id})
-    });
-
-    const data = await res.json();
-    document.getElementById("result").innerText = JSON.stringify(data, null, 2);
-}
-
-function toggleTheme() {
-    document.body.classList.toggle("light-mode");
-}
-</script>
-</body>
-</html>
+{% endblock %}

@@ -5,18 +5,11 @@ import pytz
 import requests
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from sqlalchemy.orm import DeclarativeBase
+from flask_login import LoginManager, login_required, current_user
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import generate_password_hash, check_password_hash
+from extensions import db
 
 logging.basicConfig(level=logging.DEBUG)
-
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET")
@@ -32,7 +25,10 @@ db.init_app(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = "login"
+login_manager.login_view = "auth.login"
+
+from auth import auth_bp
+app.register_blueprint(auth_bp)
 
 ALPACA_BASE = "https://paper-api.alpaca.markets"
 ALPACA_DATA = "https://data.alpaca.markets/v2"
@@ -217,52 +213,6 @@ def index():
     api_connected = check_api_connection()
     return render_template("index.html", assets=assets, api_connected=api_connected)
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
-    
-    if request.method == "POST":
-        from models import User
-        username = request.form.get("username")
-        password = request.form.get("password")
-        user = User.query.filter_by(username=username).first()
-        
-        if user and check_password_hash(user.password_hash, password):
-            login_user(user)
-            return redirect(url_for("dashboard"))
-        flash("Invalid username or password")
-    
-    return render_template("login.html")
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
-    
-    if request.method == "POST":
-        from models import User
-        username = request.form.get("username")
-        password = request.form.get("password")
-        
-        if User.query.filter_by(username=username).first():
-            flash("Username already exists")
-            return render_template("register.html")
-        
-        user = User(username=username, password_hash=generate_password_hash(password))
-        db.session.add(user)
-        db.session.commit()
-        login_user(user)
-        return redirect(url_for("dashboard"))
-    
-    return render_template("register.html")
-
-@app.route("/logout")
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for("index"))
-
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -330,6 +280,58 @@ def run_orb():
 @app.route("/api/status")
 def api_status():
     return jsonify({"connected": check_api_connection()})
+
+@app.route("/api/run_strategy", methods=["POST"])
+def run_strategy():
+    from strategies import get_strategy
+    from alpaca_client import AlpacaClient
+    
+    try:
+        data = request.json
+        strategy_name = data.get("strategy", "orb")
+        symbol = data.get("symbol", "")
+        take_profit = float(data.get("take_profit", 0.05))
+        account_id = data.get("account_id")
+        
+        if not symbol:
+            return jsonify({"status": "ERROR", "message": "Please select a symbol."})
+        
+        if take_profit <= 0 or take_profit > 1:
+            return jsonify({"status": "ERROR", "message": "Take profit must be between 0% and 100%."})
+        
+        strategy = get_strategy(strategy_name)
+        if not strategy:
+            return jsonify({"status": "ERROR", "message": f"Unknown strategy: {strategy_name}"})
+        
+        account = None
+        user_id = None
+        if account_id and current_user.is_authenticated:
+            from models import AlpacaAccount
+            account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
+            user_id = current_user.id
+        
+        client = AlpacaClient.from_account(account)
+        result = strategy.execute(client, symbol, take_profit=take_profit)
+        
+        if result.get("status") == "TRADE_PLACED" and user_id:
+            from models import OrderRecord
+            order_record = OrderRecord(
+                user_id=user_id,
+                symbol=symbol,
+                side=result.get("direction", "").lower(),
+                qty=1,
+                entry_price=result.get("entry_price"),
+                tp_price=result.get("take_profit"),
+                alpaca_order_id=result.get("alpaca_order_id", ""),
+                status="placed" if result.get("take_profit_placed") else "tp_failed"
+            )
+            db.session.add(order_record)
+            db.session.commit()
+        
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Run strategy error: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)})
 
 with app.app_context():
     import models

@@ -1,11 +1,8 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Register - ORB Auto Trader</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
+{% extends "layout.html" %}
 
+{% block title %}Register - ORB Auto Trader{% endblock %}
+
+{% block content %}
 <div class="container">
     <h1>ORB Auto Trader</h1>
     <p>Create your account</p>
@@ -31,12 +28,9 @@
     </form>
 
     <p style="margin-top: 20px; text-align: center;">
-        Already have an account? <a href="/login" style="color: #00c56e;">Login</a>
+        Already have an account? <a href="/login">Login</a>
     </p>
 
     <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
 </div>
-
-<script src="/static/script.js"></script>
-</body>
-</html>
+{% endblock %}

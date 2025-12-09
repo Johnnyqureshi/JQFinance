@@ -28,7 +28,8 @@ def register():
         return redirect(url_for("dashboard"))
     
     if request.method == "POST":
-        from models import User, db
+        from models import User
+        from extensions import db
         username = request.form.get("username")
         password = request.form.get("password")
         

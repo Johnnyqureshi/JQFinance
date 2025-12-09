@@ -321,6 +321,7 @@ def run_strategy():
         symbol = data.get("symbol", "")
         take_profit = float(data.get("take_profit", 0.05))
         account_id = data.get("account_id")
+        position_settings = data.get("position", {})
         
         if not symbol:
             return jsonify({"status": "ERROR", "message": "Please select a symbol."})
@@ -340,7 +341,16 @@ def run_strategy():
             user_id = current_user.id
         
         client = AlpacaClient.from_account(account)
-        result = strategy.execute(client, symbol, take_profit=take_profit)
+        
+        stop_loss_pct = position_settings.get("stop_loss", 0.02)
+        result = strategy.execute(
+            client, 
+            symbol, 
+            take_profit=take_profit,
+            stop_loss=stop_loss_pct,
+            position_settings=position_settings,
+            account=account
+        )
         
         if result.get("status") == "TRADE_PLACED" and user_id:
             from models import OrderRecord
@@ -348,7 +358,7 @@ def run_strategy():
                 user_id=user_id,
                 symbol=symbol,
                 side=result.get("direction", "").lower(),
-                qty=1,
+                qty=result.get("qty", 1),
                 entry_price=result.get("entry_price"),
                 tp_price=result.get("take_profit"),
                 alpaca_order_id=result.get("alpaca_order_id", ""),

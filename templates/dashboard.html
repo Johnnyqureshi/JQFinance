@@ -97,6 +97,45 @@
     </div>
 
     <div class="section">
+        <h3>Position Sizing & Risk</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+                <label>Position Size:</label>
+                <select id="position-size-type" onchange="togglePositionInput()">
+                    <option value="fixed">Fixed Shares</option>
+                    <option value="dollars">Dollar Amount</option>
+                    <option value="percent">% of Buying Power</option>
+                </select>
+            </div>
+            <div>
+                <label id="position-value-label">Shares:</label>
+                <input type="number" id="position-value" value="1" min="1" step="1" style="width: 100%;">
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+            <div>
+                <label>Stop Loss (%):</label>
+                <input type="number" id="stop-loss" value="2" min="0.5" max="20" step="0.5" style="width: 100%;">
+            </div>
+            <div>
+                <label>Max Risk per Trade:</label>
+                <select id="max-risk">
+                    <option value="0.01">1% of Account</option>
+                    <option value="0.02" selected>2% of Account</option>
+                    <option value="0.03">3% of Account</option>
+                    <option value="0.05">5% of Account</option>
+                    <option value="0.10">10% of Account</option>
+                </select>
+            </div>
+        </div>
+        
+        <div id="risk-preview" style="margin-top: 12px; padding: 10px; background: #1a1a1a; border-radius: 6px; font-size: 13px;">
+            <div style="color: #888;">Risk Preview (select account to calculate)</div>
+        </div>
+    </div>
+
+    <div class="section">
         <h3>Run ORB Strategy</h3>
         <label>Choose Asset:</label>
         <select id="symbol">
@@ -116,9 +155,9 @@
 
         {% if accounts %}
         <label>Account:</label>
-        <select id="account">
+        <select id="account" onchange="updateRiskPreview()">
             {% for account in accounts %}
-            <option value="{{ account.id }}">{{ account.name }}</option>
+            <option value="{{ account.id }}" data-equity="{{ account_balances.get(account.id).equity if account_balances.get(account.id) else 0 }}" data-buying-power="{{ account_balances.get(account.id).buying_power if account_balances.get(account.id) else 0 }}">{{ account.name }}</option>
             {% endfor %}
         </select>
         {% endif %}

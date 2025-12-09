@@ -1,110 +1,39 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ORB Trading Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>ORB Auto Trader</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <div class="header-content">
-                <h1 class="title">ORB Trading Dashboard</h1>
-                <p class="subtitle">Opening Range Breakout Strategy - Paper Trading</p>
-            </div>
-            <div class="api-status" id="apiStatus">
-                <span class="status-dot {% if api_connected %}connected{% else %}disconnected{% endif %}"></span>
-                <span class="status-text">{% if api_connected %}API Connected{% else %}API Disconnected{% endif %}</span>
-            </div>
-        </header>
 
-        <main class="main-content">
-            <div class="control-panel">
-                <h2 class="section-title">Trade Configuration</h2>
-                
-                <form id="orbForm" class="trade-form">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="symbol" class="form-label">Select Asset</label>
-                            <select id="symbol" name="symbol" class="form-select" required>
-                                <option value="">Choose a symbol...</option>
-                                {% for asset in assets %}
-                                <option value="{{ asset }}">{{ asset }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="takeProfit" class="form-label">Take Profit (%)</label>
-                            <div class="input-wrapper">
-                                <input type="number" id="takeProfit" name="take_profit" 
-                                       class="form-input" 
-                                       value="2" min="0.1" max="100" step="0.1" required>
-                                <span class="input-suffix">%</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="submit-btn" id="submitBtn">
-                        <span class="btn-text">Execute ORB Strategy</span>
-                        <span class="btn-loading" style="display: none;">
-                            <svg class="spinner" viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-                            </svg>
-                            Processing...
-                        </span>
-                    </button>
-                </form>
-            </div>
+<div class="container">
 
-            <div class="status-panel" id="statusPanel" style="display: none;">
-                <h2 class="section-title">Trade Status</h2>
-                
-                <div class="status-content" id="statusContent">
-                    <div class="status-badge" id="statusBadge">
-                        <span class="badge-icon" id="badgeIcon"></span>
-                        <span class="badge-text" id="badgeText"></span>
-                    </div>
-                    
-                    <p class="status-message" id="statusMessage"></p>
-                    
-                    <div class="trade-details" id="tradeDetails" style="display: none;">
-                        <div class="detail-row">
-                            <span class="detail-label">Symbol</span>
-                            <span class="detail-value" id="detailSymbol"></span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Direction</span>
-                            <span class="detail-value" id="detailDirection"></span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Entry Price</span>
-                            <span class="detail-value mono" id="detailEntry"></span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Take Profit</span>
-                            <span class="detail-value mono" id="detailTP"></span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">ORB High</span>
-                            <span class="detail-value mono" id="detailHigh"></span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">ORB Low</span>
-                            <span class="detail-value mono" id="detailLow"></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
+    <h1>ORB Auto Trader</h1>
+    <p>Select an asset and run the strategy.</p>
 
-        <footer class="footer">
-            <p>Paper Trading Only - Not Financial Advice</p>
-        </footer>
-    </div>
+    <label>Choose Asset:</label>
+    <select id="symbol">
+        {% for a in assets %}
+        <option value="{{ a }}">{{ a }}</option>
+        {% endfor %}
+    </select>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <label>Take Profit:</label>
+    <select id="profit">
+        <option value="0.03">3%</option>
+        <option value="0.05" selected>5%</option>
+        <option value="0.10">10%</option>
+    </select>
+
+    <button onclick="runORB()">Run ORB Strategy</button>
+
+    <div id="result" class="result"></div>
+
+    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
+
+</div>
+
+<script src="/static/script.js"></script>
+
 </body>
 </html>

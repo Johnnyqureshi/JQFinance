@@ -9,4 +9,6 @@ dependencies = [
     "flask-sqlalchemy>=3.1.1",
     "gunicorn>=23.0.0",
     "psycopg2-binary>=2.9.11",
+    "pytz>=2025.2",
+    "requests>=2.32.5",
 ]

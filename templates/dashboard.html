@@ -128,6 +128,31 @@
     </div>
 
     <div class="section">
+        <h3>Activity Monitor</h3>
+        <div id="market-status" style="margin-bottom: 15px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span id="status-indicator" style="width: 12px; height: 12px; border-radius: 50%; background: #888;"></span>
+                <span id="status-text" style="font-size: 14px;">Loading...</span>
+                <span id="current-time" style="margin-left: auto; color: #888; font-size: 12px;"></span>
+            </div>
+        </div>
+        
+        <div id="positions-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 13px; color: #888;">Active Positions</span>
+                <select id="monitor-account" style="padding: 4px 8px; font-size: 12px; background: #333; border: 1px solid #444; color: white; border-radius: 4px;">
+                    {% for account in accounts %}
+                    <option value="{{ account.id }}">{{ account.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="positions-list">
+                <p style="color: #888; font-size: 13px;">No positions</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
         <h3>Recent Orders</h3>
         {% if orders %}
             {% for order in orders %}

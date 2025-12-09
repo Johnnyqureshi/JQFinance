@@ -1,6 +1,7 @@
 # auth.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash
-from models import db, User
+from extensions import db
+from models import User
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import login_user, logout_user, login_required
 
@@ -34,7 +35,7 @@ def login():
             flash("Invalid credentials", "danger")
             return redirect(url_for("auth.login"))
         login_user(user)
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard"))
     return render_template("login.html")
 
 @auth_bp.route("/logout")

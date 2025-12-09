@@ -57,11 +57,11 @@ def get_assets():
     try:
         url = f"{ALPACA_BASE}/v2/assets"
         params = {"status": "active", "asset_class": "us_equity"}
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(url, headers=headers, params=params, timeout=30)
         if r.status_code == 200:
             assets = r.json()
-            tradable = [a["symbol"] for a in assets if a.get("tradable", False) and a.get("fractionable", False)]
-            return sorted(tradable)[:100]
+            tradable = [a["symbol"] for a in assets if a.get("tradable", False)]
+            return sorted(tradable)
         return []
     except Exception as e:
         logging.error(f"Error fetching assets: {e}")

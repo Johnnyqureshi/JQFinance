@@ -62,6 +62,25 @@ def check_api_connection(account=None):
     except:
         return False
 
+def fetch_account_balance(account):
+    headers = get_alpaca_headers(account)
+    if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
+        return None
+    try:
+        base_url = "https://paper-api.alpaca.markets" if account.is_paper else "https://api.alpaca.markets"
+        url = f"{base_url}/v2/account"
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                "equity": float(data.get("equity", 0)),
+                "cash": float(data.get("cash", 0)),
+                "buying_power": float(data.get("buying_power", 0))
+            }
+        return None
+    except:
+        return None
+
 def get_assets(account=None):
     headers = get_alpaca_headers(account)
     if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
@@ -221,13 +240,17 @@ def dashboard():
     orders = OrderRecord.query.filter_by(user_id=current_user.id).order_by(OrderRecord.created_at.desc()).limit(20).all()
     
     selected_account = None
-    if accounts:
-        selected_account = accounts[0]
+    account_balances = {}
+    for account in accounts:
+        balance = fetch_account_balance(account)
+        account_balances[account.id] = balance
+        if selected_account is None:
+            selected_account = account
     
     assets = get_assets(selected_account)
     api_connected = check_api_connection(selected_account)
     
-    return render_template("dashboard.html", accounts=accounts, orders=orders, assets=assets, api_connected=api_connected)
+    return render_template("dashboard.html", accounts=accounts, orders=orders, assets=assets, api_connected=api_connected, account_balances=account_balances)
 
 @app.route("/add_account", methods=["POST"])
 @login_required

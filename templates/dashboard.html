@@ -18,6 +18,8 @@
     .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
     .nav-links { display: flex; justify-content: space-between; margin-bottom: 15px; }
     .nav-links a { color: #00c56e; text-decoration: none; }
+    .account-card { background: #2a2a2a; }
+    .light-mode .account-card { background: #e8e8e8; }
 </style>
 {% endblock %}
 
@@ -44,7 +46,29 @@
         <h3>Alpaca Accounts</h3>
         {% if accounts %}
             {% for account in accounts %}
-            <span class="account-badge">{{ account.name }} {% if account.is_paper %}(Paper){% endif %}</span>
+            <div class="account-card" style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="account-badge">{{ account.name }} {% if account.is_paper %}(Paper){% endif %}</span>
+                </div>
+                {% if account_balances.get(account.id) %}
+                <div style="margin-top: 8px; font-size: 13px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #888;">Equity:</span>
+                        <span style="color: #4caf50; font-weight: bold;">${{ "%.2f"|format(account_balances[account.id].equity) }}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #888;">Cash:</span>
+                        <span>${{ "%.2f"|format(account_balances[account.id].cash) }}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #888;">Buying Power:</span>
+                        <span>${{ "%.2f"|format(account_balances[account.id].buying_power) }}</span>
+                    </div>
+                </div>
+                {% else %}
+                <div style="margin-top: 8px; font-size: 12px; color: #888;">Balance unavailable</div>
+                {% endif %}
+            </div>
             {% endfor %}
         {% else %}
             <p style="color: #888; font-size: 13px;">No accounts added yet.</p>

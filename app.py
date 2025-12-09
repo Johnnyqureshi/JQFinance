@@ -60,7 +60,7 @@ def get_assets():
         if r.status_code == 200:
             assets = r.json()
             tradable = [a["symbol"] for a in assets if a.get("tradable", False)]
-            priority_symbols = ["IONZ", "PLTZ", "SOXS"]
+            priority_symbols = ["IONZ", "PLTZ", "SOXS", "TZA", "MSTZ", "FNGD", "RR", "EXK", "ASM", "LAC", "NVTS", "UVIX", "PLG"]
             for sym in priority_symbols:
                 if sym not in tradable:
                     tradable.append(sym)

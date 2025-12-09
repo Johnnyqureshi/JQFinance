@@ -56,11 +56,14 @@ def get_assets():
         return []
     try:
         url = f"{ALPACA_BASE}/v2/assets"
-        params = {"status": "active", "asset_class": "us_equity"}
-        r = requests.get(url, headers=headers, params=params, timeout=30)
+        r = requests.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
             assets = r.json()
             tradable = [a["symbol"] for a in assets if a.get("tradable", False)]
+            priority_symbols = ["IONZ", "PLTZ", "SOXS"]
+            for sym in priority_symbols:
+                if sym not in tradable:
+                    tradable.append(sym)
             return sorted(tradable)
         return []
     except Exception as e:

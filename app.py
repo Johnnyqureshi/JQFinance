@@ -84,9 +84,13 @@ def fetch_account_balance(account):
 def get_assets(account=None):
     headers = get_alpaca_headers(account)
     if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
-        return []
+        priority_symbols = ["IONZ", "PLTZ", "SOXS", "TZA", "MSTZ", "FNGD", "RR", "EXK", "ASM", "LAC", "NVTS", "UVIX", "PLG", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ"]
+        return sorted(priority_symbols)
     try:
-        url = f"{ALPACA_BASE}/v2/assets"
+        base_url = ALPACA_BASE
+        if account and not account.is_paper:
+            base_url = "https://api.alpaca.markets"
+        url = f"{base_url}/v2/assets"
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
             assets = r.json()
@@ -96,10 +100,12 @@ def get_assets(account=None):
                 if sym not in tradable:
                     tradable.append(sym)
             return sorted(tradable)
-        return []
+        priority_symbols = ["IONZ", "PLTZ", "SOXS", "TZA", "MSTZ", "FNGD", "RR", "EXK", "ASM", "LAC", "NVTS", "UVIX", "PLG", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ"]
+        return sorted(priority_symbols)
     except Exception as e:
         logging.error(f"Error fetching assets: {e}")
-        return []
+        priority_symbols = ["IONZ", "PLTZ", "SOXS", "TZA", "MSTZ", "FNGD", "RR", "EXK", "ASM", "LAC", "NVTS", "UVIX", "PLG", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ"]
+        return sorted(priority_symbols)
 
 def orb_trade(symbol, take_profit, account=None, user_id=None):
     from models import OrderRecord

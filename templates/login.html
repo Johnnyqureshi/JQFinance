@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - ORB Auto Trader</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+    <h1>ORB Auto Trader</h1>
+    <p>Login to your account</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="result" style="color: #f44;">
+        {% for message in messages %}
+        {{ message }}
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <form method="POST">
+        <label>Username:</label>
+        <input type="text" name="username" required>
+        
+        <label>Password:</label>
+        <input type="password" name="password" required>
+        
+        <button type="submit">Login</button>
+    </form>
+
+    <p style="margin-top: 20px; text-align: center;">
+        Don't have an account? <a href="/register" style="color: #00c56e;">Register</a>
+    </p>
+    
+    <p style="text-align: center;">
+        <a href="/" style="color: #888;">Continue as guest</a>
+    </p>
+
+    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
+</div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

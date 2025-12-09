@@ -51,3 +51,23 @@ button:hover {
     background: #444;
     margin-top: 20px;
 }
+
+input[type="text"], input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    background: #222;
+    border: 1px solid #333;
+    color: white;
+    border-radius: 6px;
+}
+
+.light-mode input[type="text"], .light-mode input[type="password"] {
+    background: #fff;
+    border-color: #ccc;
+    color: #222;
+}
+
+a {
+    color: #00c56e;
+}

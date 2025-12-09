@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - ORB Auto Trader</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .dashboard-container { max-width: 600px; }
+        .section { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .light-mode .section { background: #f0f0f0; }
+        .account-badge { display: inline-block; background: #00c56e; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; margin: 2px; }
+        .order-row { padding: 8px 0; border-bottom: 1px solid #333; font-size: 13px; }
+        .light-mode .order-row { border-color: #ddd; }
+        .order-row:last-child { border: none; }
+        .buy { color: #4caf50; }
+        .sell { color: #f44336; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 10px; background: #333; border: 1px solid #444; color: white; border-radius: 6px; }
+        .light-mode input[type="text"], .light-mode input[type="password"] { background: #fff; border-color: #ccc; color: #222; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+        .nav-links { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .nav-links a { color: #00c56e; text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<div class="container dashboard-container">
+    <div class="nav-links">
+        <span>Welcome, {{ current_user.username }}</span>
+        <a href="/logout">Logout</a>
+    </div>
+
+    <h1>ORB Auto Trader</h1>
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="result" style="color: #4caf50;">
+        {% for message in messages %}
+        {{ message }}
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="section">
+        <h3>Alpaca Accounts</h3>
+        {% if accounts %}
+            {% for account in accounts %}
+            <span class="account-badge">{{ account.name }} {% if account.is_paper %}(Paper){% endif %}</span>
+            {% endfor %}
+        {% else %}
+            <p style="color: #888; font-size: 13px;">No accounts added yet.</p>
+        {% endif %}
+        
+        <details style="margin-top: 15px;">
+            <summary style="cursor: pointer; color: #00c56e;">Add New Account</summary>
+            <form method="POST" action="/add_account" style="margin-top: 10px;">
+                <label>Account Name:</label>
+                <input type="text" name="name" placeholder="e.g., Paper Account" required>
+                
+                <label>API Key:</label>
+                <input type="password" name="api_key" required>
+                
+                <label>API Secret:</label>
+                <input type="password" name="api_secret" required>
+                
+                <div class="checkbox-row">
+                    <input type="checkbox" name="is_paper" id="is_paper" checked>
+                    <label for="is_paper" style="margin: 0;">Paper Trading Account</label>
+                </div>
+                
+                <button type="submit">Add Account</button>
+            </form>
+        </details>
+    </div>
+
+    <div class="section">
+        <h3>Run ORB Strategy</h3>
+        <label>Choose Asset:</label>
+        <select id="symbol">
+            {% for a in assets %}
+            <option value="{{ a }}">{{ a }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Take Profit:</label>
+        <select id="profit">
+            <option value="0.05" selected>5%</option>
+            <option value="0.10">10%</option>
+            <option value="0.15">15%</option>
+            <option value="0.20">20%</option>
+            <option value="0.25">25%</option>
+        </select>
+
+        {% if accounts %}
+        <label>Account:</label>
+        <select id="account">
+            {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.name }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+
+        <button onclick="runORB()">Run ORB Strategy</button>
+        <div id="result" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h3>Recent Orders</h3>
+        {% if orders %}
+            {% for order in orders %}
+            <div class="order-row">
+                <strong class="{{ order.side }}">{{ order.side|upper }}</strong> {{ order.symbol }}
+                - Entry: ${{ "%.2f"|format(order.entry_price) }} | TP: ${{ "%.2f"|format(order.tp_price) }}
+                <span style="color: #888; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="color: #888; font-size: 13px;">No orders yet.</p>
+        {% endif %}
+    </div>
+
+    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
+</div>
+
+<script>
+async function runORB() {
+    const symbol = document.getElementById("symbol").value;
+    const profit = document.getElementById("profit").value;
+    const accountEl = document.getElementById("account");
+    const account_id = accountEl ? accountEl.value : null;
+
+    const res = await fetch("/run_orb", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({symbol, take_profit: profit, account_id: account_id})
+    });
+
+    const data = await res.json();
+    document.getElementById("result").innerText = JSON.stringify(data, null, 2);
+}
+
+function toggleTheme() {
+    document.body.classList.toggle("light-mode");
+}
+</script>
+</body>
+</html>

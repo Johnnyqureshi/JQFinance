@@ -34,7 +34,7 @@ def login():
         if not user or not check_password_hash(user.password_hash, password):
             flash("Invalid credentials", "danger")
             return redirect(url_for("auth.login"))
-        login_user(user)
+        login_user(user, remember=True)
         return redirect(url_for("dashboard"))
     return render_template("login.html")
 

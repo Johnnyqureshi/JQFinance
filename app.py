@@ -319,14 +319,17 @@ def run_strategy():
         data = request.json
         strategy_name = data.get("strategy", "orb")
         symbol = data.get("symbol", "")
-        take_profit = float(data.get("take_profit", 0.05))
+        take_profit_raw = data.get("take_profit", 0.05)
         account_id = data.get("account_id")
         position_settings = data.get("position", {})
         
         if not symbol:
             return jsonify({"status": "ERROR", "message": "Please select a symbol."})
         
-        if take_profit <= 0 or take_profit > 1:
+        is_manual_tp = take_profit_raw == "manual"
+        take_profit = 0 if is_manual_tp else float(take_profit_raw)
+        
+        if not is_manual_tp and (take_profit <= 0 or take_profit > 1):
             return jsonify({"status": "ERROR", "message": "Take profit must be between 0% and 100%."})
         
         strategy = get_strategy(strategy_name)

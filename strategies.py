@@ -85,23 +85,25 @@ class ORBStrategy(StrategyBase):
             alpaca_order_id = orr.json().get("id", "")
             
             if direction == "BUY":
-                tp_price = round(price * (1 + take_profit), 2)
+                tp_price = round(price * (1 + take_profit), 2) if take_profit > 0 else None
                 sl_price = round(price * (1 - stop_loss), 2) if stop_loss else None
             else:
-                tp_price = round(price * (1 - take_profit), 2)
+                tp_price = round(price * (1 - take_profit), 2) if take_profit > 0 else None
                 sl_price = round(price * (1 + stop_loss), 2) if stop_loss else None
             
-            tp_order = {
-                "symbol": symbol,
-                "qty": qty,
-                "side": "sell" if direction == "BUY" else "buy",
-                "type": "limit",
-                "limit_price": tp_price,
-                "time_in_force": "day"
-            }
-            
-            tp_response = requests.post(order_url, json=tp_order, headers=headers, timeout=10)
-            tp_placed = tp_response.status_code in [200, 201]
+            tp_placed = False
+            if take_profit > 0 and tp_price:
+                tp_order = {
+                    "symbol": symbol,
+                    "qty": qty,
+                    "side": "sell" if direction == "BUY" else "buy",
+                    "type": "limit",
+                    "limit_price": tp_price,
+                    "time_in_force": "day"
+                }
+                
+                tp_response = requests.post(order_url, json=tp_order, headers=headers, timeout=10)
+                tp_placed = tp_response.status_code in [200, 201]
             
             sl_placed = False
             if stop_loss and sl_price:
@@ -116,7 +118,11 @@ class ORBStrategy(StrategyBase):
                 sl_response = requests.post(order_url, json=sl_order, headers=headers, timeout=10)
                 sl_placed = sl_response.status_code in [200, 201]
             
-            if tp_placed:
+            if take_profit == 0:
+                message = f"Placed {direction} order for {qty} shares of {symbol} at ${price:.2f}. Manual TP mode - close position when ready."
+                if sl_placed:
+                    message += f" SL: ${sl_price:.2f}"
+            elif tp_placed:
                 message = f"Placed {direction} order for {qty} shares of {symbol} at ${price:.2f}. TP: ${tp_price:.2f}"
                 if sl_placed:
                     message += f", SL: ${sl_price:.2f}"

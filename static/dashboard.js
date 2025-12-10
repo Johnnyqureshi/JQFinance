@@ -114,7 +114,7 @@ async function runORB() {
             body: JSON.stringify({
                 strategy: "orb",
                 symbol: symbol,
-                take_profit: parseFloat(profit),
+                take_profit: profit === "manual" ? "manual" : parseFloat(profit),
                 account_id: account_id,
                 position: positionSettings
             })

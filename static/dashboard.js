@@ -62,21 +62,21 @@ function updateRiskPreview() {
     }
     
     preview.innerHTML = `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span style="color: #888;">Account Equity:</span>
-            <span style="color: #4caf50;">$${equity.toFixed(2)}</span>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #666680;">Account Equity</span>
+            <span style="color: #00ff80; text-shadow: 0 0 10px rgba(0, 255, 128, 0.5);">$${equity.toFixed(2)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span style="color: #888;">Max Risk (${(maxRisk * 100).toFixed(0)}%):</span>
-            <span style="color: #ff9800;">$${maxRiskDollars.toFixed(2)}</span>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #666680;">Max Risk (${(maxRisk * 100).toFixed(0)}%)</span>
+            <span style="color: #ff8000; text-shadow: 0 0 10px rgba(255, 128, 0, 0.5);">$${maxRiskDollars.toFixed(2)}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span style="color: #888;">Position Size:</span>
-            <span>${positionInfo}</span>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #666680;">Position Size</span>
+            <span style="color: #00ffff;">${positionInfo}</span>
         </div>
         <div style="display: flex; justify-content: space-between;">
-            <span style="color: #888;">Stop Loss:</span>
-            <span style="color: #f44336;">${stopLoss}%</span>
+            <span style="color: #666680;">Stop Loss</span>
+            <span style="color: #ff0080; text-shadow: 0 0 10px rgba(255, 0, 128, 0.5);">${stopLoss}%</span>
         </div>
     `;
 }
@@ -104,8 +104,10 @@ async function runORB() {
     
     const positionSettings = getPositionSettings();
     
-    resultEl.innerText = "Running strategy...";
-    resultEl.style.color = "#888";
+    resultEl.style.display = "block";
+    resultEl.innerText = "Executing strategy...";
+    resultEl.style.color = "#00ffff";
+    resultEl.style.borderLeftColor = "#00ffff";
     
     try {
         const res = await fetch("/api/run_strategy", {
@@ -123,20 +125,30 @@ async function runORB() {
         const data = await res.json();
         
         if (data.status === "TRADE_PLACED") {
-            resultEl.style.color = "#4caf50";
+            resultEl.style.color = "#00ff80";
+            resultEl.style.borderLeftColor = "#00ff80";
+            resultEl.style.textShadow = "0 0 10px rgba(0, 255, 128, 0.5)";
             resultEl.innerText = data.message;
         } else if (data.status === "NO_BREAKOUT") {
-            resultEl.style.color = "#ff9800";
+            resultEl.style.color = "#ff8000";
+            resultEl.style.borderLeftColor = "#ff8000";
+            resultEl.style.textShadow = "0 0 10px rgba(255, 128, 0, 0.5)";
             resultEl.innerText = data.message;
         } else if (data.status === "WAIT") {
-            resultEl.style.color = "#2196f3";
+            resultEl.style.color = "#0080ff";
+            resultEl.style.borderLeftColor = "#0080ff";
+            resultEl.style.textShadow = "0 0 10px rgba(0, 128, 255, 0.5)";
             resultEl.innerText = data.message;
         } else {
-            resultEl.style.color = "#f44336";
+            resultEl.style.color = "#ff0080";
+            resultEl.style.borderLeftColor = "#ff0080";
+            resultEl.style.textShadow = "0 0 10px rgba(255, 0, 128, 0.5)";
             resultEl.innerText = data.message || "An error occurred";
         }
     } catch (e) {
-        resultEl.style.color = "#f44336";
+        resultEl.style.color = "#ff0080";
+        resultEl.style.borderLeftColor = "#ff0080";
+        resultEl.style.textShadow = "0 0 10px rgba(255, 0, 128, 0.5)";
         resultEl.innerText = "Network error. Please try again.";
     }
 }
@@ -153,14 +165,17 @@ async function fetchMarketStatus() {
         if (!indicator || !statusText) return;
         
         const colors = {
-            "orb_ready": "#4caf50",
-            "opening": "#ff9800",
-            "pre_market": "#2196f3",
-            "closed": "#f44336",
-            "error": "#888"
+            "orb_ready": "#00ff80",
+            "opening": "#ff8000",
+            "pre_market": "#0080ff",
+            "closed": "#ff0080",
+            "error": "#666680"
         };
         
-        indicator.style.background = colors[data.status] || "#888";
+        const color = colors[data.status] || "#666680";
+        indicator.style.background = color;
+        indicator.style.boxShadow = `0 0 10px ${color}, 0 0 20px ${color}`;
+        indicator.className = `status-dot ${data.status}`;
         statusText.innerText = data.message;
         if (timeEl && data.current_time) {
             timeEl.innerText = data.current_time;
@@ -186,30 +201,33 @@ async function fetchPositions() {
         if (data.positions && data.positions.length > 0) {
             let html = "";
             data.positions.forEach(pos => {
-                const plColor = pos.unrealized_pl >= 0 ? "#4caf50" : "#f44336";
-                const plSign = pos.unrealized_pl >= 0 ? "+" : "";
+                const isProfit = pos.unrealized_pl >= 0;
+                const plColor = isProfit ? "#00ff80" : "#ff0080";
+                const plGlow = isProfit ? "0 0 10px rgba(0, 255, 128, 0.5)" : "0 0 10px rgba(255, 0, 128, 0.5)";
+                const plSign = isProfit ? "+" : "";
+                const borderColor = isProfit ? "rgba(0, 255, 128, 0.3)" : "rgba(255, 0, 128, 0.3)";
                 html += `
-                <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 8px;">
+                <div style="background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid ${borderColor}; transition: all 0.3s ease;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <strong>${pos.symbol}</strong>
-                            <span style="color: #888; font-size: 12px; margin-left: 8px;">${pos.qty} shares</span>
+                            <strong style="color: #00ffff; font-family: 'Orbitron', sans-serif; letter-spacing: 1px;">${pos.symbol}</strong>
+                            <span style="color: #666680; font-size: 12px; margin-left: 10px;">${pos.qty} shares</span>
                         </div>
-                        <span style="color: ${plColor}; font-weight: bold;">${plSign}${pos.unrealized_plpc.toFixed(2)}%</span>
+                        <span style="color: ${plColor}; font-weight: bold; text-shadow: ${plGlow};">${plSign}${pos.unrealized_plpc.toFixed(2)}%</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px;">
-                        <span style="color: #888;">Entry: $${pos.entry_price.toFixed(2)} | Current: $${pos.current_price.toFixed(2)}</span>
-                        <span style="color: ${plColor};">${plSign}$${pos.unrealized_pl.toFixed(2)}</span>
+                    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px;">
+                        <span style="color: #666680;">Entry: <span style="color: #e0e0e0;">$${pos.entry_price.toFixed(2)}</span> | Current: <span style="color: #00ffff;">$${pos.current_price.toFixed(2)}</span></span>
+                        <span style="color: ${plColor}; text-shadow: ${plGlow};">${plSign}$${pos.unrealized_pl.toFixed(2)}</span>
                     </div>
                     <button onclick="closePosition('${pos.symbol}', ${accountId})" 
-                        style="margin-top: 8px; padding: 6px 12px; font-size: 12px; background: #ff9800; border: none; border-radius: 4px; color: white; cursor: pointer;">
+                        style="margin-top: 12px; padding: 8px 16px; font-size: 11px; background: linear-gradient(135deg, rgba(255, 128, 0, 0.2), rgba(255, 0, 128, 0.1)); border: 1px solid #ff8000; border-radius: 4px; color: #ff8000; cursor: pointer; font-family: 'Orbitron', sans-serif; letter-spacing: 1px; text-transform: uppercase; transition: all 0.3s ease;">
                         Take Profit
                     </button>
                 </div>`;
             });
             positionsList.innerHTML = html;
         } else {
-            positionsList.innerHTML = '<p style="color: #888; font-size: 13px;">No positions</p>';
+            positionsList.innerHTML = '<p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No active positions</p>';
         }
     } catch (e) {
         console.error("Positions error:", e);

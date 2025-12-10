@@ -2,14 +2,216 @@
 
 {% block title %}Login - ORB Auto Trader{% endblock %}
 
+{% block extra_css %}
+<style>
+    .login-container {
+        position: relative;
+    }
+    
+    .cyber-logo {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    
+    .cyber-logo svg {
+        width: 80px;
+        height: 80px;
+        animation: rainbowGlow 4s ease-in-out infinite;
+    }
+    
+    @keyframes rainbowGlow {
+        0% { filter: drop-shadow(0 0 10px #00ffff); }
+        25% { filter: drop-shadow(0 0 15px #ff00ff); }
+        50% { filter: drop-shadow(0 0 10px #ff0080); }
+        75% { filter: drop-shadow(0 0 15px #8000ff); }
+        100% { filter: drop-shadow(0 0 10px #00ffff); }
+    }
+    
+    .neon-line {
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #00ffff, #ff00ff, #00ffff, transparent);
+        margin: 20px 0;
+        animation: neonPulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes neonPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+    
+    .login-form {
+        animation: formFadeIn 0.8s ease-out 0.3s both;
+    }
+    
+    @keyframes formFadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .input-group {
+        position: relative;
+        margin-bottom: 20px;
+    }
+    
+    .input-group input {
+        transition: all 0.3s ease;
+    }
+    
+    .input-group input:focus {
+        transform: scale(1.02);
+    }
+    
+    .input-icon {
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #00ffff;
+        opacity: 0.5;
+        transition: opacity 0.3s ease;
+    }
+    
+    .input-group input:focus + .input-icon {
+        opacity: 1;
+    }
+    
+    .cyber-btn {
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(255, 0, 255, 0.15));
+    }
+    
+    .cyber-btn::after {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: conic-gradient(from 0deg, transparent, #00ffff, transparent, #ff00ff, transparent);
+        animation: rotate 4s linear infinite;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .cyber-btn:hover::after {
+        opacity: 0.3;
+    }
+    
+    @keyframes rotate {
+        100% { transform: rotate(360deg); }
+    }
+    
+    .cyber-btn span {
+        position: relative;
+        z-index: 1;
+    }
+    
+    .links-section {
+        margin-top: 25px;
+        text-align: center;
+    }
+    
+    .links-section p {
+        margin: 10px 0;
+    }
+    
+    .guest-link {
+        color: #666680 !important;
+        font-size: 13px;
+    }
+    
+    .guest-link:hover {
+        color: #8000ff !important;
+    }
+    
+    .error-message {
+        background: linear-gradient(135deg, rgba(255, 0, 80, 0.1), rgba(255, 0, 128, 0.05));
+        border: 1px solid rgba(255, 0, 80, 0.3);
+        border-left: 3px solid #ff0050;
+        padding: 12px 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        color: #ff6090;
+        font-size: 14px;
+        animation: shake 0.5s ease-in-out;
+    }
+    
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        20%, 60% { transform: translateX(-5px); }
+        40%, 80% { transform: translateX(5px); }
+    }
+    
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+    
+    .corner-decor {
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        border: 2px solid;
+    }
+    
+    .corner-decor.top-left {
+        top: -1px;
+        left: -1px;
+        border-color: #00ffff transparent transparent #00ffff;
+        border-radius: 8px 0 0 0;
+    }
+    
+    .corner-decor.top-right {
+        top: -1px;
+        right: -1px;
+        border-color: #ff00ff #ff00ff transparent transparent;
+        border-radius: 0 8px 0 0;
+    }
+    
+    .corner-decor.bottom-left {
+        bottom: -1px;
+        left: -1px;
+        border-color: transparent transparent #ff0080 #ff0080;
+        border-radius: 0 0 0 8px;
+    }
+    
+    .corner-decor.bottom-right {
+        bottom: -1px;
+        right: -1px;
+        border-color: transparent #8000ff #8000ff transparent;
+        border-radius: 0 0 8px 0;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container">
+<div class="container login-container">
+    <div class="corner-decor top-left"></div>
+    <div class="corner-decor top-right"></div>
+    <div class="corner-decor bottom-left"></div>
+    <div class="corner-decor bottom-right"></div>
+    
+    <div class="cyber-logo">
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="50,10 90,30 90,70 50,90 10,70 10,30" fill="none" stroke="#00ffff" stroke-width="2"/>
+            <polygon points="50,20 80,35 80,65 50,80 20,65 20,35" fill="none" stroke="#ff00ff" stroke-width="1"/>
+            <text x="50" y="58" text-anchor="middle" fill="#00ffff" font-family="Orbitron" font-size="20" font-weight="bold">ORB</text>
+        </svg>
+    </div>
+    
     <h1>ORB Auto Trader</h1>
-    <p>Login to your account</p>
+    <p>Access your trading terminal</p>
+    
+    <div class="neon-line"></div>
 
     {% with messages = get_flashed_messages() %}
     {% if messages %}
-    <div class="result" style="color: #f44;">
+    <div class="error-message">
         {% for message in messages %}
         {{ message }}
         {% endfor %}
@@ -17,24 +219,23 @@
     {% endif %}
     {% endwith %}
 
-    <form method="POST">
-        <label>Username:</label>
-        <input type="text" name="username" required>
+    <form method="POST" class="login-form">
+        <div class="input-group">
+            <label>Username</label>
+            <input type="text" name="username" required placeholder="Enter your username">
+        </div>
         
-        <label>Password:</label>
-        <input type="password" name="password" required>
+        <div class="input-group">
+            <label>Password</label>
+            <input type="password" name="password" required placeholder="Enter your password">
+        </div>
         
-        <button type="submit">Login</button>
+        <button type="submit" class="cyber-btn"><span>Initialize Login</span></button>
     </form>
 
-    <p style="margin-top: 20px; text-align: center;">
-        Don't have an account? <a href="/register">Register</a>
-    </p>
-    
-    <p style="text-align: center;">
-        <a href="/" style="color: #888;">Continue as guest</a>
-    </p>
-
-    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
+    <div class="links-section">
+        <p>Don't have an account? <a href="/register">Register Now</a></p>
+        <p><a href="/" class="guest-link">Continue as guest</a></p>
+    </div>
 </div>
 {% endblock %}

@@ -4,37 +4,299 @@
 
 {% block extra_css %}
 <style>
-    .dashboard-container { max-width: 600px; }
-    .section { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-    .light-mode .section { background: #f0f0f0; }
-    .account-badge { display: inline-block; background: #00c56e; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; margin: 2px; }
-    .order-row { padding: 8px 0; border-bottom: 1px solid #333; font-size: 13px; }
-    .light-mode .order-row { border-color: #ddd; }
-    .order-row:last-child { border: none; }
-    .buy { color: #4caf50; }
-    .sell { color: #f44336; }
-    input[type="text"], input[type="password"] { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 10px; background: #333; border: 1px solid #444; color: white; border-radius: 6px; }
-    .light-mode input[type="text"], .light-mode input[type="password"] { background: #fff; border-color: #ccc; color: #222; }
-    .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
-    .nav-links { display: flex; justify-content: space-between; margin-bottom: 15px; }
-    .nav-links a { color: #00c56e; text-decoration: none; }
-    .account-card { background: #2a2a2a; }
-    .light-mode .account-card { background: #e8e8e8; }
+    .dashboard-container { 
+        max-width: 650px; 
+        padding: 25px;
+    }
+    
+    .section { 
+        background: linear-gradient(135deg, rgba(13, 13, 21, 0.95), rgba(20, 20, 35, 0.9));
+        padding: 20px; 
+        border-radius: 10px; 
+        margin-bottom: 20px;
+        border: 1px solid rgba(0, 255, 255, 0.15);
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    
+    .section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-magenta), transparent);
+        opacity: 0.5;
+    }
+    
+    .section:hover {
+        border-color: rgba(0, 255, 255, 0.3);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+    }
+    
+    .nav-links { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 12px 15px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 0, 255, 0.2);
+    }
+    
+    .nav-links span {
+        color: var(--neon-cyan);
+        font-family: 'Orbitron', sans-serif;
+        font-size: 13px;
+        letter-spacing: 1px;
+    }
+    
+    .nav-links a { 
+        color: var(--neon-magenta);
+        text-decoration: none;
+        font-size: 13px;
+        padding: 6px 15px;
+        border: 1px solid var(--neon-magenta);
+        border-radius: 4px;
+        transition: all 0.3s ease;
+    }
+    
+    .nav-links a:hover {
+        background: rgba(255, 0, 255, 0.2);
+        box-shadow: 0 0 15px rgba(255, 0, 255, 0.3);
+    }
+    
+    .account-badge { 
+        display: inline-block; 
+        background: linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(0, 255, 128, 0.1));
+        color: var(--neon-cyan);
+        padding: 6px 12px; 
+        border-radius: 4px; 
+        font-size: 12px;
+        font-family: 'Orbitron', sans-serif;
+        letter-spacing: 1px;
+        border: 1px solid rgba(0, 255, 255, 0.3);
+        text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+    }
+    
+    .account-card { 
+        background: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        border: 1px solid rgba(128, 0, 255, 0.2);
+        transition: all 0.3s ease;
+    }
+    
+    .account-card:hover {
+        border-color: rgba(128, 0, 255, 0.4);
+        transform: translateX(5px);
+    }
+    
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 0;
+        font-size: 13px;
+    }
+    
+    .stat-label {
+        color: #666680;
+    }
+    
+    .stat-value {
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 600;
+    }
+    
+    .stat-value.positive {
+        color: var(--neon-green);
+        text-shadow: 0 0 10px rgba(0, 255, 128, 0.5);
+    }
+    
+    .order-row { 
+        padding: 12px;
+        margin-bottom: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        font-size: 13px;
+        border-left: 3px solid var(--neon-cyan);
+        transition: all 0.3s ease;
+    }
+    
+    .order-row:hover {
+        background: rgba(0, 255, 255, 0.05);
+        transform: translateX(5px);
+    }
+    
+    .buy { 
+        color: var(--neon-green) !important;
+        text-shadow: 0 0 10px rgba(0, 255, 128, 0.5);
+    }
+    
+    .sell { 
+        color: var(--neon-pink) !important;
+        text-shadow: 0 0 10px rgba(255, 0, 128, 0.5);
+    }
+    
+    .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+    
+    .risk-preview {
+        margin-top: 15px;
+        padding: 15px;
+        background: rgba(0, 0, 0, 0.4);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 128, 0, 0.2);
+    }
+    
+    .market-status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        margin-bottom: 15px;
+    }
+    
+    .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #888;
+        animation: statusPulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes statusPulse {
+        0%, 100% { opacity: 1; box-shadow: 0 0 5px currentColor; }
+        50% { opacity: 0.6; box-shadow: 0 0 15px currentColor; }
+    }
+    
+    .status-dot.open { background: var(--neon-green); color: var(--neon-green); }
+    .status-dot.orb_ready { background: var(--neon-green); color: var(--neon-green); }
+    .status-dot.opening { background: var(--neon-orange); color: var(--neon-orange); }
+    .status-dot.pre_market { background: var(--neon-blue); color: var(--neon-blue); }
+    .status-dot.closed { background: var(--neon-pink); color: var(--neon-pink); }
+    
+    .positions-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    
+    .positions-header span {
+        font-size: 13px;
+        color: #666680;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    .monitor-select {
+        padding: 6px 12px;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(0, 255, 255, 0.3);
+        color: var(--text-primary);
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    .position-card {
+        background: rgba(0, 0, 0, 0.4);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(0, 255, 255, 0.2);
+        transition: all 0.3s ease;
+    }
+    
+    .position-card:hover {
+        border-color: rgba(0, 255, 255, 0.4);
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.1);
+    }
+    
+    .tp-btn {
+        margin-top: 10px;
+        padding: 8px 16px;
+        font-size: 12px;
+        background: linear-gradient(135deg, rgba(255, 128, 0, 0.2), rgba(255, 0, 128, 0.1));
+        border: 1px solid var(--neon-orange);
+        color: var(--neon-orange);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-family: 'Orbitron', sans-serif;
+        letter-spacing: 1px;
+    }
+    
+    .tp-btn:hover {
+        background: rgba(255, 128, 0, 0.3);
+        box-shadow: 0 0 20px rgba(255, 128, 0, 0.4);
+    }
+    
+    .run-btn {
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.15), rgba(0, 255, 255, 0.1));
+        border: 1px solid var(--neon-green);
+        color: var(--neon-green);
+    }
+    
+    .run-btn:hover {
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.25), rgba(0, 255, 255, 0.2));
+        box-shadow: 0 0 25px rgba(0, 255, 128, 0.4);
+    }
+    
+    .success-message {
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.1), rgba(0, 255, 255, 0.05));
+        border: 1px solid rgba(0, 255, 128, 0.3);
+        border-left: 3px solid var(--neon-green);
+        padding: 12px 15px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        color: var(--neon-green);
+    }
+    
+    details summary {
+        color: var(--neon-cyan);
+        padding: 10px 0;
+    }
+    
+    .cyber-divider {
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.3), rgba(255, 0, 255, 0.3), transparent);
+        margin: 15px 0;
+    }
+    
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container dashboard-container">
     <div class="nav-links">
-        <span>Welcome, {{ current_user.username }}</span>
-        <a href="/logout">Logout</a>
+        <span>// {{ current_user.username }}</span>
+        <a href="/logout">Disconnect</a>
     </div>
 
     <h1>ORB Auto Trader</h1>
     
     {% with messages = get_flashed_messages() %}
     {% if messages %}
-    <div class="result" style="color: #4caf50;">
+    <div class="success-message">
         {% for message in messages %}
         {{ message }}
         {% endfor %}
@@ -46,61 +308,59 @@
         <h3>Alpaca Accounts</h3>
         {% if accounts %}
             {% for account in accounts %}
-            <div class="account-card" style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span class="account-badge">{{ account.name }} {% if account.is_paper %}(Paper){% endif %}</span>
+            <div class="account-card">
+                <div style="margin-bottom: 10px;">
+                    <span class="account-badge">{{ account.name }} {% if account.is_paper %}// PAPER{% endif %}</span>
                 </div>
                 {% if account_balances.get(account.id) %}
-                <div style="margin-top: 8px; font-size: 13px;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: #888;">Equity:</span>
-                        <span style="color: #4caf50; font-weight: bold;">${{ "%.2f"|format(account_balances[account.id].equity) }}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: #888;">Cash:</span>
-                        <span>${{ "%.2f"|format(account_balances[account.id].cash) }}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: #888;">Buying Power:</span>
-                        <span>${{ "%.2f"|format(account_balances[account.id].buying_power) }}</span>
-                    </div>
+                <div class="stat-row">
+                    <span class="stat-label">Equity</span>
+                    <span class="stat-value positive">${{ "%.2f"|format(account_balances[account.id].equity) }}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Cash</span>
+                    <span class="stat-value">${{ "%.2f"|format(account_balances[account.id].cash) }}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Buying Power</span>
+                    <span class="stat-value">${{ "%.2f"|format(account_balances[account.id].buying_power) }}</span>
                 </div>
                 {% else %}
-                <div style="margin-top: 8px; font-size: 12px; color: #888;">Balance unavailable</div>
+                <div style="font-size: 12px; color: #666680;">Balance unavailable</div>
                 {% endif %}
             </div>
             {% endfor %}
         {% else %}
-            <p style="color: #888; font-size: 13px;">No accounts added yet.</p>
+            <p style="color: #666680; font-size: 13px;">No accounts linked.</p>
         {% endif %}
         
         <details style="margin-top: 15px;">
-            <summary style="cursor: pointer; color: #00c56e;">Add New Account</summary>
-            <form method="POST" action="/add_account" style="margin-top: 10px;">
-                <label>Account Name:</label>
-                <input type="text" name="name" placeholder="e.g., Paper Account" required>
+            <summary>+ Link New Account</summary>
+            <form method="POST" action="/add_account" style="margin-top: 15px;">
+                <label>Account Name</label>
+                <input type="text" name="name" placeholder="e.g., Paper Trading" required>
                 
-                <label>API Key:</label>
-                <input type="password" name="api_key" required>
+                <label>API Key</label>
+                <input type="password" name="api_key" required placeholder="Enter Alpaca API Key">
                 
-                <label>API Secret:</label>
-                <input type="password" name="api_secret" required>
+                <label>API Secret</label>
+                <input type="password" name="api_secret" required placeholder="Enter Alpaca Secret Key">
                 
                 <div class="checkbox-row">
                     <input type="checkbox" name="is_paper" id="is_paper" checked>
-                    <label for="is_paper" style="margin: 0;">Paper Trading Account</label>
+                    <label for="is_paper">Paper Trading Account</label>
                 </div>
                 
-                <button type="submit">Add Account</button>
+                <button type="submit">Link Account</button>
             </form>
         </details>
     </div>
 
     <div class="section">
         <h3>Position Sizing & Risk</h3>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div class="grid-2">
             <div>
-                <label>Position Size:</label>
+                <label>Position Size</label>
                 <select id="position-size-type" onchange="togglePositionInput()">
                     <option value="fixed">Fixed Shares</option>
                     <option value="dollars">Dollar Amount</option>
@@ -108,18 +368,18 @@
                 </select>
             </div>
             <div>
-                <label id="position-value-label">Shares:</label>
-                <input type="number" id="position-value" value="1" min="1" step="1" style="width: 100%;">
+                <label id="position-value-label">Shares</label>
+                <input type="number" id="position-value" value="1" min="1" step="1">
             </div>
         </div>
         
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+        <div class="grid-2" style="margin-top: 12px;">
             <div>
-                <label>Stop Loss (%):</label>
-                <input type="number" id="stop-loss" value="2" min="0.5" max="20" step="0.5" style="width: 100%;">
+                <label>Stop Loss (%)</label>
+                <input type="number" id="stop-loss" value="2" min="0.5" max="20" step="0.5">
             </div>
             <div>
-                <label>Max Risk per Trade:</label>
+                <label>Max Risk per Trade</label>
                 <select id="max-risk">
                     <option value="0.25" selected>25% of Account</option>
                     <option value="0.50">50% of Account</option>
@@ -129,21 +389,21 @@
             </div>
         </div>
         
-        <div id="risk-preview" style="margin-top: 12px; padding: 10px; background: #1a1a1a; border-radius: 6px; font-size: 13px;">
-            <div style="color: #888;">Risk Preview (select account to calculate)</div>
+        <div id="risk-preview" class="risk-preview">
+            <div style="color: #666680;">Risk Preview (select account to calculate)</div>
         </div>
     </div>
 
     <div class="section">
-        <h3>Run ORB Strategy</h3>
-        <label>Choose Asset:</label>
+        <h3>Execute ORB Strategy</h3>
+        <label>Select Asset</label>
         <select id="symbol">
             {% for a in assets %}
             <option value="{{ a }}">{{ a }}</option>
             {% endfor %}
         </select>
 
-        <label>Take Profit:</label>
+        <label>Take Profit</label>
         <select id="profit">
             <option value="manual">Manual (No Auto TP)</option>
             <option value="0.05" selected>5%</option>
@@ -154,7 +414,7 @@
         </select>
 
         {% if accounts %}
-        <label>Account:</label>
+        <label>Trading Account</label>
         <select id="account" onchange="updateRiskPreview()">
             {% for account in accounts %}
             <option value="{{ account.id }}" data-equity="{{ account_balances.get(account.id).equity if account_balances.get(account.id) else 0 }}" data-buying-power="{{ account_balances.get(account.id).buying_power if account_balances.get(account.id) else 0 }}">{{ account.name }}</option>
@@ -162,50 +422,50 @@
         </select>
         {% endif %}
 
-        <button onclick="runORB()">Run ORB Strategy</button>
-        <div id="result" class="result"></div>
+        <button onclick="runORB()" class="run-btn">Execute Strategy</button>
+        <div id="result" class="result" style="display: none;"></div>
     </div>
 
     <div class="section">
         <h3>Activity Monitor</h3>
-        <div id="market-status" style="margin-bottom: 15px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span id="status-indicator" style="width: 12px; height: 12px; border-radius: 50%; background: #888;"></span>
-                <span id="status-text" style="font-size: 14px;">Loading...</span>
-                <span id="current-time" style="margin-left: auto; color: #888; font-size: 12px;"></span>
-            </div>
+        <div class="market-status">
+            <span id="status-indicator" class="status-dot"></span>
+            <span id="status-text" style="font-size: 14px;">Connecting...</span>
+            <span id="current-time" style="margin-left: auto; color: #666680; font-size: 12px; font-family: 'Rajdhani', monospace;"></span>
         </div>
         
         <div id="positions-container">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span style="font-size: 13px; color: #888;">Active Positions</span>
-                <select id="monitor-account" style="padding: 4px 8px; font-size: 12px; background: #333; border: 1px solid #444; color: white; border-radius: 4px;">
+            <div class="positions-header">
+                <span>Active Positions</span>
+                <select id="monitor-account" class="monitor-select">
                     {% for account in accounts %}
                     <option value="{{ account.id }}">{{ account.name }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div id="positions-list">
-                <p style="color: #888; font-size: 13px;">No positions</p>
+                <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No active positions</p>
             </div>
         </div>
     </div>
 
     <div class="section">
-        <h3>Recent Orders</h3>
+        <h3>Order History</h3>
         {% if orders %}
             {% for order in orders %}
-            <div class="order-row">
-                <strong class="{{ order.side }}">{{ order.side|upper }}</strong> {{ order.symbol }}
-                - Entry: ${{ "%.2f"|format(order.entry_price) }} | TP: ${{ "%.2f"|format(order.tp_price) }}
-                <span style="color: #888; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+            <div class="order-row" style="border-left-color: {% if order.side == 'buy' %}var(--neon-green){% else %}var(--neon-pink){% endif %};">
+                <strong class="{{ order.side }}">{{ order.side|upper }}</strong> 
+                <span style="color: var(--neon-cyan);">{{ order.symbol }}</span>
+                <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) }}</span>
+                {% if order.tp_price %}
+                <span style="color: #666680;"> | TP: ${{ "%.2f"|format(order.tp_price) }}</span>
+                {% endif %}
+                <span style="float: right; color: #666680; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
             </div>
             {% endfor %}
         {% else %}
-            <p style="color: #888; font-size: 13px;">No orders yet.</p>
+            <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No orders recorded</p>
         {% endif %}
     </div>
-
-    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
 </div>
 {% endblock %}

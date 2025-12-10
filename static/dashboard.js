@@ -210,7 +210,7 @@ async function fetchPositions() {
                 <div style="background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid ${borderColor}; transition: all 0.3s ease;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <strong style="color: #00ffff; font-family: 'Orbitron', sans-serif; letter-spacing: 1px;">${pos.symbol}</strong>
+                            <strong style="color: #00ffff; font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif; letter-spacing: 1px;">${pos.symbol}</strong>
                             <span style="color: #666680; font-size: 12px; margin-left: 10px;">${pos.qty} shares</span>
                         </div>
                         <span style="color: ${plColor}; font-weight: bold; text-shadow: ${plGlow};">${plSign}${pos.unrealized_plpc.toFixed(2)}%</span>
@@ -220,7 +220,7 @@ async function fetchPositions() {
                         <span style="color: ${plColor}; text-shadow: ${plGlow};">${plSign}$${pos.unrealized_pl.toFixed(2)}</span>
                     </div>
                     <button onclick="closePosition('${pos.symbol}', ${accountId})" 
-                        style="margin-top: 12px; padding: 8px 16px; font-size: 11px; background: linear-gradient(135deg, rgba(255, 128, 0, 0.2), rgba(255, 0, 128, 0.1)); border: 1px solid #ff8000; border-radius: 4px; color: #ff8000; cursor: pointer; font-family: 'Orbitron', sans-serif; letter-spacing: 1px; text-transform: uppercase; transition: all 0.3s ease;">
+                        style="margin-top: 12px; padding: 8px 16px; font-size: 11px; background: linear-gradient(135deg, rgba(255, 128, 0, 0.2), rgba(255, 0, 128, 0.1)); border: 1px solid #ff8000; border-radius: 4px; color: #ff8000; cursor: pointer; font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif; letter-spacing: 1px; text-transform: uppercase; transition: all 0.3s ease;">
                         Take Profit
                     </button>
                 </div>`;

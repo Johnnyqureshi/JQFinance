@@ -20,9 +20,11 @@ Preferred communication style: Simple, everyday language.
 
 ### Frontend Architecture
 - **Templating**: Jinja2 templates served by Flask
-- **Styling**: Custom CSS with CSS variables for theming (dark financial dashboard theme)
+- **Styling**: Cyberpunk theme with neon colors (cyan, magenta, pink, purple), animated glowing effects, and dark menacing aesthetic
 - **JavaScript**: Vanilla JS for form handling and API interactions
-- **Fonts**: Google Fonts (Inter for UI, IBM Plex Mono for numerical data)
+- **Fonts**: Google Fonts (Orbitron for headings, Rajdhani for UI text)
+- **Accessibility**: Respects prefers-reduced-motion for users who prefer less animation
+- **Color Palette**: Neon cyan (#00ffff), magenta (#ff00ff), pink (#ff0080), purple (#8000ff), green (#00ff80), orange (#ff8000) on dark backgrounds (#0a0a0f)
 
 ### Design Patterns
 - **MVC-style separation**: Models in `models.py`, routes in `app.py`, templates in `templates/`

@@ -112,12 +112,16 @@ class PositionMonitor:
             position.last_price = current_price
             position.last_checked_at = datetime.utcnow()
             
+            if position.trailing_sl and position.sl_pct:
+                self._update_trailing_stop(position, current_price)
+            
             tp_str = f"${position.tp_price:.2f}" if position.tp_price else "N/A"
             sl_str = f"${position.sl_price:.2f}" if position.sl_price else "N/A"
+            trailing_str = " (trailing)" if position.trailing_sl else ""
             logger.info(
                 f"Price check: {position.symbol} | Side: {position.side} | "
                 f"Entry: ${position.entry_price:.2f} | Current: ${current_price:.2f} | "
-                f"TP: {tp_str} | SL: {sl_str}"
+                f"TP: {tp_str} | SL: {sl_str}{trailing_str}"
             )
             
             should_exit = False
@@ -130,7 +134,7 @@ class PositionMonitor:
                     logger.info(f"TP HIT: {position.symbol} @ ${current_price:.2f} >= ${position.tp_price:.2f}")
                 elif position.sl_price and current_price <= position.sl_price:
                     should_exit = True
-                    exit_reason = "stop_loss"
+                    exit_reason = "trailing_stop" if position.trailing_sl else "stop_loss"
                     logger.info(f"SL HIT: {position.symbol} @ ${current_price:.2f} <= ${position.sl_price:.2f}")
             else:
                 if position.tp_price and current_price <= position.tp_price:
@@ -139,7 +143,7 @@ class PositionMonitor:
                     logger.info(f"TP HIT: {position.symbol} @ ${current_price:.2f} <= ${position.tp_price:.2f}")
                 elif position.sl_price and current_price >= position.sl_price:
                     should_exit = True
-                    exit_reason = "stop_loss"
+                    exit_reason = "trailing_stop" if position.trailing_sl else "stop_loss"
                     logger.info(f"SL HIT: {position.symbol} @ ${current_price:.2f} >= ${position.sl_price:.2f}")
             
             if should_exit:
@@ -149,6 +153,34 @@ class PositionMonitor:
             
         except Exception as e:
             logger.error(f"Error checking {position.symbol}: {e}")
+    
+    def _update_trailing_stop(self, position, current_price):
+        from extensions import db
+        
+        if position.side.lower() == "buy":
+            if position.highest_price is None or current_price > position.highest_price:
+                position.highest_price = current_price
+                new_sl = round(current_price * (1 - position.sl_pct), 2)
+                if position.sl_price is None or new_sl > position.sl_price:
+                    old_sl_str = f"${position.sl_price:.2f}" if position.sl_price else "$0.00"
+                    position.sl_price = new_sl
+                    logger.info(
+                        f"TRAILING SL UPDATED: {position.symbol} | "
+                        f"New high: ${current_price:.2f} | "
+                        f"SL moved: {old_sl_str} -> ${new_sl:.2f}"
+                    )
+        else:
+            if position.lowest_price is None or current_price < position.lowest_price:
+                position.lowest_price = current_price
+                new_sl = round(current_price * (1 + position.sl_pct), 2)
+                if position.sl_price is None or new_sl < position.sl_price:
+                    old_sl_str = f"${position.sl_price:.2f}" if position.sl_price else "$0.00"
+                    position.sl_price = new_sl
+                    logger.info(
+                        f"TRAILING SL UPDATED: {position.symbol} | "
+                        f"New low: ${current_price:.2f} | "
+                        f"SL moved: {old_sl_str} -> ${new_sl:.2f}"
+                    )
     
     def _execute_exit(self, position, account, current_price, exit_reason):
         from extensions import db
@@ -185,7 +217,8 @@ class PositionMonitor:
             logger.error(f"Error executing exit for {position.symbol}: {e}")
     
     def add_position(self, user_id, account_id, symbol, side, qty, entry_price, 
-                     tp_price=None, sl_price=None, tp_pct=None, sl_pct=None, alpaca_order_id=None):
+                     tp_price=None, sl_price=None, tp_pct=None, sl_pct=None, 
+                     trailing_sl=False, alpaca_order_id=None):
         with self.app.app_context():
             from models import OpenPosition
             from extensions import db
@@ -218,6 +251,9 @@ class PositionMonitor:
                 sl_price=sl_price,
                 tp_pct=tp_pct,
                 sl_pct=sl_pct,
+                trailing_sl=trailing_sl,
+                highest_price=entry_price if side.lower() == "buy" else None,
+                lowest_price=entry_price if side.lower() == "sell" else None,
                 alpaca_order_id=alpaca_order_id,
                 status="open"
             )
@@ -227,9 +263,10 @@ class PositionMonitor:
             
             tp_log = f"${tp_price:.2f}" if tp_price else "Manual"
             sl_log = f"${sl_price:.2f}" if sl_price else "None"
+            trailing_log = " (trailing)" if trailing_sl else ""
             logger.info(
                 f"TRADE ENTRY: {symbol} | Side: {side} | Qty: {qty} | "
-                f"Entry: ${entry_price:.2f} | TP: {tp_log} | SL: {sl_log}"
+                f"Entry: ${entry_price:.2f} | TP: {tp_log} | SL: {sl_log}{trailing_log}"
             )
             
             return position

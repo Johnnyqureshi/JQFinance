@@ -390,6 +390,7 @@ def run_strategy():
             db.session.commit()
             
             if account_id:
+                trailing_sl = position_settings.get("trailing_sl", False)
                 position_monitor.add_position(
                     user_id=user_id,
                     account_id=account_id,
@@ -401,6 +402,7 @@ def run_strategy():
                     sl_price=result.get("stop_loss"),
                     tp_pct=take_profit if not is_manual_tp else None,
                     sl_pct=stop_loss_pct,
+                    trailing_sl=trailing_sl,
                     alpaca_order_id=result.get("alpaca_order_id", "")
                 )
         

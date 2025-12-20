@@ -86,12 +86,14 @@ function getPositionSettings() {
     const sizeValue = parseFloat(document.getElementById("position-value")?.value) || 1;
     const stopLoss = parseFloat(document.getElementById("stop-loss")?.value) || 2;
     const maxRisk = parseFloat(document.getElementById("max-risk")?.value) || 0.02;
+    const trailingStop = document.getElementById("trailing-stop")?.checked || false;
     
     return {
         size_type: sizeType,
         size_value: sizeValue,
         stop_loss: stopLoss / 100,
-        max_risk: maxRisk
+        max_risk: maxRisk,
+        trailing_sl: trailingStop
     };
 }
 

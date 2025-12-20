@@ -40,13 +40,27 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
         text-shadow: 0 0 60px rgba(0, 255, 255, 0.5);
-        margin-bottom: 60px;
+        margin-bottom: 30px;
         animation: titlePulse 3s ease-in-out infinite;
     }
     
     @keyframes titlePulse {
         0%, 100% { filter: brightness(1); }
         50% { filter: brightness(1.2); }
+    }
+    
+    .fist-image {
+        width: 280px;
+        height: auto;
+        margin: 20px auto;
+        display: block;
+        filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
+        animation: fistFloat 4s ease-in-out infinite;
+    }
+    
+    @keyframes fistFloat {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
     }
     
     .auth-buttons {
@@ -180,6 +194,8 @@
 
 <div class="landing-container">
     <h1 class="main-title">JOIN THE RESISTANCE</h1>
+    
+    <img src="{{ url_for('static', filename='resistance-fist.jpg') }}" alt="Resistance Fist" class="fist-image">
     
     <div class="auth-buttons">
         <a href="/login" class="auth-btn btn-login">Login</a>

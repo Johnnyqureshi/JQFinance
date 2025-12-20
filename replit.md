@@ -33,6 +33,14 @@ Preferred communication style: Simple, everyday language.
 
 ### Data Models
 - **Trade**: Stores trade records with symbol, direction, entry price, take profit price, status, and timestamp
+- **OpenPosition**: Tracks active positions with persistent TP/SL targets for multi-day monitoring
+
+### Position Monitoring
+- **Background Scheduler**: APScheduler runs every 30 seconds during market hours (9:30 AM - 4:00 PM ET)
+- **Persistent TP/SL**: Take-profit and stop-loss targets are stored in database, not in-memory
+- **Cross-day Execution**: Positions are monitored across trading days until TP, SL, or manual close
+- **Restart Recovery**: On app restart, all open positions are automatically resumed for monitoring
+- **Logging**: Comprehensive logging of trade entries, price checks, and exit reasons (orb.monitor logger)
 
 ### API Structure
 - Form submissions handled via POST to Flask routes

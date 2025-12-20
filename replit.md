@@ -40,7 +40,11 @@ Preferred communication style: Simple, everyday language.
 - **Persistent TP/SL**: Take-profit and stop-loss targets are stored in database, not in-memory
 - **Cross-day Execution**: Positions are monitored across trading days until TP, SL, or manual close
 - **Restart Recovery**: On app restart, all open positions are automatically resumed for monitoring
-- **Logging**: Comprehensive logging of trade entries, price checks, and exit reasons (orb.monitor logger)
+- **Trailing Stop Loss**: When enabled, automatically adjusts stop loss as price moves favorably (up for longs, down for shorts)
+  - Tracks highest_price for BUY positions, lowest_price for SELL positions
+  - SL only moves in favorable direction, never against position
+  - Enabled by default via UI checkbox
+- **Logging**: Comprehensive logging of trade entries, price checks, trailing stop updates, and exit reasons (orb.monitor logger)
 
 ### API Structure
 - Form submissions handled via POST to Flask routes

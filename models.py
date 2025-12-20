@@ -74,3 +74,29 @@ class OrderRecord(db.Model):
     alpaca_order_id = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(40), default="placed")
+
+
+class OpenPosition(db.Model):
+    __tablename__ = "open_positions"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    account_id = db.Column(db.Integer, db.ForeignKey('alpaca_accounts.id'), nullable=False)
+    symbol = db.Column(db.String(20), nullable=False)
+    side = db.Column(db.String(10), nullable=False)
+    qty = db.Column(db.Integer, nullable=False)
+    entry_price = db.Column(db.Float, nullable=False)
+    tp_price = db.Column(db.Float, nullable=True)
+    sl_price = db.Column(db.Float, nullable=True)
+    tp_pct = db.Column(db.Float, nullable=True)
+    sl_pct = db.Column(db.Float, nullable=True)
+    alpaca_order_id = db.Column(db.String(120))
+    status = db.Column(db.String(40), default="open")
+    last_price = db.Column(db.Float, nullable=True)
+    last_checked_at = db.Column(db.DateTime, nullable=True)
+    exit_price = db.Column(db.Float, nullable=True)
+    exit_reason = db.Column(db.String(40), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    closed_at = db.Column(db.DateTime, nullable=True)
+    
+    account = db.relationship("AlpacaAccount", backref="open_positions")
+    user = db.relationship("User", backref="open_positions")

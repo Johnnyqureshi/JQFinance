@@ -9,7 +9,16 @@ from flask_login import LoginManager, login_required, current_user
 from werkzeug.middleware.proxy_fix import ProxyFix
 from extensions import db
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+orb_logger = logging.getLogger("orb.monitor")
+orb_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+orb_logger.addHandler(handler)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET")
@@ -35,6 +44,9 @@ login_manager.login_view = "auth.login"
 
 from auth import auth_bp
 app.register_blueprint(auth_bp)
+
+from monitoring import position_monitor
+position_monitor.init_app(app)
 
 ALPACA_BASE = "https://paper-api.alpaca.markets"
 ALPACA_DATA = "https://data.alpaca.markets/v2"
@@ -370,11 +382,27 @@ def run_strategy():
                 qty=result.get("qty", 1),
                 entry_price=result.get("entry_price"),
                 tp_price=result.get("take_profit"),
+                sl_price=result.get("stop_loss"),
                 alpaca_order_id=result.get("alpaca_order_id", ""),
                 status="placed" if result.get("take_profit_placed") else "tp_failed"
             )
             db.session.add(order_record)
             db.session.commit()
+            
+            if account_id:
+                position_monitor.add_position(
+                    user_id=user_id,
+                    account_id=account_id,
+                    symbol=symbol,
+                    side=result.get("direction", "").lower(),
+                    qty=result.get("qty", 1),
+                    entry_price=result.get("entry_price"),
+                    tp_price=result.get("take_profit"),
+                    sl_price=result.get("stop_loss"),
+                    tp_pct=take_profit if not is_manual_tp else None,
+                    sl_pct=stop_loss_pct,
+                    alpaca_order_id=result.get("alpaca_order_id", "")
+                )
         
         return jsonify(result)
     except Exception as e:
@@ -491,6 +519,7 @@ def close_position():
     try:
         r = requests.delete(f"{base_url}/v2/positions/{symbol}", headers=headers, timeout=10)
         if r.status_code in [200, 204]:
+            position_monitor.close_position_manual(account_id, symbol)
             return jsonify({"success": True, "message": f"Position {symbol} closed"})
         return jsonify({"success": False, "error": f"Failed to close: {r.text}"})
     except Exception as e:

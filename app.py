@@ -252,9 +252,9 @@ def orb_trade(symbol, take_profit, account=None, user_id=None):
 
 @app.route("/")
 def index():
-    assets = get_assets()
-    api_connected = check_api_connection()
-    return render_template("index.html", assets=assets, api_connected=api_connected)
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+    return render_template("index.html")
 
 @app.route("/dashboard")
 @login_required

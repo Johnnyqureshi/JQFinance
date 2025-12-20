@@ -1,36 +1,273 @@
 {% extends "layout.html" %}
 
-{% block title %}ORB Auto Trader{% endblock %}
+{% block title %}Join The Resistance{% endblock %}
+
+{% block extra_css %}
+<style>
+    :root {
+        --neon-cyan: #00ffff;
+        --neon-magenta: #ff00ff;
+        --neon-pink: #ff0080;
+        --neon-purple: #8000ff;
+        --dark-bg: #0a0a0f;
+        --darker-bg: #050508;
+    }
+    
+    body {
+        background: var(--dark-bg);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 0;
+        overflow: hidden;
+    }
+    
+    .landing-container {
+        text-align: center;
+        padding: 40px;
+        max-width: 600px;
+    }
+    
+    .main-title {
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        font-size: 4rem;
+        letter-spacing: 8px;
+        text-transform: uppercase;
+        background: linear-gradient(135deg, var(--neon-cyan), var(--neon-magenta), var(--neon-pink));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: 0 0 40px rgba(0, 255, 255, 0.3);
+        margin-bottom: 10px;
+        animation: titlePulse 3s ease-in-out infinite;
+    }
+    
+    @keyframes titlePulse {
+        0%, 100% { filter: brightness(1); }
+        50% { filter: brightness(1.2); }
+    }
+    
+    .fist-container {
+        margin: 40px auto;
+        width: 250px;
+        height: 350px;
+        animation: fistFloat 4s ease-in-out infinite;
+    }
+    
+    @keyframes fistFloat {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-15px); }
+    }
+    
+    .fist-container svg {
+        width: 100%;
+        height: 100%;
+        filter: drop-shadow(0 0 30px rgba(0, 255, 255, 0.5)) 
+                drop-shadow(0 0 60px rgba(255, 0, 255, 0.3));
+    }
+    
+    .auth-buttons {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+        margin-top: 50px;
+    }
+    
+    .auth-btn {
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        font-size: 1.3rem;
+        letter-spacing: 3px;
+        padding: 15px 40px;
+        border: 2px solid;
+        background: transparent;
+        cursor: pointer;
+        text-decoration: none;
+        text-transform: uppercase;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .auth-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+        transition: left 0.5s ease;
+    }
+    
+    .auth-btn:hover::before {
+        left: 100%;
+    }
+    
+    .btn-login {
+        border-color: var(--neon-cyan);
+        color: var(--neon-cyan);
+    }
+    
+    .btn-login:hover {
+        background: rgba(0, 255, 255, 0.1);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.4),
+                    inset 0 0 20px rgba(0, 255, 255, 0.1);
+        transform: translateY(-3px);
+    }
+    
+    .btn-register {
+        border-color: var(--neon-magenta);
+        color: var(--neon-magenta);
+    }
+    
+    .btn-register:hover {
+        background: rgba(255, 0, 255, 0.1);
+        box-shadow: 0 0 30px rgba(255, 0, 255, 0.4),
+                    inset 0 0 20px rgba(255, 0, 255, 0.1);
+        transform: translateY(-3px);
+    }
+    
+    .cyber-grid {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-image: 
+            linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 50px 50px;
+        pointer-events: none;
+        z-index: -1;
+    }
+    
+    .scan-line {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+        opacity: 0.3;
+        animation: scanLine 8s linear infinite;
+        pointer-events: none;
+        z-index: 100;
+    }
+    
+    @keyframes scanLine {
+        0% { top: -10px; }
+        100% { top: 100vh; }
+    }
+    
+    @media (max-width: 600px) {
+        .main-title {
+            font-size: 2.5rem;
+            letter-spacing: 4px;
+        }
+        
+        .fist-container {
+            width: 180px;
+            height: 250px;
+        }
+        
+        .auth-buttons {
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .auth-btn {
+            width: 100%;
+            padding: 12px 30px;
+        }
+    }
+    
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container">
-    <h1>ORB Auto Trader</h1>
-    <p>Select an asset and run the strategy.</p>
+<div class="cyber-grid"></div>
+<div class="scan-line"></div>
 
-    <label>Choose Asset:</label>
-    <select id="symbol">
-        {% for a in assets %}
-        <option value="{{ a }}">{{ a }}</option>
-        {% endfor %}
-    </select>
-
-    <label>Take Profit:</label>
-    <select id="profit">
-        <option value="0.05" selected>5%</option>
-        <option value="0.10">10%</option>
-        <option value="0.15">15%</option>
-        <option value="0.20">20%</option>
-        <option value="0.25">25%</option>
-    </select>
-
-    <button onclick="runORB()">Run ORB Strategy</button>
-
-    <div id="result" class="result"></div>
-
-    <p style="margin-top: 20px; text-align: center;">
-        <a href="/login">Login</a> | <a href="/register">Register</a>
-    </p>
-
-    <button class="theme-btn" onclick="toggleTheme()">Toggle Dark/Light Mode</button>
+<div class="landing-container">
+    <h1 class="main-title">JOIN THE RESISTANCE</h1>
+    
+    <div class="fist-container">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300" fill="none">
+            <defs>
+                <linearGradient id="fistGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00ffff;stop-opacity:1" />
+                    <stop offset="50%" style="stop-color:#ff00ff;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#ff0080;stop-opacity:1" />
+                </linearGradient>
+                <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                    <feMerge>
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+            </defs>
+            
+            <!-- Forearm/Wrist -->
+            <path d="M70 300 L70 220 Q70 200 80 190 L120 190 Q130 200 130 220 L130 300" 
+                  stroke="url(#fistGlow)" stroke-width="3" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Palm base -->
+            <path d="M60 190 Q50 170 55 150 L55 130 Q60 100 100 95 Q140 100 145 130 L145 150 Q150 170 140 190" 
+                  stroke="url(#fistGlow)" stroke-width="3" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Knuckles - curved top -->
+            <path d="M55 130 Q55 110 70 95 Q85 80 100 80 Q115 80 130 95 Q145 110 145 130" 
+                  stroke="url(#fistGlow)" stroke-width="3" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Finger segments -->
+            <!-- Index finger -->
+            <path d="M65 130 L65 95 Q65 75 75 65 Q85 55 85 45" 
+                  stroke="url(#fistGlow)" stroke-width="2.5" fill="none" filter="url(#neonGlow)"/>
+            <path d="M85 45 Q85 35 80 30" 
+                  stroke="url(#fistGlow)" stroke-width="2" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Middle finger -->
+            <path d="M85 125 L85 85 Q85 60 95 50 Q100 40 100 30" 
+                  stroke="url(#fistGlow)" stroke-width="2.5" fill="none" filter="url(#neonGlow)"/>
+            <path d="M100 30 Q100 20 95 15" 
+                  stroke="url(#fistGlow)" stroke-width="2" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Ring finger -->
+            <path d="M105 125 L105 85 Q105 65 115 55 Q120 45 120 35" 
+                  stroke="url(#fistGlow)" stroke-width="2.5" fill="none" filter="url(#neonGlow)"/>
+            <path d="M120 35 Q120 25 115 20" 
+                  stroke="url(#fistGlow)" stroke-width="2" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Pinky finger -->
+            <path d="M125 130 L125 100 Q125 85 130 75 Q135 65 135 55" 
+                  stroke="url(#fistGlow)" stroke-width="2.5" fill="none" filter="url(#neonGlow)"/>
+            <path d="M135 55 Q135 45 130 40" 
+                  stroke="url(#fistGlow)" stroke-width="2" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Thumb wrapped around -->
+            <path d="M55 150 Q40 140 35 120 Q35 100 50 95 Q65 90 75 100 Q80 110 75 120" 
+                  stroke="url(#fistGlow)" stroke-width="3" fill="none" filter="url(#neonGlow)"/>
+            
+            <!-- Knuckle details -->
+            <circle cx="70" cy="95" r="4" stroke="url(#fistGlow)" stroke-width="1.5" fill="none" filter="url(#neonGlow)"/>
+            <circle cx="90" cy="88" r="4" stroke="url(#fistGlow)" stroke-width="1.5" fill="none" filter="url(#neonGlow)"/>
+            <circle cx="110" cy="88" r="4" stroke="url(#fistGlow)" stroke-width="1.5" fill="none" filter="url(#neonGlow)"/>
+            <circle cx="130" cy="95" r="4" stroke="url(#fistGlow)" stroke-width="1.5" fill="none" filter="url(#neonGlow)"/>
+        </svg>
+    </div>
+    
+    <div class="auth-buttons">
+        <a href="/login" class="auth-btn btn-login">Login</a>
+        <a href="/register" class="auth-btn btn-register">Register</a>
+    </div>
 </div>
 {% endblock %}

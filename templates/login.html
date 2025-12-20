@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block title %}Login - ORB Auto Trader{% endblock %}
+{% block title %}Login - Join The Resistance{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -197,14 +197,22 @@
     <div class="corner-decor bottom-right"></div>
     
     <div class="cyber-logo">
-        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="50,10 90,30 90,70 50,90 10,70 10,30" fill="none" stroke="#00ffff" stroke-width="2"/>
-            <polygon points="50,20 80,35 80,65 50,80 20,65 20,35" fill="none" stroke="#ff00ff" stroke-width="1"/>
-            <text x="50" y="58" text-anchor="middle" fill="#00ffff" font-family="Orbitron" font-size="20" font-weight="bold">ORB</text>
+        <svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg" style="width: 100px; height: 125px;">
+            <defs>
+                <linearGradient id="fistGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00ffff;stop-opacity:1" />
+                    <stop offset="50%" style="stop-color:#ff00ff;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#ff0080;stop-opacity:1" />
+                </linearGradient>
+            </defs>
+            <path d="M70 250 L70 180 Q70 165 80 155 L120 155 Q130 165 130 180 L130 250" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
+            <path d="M60 155 Q50 140 55 120 L55 100 Q60 75 100 70 Q140 75 145 100 L145 120 Q150 140 140 155" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
+            <path d="M55 100 Q55 85 70 70 Q85 55 100 55 Q115 55 130 70 Q145 85 145 100" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
+            <path d="M55 120 Q40 110 35 95 Q35 75 50 70 Q65 65 75 75 Q80 85 75 95" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
         </svg>
     </div>
     
-    <h1>ORB Auto Trader</h1>
+    <h1>Join The Resistance</h1>
     <p>Access your trading terminal</p>
     
     <div class="neon-line"></div>
@@ -235,7 +243,7 @@
 
     <div class="links-section">
         <p>Don't have an account? <a href="/register">Register Now</a></p>
-        <p><a href="/" class="guest-link">Continue as guest</a></p>
+        <p><a href="/" class="guest-link">Back to Home</a></p>
     </div>
 </div>
 {% endblock %}

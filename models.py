@@ -74,6 +74,7 @@ class OrderRecord(db.Model):
     alpaca_order_id = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(40), default="placed")
+    strategy = db.Column(db.String(20), default="orb")
 
 
 class OpenPosition(db.Model):
@@ -103,3 +104,18 @@ class OpenPosition(db.Model):
     
     account = db.relationship("AlpacaAccount", backref="open_positions")
     user = db.relationship("User", backref="open_positions")
+
+
+class SMASignalState(db.Model):
+    __tablename__ = "sma_signal_states"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    account_id = db.Column(db.Integer, db.ForeignKey('alpaca_accounts.id'), nullable=False)
+    symbol = db.Column(db.String(20), nullable=False)
+    last_signal = db.Column(db.String(20))
+    last_bar_timestamp = db.Column(db.String(50))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'account_id', 'symbol', name='uq_sma_signal_user_account_symbol'),
+    )

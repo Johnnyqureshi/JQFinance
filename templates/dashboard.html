@@ -432,6 +432,33 @@
     </div>
 
     <div class="section">
+        <h3>SMA Crossover Bot</h3>
+        <p style="font-size: 13px; color: #666680; margin-bottom: 15px;">
+            Trades INTC, DAL, T using 5/20 Simple Moving Average crossover strategy
+        </p>
+        
+        <div class="grid-2">
+            <div>
+                <label>Quantity per Trade</label>
+                <input type="number" id="sma-qty" value="1" min="1" step="1">
+            </div>
+            <div>
+                <label>Trading Account</label>
+                <select id="sma-account">
+                    {% for account in accounts %}
+                    <option value="{{ account.id }}">{{ account.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        
+        <button onclick="runSMABot()" class="run-btn" style="margin-top: 15px; border-color: var(--neon-magenta); color: var(--neon-magenta); background: linear-gradient(135deg, rgba(255, 0, 255, 0.15), rgba(128, 0, 255, 0.1));">
+            Run SMA Bot
+        </button>
+        <div id="sma-result" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="section">
         <h3>Activity Monitor</h3>
         <div class="market-status">
             <span id="status-indicator" class="status-dot"></span>
@@ -461,10 +488,11 @@
             <div class="order-row" style="border-left-color: {% if order.side == 'buy' %}var(--neon-green){% else %}var(--neon-pink){% endif %};">
                 <strong class="{{ order.side }}">{{ order.side|upper }}</strong> 
                 <span style="color: var(--neon-cyan);">{{ order.symbol }}</span>
-                <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) }}</span>
+                <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) if order.entry_price else 'N/A' }}</span>
                 {% if order.tp_price %}
                 <span style="color: #666680;"> | TP: ${{ "%.2f"|format(order.tp_price) }}</span>
                 {% endif %}
+                <span style="padding: 2px 6px; background: {% if order.strategy == 'sma' %}rgba(255, 0, 255, 0.2){% else %}rgba(0, 255, 255, 0.2){% endif %}; border-radius: 3px; font-size: 10px; color: {% if order.strategy == 'sma' %}var(--neon-magenta){% else %}var(--neon-cyan){% endif %}; margin-left: 8px;">{{ order.strategy|upper if order.strategy else 'ORB' }}</span>
                 <span style="float: right; color: #666680; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
             </div>
             {% endfor %}

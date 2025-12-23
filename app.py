@@ -500,6 +500,46 @@ def market_status():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+@app.route("/api/run_sma_bot", methods=["POST"])
+@login_required
+def run_sma_bot_endpoint():
+    from models import AlpacaAccount, OrderRecord
+    from sma_bot import run_sma_bot
+    
+    data = request.json or {}
+    account_id = data.get("account_id")
+    qty = int(data.get("qty", 1))
+    
+    if not account_id:
+        return jsonify({"status": "ERROR", "message": "Please select an Alpaca account"})
+    
+    account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
+    if not account:
+        return jsonify({"status": "ERROR", "message": "Account not found"})
+    
+    try:
+        result = run_sma_bot(account, user_id=current_user.id, qty=qty)
+        
+        if result.get("status") == "SUCCESS":
+            for order in result.get("orders_placed", []):
+                order_record = OrderRecord(
+                    user_id=current_user.id,
+                    symbol=order["symbol"],
+                    side=order["side"],
+                    qty=order["qty"],
+                    entry_price=order.get("price"),
+                    alpaca_order_id=order.get("order_id", ""),
+                    status="placed",
+                    strategy="sma"
+                )
+                db.session.add(order_record)
+            db.session.commit()
+        
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"SMA bot error: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)})
+
 @app.route("/api/close_position", methods=["POST"])
 @login_required
 def close_position():

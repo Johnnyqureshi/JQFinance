@@ -236,6 +236,77 @@ async function fetchPositions() {
     }
 }
 
+async function runSMABot() {
+    const accountEl = document.getElementById("sma-account");
+    const qtyEl = document.getElementById("sma-qty");
+    const resultEl = document.getElementById("sma-result");
+    
+    const accountId = accountEl ? accountEl.value : null;
+    const qty = qtyEl ? parseInt(qtyEl.value) || 1 : 1;
+    
+    if (!accountId) {
+        resultEl.style.display = "block";
+        resultEl.style.color = "#ff0080";
+        resultEl.style.borderLeftColor = "#ff0080";
+        resultEl.innerText = "Please select an account";
+        return;
+    }
+    
+    resultEl.style.display = "block";
+    resultEl.style.color = "#ff00ff";
+    resultEl.style.borderLeftColor = "#ff00ff";
+    resultEl.innerText = "Running SMA Bot on INTC, DAL, T...";
+    
+    try {
+        const res = await fetch("/api/run_sma_bot", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                account_id: accountId,
+                qty: qty
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === "SUCCESS") {
+            let resultText = "SMA Bot Results:\n\n";
+            const results = data.results || {};
+            
+            for (const [ticker, info] of Object.entries(results)) {
+                const signal = info.signal?.toUpperCase() || "N/A";
+                const signalColor = signal === "BUY" ? "↑" : signal === "SELL" ? "↓" : "→";
+                const orderStatus = info.order_placed ? "✓ Order placed" : "";
+                resultText += `${ticker}: ${signalColor} ${signal} ${orderStatus}\n`;
+                if (info.sma_fast && info.sma_slow) {
+                    resultText += `  SMA5: ${info.sma_fast.toFixed(2)} | SMA20: ${info.sma_slow.toFixed(2)}\n`;
+                }
+            }
+            
+            if (data.orders_placed && data.orders_placed.length > 0) {
+                resultText += `\n${data.orders_placed.length} order(s) placed`;
+                resultEl.style.color = "#00ff80";
+                resultEl.style.borderLeftColor = "#00ff80";
+            } else {
+                resultEl.style.color = "#ff8000";
+                resultEl.style.borderLeftColor = "#ff8000";
+                resultText += "\nNo orders placed (signals: hold or insufficient data)";
+            }
+            
+            resultEl.style.whiteSpace = "pre-wrap";
+            resultEl.innerText = resultText;
+        } else {
+            resultEl.style.color = "#ff0080";
+            resultEl.style.borderLeftColor = "#ff0080";
+            resultEl.innerText = data.message || "Error running SMA bot";
+        }
+    } catch (e) {
+        resultEl.style.color = "#ff0080";
+        resultEl.style.borderLeftColor = "#ff0080";
+        resultEl.innerText = "Network error. Please try again.";
+    }
+}
+
 async function closePosition(symbol, accountId) {
     if (!confirm(`Close position for ${symbol}?`)) return;
     

@@ -32,8 +32,15 @@ Preferred communication style: Simple, everyday language.
 - **Connection pooling**: SQLAlchemy configured with pool recycling and pre-ping for reliability
 
 ### Data Models
-- **Trade**: Stores trade records with symbol, direction, entry price, take profit price, status, and timestamp
+- **OrderRecord**: Stores trade records with symbol, direction, entry price, take profit price, status, strategy (orb/sma), and timestamp
 - **OpenPosition**: Tracks active positions with persistent TP/SL targets for multi-day monitoring
+
+### Trading Strategies
+- **ORB (Opening Range Breakout)**: Trades breakouts above/below the first 15-minute candle after market open
+- **SMA Crossover Bot**: Trades INTC, DAL, T using 5/20 Simple Moving Average crossover detection
+  - Only places orders on actual crossover events (not continuous trend signals)
+  - Compares current vs previous SMA relationship to detect state changes
+  - Endpoint: POST /api/run_sma_bot
 
 ### Position Monitoring
 - **Background Scheduler**: APScheduler runs every 30 seconds during market hours (9:30 AM - 4:00 PM ET)

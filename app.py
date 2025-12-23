@@ -500,6 +500,47 @@ def market_status():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+@app.route("/sma-bot")
+@login_required
+def sma_bot_page():
+    from models import AlpacaAccount, OrderRecord
+    
+    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
+    account_balances = {}
+    for account in accounts:
+        balance = fetch_account_balance(account)
+        if balance:
+            account_balances[account.id] = type('obj', (object,), balance)()
+    
+    orders = OrderRecord.query.filter_by(user_id=current_user.id, strategy='sma').order_by(OrderRecord.created_at.desc()).limit(50).all()
+    
+    return render_template("sma_bot.html", 
+                          accounts=accounts, 
+                          account_balances=account_balances,
+                          orders=orders)
+
+@app.route("/api/sma-bot/assets")
+@login_required
+def get_sma_assets():
+    from models import AlpacaAccount
+    from sma_bot import fetch_tradable_assets, get_alpaca_headers, get_base_url
+    
+    account_id = request.args.get("account_id")
+    if not account_id:
+        accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).first()
+        if accounts:
+            account_id = accounts.id
+    
+    account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
+    if not account:
+        return jsonify({"assets": []})
+    
+    headers = get_alpaca_headers(account)
+    base_url = get_base_url(account)
+    assets = fetch_tradable_assets(headers, base_url)
+    
+    return jsonify({"assets": assets})
+
 @app.route("/api/run_sma_bot", methods=["POST"])
 @login_required
 def run_sma_bot_endpoint():
@@ -509,16 +550,20 @@ def run_sma_bot_endpoint():
     data = request.json or {}
     account_id = data.get("account_id")
     qty = int(data.get("qty", 1))
+    symbols = data.get("symbols", [])
     
     if not account_id:
         return jsonify({"status": "ERROR", "message": "Please select an Alpaca account"})
+    
+    if not symbols:
+        return jsonify({"status": "ERROR", "message": "Please select at least one symbol"})
     
     account = AlpacaAccount.query.filter_by(id=account_id, user_id=current_user.id).first()
     if not account:
         return jsonify({"status": "ERROR", "message": "Account not found"})
     
     try:
-        result = run_sma_bot(account, user_id=current_user.id, qty=qty)
+        result = run_sma_bot(account, user_id=current_user.id, qty=qty, symbols=symbols)
         
         if result.get("status") == "SUCCESS":
             for order in result.get("orders_placed", []):

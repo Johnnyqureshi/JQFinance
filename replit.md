@@ -37,10 +37,14 @@ Preferred communication style: Simple, everyday language.
 
 ### Trading Strategies
 - **ORB (Opening Range Breakout)**: Trades breakouts above/below the first 15-minute candle after market open
-- **SMA Crossover Bot**: Trades INTC, DAL, T using 5/20 Simple Moving Average crossover detection
+  - Page: /dashboard
+- **SMA Crossover Bot**: Trades any Alpaca-available symbol using 5/20 Simple Moving Average crossover detection
+  - Page: /sma-bot (separate from ORB to avoid conflicts)
+  - Supports all tradable US equities from Alpaca
+  - Search/filter functionality for symbol selection
   - Only places orders on actual crossover events (not continuous trend signals)
   - Compares current vs previous SMA relationship to detect state changes
-  - Endpoint: POST /api/run_sma_bot
+  - Endpoint: POST /api/run_sma_bot (requires symbols array)
 
 ### Position Monitoring
 - **Background Scheduler**: APScheduler runs every 30 seconds during market hours (9:30 AM - 4:00 PM ET)

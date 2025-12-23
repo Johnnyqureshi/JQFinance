@@ -5,7 +5,6 @@ from datetime import datetime
 logger = logging.getLogger("sma.bot")
 logger.setLevel(logging.INFO)
 
-SMA_TICKERS = ["INTC", "DAL", "T"]
 ALPACA_DATA = "https://data.alpaca.markets/v2"
 
 def get_last_signal_state(user_id, account_id, symbol):
@@ -146,12 +145,30 @@ def get_current_price(symbol, headers):
     except:
         return None
 
-def run_sma_bot(account, user_id=None, qty=1):
+def fetch_tradable_assets(headers, base_url):
+    url = f"{base_url}/v2/assets"
+    params = {"status": "active", "asset_class": "us_equity"}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=30)
+        if r.status_code == 200:
+            assets = r.json()
+            tradable = [a for a in assets if a.get("tradable")]
+            return sorted([{"symbol": a["symbol"], "name": a.get("name", "")} for a in tradable], key=lambda x: x["symbol"])
+        logger.error(f"Error fetching assets: {r.status_code}")
+        return []
+    except Exception as e:
+        logger.error(f"Exception fetching assets: {e}")
+        return []
+
+def run_sma_bot(account, user_id=None, qty=1, symbols=None):
     if not account:
         return {"status": "ERROR", "message": "No Alpaca account connected"}
     
     if not user_id:
         return {"status": "ERROR", "message": "User authentication required"}
+    
+    if not symbols or len(symbols) == 0:
+        return {"status": "ERROR", "message": "No symbols selected"}
     
     headers = get_alpaca_headers(account)
     if not headers.get("APCA-API-KEY-ID"):
@@ -162,7 +179,7 @@ def run_sma_bot(account, user_id=None, qty=1):
     results = {}
     orders_placed = []
     
-    for ticker in SMA_TICKERS:
+    for ticker in symbols:
         try:
             bars = fetch_bars(ticker, headers, limit=100)
             
@@ -244,6 +261,6 @@ def run_sma_bot(account, user_id=None, qty=1):
         "status": "SUCCESS",
         "results": results,
         "orders_placed": orders_placed,
-        "tickers": SMA_TICKERS,
+        "tickers": symbols,
         "timestamp": datetime.utcnow().isoformat()
     }

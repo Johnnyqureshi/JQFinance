@@ -1,0 +1,593 @@
+{% extends "layout.html" %}
+
+{% block title %}Robots Panel - ORB Auto Trader{% endblock %}
+
+{% block extra_css %}
+<style>
+    * {
+        box-sizing: border-box;
+    }
+    
+    body {
+        margin: 0;
+        background: var(--dark-bg);
+        min-height: 100vh;
+    }
+    
+    .app-container {
+        display: flex;
+        min-height: 100vh;
+    }
+    
+    .sidebar {
+        width: 220px;
+        background: linear-gradient(180deg, rgba(10, 10, 20, 0.98), rgba(5, 5, 15, 0.95));
+        border-right: 1px solid rgba(0, 255, 255, 0.15);
+        padding: 20px 0;
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        height: 100vh;
+        z-index: 100;
+    }
+    
+    .sidebar-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+        margin-bottom: 20px;
+    }
+    
+    .sidebar-logo {
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        font-size: 18px;
+        letter-spacing: 2px;
+        background: linear-gradient(135deg, var(--neon-cyan), var(--neon-magenta));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .sidebar-user {
+        color: #666680;
+        font-size: 12px;
+        margin-top: 8px;
+    }
+    
+    .sidebar-section {
+        padding: 10px 15px;
+        margin-bottom: 10px;
+    }
+    
+    .sidebar-section-title {
+        color: #444455;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 10px;
+        padding-left: 5px;
+    }
+    
+    .sidebar-nav {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .sidebar-nav li {
+        margin-bottom: 4px;
+    }
+    
+    .sidebar-nav a {
+        display: flex;
+        align-items: center;
+        padding: 12px 15px;
+        color: #888899;
+        text-decoration: none;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+        font-size: 14px;
+        border-left: 3px solid transparent;
+    }
+    
+    .sidebar-nav a:hover {
+        background: rgba(0, 255, 255, 0.05);
+        color: var(--neon-cyan);
+    }
+    
+    .sidebar-nav a.active {
+        background: rgba(0, 255, 255, 0.1);
+        color: var(--neon-cyan);
+        border-left-color: var(--neon-cyan);
+    }
+    
+    .sidebar-nav a.active.sma {
+        background: rgba(255, 0, 255, 0.1);
+        color: var(--neon-magenta);
+        border-left-color: var(--neon-magenta);
+    }
+    
+    .nav-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .nav-icon svg {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .sidebar-footer {
+        margin-top: auto;
+        padding: 15px 20px;
+        border-top: 1px solid rgba(0, 255, 255, 0.1);
+    }
+    
+    .logout-btn {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        background: transparent;
+        border: 1px solid rgba(255, 0, 128, 0.3);
+        color: var(--neon-pink);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+    
+    .logout-btn:hover {
+        background: rgba(255, 0, 128, 0.1);
+        border-color: var(--neon-pink);
+    }
+    
+    .main-content {
+        flex: 1;
+        margin-left: 220px;
+        padding: 25px;
+        max-width: calc(100% - 220px);
+    }
+    
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+    }
+    
+    .panel-title {
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        font-size: 28px;
+        letter-spacing: 3px;
+        margin: 0;
+    }
+    
+    .panel-title.orb {
+        color: var(--neon-cyan);
+        text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+    }
+    
+    .panel-title.sma {
+        color: var(--neon-magenta);
+        text-shadow: 0 0 20px rgba(255, 0, 255, 0.5);
+    }
+    
+    .section { 
+        background: linear-gradient(135deg, rgba(13, 13, 21, 0.95), rgba(20, 20, 35, 0.9));
+        padding: 20px; 
+        border-radius: 10px; 
+        margin-bottom: 20px;
+        border: 1px solid rgba(0, 255, 255, 0.15);
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    
+    .section.sma-theme {
+        border-color: rgba(255, 0, 255, 0.15);
+    }
+    
+    .section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-magenta), transparent);
+        opacity: 0.5;
+    }
+    
+    .section:hover {
+        border-color: rgba(0, 255, 255, 0.3);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+    }
+    
+    .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+    }
+    
+    .account-badge { 
+        display: inline-block; 
+        background: linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(0, 255, 128, 0.1));
+        color: var(--neon-cyan);
+        padding: 6px 12px; 
+        border-radius: 4px; 
+        font-size: 12px;
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        letter-spacing: 1px;
+        border: 1px solid rgba(0, 255, 255, 0.3);
+    }
+    
+    .account-card { 
+        background: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        border: 1px solid rgba(128, 0, 255, 0.2);
+    }
+    
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 0;
+        font-size: 13px;
+    }
+    
+    .stat-label { color: #666680; }
+    .stat-value { font-family: 'Rajdhani', sans-serif; font-weight: 600; }
+    .stat-value.positive { color: var(--neon-green); }
+    
+    .order-row { 
+        padding: 12px;
+        margin-bottom: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        font-size: 13px;
+        border-left: 3px solid var(--neon-cyan);
+    }
+    
+    .buy { color: var(--neon-green) !important; }
+    .sell { color: var(--neon-pink) !important; }
+    
+    .run-btn {
+        width: 100%;
+        margin-top: 15px;
+        padding: 14px;
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.15), rgba(0, 255, 255, 0.1));
+        border: 1px solid var(--neon-green);
+        color: var(--neon-green);
+        border-radius: 6px;
+        cursor: pointer;
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        letter-spacing: 2px;
+        transition: all 0.3s ease;
+    }
+    
+    .run-btn:hover {
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.25), rgba(0, 255, 255, 0.2));
+        box-shadow: 0 0 25px rgba(0, 255, 128, 0.4);
+    }
+    
+    .run-btn.sma {
+        background: linear-gradient(135deg, rgba(255, 0, 255, 0.15), rgba(128, 0, 255, 0.1));
+        border-color: var(--neon-magenta);
+        color: var(--neon-magenta);
+    }
+    
+    .run-btn.sma:hover {
+        background: linear-gradient(135deg, rgba(255, 0, 255, 0.25), rgba(128, 0, 255, 0.2));
+        box-shadow: 0 0 25px rgba(255, 0, 255, 0.4);
+    }
+    
+    .success-message {
+        background: linear-gradient(135deg, rgba(0, 255, 128, 0.1), rgba(0, 255, 255, 0.05));
+        border: 1px solid rgba(0, 255, 128, 0.3);
+        border-left: 3px solid var(--neon-green);
+        padding: 12px 15px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        color: var(--neon-green);
+    }
+    
+    .market-status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        margin-bottom: 15px;
+    }
+    
+    .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #888;
+        animation: statusPulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes statusPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+    
+    .status-dot.open, .status-dot.orb_ready { background: var(--neon-green); }
+    .status-dot.opening, .status-dot.pre_market { background: var(--neon-orange); }
+    .status-dot.closed { background: var(--neon-pink); }
+    
+    .risk-preview {
+        margin-top: 15px;
+        padding: 15px;
+        background: rgba(0, 0, 0, 0.4);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 128, 0, 0.2);
+    }
+    
+    .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px 0;
+    }
+    
+    .checkbox-row input[type="checkbox"] {
+        accent-color: var(--neon-cyan);
+    }
+    
+    .position-card {
+        background: rgba(0, 0, 0, 0.4);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(0, 255, 255, 0.2);
+    }
+    
+    .tp-btn {
+        margin-top: 10px;
+        padding: 8px 16px;
+        font-size: 12px;
+        background: linear-gradient(135deg, rgba(255, 128, 0, 0.2), rgba(255, 0, 128, 0.1));
+        border: 1px solid var(--neon-orange);
+        color: var(--neon-orange);
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    details summary {
+        color: var(--neon-cyan);
+        padding: 10px 0;
+        cursor: pointer;
+    }
+    
+    .symbol-search {
+        width: 100%;
+        padding: 12px 15px;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 0, 255, 0.3);
+        color: var(--text-primary);
+        border-radius: 6px;
+        margin-bottom: 15px;
+    }
+    
+    .symbol-list {
+        max-height: 250px;
+        overflow-y: auto;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 0, 255, 0.2);
+        border-radius: 6px;
+        padding: 10px;
+    }
+    
+    .symbol-item {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 4px;
+    }
+    
+    .symbol-item:hover { background: rgba(255, 0, 255, 0.1); }
+    .symbol-item.selected { background: rgba(255, 0, 255, 0.2); border: 1px solid rgba(255, 0, 255, 0.4); }
+    .symbol-item input { margin-right: 10px; accent-color: var(--neon-magenta); }
+    .symbol-ticker { color: var(--neon-magenta); min-width: 80px; font-weight: 600; }
+    .symbol-name { color: #666680; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    
+    .selected-symbols {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+        min-height: 36px;
+    }
+    
+    .selected-tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 12px;
+        background: rgba(255, 0, 255, 0.2);
+        border: 1px solid rgba(255, 0, 255, 0.4);
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--neon-magenta);
+    }
+    
+    .selected-tag .remove {
+        margin-left: 8px;
+        cursor: pointer;
+        opacity: 0.7;
+    }
+    
+    .selected-tag .remove:hover { opacity: 1; }
+    
+    .result-card {
+        background: rgba(0, 0, 0, 0.4);
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        border-left: 3px solid var(--neon-magenta);
+    }
+    
+    .result-card.buy { border-left-color: var(--neon-green); }
+    .result-card.sell { border-left-color: var(--neon-pink); }
+    
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    
+    .result-symbol { font-size: 18px; font-weight: 600; color: var(--neon-magenta); }
+    
+    .signal-badge {
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .signal-badge.buy { background: rgba(0, 255, 128, 0.2); color: var(--neon-green); border: 1px solid var(--neon-green); }
+    .signal-badge.sell { background: rgba(255, 0, 128, 0.2); color: var(--neon-pink); border: 1px solid var(--neon-pink); }
+    .signal-badge.hold { background: rgba(128, 128, 128, 0.2); color: #888; border: 1px solid #666; }
+    
+    .result-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        font-size: 12px;
+    }
+    
+    .stat-box {
+        text-align: center;
+        padding: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 4px;
+    }
+    
+    .stat-box .label { color: #666680; margin-bottom: 4px; }
+    .stat-box .value { color: var(--text-primary); font-weight: 600; }
+    
+    .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        color: var(--neon-magenta);
+    }
+    
+    .loading.active { display: block; }
+    
+    .spinner {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        border: 3px solid rgba(255, 0, 255, 0.2);
+        border-top-color: var(--neon-magenta);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    @media (max-width: 900px) {
+        .sidebar { width: 60px; padding: 15px 5px; }
+        .sidebar-header, .sidebar-section-title, .sidebar-nav a span { display: none; }
+        .sidebar-nav a { justify-content: center; padding: 12px; }
+        .nav-icon { margin: 0; }
+        .main-content { margin-left: 60px; max-width: calc(100% - 60px); }
+        .grid-2 { grid-template-columns: 1fr; }
+        .result-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="app-container">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">RESISTANCE</div>
+            <div class="sidebar-user">// {{ current_user.username }}</div>
+        </div>
+        
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">Robots Panel</div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="/robots/orb" class="{% if active_tab == 'orb' %}active{% endif %}">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <path d="M3 9h18M9 21V9"/>
+                            </svg>
+                        </span>
+                        <span>ORB ROBOT</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/robots/sma" class="{% if active_tab == 'sma' %}active sma{% endif %}">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                        </span>
+                        <span>SMA ROBOT</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+        
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">Account</div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="/robots/accounts">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        </span>
+                        <span>Accounts</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+        
+        <div class="sidebar-footer">
+            <a href="/logout" class="logout-btn">Disconnect</a>
+        </div>
+    </aside>
+    
+    <main class="main-content">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="success-message">
+            {% for message in messages %}{{ message }}{% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        
+        {% block panel_content %}{% endblock %}
+    </main>
+</div>
+{% endblock %}

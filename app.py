@@ -253,8 +253,74 @@ def orb_trade(symbol, take_profit, account=None, user_id=None):
 @app.route("/")
 def index():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("robots_orb"))
     return render_template("index.html")
+
+@app.route("/robots")
+@login_required
+def robots_redirect():
+    return redirect(url_for("robots_orb"))
+
+@app.route("/robots/orb")
+@login_required
+def robots_orb():
+    from models import AlpacaAccount, OrderRecord
+    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
+    orders = OrderRecord.query.filter_by(user_id=current_user.id, strategy='orb').order_by(OrderRecord.created_at.desc()).limit(20).all()
+    
+    account_balances = {}
+    selected_account = None
+    for account in accounts:
+        balance = fetch_account_balance(account)
+        if balance:
+            account_balances[account.id] = type('obj', (object,), balance)()
+        if selected_account is None:
+            selected_account = account
+    
+    assets = get_assets(selected_account)
+    
+    return render_template("robots_orb.html", 
+                          accounts=accounts, 
+                          orders=orders, 
+                          assets=assets,
+                          account_balances=account_balances,
+                          active_tab='orb')
+
+@app.route("/robots/sma")
+@login_required
+def robots_sma():
+    from models import AlpacaAccount, OrderRecord
+    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
+    orders = OrderRecord.query.filter_by(user_id=current_user.id, strategy='sma').order_by(OrderRecord.created_at.desc()).limit(20).all()
+    
+    account_balances = {}
+    for account in accounts:
+        balance = fetch_account_balance(account)
+        if balance:
+            account_balances[account.id] = type('obj', (object,), balance)()
+    
+    return render_template("robots_sma.html", 
+                          accounts=accounts, 
+                          orders=orders,
+                          account_balances=account_balances,
+                          active_tab='sma')
+
+@app.route("/robots/accounts")
+@login_required
+def robots_accounts():
+    from models import AlpacaAccount
+    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
+    
+    account_balances = {}
+    for account in accounts:
+        balance = fetch_account_balance(account)
+        if balance:
+            account_balances[account.id] = type('obj', (object,), balance)()
+    
+    return render_template("robots_accounts.html", 
+                          accounts=accounts,
+                          account_balances=account_balances,
+                          active_tab='accounts')
 
 @app.route("/dashboard")
 @login_required
@@ -296,6 +362,9 @@ def add_account():
     db.session.add(account)
     db.session.commit()
     flash("Account added successfully")
+    referer = request.headers.get('Referer', '')
+    if '/robots' in referer:
+        return redirect(url_for("robots_accounts"))
     return redirect(url_for("dashboard"))
 
 @app.route("/run_orb", methods=["POST"])

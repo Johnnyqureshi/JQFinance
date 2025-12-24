@@ -1,0 +1,132 @@
+{% extends "robots.html" %}
+
+{% block panel_content %}
+<div class="panel-header">
+    <h1 class="panel-title orb">ORB ROBOT</h1>
+    <div class="market-status">
+        <span id="status-indicator" class="status-dot"></span>
+        <span id="status-text" style="font-size: 14px;">Connecting...</span>
+        <span id="current-time" style="margin-left: auto; color: #666680; font-size: 12px;">--:--</span>
+    </div>
+</div>
+
+{% if not accounts %}
+<div class="section">
+    <p style="color: var(--neon-orange); text-align: center;">
+        Please <a href="/robots/accounts" style="color: var(--neon-cyan);">link an Alpaca account</a> first.
+    </p>
+</div>
+{% else %}
+
+<div class="section">
+    <h3>Position Sizing & Risk</h3>
+    <div class="grid-2">
+        <div>
+            <label>Position Size</label>
+            <select id="position-size-type" onchange="togglePositionInput()">
+                <option value="fixed">Fixed Shares</option>
+                <option value="dollars">Dollar Amount</option>
+                <option value="percent">% of Buying Power</option>
+            </select>
+        </div>
+        <div>
+            <label id="position-value-label">Shares</label>
+            <input type="number" id="position-value" value="1" min="1" step="1">
+        </div>
+    </div>
+    
+    <div class="grid-2" style="margin-top: 12px;">
+        <div>
+            <label>Stop Loss (%)</label>
+            <input type="number" id="stop-loss" value="2" min="0.5" max="20" step="0.5">
+        </div>
+        <div>
+            <label>Max Risk per Trade</label>
+            <select id="max-risk">
+                <option value="0.25" selected>25% of Account</option>
+                <option value="0.50">50% of Account</option>
+                <option value="0.75">75% of Account</option>
+                <option value="1.00">100% of Account</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="checkbox-row" style="margin-top: 12px;">
+        <input type="checkbox" id="trailing-stop" checked>
+        <label for="trailing-stop">Trailing Stop Loss (moves with price)</label>
+    </div>
+    
+    <div id="risk-preview" class="risk-preview">
+        <div style="color: #666680;">Risk Preview (select account to calculate)</div>
+    </div>
+</div>
+
+<div class="section">
+    <h3>Execute ORB Strategy</h3>
+    <label>Select Asset</label>
+    <select id="symbol">
+        {% for a in assets %}
+        <option value="{{ a }}">{{ a }}</option>
+        {% endfor %}
+    </select>
+
+    <label>Take Profit</label>
+    <select id="profit">
+        <option value="manual">Manual (No Auto TP)</option>
+        <option value="0.05" selected>5%</option>
+        <option value="0.10">10%</option>
+        <option value="0.15">15%</option>
+        <option value="0.20">20%</option>
+        <option value="0.25">25%</option>
+    </select>
+
+    <label>Trading Account</label>
+    <select id="account" onchange="updateRiskPreview()">
+        {% for account in accounts %}
+        <option value="{{ account.id }}" data-equity="{{ account_balances.get(account.id).equity if account_balances.get(account.id) else 0 }}" data-buying-power="{{ account_balances.get(account.id).buying_power if account_balances.get(account.id) else 0 }}">{{ account.name }}</option>
+        {% endfor %}
+    </select>
+
+    <button onclick="runORB()" class="run-btn">Execute Strategy</button>
+    <div id="result" class="result" style="display: none;"></div>
+</div>
+
+<div class="section">
+    <h3>Active Positions</h3>
+    <div style="margin-bottom: 12px;">
+        <select id="monitor-account" onchange="loadPositions()" style="padding: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(0,255,255,0.3); color: var(--text-primary); border-radius: 4px;">
+            {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div id="positions-list">
+        <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No active positions</p>
+    </div>
+</div>
+
+<div class="section">
+    <h3>ORB Order History</h3>
+    {% if orders %}
+        {% for order in orders %}
+        <div class="order-row" style="border-left-color: {% if order.side == 'buy' %}var(--neon-green){% else %}var(--neon-pink){% endif %};">
+            <strong class="{{ order.side }}">{{ order.side|upper }}</strong> 
+            <span style="color: var(--neon-cyan);">{{ order.symbol }}</span>
+            <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) if order.entry_price else 'N/A' }}</span>
+            {% if order.tp_price %}
+            <span style="color: #666680;"> | TP: ${{ "%.2f"|format(order.tp_price) }}</span>
+            {% endif %}
+            <span style="float: right; color: #666680; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No ORB orders recorded</p>
+    {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/dashboard.js"></script>
+{% endblock %}

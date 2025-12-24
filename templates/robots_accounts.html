@@ -1,0 +1,59 @@
+{% extends "robots.html" %}
+
+{% block panel_content %}
+<div class="panel-header">
+    <h1 class="panel-title orb">ACCOUNTS</h1>
+</div>
+
+<div class="section">
+    <h3>Alpaca Accounts</h3>
+    {% if accounts %}
+        {% for account in accounts %}
+        <div class="account-card">
+            <div style="margin-bottom: 10px;">
+                <span class="account-badge">{{ account.name }} {% if account.is_paper %}// PAPER{% endif %}</span>
+            </div>
+            {% if account_balances.get(account.id) %}
+            <div class="stat-row">
+                <span class="stat-label">Equity</span>
+                <span class="stat-value positive">${{ "%.2f"|format(account_balances[account.id].equity) }}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Cash</span>
+                <span class="stat-value">${{ "%.2f"|format(account_balances[account.id].cash) }}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Buying Power</span>
+                <span class="stat-value">${{ "%.2f"|format(account_balances[account.id].buying_power) }}</span>
+            </div>
+            {% else %}
+            <div style="font-size: 12px; color: #666680;">Balance unavailable</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color: #666680; font-size: 13px;">No accounts linked.</p>
+    {% endif %}
+    
+    <details style="margin-top: 20px;">
+        <summary>+ Link New Account</summary>
+        <form method="POST" action="/add_account" style="margin-top: 15px;">
+            <label>Account Name</label>
+            <input type="text" name="name" placeholder="e.g., Paper Trading" required>
+            
+            <label>API Key</label>
+            <input type="password" name="api_key" required placeholder="Enter Alpaca API Key">
+            
+            <label>API Secret</label>
+            <input type="password" name="api_secret" required placeholder="Enter Alpaca Secret Key">
+            
+            <div class="checkbox-row">
+                <input type="checkbox" name="is_paper" id="is_paper" checked>
+                <label for="is_paper">Paper Trading Account</label>
+            </div>
+            
+            <button type="submit" class="run-btn" style="margin-top: 15px;">Link Account</button>
+        </form>
+    </details>
+</div>
+{% endblock %}

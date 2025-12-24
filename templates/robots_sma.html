@@ -1,0 +1,269 @@
+{% extends "robots.html" %}
+
+{% block panel_content %}
+<div class="panel-header">
+    <h1 class="panel-title sma">SMA ROBOT</h1>
+</div>
+
+{% if not accounts %}
+<div class="section sma-theme">
+    <p style="color: var(--neon-orange); text-align: center;">
+        Please <a href="/robots/accounts" style="color: var(--neon-magenta);">link an Alpaca account</a> first.
+    </p>
+</div>
+{% else %}
+
+<div class="section sma-theme">
+    <h3>Select Trading Account</h3>
+    <select id="sma-account" onchange="loadAssets()">
+        {% for account in accounts %}
+        <option value="{{ account.id }}">
+            {{ account.name }} {% if account.is_paper %}(Paper){% endif %}{% if account_balances.get(account.id) %} - ${{ "%.2f"|format(account_balances[account.id].equity) }}{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="section sma-theme">
+    <h3>Select Symbols</h3>
+    <input type="text" class="symbol-search" id="symbol-search" placeholder="Search symbols (e.g., AAPL, TSLA, INTC...)" onkeyup="filterSymbols()">
+    
+    <div id="selected-symbols" class="selected-symbols">
+        <span style="color: #666680; font-size: 13px;">No symbols selected</span>
+    </div>
+    
+    <div class="symbol-list" id="symbol-list">
+        <div class="loading" id="loading-assets">
+            <div class="spinner"></div>
+            <p>Loading tradable assets...</p>
+        </div>
+    </div>
+</div>
+
+<div class="section sma-theme">
+    <h3>Trade Settings</h3>
+    <div class="grid-2">
+        <div>
+            <label>Quantity per Trade</label>
+            <input type="number" id="sma-qty" value="1" min="1" step="1">
+        </div>
+        <div>
+            <label>Selected Symbols</label>
+            <input type="text" id="symbol-count" value="0 symbols" readonly style="background: rgba(0,0,0,0.2); border-color: rgba(255,0,255,0.2);">
+        </div>
+    </div>
+    
+    <button onclick="runSMABot()" class="run-btn sma" id="run-btn" disabled>
+        Run SMA Crossover Analysis
+    </button>
+    
+    <div class="loading" id="loading-results">
+        <div class="spinner"></div>
+        <p>Analyzing symbols...</p>
+    </div>
+    
+    <div id="results-container"></div>
+</div>
+
+<div class="section sma-theme">
+    <h3>SMA Order History</h3>
+    {% if orders %}
+        {% for order in orders %}
+        <div class="order-row" style="border-left-color: {% if order.side == 'buy' %}var(--neon-green){% else %}var(--neon-pink){% endif %};">
+            <strong class="{{ order.side }}">{{ order.side|upper }}</strong> 
+            <span style="color: var(--neon-magenta);">{{ order.symbol }}</span>
+            <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) if order.entry_price else 'N/A' }}</span>
+            <span style="float: right; color: #666680; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No SMA orders recorded</p>
+    {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allAssets = [];
+let selectedSymbols = new Set();
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('sma-account')) {
+        loadAssets();
+    }
+});
+
+function loadAssets() {
+    const accountId = document.getElementById('sma-account').value;
+    const loadingEl = document.getElementById('loading-assets');
+    const listEl = document.getElementById('symbol-list');
+    
+    loadingEl.classList.add('active');
+    
+    fetch(`/api/sma-bot/assets?account_id=${accountId}`)
+        .then(r => r.json())
+        .then(data => {
+            loadingEl.classList.remove('active');
+            if (data.assets) {
+                allAssets = data.assets;
+                renderSymbolList(allAssets.slice(0, 100));
+            }
+        })
+        .catch(err => {
+            loadingEl.classList.remove('active');
+            listEl.innerHTML = '<p style="color: var(--neon-pink); padding: 20px;">Error loading assets</p>';
+        });
+}
+
+function filterSymbols() {
+    const query = document.getElementById('symbol-search').value.toUpperCase();
+    const filtered = allAssets.filter(a => 
+        a.symbol.includes(query) || a.name.toUpperCase().includes(query)
+    );
+    renderSymbolList(filtered.slice(0, 100));
+}
+
+function renderSymbolList(assets) {
+    const listEl = document.getElementById('symbol-list');
+    if (assets.length === 0) {
+        listEl.innerHTML = '<p style="color: #666680; padding: 20px; text-align: center;">No matching symbols</p>';
+        return;
+    }
+    
+    let html = '';
+    assets.forEach(asset => {
+        const isSelected = selectedSymbols.has(asset.symbol);
+        html += `
+            <div class="symbol-item ${isSelected ? 'selected' : ''}" onclick="toggleSymbol('${asset.symbol}')">
+                <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleSymbol('${asset.symbol}')">
+                <span class="symbol-ticker">${asset.symbol}</span>
+                <span class="symbol-name">${asset.name}</span>
+            </div>
+        `;
+    });
+    listEl.innerHTML = html;
+}
+
+function toggleSymbol(symbol) {
+    if (selectedSymbols.has(symbol)) {
+        selectedSymbols.delete(symbol);
+    } else {
+        selectedSymbols.add(symbol);
+    }
+    updateSelectedDisplay();
+    filterSymbols();
+}
+
+function removeSymbol(symbol) {
+    selectedSymbols.delete(symbol);
+    updateSelectedDisplay();
+    filterSymbols();
+}
+
+function updateSelectedDisplay() {
+    const container = document.getElementById('selected-symbols');
+    const countEl = document.getElementById('symbol-count');
+    const runBtn = document.getElementById('run-btn');
+    
+    if (selectedSymbols.size === 0) {
+        container.innerHTML = '<span style="color: #666680; font-size: 13px;">No symbols selected</span>';
+        countEl.value = '0 symbols';
+        runBtn.disabled = true;
+    } else {
+        let html = '';
+        selectedSymbols.forEach(sym => {
+            html += `<span class="selected-tag">${sym}<span class="remove" onclick="removeSymbol('${sym}')">&times;</span></span>`;
+        });
+        container.innerHTML = html;
+        countEl.value = `${selectedSymbols.size} symbol${selectedSymbols.size > 1 ? 's' : ''}`;
+        runBtn.disabled = false;
+    }
+}
+
+function runSMABot() {
+    const accountId = document.getElementById('sma-account').value;
+    const qty = document.getElementById('sma-qty').value;
+    const symbols = Array.from(selectedSymbols);
+    
+    if (symbols.length === 0) {
+        alert('Please select at least one symbol');
+        return;
+    }
+    
+    const loadingEl = document.getElementById('loading-results');
+    const resultsEl = document.getElementById('results-container');
+    const runBtn = document.getElementById('run-btn');
+    
+    loadingEl.classList.add('active');
+    resultsEl.innerHTML = '';
+    runBtn.disabled = true;
+    
+    fetch('/api/run_sma_bot', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            account_id: accountId,
+            qty: parseInt(qty),
+            symbols: symbols
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        loadingEl.classList.remove('active');
+        runBtn.disabled = false;
+        
+        if (data.status === 'SUCCESS') {
+            let html = '<h4 style="margin: 15px 0; color: var(--neon-magenta);">Analysis Results</h4>';
+            
+            for (const [symbol, result] of Object.entries(data.results)) {
+                const signalClass = result.signal.includes('buy') ? 'buy' : 
+                                   result.signal.includes('sell') ? 'sell' : 'hold';
+                const signalDisplay = result.signal.replace('hold_', '').toUpperCase();
+                
+                html += `
+                    <div class="result-card ${signalClass}">
+                        <div class="result-header">
+                            <span class="result-symbol">${symbol}</span>
+                            <span class="signal-badge ${signalClass}">${signalDisplay}</span>
+                        </div>
+                        <div class="result-stats">
+                            <div class="stat-box">
+                                <div class="label">Price</div>
+                                <div class="value">$${result.current_price ? result.current_price.toFixed(2) : 'N/A'}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="label">SMA(5)</div>
+                                <div class="value">${result.sma_fast ? result.sma_fast.toFixed(4) : 'N/A'}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="label">SMA(20)</div>
+                                <div class="value">${result.sma_slow ? result.sma_slow.toFixed(4) : 'N/A'}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="label">Order</div>
+                                <div class="value">${result.order_placed ? 'PLACED' : (result.skipped ? 'SKIPPED' : 'NO')}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (data.orders_placed && data.orders_placed.length > 0) {
+                html += `<p style="color: var(--neon-green); margin-top: 15px;">${data.orders_placed.length} order(s) placed!</p>`;
+            }
+            
+            resultsEl.innerHTML = html;
+        } else {
+            resultsEl.innerHTML = `<p style="color: var(--neon-pink);">Error: ${data.message}</p>`;
+        }
+    })
+    .catch(err => {
+        loadingEl.classList.remove('active');
+        runBtn.disabled = false;
+        resultsEl.innerHTML = `<p style="color: var(--neon-pink);">Error: ${err.message}</p>`;
+    });
+}
+</script>
+{% endblock %}

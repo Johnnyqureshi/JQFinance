@@ -1,130 +1,158 @@
-# Design Guidelines: ORB Trading Dashboard
+# Design Guidelines: ORB Cyberpunk Trading Platform
 
 ## Design Approach
-**Reference-Based: Modern Financial Dashboard**
-Drawing inspiration from professional trading platforms (Robinhood, Interactive Brokers) with Material Design principles for clarity and efficiency. This is a utility-focused application where real-time data visibility and quick configuration are paramount.
+**Reference-Based: Elite Cyberpunk Trading Terminal**
+Inspired by futuristic trading interfaces (Blade Runner UI, cyberpunk HUDs, institutional quant systems) with glassmorphism aesthetics. This is a utility-focused professional trading platform with premium visual treatment emphasizing data clarity through neon contrast and geometric precision.
+
+## Color System
+- **Backgrounds:** Deep black (#000000) and charcoal (#0a0a0f) foundations
+- **Neon Accents:** Electric cyan (#00f0ff), magenta (#ff00ff), violet (#8b5cf6), neon green (#00ff88)
+- **Glassmorphism:** Panels use backdrop-blur with 10-20% white/cyan transparency
+- **Glow Effects:** box-shadow with color-matched blur (0 0 20px currentColor)
+- **Grid Lines:** 1px borders in cyan/violet at 20% opacity
 
 ## Typography System
-**Font Family:** 
-- Primary: 'Inter' or 'SF Pro Display' via Google Fonts
-- Monospace: 'IBM Plex Mono' for numerical data
+**Font Families via Google Fonts:**
+- Headers: 'Orbitron' (weights: 700, 900)
+- Body: 'Rajdhani' (weights: 400, 500, 600, 700)
+- Data/Prices: 'IBM Plex Mono' (weights: 400, 600)
 
 **Hierarchy:**
-- Dashboard Title: text-3xl font-bold
-- Section Headers: text-lg font-semibold
-- Labels: text-sm font-medium uppercase tracking-wide
-- Data/Status: text-base font-normal
-- Numerical Values: font-mono text-lg for prices/percentages
-- Helper Text: text-xs
+- Platform Title: text-4xl font-black (Orbitron) with neon glow effect
+- Section Headers: text-2xl font-bold (Orbitron) uppercase tracking-wider
+- Panel Headers: text-lg font-semibold (Rajdhani) uppercase tracking-wide
+- Labels: text-sm font-medium (Rajdhani) uppercase
+- Numerical Data: text-xl font-mono (IBM Plex Mono)
+- Body Text: text-base font-normal (Rajdhana)
+- Terminal Text: text-xs font-mono (IBM Plex Mono)
 
 ## Layout System
-**Spacing Units:** Tailwind units of 2, 4, 6, and 8 (p-4, gap-6, mb-8, etc.)
+**Spacing Units:** Tailwind units of 3, 4, 6, and 8 for geometric precision
 
 **Grid Structure:**
-- Single-column centered container: max-w-2xl mx-auto
-- Dashboard cards with p-6 padding
-- Form elements with gap-4 spacing
-- Status displays with p-4 internal spacing
+- Full-width dashboard with max-w-7xl container
+- CSS Grid layout: 12-column system (grid-cols-12)
+- Glassmorphic cards span 4-6 columns each
+- Geometric dividers with 1px neon borders
+- Terminal panel spans full width at bottom
 
 ## Core Components
 
-### Dashboard Container
-- Centered layout with max-w-2xl
-- Vertical stack with gap-8 between major sections
-- Top padding: pt-12, bottom: pb-16
+### Platform Header
+- Full-width with backdrop-blur glassmorphism
+- Logo/title on left with neon glow text effect
+- Real-time connection status badge on right (pulsing neon dot + "CONNECTED")
+- Height: h-20 with px-8 horizontal padding
+- Fixed position: sticky top-0 with z-50
 
-### Trading Control Panel (Primary Card)
-- Prominent card with rounded-xl borders
-- Shadow: shadow-lg for elevation
-- Internal padding: p-6
-- Contains dropdown and input in two-column grid (grid-cols-2 gap-4 on desktop, stacks on mobile)
+### Trading Control Panel (Primary Glassmorphic Card)
+- Glassmorphism treatment: backdrop-blur-xl with border-2 neon-outlined
+- Rounded corners: rounded-2xl
+- Padding: p-8
+- Subtle glow on edges using box-shadow
+- Spans 6 columns on desktop grid
 
-### Asset Selector
-- Full-width dropdown with rounded-lg corners
-- Height: h-12 for comfortable touch targets
-- Font: text-base with placeholder text
-- Padding: px-4
+### Bot Configuration Cards
+- Multiple bot panels in grid layout (grid-cols-1 md:grid-cols-2 lg:grid-cols-3)
+- Each card: glassmorphic panel with p-6 padding
+- Header stripe with neon accent color per bot type
+- Status indicator with animated glow pulse
+- Sharp geometric borders with rounded-xl corners
 
-### Take Profit Input
-- Number input with percentage symbol inline
-- Same styling as dropdown for consistency
-- Validation indicators (built into input state)
+### Asset Selector & Inputs
+- Custom-styled dropdown with neon border on focus
+- Height: h-14 for premium feel
+- Glassmorphic background with backdrop-blur-md
+- Neon-colored border (2px) that intensifies on hover/focus
+- Placeholder text in cyan at 50% opacity
 
-### Execute Button
-- Full-width primary action button
-- Height: h-12
-- Rounded: rounded-lg
-- Font: text-base font-semibold
-- Positioned below inputs with mt-6 spacing
+### Execute/Action Buttons
+- Neon-outlined buttons with transparent fill
+- Height: h-14 with px-8 padding
+- Border: 2px solid with neon color
+- Hover state: background glow with color at 20% opacity + intensified border glow
+- Font: text-base font-bold uppercase tracking-wider (Rajdhani)
+- Transition: transition-all duration-300
 
-### Status Display Card
-- Separate card below control panel
-- Rounded-xl with shadow-md
-- Padding: p-6
-- Contains status indicator and detailed trade information
+### Status Display Grid
+- Grid of status cards below control panel
+- Each card shows: bot name, status badge, key metrics
+- Status badges: rounded-full with backdrop-blur, animated glow pulse
+- Use Heroicons (outline) with neon stroke color
+- Metrics displayed in monospace with large text-2xl sizing
 
-### Status Indicators
-- Large status badge with rounded-full pills
-- Status text: font-semibold text-sm uppercase tracking-wide
-- Different visual treatments per state (WAIT, NO_BREAKOUT, TRADE_PLACED, ERROR)
-- Icon integration using Heroicons (clock, chart, check, alert)
+### Terminal Log Panel
+- Full-width panel at bottom (min-h-48)
+- Background: pure black with subtle grid pattern
+- Green monospace text (terminal aesthetic)
+- Auto-scroll with smooth animation
+- Shows: timestamps, trade executions, system events
+- Each line: text-xs font-mono with opacity-80
 
 ### Trade Details Table
-- When trade is placed, show structured data
-- Two-column layout (label: value)
-- Labels: text-sm font-medium
-- Values: text-base font-mono for numbers
-- Row spacing: space-y-3
+- Two-column layout within cards
+- Labels: text-sm uppercase tracking-wide in cyan
+- Values: text-lg font-mono with neon green color for gains, magenta for losses
+- Row separators: 1px border in violet at 20% opacity
+- Decimal alignment for numerical columns
 
-### Header Section
-- Application title: text-3xl font-bold
-- Subtitle/description: text-base mt-2
-- Container: mb-8
+### Geometric Grid Background
+- Subtle grid pattern overlay on main background
+- 32px grid spacing with 1px cyan lines at 10% opacity
+- Applied to body element
+- Creates institutional/technical aesthetic
 
 ## Icon Library
-**Heroicons via CDN** - use outline variants for UI chrome, solid for status indicators
+**Heroicons via CDN** - use outline variants exclusively with neon stroke colors
 
 ## Component Specifications
 
-**Navigation/Header:**
-- Simple centered header with app branding
-- No complex navigation needed (single-page app)
-- API status indicator (connected/disconnected) in top-right corner as small badge
+### Glassmorphism Panels
+- backdrop-filter: blur(12px)
+- background: linear-gradient with 15% white/cyan transparency
+- border: 1-2px with neon accent color at 30% opacity
+- Shadow: multi-layer glow (inner + outer box-shadow)
 
-**Forms:**
-- Consistent input heights (h-12)
-- Clear focus states with border treatment
-- Label positioning: above inputs with mb-2
-- Error messages: text-sm mt-1
+### Animated Elements
+- Status indicators: infinite pulse animation (animate-pulse custom timing)
+- Connection status: pulsing neon dot (scale + opacity animation)
+- Button hovers: glow intensification (300ms ease-in-out)
+- Data updates: brief flash animation on value change
+- Terminal text: typing cursor blink animation
 
-**Data Display:**
-- Numerical data always in monospace font
-- Align decimal points in tables
-- Clear visual separation between data rows (border-b last:border-0)
+### Data Visualization
+- Real-time price charts with neon line graphs
+- Candlestick charts using cyan/magenta color scheme
+- Grid lines in violet at low opacity
+- Tooltip overlays with glassmorphic treatment
 
-**Overlays:**
-- Loading states: centered spinner with backdrop blur
-- Inline loading for button states (spinner replaces text)
+## Layout Structure
 
-## Animations
-**Minimal and Purposeful:**
-- Smooth transitions on status changes (transition-all duration-300)
-- Button hover states with scale or opacity changes
-- NO complex scroll animations or decorative effects
-- Focus on instant feedback and responsiveness
+### Desktop (lg+)
+- 12-column grid with gap-6
+- Control panel: cols-span-6
+- Bot cards: 2-3 columns each in grid
+- Terminal: full-width at bottom (col-span-12)
+- Sidebar potential: col-span-3 for watchlists
 
-## Images
-**No hero images required** - this is a functional dashboard, not a marketing page. Focus on clarity and data presentation.
+### Tablet/Mobile
+- Single column stacking
+- Cards span full width
+- Reduced padding (p-4 instead of p-6)
+- Collapsible terminal panel
 
 ## Accessibility
-- All form inputs with proper labels and aria-attributes
-- Status messages with role="status" for screen readers
-- Color-independent status indicators (always include icons/text)
-- Keyboard navigation for all interactive elements
-- Focus visible states on all controls
+- High contrast neon text on dark backgrounds exceeds WCAG AAA
+- All interactive elements have 3px neon focus rings
+- Status communicated through icons + text, not color alone
+- Screen reader announcements for real-time price updates
+- Keyboard shortcuts for common trading actions (displayed in tooltips)
 
-## Layout Constraints
-- Single viewport approach - entire dashboard visible without scrolling on desktop
-- Responsive breakpoint at md: for mobile adaptation
-- Mobile: stack all elements vertically with full-width components
-- Desktop: maintain compact, focused layout
+## Performance Considerations
+- Backdrop-blur limited to 12px maximum for performance
+- Animations use transform and opacity only (GPU-accelerated)
+- Glow effects use box-shadow, not filters
+- Terminal auto-scroll virtualized for performance with large logs
+
+## Images
+**No hero images** - this is a functional trading terminal focused on data density and real-time information. Visual impact comes from the cyberpunk UI treatment itself.

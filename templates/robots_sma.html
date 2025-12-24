@@ -2,19 +2,27 @@
 
 {% block panel_content %}
 <div class="panel-header">
-    <h1 class="panel-title sma">SMA ROBOT</h1>
+    <h1 class="panel-title sma">SMA Robot</h1>
 </div>
 
 {% if not accounts %}
 <div class="section sma-theme">
-    <p style="color: var(--neon-orange); text-align: center;">
-        Please <a href="/robots/accounts" style="color: var(--neon-magenta);">link an Alpaca account</a> first.
-    </p>
+    <div style="text-align: center; padding: 40px 20px;">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--neon-orange)" stroke-width="1.5" style="margin-bottom: 20px; opacity: 0.6;">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <p style="color: var(--neon-orange); margin-bottom: 8px; font-size: 1rem;">Account Required</p>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">
+            <a href="/robots/accounts" style="color: var(--neon-magenta);">Link an Alpaca account</a> to start trading
+        </p>
+    </div>
 </div>
 {% else %}
 
 <div class="section sma-theme">
-    <h3>Select Trading Account</h3>
+    <h3 style="color: var(--neon-magenta);">Select Trading Account</h3>
     <select id="sma-account" onchange="loadAssets()">
         {% for account in accounts %}
         <option value="{{ account.id }}">
@@ -25,23 +33,23 @@
 </div>
 
 <div class="section sma-theme">
-    <h3>Select Symbols</h3>
+    <h3 style="color: var(--neon-magenta);">Select Symbols</h3>
     <input type="text" class="symbol-search" id="symbol-search" placeholder="Search symbols (e.g., AAPL, TSLA, INTC...)" onkeyup="filterSymbols()">
     
     <div id="selected-symbols" class="selected-symbols">
-        <span style="color: #666680; font-size: 13px;">No symbols selected</span>
+        <span style="color: var(--text-muted); font-size: 0.8125rem;">No symbols selected</span>
     </div>
     
     <div class="symbol-list" id="symbol-list">
         <div class="loading" id="loading-assets">
-            <div class="spinner"></div>
+            <div class="spinner magenta"></div>
             <p>Loading tradable assets...</p>
         </div>
     </div>
 </div>
 
 <div class="section sma-theme">
-    <h3>Trade Settings</h3>
+    <h3 style="color: var(--neon-magenta);">Trade Settings</h3>
     <div class="grid-2">
         <div>
             <label>Quantity per Trade</label>
@@ -49,16 +57,19 @@
         </div>
         <div>
             <label>Selected Symbols</label>
-            <input type="text" id="symbol-count" value="0 symbols" readonly style="background: rgba(0,0,0,0.2); border-color: rgba(255,0,255,0.2);">
+            <input type="text" id="symbol-count" value="0 symbols" readonly style="background: rgba(0,0,0,0.3); border-color: rgba(255,0,255,0.15); cursor: default;">
         </div>
     </div>
     
     <button onclick="runSMABot()" class="run-btn sma" id="run-btn" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
         Run SMA Crossover Analysis
     </button>
     
     <div class="loading" id="loading-results">
-        <div class="spinner"></div>
+        <div class="spinner magenta"></div>
         <p>Analyzing symbols...</p>
     </div>
     
@@ -66,18 +77,22 @@
 </div>
 
 <div class="section sma-theme">
-    <h3>SMA Order History</h3>
+    <h3 style="color: var(--neon-magenta);">Order History</h3>
     {% if orders %}
         {% for order in orders %}
-        <div class="order-row" style="border-left-color: {% if order.side == 'buy' %}var(--neon-green){% else %}var(--neon-pink){% endif %};">
-            <strong class="{{ order.side }}">{{ order.side|upper }}</strong> 
-            <span style="color: var(--neon-magenta);">{{ order.symbol }}</span>
-            <span style="color: #666680;"> @ ${{ "%.2f"|format(order.entry_price) if order.entry_price else 'N/A' }}</span>
-            <span style="float: right; color: #666680; font-size: 11px;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+        <div class="order-row {{ order.side }}">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                    <span class="signal-badge {{ order.side }}" style="margin-right: 12px;">{{ order.side|upper }}</span>
+                    <span style="color: var(--neon-magenta); font-family: 'IBM Plex Mono', monospace; font-weight: 600;">{{ order.symbol }}</span>
+                    <span style="color: var(--text-muted); margin-left: 12px;">@ ${{ "%.2f"|format(order.entry_price) if order.entry_price else 'N/A' }}</span>
+                </div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; font-family: 'IBM Plex Mono', monospace;">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+            </div>
         </div>
         {% endfor %}
     {% else %}
-        <p style="color: #666680; font-size: 13px; text-align: center; padding: 20px 0;">No SMA orders recorded</p>
+        <p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 32px 0;">No SMA orders recorded yet</p>
     {% endif %}
 </div>
 
@@ -96,9 +111,14 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadAssets() {
-    const accountId = document.getElementById('sma-account').value;
+    const accountEl = document.getElementById('sma-account');
+    if (!accountEl) return;
+    
+    const accountId = accountEl.value;
     const loadingEl = document.getElementById('loading-assets');
     const listEl = document.getElementById('symbol-list');
+    
+    if (!loadingEl || !listEl) return;
     
     loadingEl.classList.add('active');
     
@@ -113,7 +133,7 @@ function loadAssets() {
         })
         .catch(err => {
             loadingEl.classList.remove('active');
-            listEl.innerHTML = '<p style="color: var(--neon-pink); padding: 20px;">Error loading assets</p>';
+            listEl.innerHTML = '<p style="color: var(--neon-pink); padding: 20px; text-align: center;">Error loading assets</p>';
         });
 }
 
@@ -128,7 +148,7 @@ function filterSymbols() {
 function renderSymbolList(assets) {
     const listEl = document.getElementById('symbol-list');
     if (assets.length === 0) {
-        listEl.innerHTML = '<p style="color: #666680; padding: 20px; text-align: center;">No matching symbols</p>';
+        listEl.innerHTML = '<p style="color: var(--text-muted); padding: 20px; text-align: center;">No matching symbols</p>';
         return;
     }
     
@@ -168,7 +188,7 @@ function updateSelectedDisplay() {
     const runBtn = document.getElementById('run-btn');
     
     if (selectedSymbols.size === 0) {
-        container.innerHTML = '<span style="color: #666680; font-size: 13px;">No symbols selected</span>';
+        container.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8125rem;">No symbols selected</span>';
         countEl.value = '0 symbols';
         runBtn.disabled = true;
     } else {
@@ -215,7 +235,7 @@ function runSMABot() {
         runBtn.disabled = false;
         
         if (data.status === 'SUCCESS') {
-            let html = '<h4 style="margin: 15px 0; color: var(--neon-magenta);">Analysis Results</h4>';
+            let html = '<h4 style="margin: 20px 0 16px; color: var(--neon-magenta); font-family: Orbitron, sans-serif; font-size: 0.875rem; letter-spacing: 2px;">ANALYSIS RESULTS</h4>';
             
             for (const [symbol, result] of Object.entries(data.results)) {
                 const signalClass = result.signal.includes('buy') ? 'buy' : 
@@ -243,7 +263,7 @@ function runSMABot() {
                             </div>
                             <div class="stat-box">
                                 <div class="label">Order</div>
-                                <div class="value">${result.order_placed ? 'PLACED' : (result.skipped ? 'SKIPPED' : 'NO')}</div>
+                                <div class="value" style="color: ${result.order_placed ? 'var(--neon-green)' : 'var(--text-muted)'};">${result.order_placed ? 'PLACED' : (result.skipped ? 'SKIPPED' : 'NO')}</div>
                             </div>
                         </div>
                     </div>
@@ -251,18 +271,18 @@ function runSMABot() {
             }
             
             if (data.orders_placed && data.orders_placed.length > 0) {
-                html += `<p style="color: var(--neon-green); margin-top: 15px;">${data.orders_placed.length} order(s) placed!</p>`;
+                html += `<p style="color: var(--neon-green); margin-top: 16px; font-weight: 600;">${data.orders_placed.length} order(s) placed successfully!</p>`;
             }
             
             resultsEl.innerHTML = html;
         } else {
-            resultsEl.innerHTML = `<p style="color: var(--neon-pink);">Error: ${data.message}</p>`;
+            resultsEl.innerHTML = `<p style="color: var(--neon-pink); padding: 16px;">Error: ${data.message}</p>`;
         }
     })
     .catch(err => {
         loadingEl.classList.remove('active');
         runBtn.disabled = false;
-        resultsEl.innerHTML = `<p style="color: var(--neon-pink);">Error: ${err.message}</p>`;
+        resultsEl.innerHTML = `<p style="color: var(--neon-pink); padding: 16px;">Error: ${err.message}</p>`;
     });
 }
 </script>

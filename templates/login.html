@@ -1,106 +1,85 @@
 {% extends "layout.html" %}
 
-{% block title %}Login - Join The Resistance{% endblock %}
+{% block title %}Login - RESISTANCE{% endblock %}
 
 {% block extra_css %}
 <style>
+    body {
+        background: var(--bg-void);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
     .login-container {
         position: relative;
     }
     
     .cyber-logo {
         text-align: center;
-        margin-bottom: 20px;
+        margin-bottom: 24px;
     }
     
-    .cyber-logo svg {
-        width: 80px;
-        height: 80px;
-        animation: rainbowGlow 4s ease-in-out infinite;
+    .logo-icon {
+        width: 70px;
+        height: 70px;
+        margin: 0 auto;
+        border: 2px solid var(--neon-cyan);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: logo-glow 3s ease-in-out infinite;
     }
     
-    @keyframes rainbowGlow {
-        0% { filter: drop-shadow(0 0 10px #00ffff); }
-        25% { filter: drop-shadow(0 0 15px #ff00ff); }
-        50% { filter: drop-shadow(0 0 10px #ff0080); }
-        75% { filter: drop-shadow(0 0 15px #8000ff); }
-        100% { filter: drop-shadow(0 0 10px #00ffff); }
+    .logo-icon svg {
+        width: 32px;
+        height: 32px;
+        stroke: var(--neon-cyan);
+    }
+    
+    @keyframes logo-glow {
+        0%, 100% { 
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3), 0 0 30px rgba(0, 240, 255, 0.1);
+        }
+        50% { 
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.5), 0 0 50px rgba(0, 240, 255, 0.2);
+        }
     }
     
     .neon-line {
         width: 100%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #00ffff, #ff00ff, #00ffff, transparent);
-        margin: 20px 0;
-        animation: neonPulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes neonPulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-magenta), transparent);
+        margin: 24px 0;
     }
     
     .login-form {
-        animation: formFadeIn 0.8s ease-out 0.3s both;
-    }
-    
-    @keyframes formFadeIn {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
+        animation: fade-in 0.6s ease-out;
     }
     
     .input-group {
-        position: relative;
         margin-bottom: 20px;
-    }
-    
-    .input-group input {
-        transition: all 0.3s ease;
-    }
-    
-    .input-group input:focus {
-        transform: scale(1.02);
-    }
-    
-    .input-icon {
-        position: absolute;
-        right: 15px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #00ffff;
-        opacity: 0.5;
-        transition: opacity 0.3s ease;
-    }
-    
-    .input-group input:focus + .input-icon {
-        opacity: 1;
     }
     
     .cyber-btn {
         position: relative;
         overflow: hidden;
-        background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(255, 0, 255, 0.15));
+        background: linear-gradient(135deg, rgba(0, 240, 255, 0.1), rgba(255, 0, 255, 0.08));
     }
     
     .cyber-btn::after {
         content: '';
         position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: conic-gradient(from 0deg, transparent, #00ffff, transparent, #ff00ff, transparent);
-        animation: rotate 4s linear infinite;
-        opacity: 0;
-        transition: opacity 0.3s ease;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.2), transparent);
+        transform: translateX(-100%);
+        transition: transform 0.5s ease;
     }
     
     .cyber-btn:hover::after {
-        opacity: 0.3;
-    }
-    
-    @keyframes rotate {
-        100% { transform: rotate(360deg); }
+        transform: translateX(100%);
     }
     
     .cyber-btn span {
@@ -109,82 +88,69 @@
     }
     
     .links-section {
-        margin-top: 25px;
+        margin-top: 28px;
         text-align: center;
     }
     
     .links-section p {
-        margin: 10px 0;
+        margin: 12px 0;
+        font-size: 0.875rem;
     }
     
-    .guest-link {
-        color: #666680 !important;
-        font-size: 13px;
+    .back-link {
+        color: var(--text-muted) !important;
+        font-size: 0.8125rem;
     }
     
-    .guest-link:hover {
-        color: #8000ff !important;
+    .back-link:hover {
+        color: var(--neon-violet) !important;
     }
     
     .error-message {
-        background: linear-gradient(135deg, rgba(255, 0, 80, 0.1), rgba(255, 0, 128, 0.05));
-        border: 1px solid rgba(255, 0, 80, 0.3);
-        border-left: 3px solid #ff0050;
-        padding: 12px 15px;
-        border-radius: 6px;
+        background: linear-gradient(135deg, rgba(255, 0, 128, 0.1), rgba(255, 0, 80, 0.05));
+        border: 1px solid rgba(255, 0, 128, 0.25);
+        border-left: 3px solid var(--neon-pink);
+        padding: 14px 18px;
+        border-radius: 8px;
         margin-bottom: 20px;
-        color: #ff6090;
-        font-size: 14px;
-        animation: shake 0.5s ease-in-out;
-    }
-    
-    @keyframes shake {
-        0%, 100% { transform: translateX(0); }
-        20%, 60% { transform: translateX(-5px); }
-        40%, 80% { transform: translateX(5px); }
-    }
-    
-    @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-        }
+        color: var(--neon-pink);
+        font-size: 0.875rem;
     }
     
     .corner-decor {
         position: absolute;
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         border: 2px solid;
+        pointer-events: none;
     }
     
     .corner-decor.top-left {
         top: -1px;
         left: -1px;
-        border-color: #00ffff transparent transparent #00ffff;
-        border-radius: 8px 0 0 0;
+        border-color: var(--neon-cyan) transparent transparent var(--neon-cyan);
+        border-radius: 12px 0 0 0;
     }
     
     .corner-decor.top-right {
         top: -1px;
         right: -1px;
-        border-color: #ff00ff #ff00ff transparent transparent;
-        border-radius: 0 8px 0 0;
+        border-color: var(--neon-magenta) var(--neon-magenta) transparent transparent;
+        border-radius: 0 12px 0 0;
     }
     
     .corner-decor.bottom-left {
         bottom: -1px;
         left: -1px;
-        border-color: transparent transparent #ff0080 #ff0080;
-        border-radius: 0 0 0 8px;
+        border-color: transparent transparent var(--neon-violet) var(--neon-violet);
+        border-radius: 0 0 0 12px;
     }
     
     .corner-decor.bottom-right {
         bottom: -1px;
         right: -1px;
-        border-color: transparent #8000ff #8000ff transparent;
-        border-radius: 0 0 8px 0;
+        border-color: transparent var(--neon-pink) var(--neon-pink) transparent;
+        border-radius: 0 0 12px 0;
     }
 </style>
 {% endblock %}
@@ -197,22 +163,14 @@
     <div class="corner-decor bottom-right"></div>
     
     <div class="cyber-logo">
-        <svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg" style="width: 100px; height: 125px;">
-            <defs>
-                <linearGradient id="fistGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#00ffff;stop-opacity:1" />
-                    <stop offset="50%" style="stop-color:#ff00ff;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#ff0080;stop-opacity:1" />
-                </linearGradient>
-            </defs>
-            <path d="M70 250 L70 180 Q70 165 80 155 L120 155 Q130 165 130 180 L130 250" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
-            <path d="M60 155 Q50 140 55 120 L55 100 Q60 75 100 70 Q140 75 145 100 L145 120 Q150 140 140 155" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
-            <path d="M55 100 Q55 85 70 70 Q85 55 100 55 Q115 55 130 70 Q145 85 145 100" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
-            <path d="M55 120 Q40 110 35 95 Q35 75 50 70 Q65 65 75 75 Q80 85 75 95" stroke="url(#fistGlow)" stroke-width="3" fill="none"/>
-        </svg>
+        <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+        </div>
     </div>
     
-    <h1>Join The Resistance</h1>
+    <h1>Resistance</h1>
     <p>Access your trading terminal</p>
     
     <div class="neon-line"></div>
@@ -242,8 +200,8 @@
     </form>
 
     <div class="links-section">
-        <p>Don't have an account? <a href="/register">Register Now</a></p>
-        <p><a href="/" class="guest-link">Back to Home</a></p>
+        <p>New to Resistance? <a href="/register">Create Account</a></p>
+        <p><a href="/" class="back-link">Back to Home</a></p>
     </div>
 </div>
 {% endblock %}

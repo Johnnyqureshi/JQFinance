@@ -57,6 +57,22 @@ Preferred communication style: Simple, everyday language.
   - Enabled by default via UI checkbox
 - **Logging**: Comprehensive logging of trade entries, price checks, trailing stop updates, and exit reasons (orb.monitor logger)
 
+### AI Studio (Video Generation)
+- **Page**: /ai-studio
+- **Blueprint**: ai_studio_bp in `ai_studio.py`
+- **API Provider**: AI/ML API (aimlapi.com) for Kling AI v2 models
+- **Features**: Text-to-video and Image-to-video generation
+- **Models**: klingai/v2-master-text-to-video, klingai/v2-master-image-to-video
+- **Settings**: Aspect ratio (16:9, 9:16, 1:1), Duration (5s, 10s), CFG scale (0-1)
+- **Pattern**: Async polling - create task, poll status every 10s until complete
+- **Generation Time**: 5-14 minutes depending on duration
+- **Data Model**: VideoGeneration stores generation records with status tracking
+- **Endpoints**:
+  - POST /api/ai-studio/text-to-video
+  - POST /api/ai-studio/image-to-video
+  - GET /api/ai-studio/status/<generation_id>
+  - GET /api/ai-studio/history
+
 ### API Structure
 - Form submissions handled via POST to Flask routes
 - JSON responses for trade execution results
@@ -75,6 +91,12 @@ Preferred communication style: Simple, everyday language.
 ### Database
 - PostgreSQL database connection via `DATABASE_URL` environment variable
 - SQLAlchemy ORM for database operations
+
+### AI/ML API (Kling AI Video Generation)
+- **API Base URL**: `https://api.aimlapi.com/v2`
+- **Authentication**: Bearer token via Authorization header
+- **Required Environment Variables**:
+  - `AIML_API_KEY`: AI/ML API key for Kling AI video generation
 
 ### Other Environment Variables
 - `SESSION_SECRET`: Flask session secret key for security

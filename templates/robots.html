@@ -127,6 +127,13 @@
         text-shadow: 0 0 10px rgba(255, 0, 255, 0.4);
     }
     
+    .sidebar-nav a.active.ai-studio {
+        background: linear-gradient(90deg, rgba(139, 92, 246, 0.12), transparent);
+        color: var(--neon-violet);
+        border-left-color: var(--neon-violet);
+        text-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+    }
+    
     .nav-icon {
         width: 24px;
         height: 24px;
@@ -797,6 +804,23 @@
                             </svg>
                         </span>
                         <span>SMA Robot</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+        
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">AI Tools</div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="/ai-studio" class="{% if active_tab == 'ai_studio' %}active ai-studio{% endif %}">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <polygon points="23 7 16 12 23 17 23 7"/>
+                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                            </svg>
+                        </span>
+                        <span>AI Studio</span>
                     </a>
                 </li>
             </ul>

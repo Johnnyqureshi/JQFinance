@@ -106,6 +106,27 @@ class OpenPosition(db.Model):
     user = db.relationship("User", backref="open_positions")
 
 
+class VideoGeneration(db.Model):
+    __tablename__ = "video_generations"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    generation_id = db.Column(db.String(500), nullable=False)
+    mode = db.Column(db.String(30), nullable=False)
+    prompt = db.Column(db.Text, nullable=True)
+    negative_prompt = db.Column(db.Text, nullable=True)
+    image_url = db.Column(db.Text, nullable=True)
+    aspect_ratio = db.Column(db.String(10), default="16:9")
+    duration = db.Column(db.Integer, default=5)
+    cfg_scale = db.Column(db.Float, default=0.5)
+    status = db.Column(db.String(30), default="generating")
+    video_url = db.Column(db.Text, nullable=True)
+    file_size = db.Column(db.Integer, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="video_generations")
+
+
 class SMASignalState(db.Model):
     __tablename__ = "sma_signal_states"
     id = db.Column(db.Integer, primary_key=True)

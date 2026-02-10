@@ -45,6 +45,9 @@ login_manager.login_view = "auth.login"
 from auth import auth_bp
 app.register_blueprint(auth_bp)
 
+from ai_studio import ai_studio_bp
+app.register_blueprint(ai_studio_bp)
+
 from monitoring import position_monitor
 position_monitor.init_app(app)
 

@@ -331,22 +331,7 @@ def robots_accounts():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    from models import AlpacaAccount, OrderRecord
-    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
-    orders = OrderRecord.query.filter_by(user_id=current_user.id).order_by(OrderRecord.created_at.desc()).limit(20).all()
-    
-    selected_account = None
-    account_balances = {}
-    for account in accounts:
-        balance = fetch_account_balance(account)
-        account_balances[account.id] = balance
-        if selected_account is None:
-            selected_account = account
-    
-    assets = get_assets(selected_account)
-    api_connected = check_api_connection(selected_account)
-    
-    return render_template("dashboard.html", accounts=accounts, orders=orders, assets=assets, api_connected=api_connected, account_balances=account_balances)
+    return redirect(url_for("robots_orb"))
 
 @app.route("/add_account", methods=["POST"])
 @login_required
@@ -371,7 +356,7 @@ def add_account():
     referer = request.headers.get('Referer', '')
     if '/robots' in referer:
         return redirect(url_for("robots_accounts"))
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("robots_accounts"))
 
 @app.route("/run_orb", methods=["POST"])
 def run_orb():
@@ -578,21 +563,7 @@ def market_status():
 @app.route("/sma-bot")
 @login_required
 def sma_bot_page():
-    from models import AlpacaAccount, OrderRecord
-    
-    accounts = AlpacaAccount.query.filter_by(user_id=current_user.id).all()
-    account_balances = {}
-    for account in accounts:
-        balance = fetch_account_balance(account)
-        if balance:
-            account_balances[account.id] = type('obj', (object,), balance)()
-    
-    orders = OrderRecord.query.filter_by(user_id=current_user.id, strategy='sma').order_by(OrderRecord.created_at.desc()).limit(50).all()
-    
-    return render_template("sma_bot.html", 
-                          accounts=accounts, 
-                          account_balances=account_balances,
-                          orders=orders)
+    return redirect(url_for("robots_sma"))
 
 @app.route("/api/sma-bot/assets")
 @login_required

@@ -73,6 +73,25 @@ Preferred communication style: Simple, everyday language.
   - GET /api/ai-studio/status/<generation_id>
   - GET /api/ai-studio/history
 
+### Finelo AI (Education & Analysis)
+- **Page**: /finelo
+- **Blueprint**: finelo_bp in `finelo.py`
+- **Features**: AI Trading Mentor chat, AI Chart Analyzer, Market Simulator, Trading Academy
+- **AI Chat**: Uses AIML API chat completions (gpt-4o-mini) for trading education
+- **Chart Analyzer**: Vision model analyzes uploaded chart images for patterns, levels, indicators
+- **Market Simulator**: Virtual $100,000 portfolio for risk-free practice trading
+- **Stock Ticker**: Scrolling live prices from Alpaca snapshots API
+- **Trading Academy**: 7 structured lessons covering ORB, SMA, risk management, candlesticks, psychology
+- **Data Models**: ChatMessage (chat history), SimulatorPortfolio (virtual balance), SimulatorTrade (virtual trades)
+- **Endpoints**:
+  - POST /api/finelo/chat (AI mentor)
+  - POST /api/finelo/analyze-chart (chart analysis)
+  - GET /api/finelo/ticker (live prices)
+  - POST /api/finelo/simulator/trade (virtual trade)
+  - GET /api/finelo/simulator/portfolio (portfolio data)
+  - POST /api/finelo/simulator/reset (reset account)
+  - POST /api/finelo/chat/clear (clear history)
+
 ### API Structure
 - Form submissions handled via POST to Flask routes
 - JSON responses for trade execution results

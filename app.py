@@ -48,6 +48,9 @@ app.register_blueprint(auth_bp)
 from ai_studio import ai_studio_bp
 app.register_blueprint(ai_studio_bp)
 
+from finelo import finelo_bp
+app.register_blueprint(finelo_bp)
+
 from monitoring import position_monitor
 position_monitor.init_app(app)
 

@@ -127,6 +127,44 @@ class VideoGeneration(db.Model):
     user = db.relationship("User", backref="video_generations")
 
 
+class ChatMessage(db.Model):
+    __tablename__ = "chat_messages"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    role = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="chat_messages")
+
+
+class SimulatorPortfolio(db.Model):
+    __tablename__ = "simulator_portfolios"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    cash_balance = db.Column(db.Float, default=100000.0)
+    initial_balance = db.Column(db.Float, default=100000.0)
+    total_trades = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="simulator_portfolio")
+
+
+class SimulatorTrade(db.Model):
+    __tablename__ = "simulator_trades"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    symbol = db.Column(db.String(20), nullable=False)
+    side = db.Column(db.String(10), nullable=False)
+    qty = db.Column(db.Integer, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), default="open")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="simulator_trades")
+
+
 class SMASignalState(db.Model):
     __tablename__ = "sma_signal_states"
     id = db.Column(db.Integer, primary_key=True)

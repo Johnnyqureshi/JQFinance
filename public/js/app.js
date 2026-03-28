@@ -245,8 +245,8 @@ async function openStock(symbol, snap) {
   document.getElementById('page-stock').classList.add('active');
 
   // Stock header
-  const price     = snap?.latestTrade?.p || snap?.latestQuote?.ap || 0;
-  const prev      = snap?.prevDailyBar?.c || 0;
+  const price     = snap?.price || 0;
+  const prev      = snap?.previousClose || 0;
   const change    = price - prev;
   const pct       = prev ? (change / prev) * 100 : 0;
   const isUp      = change >= 0;
@@ -301,8 +301,8 @@ function switchStockTab(tab) {
   if (!d) return;
 
   const snap   = d.snap;
-  const price  = snap?.latestTrade?.p || snap?.latestQuote?.ap || 0;
-  const prev   = snap?.prevDailyBar?.c || 0;
+  const price  = snap?.price || 0;
+  const prev   = snap?.previousClose || 0;
   const isUp   = price >= prev;
 
   if (tab === 'overview') renderOverviewTab(snap, d.bars, isUp);
@@ -315,13 +315,13 @@ function renderOverviewTab(snap, barsData, isUp) {
   const panel  = document.getElementById('tab-overview');
   if (!panel) return;
 
-  const price  = snap?.latestTrade?.p  || 0;
-  const prev   = snap?.prevDailyBar?.c || 0;
-  const open   = snap?.dailyBar?.o     || 0;
-  const high   = snap?.dailyBar?.h     || 0;
-  const low    = snap?.dailyBar?.l     || 0;
-  const vol    = snap?.dailyBar?.v     || 0;
-  const vwap   = snap?.dailyBar?.vw    || 0;
+  const price  = snap?.price         || 0;
+  const prev   = snap?.previousClose || 0;
+  const open   = snap?.open          || 0;
+  const high   = snap?.dayHigh       || 0;
+  const low    = snap?.dayLow        || 0;
+  const vol    = snap?.volume        || 0;
+  const vwap   = snap?.price         || 0;
 
   panel.innerHTML = `
     <div class="overview-stats-grid">
@@ -520,8 +520,8 @@ function renderNewsTab(newsData) {
 
 function buildMarketRow(sym, snaps) {
   const s     = snaps[sym];
-  const price = s?.latestTrade?.p || 0;
-  const prev  = s?.prevDailyBar?.c || 0;
+  const price = s?.price || 0;
+  const prev  = s?.previousClose || 0;
   const chg   = price - prev;
   const pct   = prev ? (chg / prev) * 100 : 0;
   const isUp  = chg >= 0;
@@ -568,7 +568,7 @@ async function loadMarkets() {
   fill('financeTable', FINANCE);
 
   const sorted = MOVERS_SYM.slice().sort((a, b) => {
-    const pctOf = s => { const snap = snaps[s]; const p = snap?.latestTrade?.p||0; const pv = snap?.prevDailyBar?.c||0; return pv ? Math.abs((p-pv)/pv) : 0; };
+    const pctOf = s => { const snap = snaps[s]; const p = snap?.price||0; const pv = snap?.previousClose||0; return pv ? Math.abs((p-pv)/pv) : 0; };
     return pctOf(b) - pctOf(a);
   });
   fill('moversTable', sorted);
@@ -583,8 +583,8 @@ function updateTickerStrip(snaps) {
   const syms = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'];
   strip.innerHTML = syms.map(sym => {
     const s    = snaps[sym];
-    const price = s?.latestTrade?.p || 0;
-    const prev  = s?.prevDailyBar?.c || 0;
+    const price = s?.price || 0;
+    const prev  = s?.previousClose || 0;
     const chg   = price - prev;
     const pct   = prev ? (chg / prev) * 100 : 0;
     return price ? `
@@ -620,8 +620,8 @@ async function loadWatchlist() {
   grid.innerHTML = '';
   state.watchlist.forEach(sym => {
     const s     = snaps[sym];
-    const price = s?.latestTrade?.p || 0;
-    const prev  = s?.prevDailyBar?.c || 0;
+    const price = s?.price || 0;
+    const prev  = s?.previousClose || 0;
     const chg   = price - prev;
     const pct   = prev ? (chg / prev) * 100 : 0;
     const isUp  = chg >= 0;
@@ -735,8 +735,8 @@ async function renderSearchResults(results, container) {
   container.innerHTML = '';
   results.slice(0, 8).forEach(r => {
     const s     = snaps[r.symbol];
-    const price = s?.latestTrade?.p || 0;
-    const prev  = s?.prevDailyBar?.c || 0;
+    const price = s?.price || 0;
+    const prev  = s?.previousClose || 0;
     const chg   = price - prev;
     const pct   = prev ? (chg / prev) * 100 : 0;
 

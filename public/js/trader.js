@@ -397,12 +397,12 @@
       const quoteData = await quoteRes.json();
       if (quoteData.error) throw new Error(quoteData.error);
 
-      // FMP quote via our proxy — extract price fields
-      const price = quoteData?.latestTrade?.p;
-      const open  = quoteData?.dailyBar?.o;
-      const high  = quoteData?.dailyBar?.h;
-      const low   = quoteData?.dailyBar?.l;
-      const vol   = quoteData?.dailyBar?.v;
+      // Flat FMP fields from /api/quote
+      const price = quoteData?.price;
+      const open  = quoteData?.open;
+      const high  = quoteData?.dayHigh;
+      const low   = quoteData?.dayLow;
+      const vol   = quoteData?.volume;
 
       if (!price) throw new Error('No price data returned for this symbol.');
 

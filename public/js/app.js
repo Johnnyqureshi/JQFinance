@@ -459,6 +459,15 @@ function renderAnalysts(fmp, price, val) {
 }
 
 // ── News tab ───────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function renderNews(news) {
   if (!news?.length) {
     $('tab-news').innerHTML = '<div class="news-feed"><p class="no-data" style="padding:24px">No recent news found.</p></div>';
@@ -466,17 +475,18 @@ function renderNews(news) {
   }
   const cards = news.slice(0, 20).map(n => {
     const date  = n.created_at ? timeAgo(n.created_at) : '';
-    const title = (n.headline || n.title || '').replace(/"/g, '&quot;');
-    const safe  = (n.url || '#').replace(/"/g, '%22');
+    const title = escapeHtml(n.headline || n.title || '');
+    const rawUrl = n.url || '#';
+    const safe  = /^https?:\/\//i.test(rawUrl) ? rawUrl.replace(/"/g, '%22') : '#';
     const img   = n.image ? `<div class="ni-thumb" style="background-image:url('${n.image.replace(/'/g,'%27')}')"></div>` : '';
-    const sum   = n.summary ? `<div class="ni-summary">${n.summary.slice(0, 120)}${n.summary.length>120?'…':''}</div>` : '';
+    const sum   = n.summary ? `<div class="ni-summary">${escapeHtml(n.summary.slice(0, 120))}${n.summary.length>120?'…':''}</div>` : '';
     return `<div class="news-item2" onclick="window.open('${safe}','_blank')">
       ${img}
       <div class="ni-body">
         <div class="ni-headline">${title}</div>
         ${sum}
         <div class="ni-meta">
-          ${n.source ? `<span class="ni-src">${n.source}</span>` : ''}
+          ${n.source ? `<span class="ni-src">${escapeHtml(n.source)}</span>` : ''}
           ${date    ? `<span class="ni-date">${date}</span>` : ''}
         </div>
       </div>

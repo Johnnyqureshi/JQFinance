@@ -1,380 +1,85 @@
 require('dotenv').config();
 const express = require('express');
-const path = require('path');
-const fetch = require('node-fetch');
+const cors    = require('cors');
+const path    = require('path');
+const fetch   = require('node-fetch');
 
 const app = express();
-const PORT = 5000;
+const PORT = 3000;
+const FMP_KEY = process.env.FMP_API_KEY;
 
+app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname)));
 
-// ─── KEYS ─────────────────────────────────────────────────────────────────────
-
-const FMP_API_KEY = process.env.FMP_API_KEY;
-const FMP_BASE    = 'https://financialmodelingprep.com/stable';
-
-const YAHOO_BASE  = 'https://query1.finance.yahoo.com/v8/finance/chart';
-const YAHOO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; StockPulse/1.0)' };
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-// Transform an FMP quote object into the snapshot shape the frontend expects
-function fmpToSnapshot(q) {
-  if (!q || !q.symbol) return null;
-  return {
-    latestTrade:  { p: q.price ?? 0 },
-    latestQuote:  { ap: q.price ?? 0, bp: q.price ?? 0 },
-    prevDailyBar: { c: q.previousClose ?? q.price ?? 0 },
-    dailyBar: {
-      o:  q.open    ?? q.price ?? 0,
-      h:  q.dayHigh ?? q.price ?? 0,
-      l:  q.dayLow  ?? q.price ?? 0,
-      v:  q.volume  ?? 0,
-      vw: q.price   ?? 0,   // FMP has no VWAP; use price as close approximation
-    },
-  };
-}
-
-// US-only exchange filter for search results
-const US_EXCHANGES = new Set([
-  'NASDAQ', 'NYSE', 'AMEX', 'NYSE ARCA', 'NYSE MKT',
-  'NYSE American', 'BATS', 'CBOE', 'OTC', 'PINK',
-]);
-
-// Grade-to-category for analyst ratings tally
-function gradeCategory(grade) {
-  if (!grade) return 'hold';
-  const g = grade.toLowerCase().trim();
-  if (['strong buy', 'strong outperform', 'top pick', 'conviction buy'].some(s => g.includes(s))) return 'strongBuy';
-  if (!g.includes('strong') && ['sell', 'underperform', 'underweight', 'market underperform', 'reduce', 'negative', 'sector underperform'].some(s => g === s || g.includes(s))) return 'sell';
-  if (['strong sell', 'strong underperform'].some(s => g.includes(s))) return 'strongSell';
-  if (['buy', 'outperform', 'overweight', 'market outperform', 'accumulate', 'positive', 'sector outperform', 'add'].some(s => g === s || g.includes(s))) return 'buy';
-  return 'hold';
-}
-
-// ─── /api/snapshots ───────────────────────────────────────────────────────────
-// Returns batch price snapshots via parallel individual FMP quote calls.
-// (FMP free plan doesn't support comma-delimited batch queries.)
-
-app.get('/api/snapshots', async (req, res) => {
+// ─── GET /api/quote/:ticker ────────────────────────────────────────────────────
+app.get('/api/quote/:ticker', async (req, res) => {
+  const { ticker } = req.params;
   try {
-    if (!FMP_API_KEY) return res.status(500).json({ error: 'FMP_API_KEY not configured' });
-
-    const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (symbols.length === 0) return res.json({});
-
-    const results = await Promise.all(
-      symbols.map(sym =>
-        fetch(`${FMP_BASE}/quote?symbol=${encodeURIComponent(sym)}&apikey=${FMP_API_KEY}`)
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null)
-      )
-    );
-
-    const out = {};
-    results.forEach((data, i) => {
-      const sym = symbols[i];
-      const q   = Array.isArray(data) ? data[0] : data;
-      const snap = fmpToSnapshot(q);
-      if (snap) out[sym] = snap;
-    });
-
-    res.json(out);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── /api/bars/:symbol ────────────────────────────────────────────────────────
-// Historical OHLCV bars via Yahoo Finance.
-// Timeframe mapping:
-//   1Hour  → Yahoo interval=1h,  range derived from limit
-//   1Day   → Yahoo interval=1d,  range derived from limit
-
-app.get('/api/bars/:symbol', async (req, res) => {
-  const symbol    = req.params.symbol.toUpperCase();
-  const timeframe = req.query.timeframe || '1Day';
-  const limit     = parseInt(req.query.limit, 10) || 60;
-
-  try {
-    let interval, range;
-
-    if (timeframe === '1Hour') {
-      interval = '1h';
-      range    = limit <= 24 ? '5d' : limit <= 72 ? '5d' : '1mo';
-    } else {
-      interval = '1d';
-      if      (limit <= 30)  range = '2mo';
-      else if (limit <= 90)  range = '6mo';
-      else if (limit <= 180) range = '1y';
-      else                   range = '2y';
-    }
-
-    const url = `${YAHOO_BASE}/${symbol}?interval=${interval}&range=${range}`;
-    const response = await fetch(url, { headers: YAHOO_HEADERS });
-
-    if (!response.ok) return res.json({ bars: [] });
-
-    const data   = await response.json();
-    const result = data?.chart?.result?.[0];
-    if (!result)  return res.json({ bars: [] });
-
-    const timestamps = result.timestamp             || [];
-    const q          = result.indicators?.quote?.[0] || {};
-    const opens      = q.open   || [];
-    const highs      = q.high   || [];
-    const lows       = q.low    || [];
-    const closes     = q.close  || [];
-    const volumes    = q.volume || [];
-
-    // Build OHLCV bar objects
-    const bars = timestamps
-      .map((ts, i) => ({
-        t: new Date(ts * 1000).toISOString(),
-        o: opens[i]   ?? null,
-        h: highs[i]   ?? null,
-        l: lows[i]    ?? null,
-        c: closes[i]  ?? null,
-        v: volumes[i] ?? null,
-      }))
-      .filter(b => b.c !== null)
-      .slice(-limit); // respect the requested limit
-
-    res.json({ bars });
-  } catch (e) {
-    res.json({ bars: [], error: e.message });
-  }
-});
-
-// ─── /api/quote/:symbol ───────────────────────────────────────────────────────
-// Single-symbol snapshot via FMP
-
-app.get('/api/quote/:symbol', async (req, res) => {
-  try {
-    if (!FMP_API_KEY) return res.status(500).json({ error: 'FMP_API_KEY not configured' });
-
-    const symbol = req.params.symbol.toUpperCase();
-    const url = `${FMP_BASE}/quote?symbol=${symbol}&apikey=${FMP_API_KEY}`;
+    const url = `https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${FMP_KEY}`;
     const response = await fetch(url);
+    if (!response.ok) return res.status(response.status).json({ error: 'FMP error' });
 
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(response.status).json({ error: err });
-    }
+    const data = await response.json();
+    const q = Array.isArray(data) ? data[0] : data;
+    if (!q || !q.symbol) return res.status(404).json({ error: 'Ticker not found' });
 
-    const quotes = await response.json();
-    const q = Array.isArray(quotes) ? quotes[0] : quotes;
-    const snap = fmpToSnapshot(q);
-
-    if (!snap) return res.status(404).json({ error: 'Symbol not found' });
-    res.json(snap);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── /api/news/:symbol ────────────────────────────────────────────────────────
-// Market news from FMP articles, filtered by ticker when possible
-
-app.get('/api/news/:symbol', async (req, res) => {
-  try {
-    if (!FMP_API_KEY) return res.json({ news: [] });
-
-    const symbol = req.params.symbol.toUpperCase();
-
-    // Fetch a larger batch so we have enough after filtering
-    const url = `${FMP_BASE}/fmp-articles?page=0&size=50&apikey=${FMP_API_KEY}`;
-    const response = await fetch(url);
-
-    if (!response.ok) return res.json({ news: [] });
-
-    const articles = await response.json();
-    if (!Array.isArray(articles)) return res.json({ news: [] });
-
-    // Filter to articles that mention this symbol in the tickers field
-    const relevant = articles.filter(a => {
-      if (!a.tickers) return false;
-      const tickers = a.tickers.split(',').map(t => t.trim().toUpperCase());
-      return tickers.includes(symbol);
+    res.json({
+      price:             q.price,
+      change:            q.change,
+      changesPercentage: q.changesPercentage,
+      volume:            q.volume,
+      avgVolume:         q.avgVolume,
+      dayHigh:           q.dayHigh,
+      dayLow:            q.dayLow,
+      open:              q.open,
+      previousClose:     q.previousClose,
     });
-
-    // Fall back to most recent articles if none are symbol-specific
-    const source = relevant.length >= 3 ? relevant : articles;
-
-    const news = source.slice(0, 10).map(a => ({
-      headline:   a.title   || '',
-      url:        a.link    || '#',
-      source:     a.site    || 'FMP',
-      created_at: a.date    || new Date().toISOString(),
-      summary:    a.content ? a.content.slice(0, 200) : '',
-    }));
-
-    res.json({ news });
   } catch (e) {
-    res.json({ news: [] });
+    res.status(500).json({ error: e.message });
   }
 });
 
-// ─── /api/search ──────────────────────────────────────────────────────────────
-// Symbol + name search via FMP, filtered to US-listed equities
-
-app.get('/api/search', async (req, res) => {
+// ─── GET /api/history/:ticker ──────────────────────────────────────────────────
+app.get('/api/history/:ticker', async (req, res) => {
+  const { ticker } = req.params;
   try {
-    if (!FMP_API_KEY) return res.json([]);
-
-    const query = (req.query.q || '').trim();
-    if (!query) return res.json([]);
-
-    const url = `${FMP_BASE}/search-name?query=${encodeURIComponent(query)}&limit=50&apikey=${FMP_API_KEY}`;
+    const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${ticker}?timeseries=14&apikey=${FMP_KEY}`;
     const response = await fetch(url);
+    if (!response.ok) return res.status(response.status).json({ error: 'FMP error' });
 
-    if (!response.ok) return res.json([]);
-
-    const results = await response.json();
-    if (!Array.isArray(results)) return res.json([]);
-
-    const filtered = results
-      .filter(r => {
-        if (!r.symbol || !r.exchange) return false;
-        // Keep US exchanges only, exclude symbols with dots (foreign listings)
-        return US_EXCHANGES.has(r.exchange) && !r.symbol.includes('.');
-      })
-      .slice(0, 20)
-      .map(r => ({ symbol: r.symbol, name: r.name || r.symbol }));
-
-    res.json(filtered);
+    const data = await response.json();
+    res.json({ historical: data.historical || [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ─── /api/stock/:ticker ───────────────────────────────────────────────────────
-// Analyst ratings + price targets + upgrades from FMP
-
-app.get('/api/stock/:ticker', async (req, res) => {
-  const ticker = req.params.ticker.toUpperCase();
-
-  if (!FMP_API_KEY) {
-    return res.status(500).json({ error: 'FMP_API_KEY not configured' });
-  }
-
+// ─── GET /api/ratings/:ticker ──────────────────────────────────────────────────
+app.get('/api/ratings/:ticker', async (req, res) => {
+  const { ticker } = req.params;
   try {
-    const [gradesRes, targetRes] = await Promise.all([
-      fetch(`${FMP_BASE}/grades?symbol=${ticker}&limit=50&apikey=${FMP_API_KEY}`),
-      fetch(`${FMP_BASE}/price-target-consensus?symbol=${ticker}&apikey=${FMP_API_KEY}`),
-    ]);
+    const url = `https://financialmodelingprep.com/api/v3/analyst-stock-recommendations/${ticker}?apikey=${FMP_KEY}`;
+    const response = await fetch(url);
+    if (!response.ok) return res.status(response.status).json({ error: 'FMP error' });
 
-    // ── Analyst ratings ──
-    let ratings  = null;
-    let upgrades = [];
+    const data = await response.json();
+    const entry = Array.isArray(data) && data.length > 0 ? data[0] : null;
 
-    if (gradesRes.ok) {
-      const raw  = await gradesRes.json();
-      const list = Array.isArray(raw) ? raw : [];
+    if (!entry) return res.json({ strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 0 });
 
-      upgrades = list.slice(0, 10).map(u => ({
-        date:          u.date           ?? null,
-        gradingCompany: u.gradingCompany ?? null,
-        action:        u.action         ?? null,
-        previousGrade: u.previousGrade  ?? null,
-        newGrade:      u.newGrade       ?? null,
-      }));
-
-      const counts = { strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 0 };
-      list.forEach(g => { counts[gradeCategory(g.newGrade)]++; });
-
-      const total   = Object.values(counts).reduce((a, b) => a + b, 0);
-      const bullish = counts.strongBuy + counts.buy;
-      const bearish = counts.sell      + counts.strongSell;
-      let consensus = 'N/A';
-      if (total > 0) {
-        if (bullish / total > 0.6)      consensus = 'Strong Buy';
-        else if (bullish / total > 0.4) consensus = 'Buy';
-        else if (bearish / total > 0.4) consensus = 'Sell';
-        else                             consensus = 'Hold';
-      }
-      ratings = { ...counts, total, consensus };
-    }
-
-    // ── Price target consensus ──
-    let priceTarget = null;
-    if (targetRes.ok) {
-      const raw  = await targetRes.json();
-      const item = Array.isArray(raw) ? raw[0] : raw;
-      if (item && Object.keys(item).length > 0) {
-        priceTarget = {
-          targetHigh:       item.targetHigh       ?? item.priceTargetHigh    ?? null,
-          targetLow:        item.targetLow        ?? item.priceTargetLow     ?? null,
-          targetMedian:     item.targetMedian     ?? item.priceTargetMedian  ?? null,
-          targetMean:       item.targetMean       ?? item.priceTargetAverage ?? null,
-          numberOfAnalysts: item.numberOfAnalysts ?? null,
-          lastUpdated:      item.lastUpdated      ?? null,
-        };
-      }
-    }
-
-    res.json({ symbol: ticker, ratings, priceTarget, upgrades });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── /api/historical/:symbol ─────────────────────────────────────────────────
-// OHLCV daily history via Yahoo Finance chart API (free, no key required).
-// Returns { symbol, historical: [...] } newest-first, matching FMP's shape.
-
-app.get('/api/historical/:symbol', async (req, res) => {
-  try {
-    const symbol = req.params.symbol.toUpperCase();
-    const url    = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2mo`;
-
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; StockPulse/1.0)' },
+    res.json({
+      strongBuy:  entry.analystRatingsStrongBuy  || 0,
+      buy:        entry.analystRatingsbuy        || 0,
+      hold:       entry.analystRatingsHold       || 0,
+      sell:       entry.analystRatingsSell       || 0,
+      strongSell: entry.analystRatingsStrongSell || 0,
     });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Yahoo Finance returned ${response.status}` });
-    }
-
-    const data  = await response.json();
-    const result = data?.chart?.result?.[0];
-
-    if (!result) return res.status(404).json({ error: 'Symbol not found' });
-
-    const timestamps = result.timestamp         || [];
-    const quote      = result.indicators?.quote?.[0] || {};
-    const opens      = quote.open   || [];
-    const highs      = quote.high   || [];
-    const lows       = quote.low    || [];
-    const closes     = quote.close  || [];
-    const volumes    = quote.volume || [];
-
-    // Build newest-first array (Yahoo is oldest-first)
-    const historical = timestamps
-      .map((ts, i) => ({
-        date:   new Date(ts * 1000).toISOString().slice(0, 10),
-        open:   opens[i]   ?? null,
-        high:   highs[i]   ?? null,
-        low:    lows[i]    ?? null,
-        close:  closes[i]  ?? null,
-        volume: volumes[i] ?? null,
-      }))
-      .filter(d => d.close !== null)
-      .reverse(); // newest first
-
-    res.json({ symbol, historical });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// ─── FALLBACK ──────────────────────────────────────────────────────────────────
-
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`StockPulse running on port ${PORT}`);
+  console.log(`StockPulse backend running on port ${PORT}`);
 });

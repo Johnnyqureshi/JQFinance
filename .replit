@@ -43,4 +43,3 @@ externalPort = 80
 [userenv]
 
 [userenv.shared]
-FMP_API_KEY = "5OvBANUlBzZ1wuWWmgjs4OAEZxarfhBC"

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockPulse</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 24 L10 16 L16 20 L22 8 L28 12" stroke="#FFD700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="28" cy="12" r="2.5" fill="#FFD700"/>
+        </svg>
+      </div>
+      <span class="logo-text">StockPulse</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-page="feed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        <span>Feed</span>
+      </a>
+      <a href="#" class="nav-item" data-page="markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span>Markets</span>
+      </a>
+      <a href="#" class="nav-item" data-page="watchlist">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        <span>Watchlist</span>
+      </a>
+      <a href="#" class="nav-item" data-page="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <span>Search</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="market-status" id="marketStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking...</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <button class="sidebar-toggle" id="sidebarToggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+      <div class="topbar-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="topbarSearch" placeholder="Search stocks, ETFs..." autocomplete="off" />
+        <div class="search-dropdown" id="searchDropdown"></div>
+      </div>
+      <div class="topbar-right">
+        <div class="ticker-strip" id="tickerStrip"></div>
+      </div>
+    </header>
+
+    <!-- FEED PAGE -->
+    <div class="page active" id="page-feed">
+      <div class="feed-header">
+        <h1 class="page-title">Market Feed</h1>
+        <div class="feed-controls">
+          <button class="btn-refresh" id="refreshFeed">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div class="feed-grid" id="feedGrid">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading market data...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MARKETS PAGE -->
+    <div class="page" id="page-markets">
+      <div class="feed-header">
+        <h1 class="page-title">Markets Overview</h1>
+      </div>
+      <div class="markets-sections">
+        <div class="markets-section">
+          <h2 class="section-title">Major Indices</h2>
+          <div class="markets-table" id="indicesTable"></div>
+        </div>
+        <div class="markets-section">
+          <h2 class="section-title">Top Movers</h2>
+          <div class="markets-table" id="moversTable"></div>
+        </div>
+        <div class="markets-section">
+          <h2 class="section-title">Tech Leaders</h2>
+          <div class="markets-table" id="techTable"></div>
+        </div>
+        <div class="markets-section">
+          <h2 class="section-title">Finance</h2>
+          <div class="markets-table" id="financeTable"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WATCHLIST PAGE -->
+    <div class="page" id="page-watchlist">
+      <div class="feed-header">
+        <h1 class="page-title">My Watchlist</h1>
+        <button class="btn-refresh" id="addToWatchlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+          Add Symbol
+        </button>
+      </div>
+      <div class="add-symbol-form" id="addSymbolForm" style="display:none;">
+        <input type="text" id="watchlistInput" placeholder="Enter symbol (e.g. AAPL)" maxlength="10" />
+        <button id="confirmAddSymbol">Add</button>
+        <button id="cancelAddSymbol" class="btn-secondary">Cancel</button>
+      </div>
+      <div class="watchlist-grid" id="watchlistGrid">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <p>Your watchlist is empty</p>
+          <span>Add symbols to track them here</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEARCH PAGE -->
+    <div class="page" id="page-search">
+      <div class="feed-header">
+        <h1 class="page-title">Search</h1>
+      </div>
+      <div class="search-page-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="searchPageInput" placeholder="Search for any stock or ETF..." autocomplete="off" />
+      </div>
+      <div class="search-results" id="searchResults">
+        <p class="search-hint">Type a symbol or company name to search</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- RIGHT PANEL (Stock Detail) -->
+  <aside class="detail-panel" id="detailPanel">
+    <button class="panel-close" id="panelClose">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+    <div class="panel-content" id="panelContent">
+      <div class="panel-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <p>Select a stock to view details</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CHART MODAL -->
+  <div class="modal-overlay" id="chartModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Chart</h3>
+        <button class="modal-close" id="modalClose">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-timeframes">
+        <button class="tf-btn active" data-tf="1Day" data-limit="30">1M</button>
+        <button class="tf-btn" data-tf="1Day" data-limit="90">3M</button>
+        <button class="tf-btn" data-tf="1Day" data-limit="180">6M</button>
+        <button class="tf-btn" data-tf="1Day" data-limit="365">1Y</button>
+        <button class="tf-btn" data-tf="1Hour" data-limit="72">3D</button>
+      </div>
+      <div class="modal-chart-area">
+        <canvas id="chartCanvas"></canvas>
+      </div>
+      <div id="modalStats" class="modal-stats"></div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

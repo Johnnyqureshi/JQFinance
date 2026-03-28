@@ -1,10 +1,8 @@
-# ORB Trading Dashboard
+# StockPulse
 
 ## Overview
 
-This is a Flask-based web application that implements an Opening Range Breakout (ORB) trading strategy using the Alpaca paper trading API. The dashboard allows users to select assets, configure take-profit percentages, and execute automated trades based on the first 15-minute candle after market open.
-
-The application monitors for price breakouts above or below the opening range and places paper trades accordingly through Alpaca's trading API.
+StockPulse is a real-time stock market dashboard with a TikTok-inspired layout. Built with Node.js/Express backend and vanilla HTML/CSS/JS frontend.
 
 ## User Preferences
 
@@ -12,115 +10,56 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Backend Architecture
-- **Framework**: Flask with Python
-- **Database ORM**: Flask-SQLAlchemy with a custom DeclarativeBase
-- **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
-- **Proxy Handling**: Werkzeug ProxyFix middleware for proper header forwarding
+### Backend
+- **Runtime**: Node.js 20
+- **Framework**: Express
+- **Port**: 5000
+- **Entry point**: `server.js`
 
-### Frontend Architecture
-- **Templating**: Jinja2 templates served by Flask
-- **Styling**: Cyberpunk theme with neon colors (cyan, magenta, pink, purple), animated glowing effects, and dark menacing aesthetic
-- **JavaScript**: Vanilla JS for form handling and API interactions
-- **Fonts**: Google Fonts (Orbitron for headings, Rajdhani for UI text)
-- **Accessibility**: Respects prefers-reduced-motion for users who prefer less animation
-- **Color Palette**: Neon cyan (#00ffff), magenta (#ff00ff), pink (#ff0080), purple (#8000ff), green (#00ff80), orange (#ff8000) on dark backgrounds (#0a0a0f)
+### Frontend
+- **Approach**: Vanilla HTML/CSS/JS (no frameworks)
+- **Files**: `public/index.html`, `public/css/style.css`, `public/js/app.js`
+- **Fonts**: Google Fonts — Inter (body), Playfair Display (headings)
+- **Theme**: Dark black (#0a0a0a, #111111) backgrounds with gold (#FFD700, #B8860B) accents
 
-### Design Patterns
-- **MVC-style separation**: Models in `models.py`, routes in `app.py`, templates in `templates/`
-- **Environment-based configuration**: API keys and database URLs stored as environment variables
-- **Connection pooling**: SQLAlchemy configured with pool recycling and pre-ping for reliability
+### Layout (TikTok-inspired)
+- **Left sidebar**: Navigation — Feed, Markets, Watchlist, Search + market status indicator
+- **Main area**: Full-height scrollable page content with topbar search
+- **Right panel**: Stock detail panel — price, chart, stats, news, actions
 
-### Data Models
-- **OrderRecord**: Stores trade records with symbol, direction, entry price, take profit price, status, strategy (orb/sma), and timestamp
-- **OpenPosition**: Tracks active positions with persistent TP/SL targets for multi-day monitoring
+### Pages
+- **Feed** (`/`): Grid of stock cards with mini sparkline charts
+- **Markets**: 4 sections — Indices, Top Movers, Tech Leaders, Finance
+- **Watchlist**: Personalized list stored in localStorage; add/remove symbols
+- **Search**: Full symbol + company name search via Alpaca assets API
 
-### Trading Strategies
-- **ORB (Opening Range Breakout)**: Trades breakouts above/below the first 15-minute candle after market open
-  - Page: /dashboard
-- **SMA Crossover Bot**: Trades any Alpaca-available symbol using 5/20 Simple Moving Average crossover detection
-  - Page: /sma-bot (separate from ORB to avoid conflicts)
-  - Supports all tradable US equities from Alpaca
-  - Search/filter functionality for symbol selection
-  - Only places orders on actual crossover events (not continuous trend signals)
-  - Compares current vs previous SMA relationship to detect state changes
-  - Endpoint: POST /api/run_sma_bot (requires symbols array)
-
-### Position Monitoring
-- **Background Scheduler**: APScheduler runs every 30 seconds during market hours (9:30 AM - 4:00 PM ET)
-- **Persistent TP/SL**: Take-profit and stop-loss targets are stored in database, not in-memory
-- **Cross-day Execution**: Positions are monitored across trading days until TP, SL, or manual close
-- **Restart Recovery**: On app restart, all open positions are automatically resumed for monitoring
-- **Trailing Stop Loss**: When enabled, automatically adjusts stop loss as price moves favorably (up for longs, down for shorts)
-  - Tracks highest_price for BUY positions, lowest_price for SELL positions
-  - SL only moves in favorable direction, never against position
-  - Enabled by default via UI checkbox
-- **Logging**: Comprehensive logging of trade entries, price checks, trailing stop updates, and exit reasons (orb.monitor logger)
-
-### AI Studio (Video Generation)
-- **Page**: /ai-studio
-- **Blueprint**: ai_studio_bp in `ai_studio.py`
-- **API Provider**: AI/ML API (aimlapi.com) for Kling AI v2 models
-- **Features**: Text-to-video and Image-to-video generation
-- **Models**: klingai/v2-master-text-to-video, klingai/v2-master-image-to-video
-- **Settings**: Aspect ratio (16:9, 9:16, 1:1), Duration (5s, 10s), CFG scale (0-1)
-- **Pattern**: Async polling - create task, poll status every 10s until complete
-- **Generation Time**: 5-14 minutes depending on duration
-- **Data Model**: VideoGeneration stores generation records with status tracking
-- **Endpoints**:
-  - POST /api/ai-studio/text-to-video
-  - POST /api/ai-studio/image-to-video
-  - GET /api/ai-studio/status/<generation_id>
-  - GET /api/ai-studio/history
-
-### Finelo AI (Education & Analysis)
-- **Page**: /finelo
-- **Blueprint**: finelo_bp in `finelo.py`
-- **Features**: AI Trading Mentor chat, AI Chart Analyzer, Market Simulator, Trading Academy
-- **AI Chat**: Uses AIML API chat completions (gpt-4o-mini) for trading education
-- **Chart Analyzer**: Vision model analyzes uploaded chart images for patterns, levels, indicators
-- **Market Simulator**: Virtual $100,000 portfolio for risk-free practice trading
-- **Stock Ticker**: Scrolling live prices from Alpaca snapshots API
-- **Trading Academy**: 7 structured lessons covering ORB, SMA, risk management, candlesticks, psychology
-- **Data Models**: ChatMessage (chat history), SimulatorPortfolio (virtual balance), SimulatorTrade (virtual trades)
-- **Endpoints**:
-  - POST /api/finelo/chat (AI mentor)
-  - POST /api/finelo/analyze-chart (chart analysis)
-  - GET /api/finelo/ticker (live prices)
-  - POST /api/finelo/simulator/trade (virtual trade)
-  - GET /api/finelo/simulator/portfolio (portfolio data)
-  - POST /api/finelo/simulator/reset (reset account)
-  - POST /api/finelo/chat/clear (clear history)
-
-### API Structure
-- Form submissions handled via POST to Flask routes
-- JSON responses for trade execution results
-- Real-time status updates displayed on the frontend
+### Features
+- Live stock data from Alpaca paper trading API (snapshots, bars, news)
+- Mini sparkline charts on each stock card (hourly data)
+- Full line chart in detail panel and modal (1M/3M/6M/1Y/3D timeframes)
+- Live ticker strip in topbar showing key indices
+- Market open/closed indicator (Eastern Time)
+- Persistent watchlist via localStorage
+- Responsive design — sidebar collapses on mobile
 
 ## External Dependencies
 
 ### Alpaca Trading API
-- **Paper Trading Base URL**: `https://paper-api.alpaca.markets`
-- **Market Data URL**: `https://data.alpaca.markets/v2`
-- **Authentication**: API key and secret passed via headers (APCA-API-KEY-ID, APCA-API-SECRET-KEY)
-- **Required Environment Variables**:
-  - `ALPACA_API_KEY`: Alpaca API key ID
-  - `ALPACA_API_SECRET`: Alpaca API secret key
+- **Paper Trading**: `https://paper-api.alpaca.markets/v2`
+- **Market Data**: `https://data.alpaca.markets/v2`
+- **News**: `https://data.alpaca.markets/v1beta1/news`
+- **Authentication**: APCA-API-KEY-ID, APCA-API-SECRET-KEY headers
+- **Required env vars**: `ALPACA_API_KEY`, `ALPACA_API_SECRET`
 
-### Database
-- PostgreSQL database connection via `DATABASE_URL` environment variable
-- SQLAlchemy ORM for database operations
+### API Endpoints (server.js)
+- `GET /api/snapshots?symbols=...` — batch price snapshots
+- `GET /api/bars/:symbol?timeframe=&limit=` — OHLCV bar data
+- `GET /api/quote/:symbol` — single symbol snapshot
+- `GET /api/news/:symbol` — recent news articles
+- `GET /api/search?q=...` — symbol/company name search
 
-### AI/ML API (Kling AI Video Generation)
-- **API Base URL**: `https://api.aimlapi.com/v2`
-- **Authentication**: Bearer token via Authorization header
-- **Required Environment Variables**:
-  - `AIML_API_KEY`: AI/ML API key for Kling AI video generation
-
-### Other Environment Variables
-- `SESSION_SECRET`: Flask session secret key for security
-
-### Python Dependencies
-- Flask and Flask-SQLAlchemy for web framework and ORM
-- requests for HTTP calls to Alpaca API
-- pytz for timezone handling (Eastern Time for market hours)
+## Available Environment Variables
+- `ALPACA_API_KEY` — Alpaca API key
+- `ALPACA_API_SECRET` — Alpaca API secret
+- `AIML_API_KEY` — (available, not currently used)
+- `SESSION_SECRET` — (available, not currently used)

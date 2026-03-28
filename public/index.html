@@ -7,156 +7,145 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
 
-  <!-- LEFT SIDEBAR -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="logo-icon">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 24 L10 16 L16 20 L22 8 L28 12" stroke="#FFD700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="28" cy="12" r="2.5" fill="#FFD700"/>
-        </svg>
-      </div>
-      <span class="logo-text">StockPulse</span>
+  <!-- TOP NAV -->
+  <nav class="topnav">
+    <div class="nav-logo">
+      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+        <path d="M4 24L10 16L16 20L22 8L28 12" stroke="#f0b429" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="28" cy="12" r="2.5" fill="#f0b429"/>
+      </svg>
+      <span>StockPulse</span>
     </div>
 
-    <nav class="sidebar-nav">
-      <a href="#" class="nav-item active" data-page="feed">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
-        </svg>
-        <span>Feed</span>
+    <div class="nav-tabs">
+      <a class="nav-tab active" data-page="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Search
       </a>
-      <a href="#" class="nav-item" data-page="markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        <span>Markets</span>
+      <a class="nav-tab" data-page="markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Markets
       </a>
-      <a href="#" class="nav-item" data-page="watchlist">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-        <span>Watchlist</span>
+      <a class="nav-tab" data-page="watchlist">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Watchlist
       </a>
-      <a href="#" class="nav-item" data-page="search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <span>Search</span>
+      <a class="nav-tab" data-page="trader">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Trader
       </a>
-      <a href="#" class="nav-item nav-item-trader" data-page="trader">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-        </svg>
-        <span>Trader</span>
-      </a>
-    </nav>
+    </div>
 
-    <div class="sidebar-footer">
+    <div class="nav-right">
       <div class="market-status" id="marketStatus">
         <span class="status-dot"></span>
-        <span class="status-text">Checking...</span>
+        <span class="status-text">Checking…</span>
+      </div>
+      <div class="nav-search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="navSearchInput" placeholder="Search ticker…" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <div class="nav-dropdown" id="navDropdown"></div>
       </div>
     </div>
-  </aside>
+  </nav>
 
-  <!-- MAIN CONTENT -->
-  <main class="main-content">
+  <!-- MAIN -->
+  <main class="main">
 
-    <!-- TOP BAR -->
-    <header class="topbar">
-      <button class="sidebar-toggle" id="sidebarToggle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-      </button>
-      <div class="topbar-search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="text" id="topbarSearch" placeholder="Search stocks, ETFs..." autocomplete="off" />
-        <div class="search-dropdown" id="searchDropdown"></div>
-      </div>
-      <div class="live-badge" id="liveBadge" style="display:none">
-        <span class="live-dot"></span>
-        LIVE
-      </div>
-      <div class="topbar-right">
-        <div class="ticker-strip" id="tickerStrip"></div>
-      </div>
-    </header>
-
-    <!-- FEED PAGE -->
-    <div class="page active" id="page-feed">
-
-      <!-- Feed search / add ticker -->
-      <div class="feed-search-wrap">
-        <div class="feed-search-bar" id="feedSearchBar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input
-            type="text"
-            id="feedSearch"
-            placeholder="Add a ticker to your feed… e.g. AAPL"
-            autocomplete="off"
-            autocapitalize="characters"
-            spellcheck="false"
-          />
-          <button class="feed-search-btn" id="feedSearchBtn" aria-label="Add ticker">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <polyline points="19 12 12 19 5 12"/>
-            </svg>
-          </button>
+    <!-- SEARCH PAGE (default) -->
+    <div class="page active" id="page-search">
+      <div class="search-hero" id="searchHero">
+        <h1 class="hero-title">Analyze any stock</h1>
+        <p class="hero-sub">Real-time prices, analyst ratings, charts and trading signals</p>
+        <div class="hero-search-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="heroSearchInput" placeholder="Search by ticker or company name…" autocomplete="off" autocapitalize="characters" spellcheck="false" />
         </div>
-        <div class="feed-search-msg" id="feedSearchMsg"></div>
+        <div class="hero-chips">
+          <span class="chips-label">Popular:</span>
+          <button class="chip" data-sym="AAPL">AAPL</button>
+          <button class="chip" data-sym="NVDA">NVDA</button>
+          <button class="chip" data-sym="TSLA">TSLA</button>
+          <button class="chip" data-sym="MSFT">MSFT</button>
+          <button class="chip" data-sym="AMZN">AMZN</button>
+          <button class="chip" data-sym="META">META</button>
+        </div>
       </div>
+      <div class="search-results-wrap" id="searchResultsWrap" style="display:none">
+        <div class="search-results-list" id="searchResultsList"></div>
+      </div>
+    </div>
 
-      <!-- Feed header -->
-      <div class="feed-header">
-        <h1 class="page-title">Market Feed</h1>
-        <button class="btn-refresh" id="refreshFeed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-          Refresh
+    <!-- STOCK DETAIL PAGE -->
+    <div class="page" id="page-stock">
+      <div class="stock-header" id="stockHeader">
+        <button class="back-btn" id="backBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
+        </button>
+        <div class="stock-header-main">
+          <span class="stock-symbol" id="detailSymbol">--</span>
+          <span class="stock-name" id="detailName"></span>
+        </div>
+        <div class="stock-header-price">
+          <span class="stock-price" id="detailPrice">--</span>
+          <span class="stock-change" id="detailChange"></span>
+        </div>
+        <button class="watch-btn" id="detailWatchBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          <span id="watchBtnLabel">Watch</span>
         </button>
       </div>
 
-      <!-- Card grid -->
-      <div class="feed-grid" id="feedGrid"></div>
+      <div class="stock-tabs" id="stockTabs">
+        <button class="stock-tab active" data-tab="overview">Overview</button>
+        <button class="stock-tab" data-tab="chart">Chart</button>
+        <button class="stock-tab" data-tab="analysts">Analysts</button>
+        <button class="stock-tab" data-tab="news">News</button>
+      </div>
 
+      <div class="stock-tab-panels">
+        <div class="tab-panel active" id="tab-overview">
+          <div class="tab-loading"><div class="spinner"></div></div>
+        </div>
+        <div class="tab-panel" id="tab-chart">
+          <div class="tab-loading"><div class="spinner"></div></div>
+        </div>
+        <div class="tab-panel" id="tab-analysts">
+          <div class="tab-loading"><div class="spinner"></div></div>
+        </div>
+        <div class="tab-panel" id="tab-news">
+          <div class="tab-loading"><div class="spinner"></div></div>
+        </div>
+      </div>
     </div>
 
     <!-- MARKETS PAGE -->
     <div class="page" id="page-markets">
-      <div class="feed-header">
-        <h1 class="page-title">Markets Overview</h1>
+      <div class="page-header">
+        <h1 class="page-title">Markets</h1>
+        <div class="ticker-strip" id="tickerStrip"></div>
       </div>
-      <div class="markets-sections">
+      <div class="markets-grid">
         <div class="markets-section">
-          <h2 class="section-title">Major Indices</h2>
+          <h2 class="section-label">Major Indices</h2>
           <div class="markets-table" id="indicesTable"></div>
         </div>
         <div class="markets-section">
-          <h2 class="section-title">Top Movers</h2>
+          <h2 class="section-label">Top Movers</h2>
           <div class="markets-table" id="moversTable"></div>
         </div>
         <div class="markets-section">
-          <h2 class="section-title">Tech Leaders</h2>
+          <h2 class="section-label">Tech Leaders</h2>
           <div class="markets-table" id="techTable"></div>
         </div>
         <div class="markets-section">
-          <h2 class="section-title">Finance</h2>
+          <h2 class="section-label">Finance</h2>
           <div class="markets-table" id="financeTable"></div>
         </div>
       </div>
@@ -164,92 +153,47 @@
 
     <!-- WATCHLIST PAGE -->
     <div class="page" id="page-watchlist">
-      <div class="feed-header">
-        <h1 class="page-title">My Watchlist</h1>
-        <button class="btn-refresh" id="addToWatchlist">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-          </svg>
-          Add Symbol
+      <div class="page-header">
+        <h1 class="page-title">Watchlist</h1>
+        <button class="icon-btn" id="addToWatchlistBtn" title="Add symbol">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          Add
         </button>
       </div>
-      <div class="add-symbol-form" id="addSymbolForm" style="display:none;">
-        <input type="text" id="watchlistInput" placeholder="Enter symbol (e.g. AAPL)" maxlength="10" />
-        <button id="confirmAddSymbol">Add</button>
-        <button id="cancelAddSymbol" class="btn-secondary">Cancel</button>
+      <div class="add-form" id="addSymbolForm" style="display:none">
+        <input type="text" id="watchlistInput" placeholder="Enter ticker (e.g. AAPL)" maxlength="10" autocapitalize="characters" />
+        <button id="confirmAddSymbol" class="btn-gold">Add</button>
+        <button id="cancelAddSymbol" class="btn-ghost">Cancel</button>
       </div>
-      <div class="watchlist-grid" id="watchlistGrid">
-        <div class="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-          <p>Your watchlist is empty</p>
-          <span>Add symbols to track them here</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- SEARCH PAGE -->
-    <div class="page" id="page-search">
-      <div class="feed-header">
-        <h1 class="page-title">Search</h1>
-      </div>
-      <div class="search-page-bar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="text" id="searchPageInput" placeholder="Search for any stock or ETF..." autocomplete="off" />
-      </div>
-      <div class="search-results" id="searchResults">
-        <p class="search-hint">Type a symbol or company name to search</p>
-      </div>
+      <div class="watchlist-list" id="watchlistGrid"></div>
     </div>
 
     <!-- REALTIME TRADER PAGE -->
     <div class="page" id="page-trader">
 
-      <div class="feed-header">
+      <div class="page-header">
         <h1 class="page-title trader-page-title">Realtime Trader</h1>
       </div>
 
-      <!-- Input bar -->
       <div class="trader-input-wrap">
         <div class="trader-input-bar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
-          <input
-            type="text"
-            id="traderTickerInput"
-            placeholder="Enter ticker… e.g. TSLA"
-            maxlength="10"
-            autocomplete="off"
-            autocapitalize="characters"
-            spellcheck="false"
-          />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <input type="text" id="traderTickerInput" placeholder="Enter ticker… e.g. TSLA" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" />
           <button class="trader-analyze-btn" id="traderAnalyzeBtn">Analyze</button>
         </div>
       </div>
 
-      <!-- Loading state -->
       <div class="trader-loading" id="traderLoading" style="display:none">
         <div class="trader-spinner"></div>
         <p>Analyzing <strong id="traderLoadingTicker"></strong>…</p>
       </div>
 
-      <!-- Error state -->
       <div class="trader-error" id="traderError" style="display:none">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         <p id="traderErrorMsg">Unable to analyze this symbol.</p>
       </div>
 
-      <!-- Results (hidden until analysis runs) -->
       <div class="trader-results" id="traderResults" style="display:none">
-
-        <!-- ① Verdict card -->
         <div class="verdict-card" id="verdictCard">
           <div class="verdict-left">
             <div class="verdict-badge" id="verdictBadge">--</div>
@@ -265,10 +209,7 @@
           </div>
         </div>
 
-        <!-- ② Metrics row -->
         <div class="trader-metrics-row">
-
-          <!-- RSI Gauge -->
           <div class="metric-card">
             <div class="metric-title">RSI (14)</div>
             <div class="rsi-wrap">
@@ -279,8 +220,6 @@
               </div>
             </div>
           </div>
-
-          <!-- Volume bar -->
           <div class="metric-card">
             <div class="metric-title">Volume vs 10-Day Avg</div>
             <div class="vol-wrap">
@@ -297,8 +236,6 @@
               <div class="vol-diff-badge" id="volDiffBadge"></div>
             </div>
           </div>
-
-          <!-- Day range slider -->
           <div class="metric-card">
             <div class="metric-title">Day Range Position</div>
             <div class="range-wrap">
@@ -316,13 +253,9 @@
               <div class="range-pct-label" id="rangePctLabel">-- in today's range</div>
             </div>
           </div>
+        </div>
 
-        </div><!-- /trader-metrics-row -->
-
-        <!-- ③ Second row: Direction + Support/Resistance -->
         <div class="trader-metrics-row">
-
-          <!-- Day direction -->
           <div class="metric-card direction-card-wrap">
             <div class="metric-title">Day Direction</div>
             <div class="direction-inner" id="directionInner">
@@ -331,78 +264,28 @@
               <div class="direction-pct" id="directionPct">+0.00% from open</div>
             </div>
           </div>
-
-          <!-- Support / Resistance table -->
           <div class="metric-card sr-card">
             <div class="metric-title">Support &amp; Resistance — 14-Day Levels</div>
             <div class="sr-table" id="srTable"></div>
           </div>
+        </div>
 
-        </div><!-- /trader-metrics-row -->
-
-        <!-- ④ Auto-refresh countdown -->
         <div class="refresh-countdown-row">
           <div class="countdown-ring-wrap">
             <svg class="countdown-ring-svg" viewBox="0 0 44 44">
               <circle class="countdown-track" cx="22" cy="22" r="18"/>
-              <circle class="countdown-arc"  cx="22" cy="22" r="18" id="countdownArc"/>
+              <circle class="countdown-arc" cx="22" cy="22" r="18" id="countdownArc"/>
             </svg>
             <span class="countdown-num" id="countdownNum">60</span>
           </div>
           <span class="countdown-label">Auto-refresh in <strong id="countdownSecs">60</strong>s</span>
           <button class="trader-refresh-now-btn" id="traderRefreshBtn">Refresh Now</button>
         </div>
-
-      </div><!-- /trader-results -->
+      </div>
 
     </div><!-- /page-trader -->
 
   </main>
-
-  <!-- Panel backdrop (mobile) -->
-  <div class="panel-backdrop" id="panelBackdrop"></div>
-
-  <!-- RIGHT PANEL (Stock Detail) -->
-  <aside class="detail-panel" id="detailPanel">
-    <button class="panel-close" id="panelClose">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-      </svg>
-    </button>
-    <div class="panel-content" id="panelContent">
-      <div class="panel-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        <p>Select a stock to view details</p>
-      </div>
-    </div>
-  </aside>
-
-  <!-- CHART MODAL -->
-  <div class="modal-overlay" id="chartModal" style="display:none;">
-    <div class="modal">
-      <div class="modal-header">
-        <h3 id="modalTitle">Chart</h3>
-        <button class="modal-close" id="modalClose">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-timeframes">
-        <button class="tf-btn active" data-tf="1Day" data-limit="30">1M</button>
-        <button class="tf-btn" data-tf="1Day" data-limit="90">3M</button>
-        <button class="tf-btn" data-tf="1Day" data-limit="180">6M</button>
-        <button class="tf-btn" data-tf="1Day" data-limit="365">1Y</button>
-        <button class="tf-btn" data-tf="1Hour" data-limit="72">3D</button>
-      </div>
-      <div class="modal-chart-area">
-        <canvas id="chartCanvas"></canvas>
-      </div>
-      <div id="modalStats" class="modal-stats"></div>
-    </div>
-  </div>
 
   <script src="/js/app.js"></script>
   <script src="/js/trader.js"></script>

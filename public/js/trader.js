@@ -482,7 +482,7 @@
     }
 
     // Stop countdown when user leaves the Trader page
-    document.querySelectorAll('.nav-item').forEach(item => {
+    document.querySelectorAll('.nav-tab').forEach(item => {
       item.addEventListener('click', () => {
         if (item.dataset.page !== 'trader') stopCountdown();
         else if (trader.symbol) {

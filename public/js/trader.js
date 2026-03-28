@@ -109,13 +109,16 @@ const trader = (() => {
     }
     const needleA=(rsi/100)*Math.PI;
     const nx=cx+58*Math.cos(Math.PI+needleA), ny=cy-58*Math.sin(needleA);
-    svg.innerHTML=`
+    const svgMarkup = `<svg xmlns="http://www.w3.org/2000/svg">
       ${trackSeg}${fillSeg}
       <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(2)}" y2="${ny.toFixed(2)}" stroke="var(--t1)" stroke-width="2.5" stroke-linecap="round"/>
       <circle cx="${cx}" cy="${cy}" r="4" fill="var(--teal)"/>
       <text x="${cx-r-2}" y="${cy+18}" font-size="8" fill="var(--t3)" text-anchor="middle">0</text>
       <text x="${cx}" y="${cy-r-8}" font-size="8" fill="var(--t3)" text-anchor="middle">50</text>
-      <text x="${cx+r+2}" y="${cy+18}" font-size="8" fill="var(--t3)" text-anchor="middle">100</text>`;
+      <text x="${cx+r+2}" y="${cy+18}" font-size="8" fill="var(--t3)" text-anchor="middle">100</text>
+    </svg>`;
+    const parsed = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml');
+    svg.replaceChildren(...parsed.documentElement.children);
   }
 
   // ── Countdown ring ─────────────────────────────────────────────────────────

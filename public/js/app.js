@@ -602,7 +602,7 @@ function buildMarketRow(sym, snaps) {
     <span class="mrow-price">${price ? '$' + fmt(price) : '--'}</span>
     <span class="mrow-change ${cls(chg)}">${isUp ? '+' : ''}${fmt(pct)}%</span>
   `;
-  div.addEventListener('click', () => { if (s) openStock(sym, s); });
+  div.addEventListener('click', () => openStock(sym, s || { symbol: sym }));
   return div;
 }
 
@@ -704,7 +704,7 @@ async function loadWatchlist() {
     `;
     row.addEventListener('click', e => {
       if (e.target.closest('.wrow-remove')) return;
-      if (s) openStock(sym, s);
+      openStock(sym, s || { symbol: sym });
     });
     row.querySelector('.wrow-remove').addEventListener('click', () => {
       state.watchlist.splice(state.watchlist.indexOf(sym), 1);
@@ -743,7 +743,7 @@ function setupNavSearch() {
           dropdown.classList.remove('open');
           input.value = '';
           const snaps = await fetchSnapshots([sym]);
-          if (snaps[sym]) openStock(sym, snaps[sym]);
+          openStock(sym, snaps[sym] || { symbol: sym });
         });
       });
     }, 280);
@@ -791,9 +791,9 @@ function setupHeroSearch() {
   // Chip clicks
   document.querySelectorAll('.chip').forEach(chip => {
     chip.addEventListener('click', async () => {
-      const sym = chip.dataset.sym;
+      const sym   = chip.dataset.sym;
       const snaps = await fetchSnapshots([sym]);
-      if (snaps[sym]) openStock(sym, snaps[sym]);
+      openStock(sym, snaps[sym] || { symbol: sym });
     });
   });
 }
@@ -818,7 +818,7 @@ async function renderSearchResults(results, container) {
       ${price && prev ? `<span class="mrow-change ${cls(chg)}">${chg >= 0 ? '+' : ''}${fmt(pct)}%</span>` : ''}
       <span class="result-arrow">›</span>
     `;
-    row.addEventListener('click', () => { if (s) openStock(r.symbol, s); });
+    row.addEventListener('click', () => openStock(r.symbol, s || { symbol: r.symbol, name: r.name }));
     container.appendChild(row);
   });
 }

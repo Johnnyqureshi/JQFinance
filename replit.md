@@ -46,30 +46,27 @@ Preferred communication style: Simple, everyday language.
 
 ## External Dependencies
 
-### Financial Modeling Prep (FMP) — Prices, Ratings, News, Search
-- **Base URL**: `https://financialmodelingprep.com/stable`
-- **Required env var**: `FMP_API_KEY`
-- **Free plan limit**: ~250 requests/day (rate limit errors appear as empty results)
-- **Endpoints used**:
-  - `/stable/quote?symbol=X` — single quote (price, volume, high/low, open, prev close)
-  - `/stable/grades?symbol=X` — analyst grades & upgrades/downgrades
-  - `/stable/price-target-consensus?symbol=X` — low/median/high price targets
-  - `/stable/fmp-articles` — market news articles
-  - `/stable/search-name?query=X` — symbol + company name search
+### Yahoo Finance (Primary — no API key required)
+- **Price/Quote data**: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d`
+  - Extracts: price, open, dayHigh, dayLow, volume, previousClose, change%, name
+- **Search**: `https://query1.finance.yahoo.com/v1/finance/search?q=...`
+- **Historical/Bars**: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=...&range=...`
+- **News fallback**: Yahoo search API news results
 
-### Yahoo Finance Chart API — Historical OHLCV (no key required)
-- **Base URL**: `https://query1.finance.yahoo.com/v8/finance/chart`
-- **Used for**: all bar/chart data — overview sparklines, chart tab, Realtime Trader history
-- **Timeframe mapping**: `1Hour` → `interval=1h`, `1Day` → `interval=1d`
+### Financial Modeling Prep (FMP) — Analyst Data Only
+- **Base URL**: `https://financialmodelingprep.com/api/v3`
+- **Required env var**: `FMP_API_KEY`
+- **Free plan limit**: ~250 requests/day — app degrades gracefully when hit
+- **Used only for**: analyst ratings, price targets, upgrades/downgrades, news (with Yahoo fallback)
 
 ### API Endpoints (server.js)
-- `GET /api/snapshots?symbols=A,B,C` — parallel FMP individual quotes (Alpaca snapshot shape)
-- `GET /api/quote/:symbol` — single FMP quote (Alpaca snapshot shape)
+- `GET /api/snapshots?symbols=A,B,C` — Yahoo Finance parallel chart quotes
+- `GET /api/quote/:symbol` — Yahoo Finance single chart quote
 - `GET /api/bars/:symbol?timeframe=&limit=` — Yahoo Finance OHLCV bars `{t,o,h,l,c,v}`
 - `GET /api/historical/:symbol` — Yahoo Finance daily OHLCV, newest-first, for Realtime Trader
-- `GET /api/news/:symbol` — FMP articles (filtered by ticker, falls back to general market news)
-- `GET /api/search?q=...` — FMP name search filtered to US exchanges
-- `GET /api/stock/:ticker` — FMP analyst ratings, price targets, upgrades/downgrades
+- `GET /api/search?q=...` — Yahoo Finance search (equity symbols, US exchanges)
+- `GET /api/news/:symbol` — FMP articles with Yahoo Finance fallback
+- `GET /api/stock/:ticker` — FMP analyst ratings, price targets, upgrades/downgrades (graceful empty on rate limit)
 
 ## Available Environment Variables
 - `FMP_API_KEY` — Financial Modeling Prep API key (primary data source)

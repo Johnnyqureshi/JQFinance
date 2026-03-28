@@ -1,9 +1,7 @@
 // ── StockPulse — Main App ──────────────────────────────────────────────────────
 
 const INDICES  = ['SPY','QQQ','DIA','IWM'];
-const TECH     = ['AAPL','MSFT','NVDA','GOOGL','META','AMD','TSLA'];
-const FINANCE  = ['JPM','BAC','GS','V','MA','BRK-B'];
-const MOVERS   = ['AMZN','NFLX','UBER','COIN','PLTR','ROKU','RBLX','SNAP'];
+const MOVERS   = ['AAPL','MSFT','NVDA','TSLA','AMZN','META','GOOGL','NFLX','UBER','COIN','PLTR','AMD'];
 
 const state = {
   page:        'home',
@@ -509,8 +507,8 @@ function skelRows(n=5) {
 }
 
 async function loadMarkets() {
-  ['indicesTable','moversTable','techTable','financeTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
-  const all  = [...new Set([...INDICES,...TECH,...FINANCE,...MOVERS])];
+  ['indicesTable','moversTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
+  const all  = [...new Set([...INDICES,...MOVERS])];
   const snaps= await api.snapshots(all);
 
   const buildRow = sym => {
@@ -534,8 +532,6 @@ async function loadMarkets() {
   };
 
   fill('indicesTable', INDICES);
-  fill('techTable', TECH);
-  fill('financeTable', FINANCE);
 
   const sorted = [...MOVERS].sort((a,b)=>{
     const abs=s=>{const snap=snaps[s];const p=snap?.price||0;const pv=snap?.previousClose||0;return pv?Math.abs((p-pv)/pv):0;};

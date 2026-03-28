@@ -41,6 +41,9 @@ const api = {
   async valuation(sym) {
     try { const r = await fetch(`/api/valuation/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
   },
+  async wsb() {
+    try { const r = await fetch('/api/wsb'); return r.ok ? r.json() : null; } catch { return null; }
+  },
 };
 
 // ── Market status ──────────────────────────────────────────────────────────────
@@ -539,6 +542,8 @@ async function loadMarkets() {
   });
   fill('moversTable', sorted);
 
+  loadWSB();
+
   // ticker tape
   const tape = $('tickerTape');
   if (tape) tape.innerHTML = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'].map(sym => {
@@ -546,6 +551,89 @@ async function loadMarkets() {
     const ch=s.price-(s.previousClose||0), pt=(s.previousClose?(ch/s.previousClose)*100:0);
     return`<div class="tape-item"><span class="tape-sym">${sym}</span><span class="tape-price">$${fmt(s.price)}</span><span class="tape-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span></div>`;
   }).join('');
+}
+
+// ── WSB ────────────────────────────────────────────────────────────────────────
+async function loadWSB() {
+  const body = $('wsbBody'), upd = $('wsbUpdated');
+  if (!body) return;
+  body.innerHTML = '<div class="tab-spin"><div class="spinner"></div></div>';
+  const data = await api.wsb();
+  if (!data || (!data.tickers?.length && !data.risers?.length)) {
+    body.innerHTML = '<div class="wsb-err">Could not load WSB data — try again shortly.</div>';
+    return;
+  }
+
+  if (upd && data.updated) {
+    const s = Math.floor((Date.now() - new Date(data.updated).getTime()) / 1000);
+    upd.textContent = s < 60 ? 'just now' : `${Math.floor(s/60)}m ago`;
+  }
+
+  // fetch live prices for all relevant tickers
+  const allSyms = [...new Set([
+    ...(data.tickers||[]).map(t=>t.sym),
+    ...(data.risers||[]).map(t=>t.sym),
+  ])];
+  const snaps = allSyms.length ? await api.snapshots(allSyms) : {};
+
+  const maxMentions = data.tickers[0]?.mentions || 1;
+
+  const buildTickerRow = (t, showBar=true) => {
+    const s  = snaps[t.sym] || {};
+    const px = s.price||0, pv = s.previousClose||0;
+    const ch = px-pv, pt = pv?(ch/pv)*100:0;
+    const bar = Math.round((t.mentions/maxMentions)*100);
+    const rankChg = (t.rankAgo||t.rank) - t.rank;
+    const rankBadge = rankChg > 0
+      ? `<span class="wsb-rank-up">▲${rankChg}</span>`
+      : rankChg < 0
+        ? `<span class="wsb-rank-dn">▼${Math.abs(rankChg)}</span>`
+        : `<span class="wsb-rank-eq">—</span>`;
+    return `<div class="wsb-ticker-row" data-sym="${t.sym}">
+      <span class="wsb-rank">#${t.rank}</span>
+      ${rankBadge}
+      <span class="wsb-sym">${t.sym}</span>
+      ${showBar ? `<div class="wsb-bar-wrap"><div class="wsb-bar" style="width:${bar}%"></div></div>` : `<span class="wsb-name-sm">${(t.name||'').split(' ').slice(0,2).join(' ')}</span>`}
+      <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+      ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
+    </div>`;
+  };
+
+  const buildRiserRow = t => {
+    const s  = snaps[t.sym] || {};
+    const px = s.price||0, pv = s.previousClose||0;
+    const ch = px-pv, pt = pv?(ch/pv)*100:0;
+    return `<div class="wsb-ticker-row" data-sym="${t.sym}">
+      <span class="wsb-rank">#${t.rank}</span>
+      <span class="wsb-rank-up">▲${t.rankGain}</span>
+      <span class="wsb-sym">${t.sym}</span>
+      <span class="wsb-name-sm">${(t.name||'').split(' ').slice(0,2).join(' ')}</span>
+      <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+      ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
+    </div>`;
+  };
+
+  const tickerRows = (data.tickers||[]).map(t => buildTickerRow(t, true)).join('');
+  const riserRows  = (data.risers||[]).map(buildRiserRow).join('');
+
+  body.innerHTML = `
+    <div class="wsb-cols">
+      <div class="wsb-left">
+        <div class="wsb-section-label">Most Mentioned — 24h</div>
+        <div class="wsb-tickers">${tickerRows||'<div class="wsb-err">No data</div>'}</div>
+      </div>
+      <div class="wsb-right">
+        <div class="wsb-section-label">Biggest Rank Gainers — vs Yesterday</div>
+        <div class="wsb-tickers">${riserRows||'<div class="wsb-err">No risers today</div>'}</div>
+      </div>
+    </div>`;
+
+  body.querySelectorAll('.wsb-ticker-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const sym = row.dataset.sym;
+      openStock(sym, snaps[sym] || { symbol: sym });
+    });
+  });
 }
 
 // ── Watchlist ──────────────────────────────────────────────────────────────────
@@ -693,6 +781,8 @@ document.addEventListener('DOMContentLoaded', () => {
     idx>=0 ? state.watchlist.splice(idx,1) : state.watchlist.push(sym);
     saveWL(); updateWatchBtn(sym);
   });
+
+  $('wsbRefresh')?.addEventListener('click', loadWSB);
 
   setupNavSearch();
   setupHeroSearch();

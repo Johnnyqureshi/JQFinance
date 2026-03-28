@@ -244,4 +244,59 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── GET /api/wsb ─────────────────────────────────────────────────────────────
+const WSB_BLOCKLIST = new Set([
+  'DD','YOLO','HOLD','BUY','SELL','PUTS','CALL','CALLS','OTM','ITM','ATM',
+  'ETF','FED','SEC','CEO','CFO','CTO','COO','IPO','USA','USD','EUR','GBP',
+  'THE','AND','FOR','BUT','ARE','WAS','NOT','HAS','HAD','ITS','YOUR','YOU',
+  'LOL','OMG','WTF','IMO','WSB','HFT','ATH','EOD','EOM','EOY','YTD','QOQ',
+  'YOY','ALL','NOW','NEW','OLD','HOT','TOP','BIG','DAY','GET','GOT','OUT',
+  'OFF','ANY','TOO','PER','PRE','POST','PRO','MAX','MIN','GDP','CPI','WHO',
+  'WTO','IMF','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC','JAN',
+  'FEB','MAR','DIV','NAV','NAZ','EOW','EPS','PE','PB','RH','AI','IT','US',
+  'OR','IF','BE','DO','GO','ON','IN','AT','TO','OF','AS','UP','NO','MY',
+  'EDIT','TLDR','FOMO','BTFD','HODL','MOON','BEAR','BULL','LONG','SHORT',
+  'LMAO','LMFAO','JUST','BEEN','WILL','THAT','THIS','WITH','HAVE','FROM',
+  'THEY','THEM','THEN','THAN','WHEN','WHAT','WERE','WELL','VERY','ALSO',
+  'NEED','BACK','MUCH','HIGH','RATE','YEAR','LAST','GOOD','SAME',
+]);
+
+app.get('/api/wsb', async (req, res) => {
+  try {
+    const r = await fetch('https://apewisdom.io/api/v1.0/filter/wallstreetbets/page/1', {
+      headers: { 'User-Agent': 'StockPulse/1.0', 'Accept': 'application/json' },
+    });
+    if (!r.ok) return res.json({ tickers: [], risers: [], error: 'ApeWisdom unavailable' });
+    const data = await r.json();
+    const all  = (data.results || []).filter(x => x.ticker && x.mentions);
+
+    // top 10 by 24h mentions
+    const tickers = all.slice(0, 10).map(x => ({
+      sym:         x.ticker,
+      name:        x.name || '',
+      rank:        x.rank,
+      mentions:    x.mentions,
+      upvotes:     x.upvotes || 0,
+      rankAgo:     x.rank_24h_ago || x.rank,
+      mentionsAgo: x.mentions_24h_ago || 0,
+    }));
+
+    // top 10 biggest rank gainers (rank improved most vs 24h ago)
+    const risers = [...all]
+      .filter(x => x.rank_24h_ago && x.rank_24h_ago > x.rank)
+      .sort((a, b) => (b.rank_24h_ago - b.rank) - (a.rank_24h_ago - a.rank))
+      .slice(0, 10)
+      .map(x => ({
+        sym:      x.ticker,
+        name:     x.name || '',
+        rank:     x.rank,
+        rankGain: x.rank_24h_ago - x.rank,
+        mentions: x.mentions,
+        upvotes:  x.upvotes || 0,
+      }));
+
+    res.json({ tickers, risers, updated: new Date().toISOString() });
+  } catch (e) { res.json({ tickers: [], risers: [], error: e.message }); }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`StockPulse on :${PORT}`));

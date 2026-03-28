@@ -148,9 +148,14 @@ function drawMiniChart(canvas, prices, isUp) {
 
 async function loadMiniChart(symbol, container) {
   const data = await fetchBars(symbol, '1Hour', 24);
-  if (!data || !data.bars) return;
+  const canvas = container?.querySelector('canvas');
+  if (!data || !data.bars || data.bars.length < 2) {
+    if (container) {
+      container.innerHTML = '<div class="chart-unavailable">Chart unavailable</div>';
+    }
+    return;
+  }
   const prices = data.bars.map(b => b.c);
-  const canvas = container.querySelector('canvas');
   if (canvas && prices.length > 1) {
     const isUp = prices[prices.length - 1] >= prices[0];
     drawMiniChart(canvas, prices, isUp);
@@ -579,9 +584,12 @@ async function openDetail(symbol, snap) {
 
   // Chart
   const pCanvas = document.getElementById('panelChartCanvas');
-  if (pCanvas && chartData?.bars) {
+  const chartArea = pCanvas?.closest('.panel-chart-area');
+  if (chartData?.bars?.length >= 2) {
     pCanvas.style.height = '120px';
     drawFullChart(pCanvas, chartData.bars, isUp ? '#22c55e' : '#ef4444');
+  } else if (chartArea) {
+    chartArea.innerHTML = '<div class="chart-unavailable chart-unavailable-lg">Chart data unavailable — Alpaca API keys need renewal</div>';
   }
 
   // Analyst ratings bar

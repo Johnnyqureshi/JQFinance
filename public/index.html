@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
@@ -50,6 +50,12 @@
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
         <span>Search</span>
+      </a>
+      <a href="#" class="nav-item nav-item-trader" data-page="trader">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        <span>Trader</span>
       </a>
     </nav>
 
@@ -200,6 +206,157 @@
       </div>
     </div>
 
+    <!-- REALTIME TRADER PAGE -->
+    <div class="page" id="page-trader">
+
+      <div class="feed-header">
+        <h1 class="page-title trader-page-title">Realtime Trader</h1>
+      </div>
+
+      <!-- Input bar -->
+      <div class="trader-input-wrap">
+        <div class="trader-input-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <input
+            type="text"
+            id="traderTickerInput"
+            placeholder="Enter ticker… e.g. TSLA"
+            maxlength="10"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+          />
+          <button class="trader-analyze-btn" id="traderAnalyzeBtn">Analyze</button>
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div class="trader-loading" id="traderLoading" style="display:none">
+        <div class="trader-spinner"></div>
+        <p>Analyzing <strong id="traderLoadingTicker"></strong>…</p>
+      </div>
+
+      <!-- Error state -->
+      <div class="trader-error" id="traderError" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <p id="traderErrorMsg">Unable to analyze this symbol.</p>
+      </div>
+
+      <!-- Results (hidden until analysis runs) -->
+      <div class="trader-results" id="traderResults" style="display:none">
+
+        <!-- ① Verdict card -->
+        <div class="verdict-card" id="verdictCard">
+          <div class="verdict-left">
+            <div class="verdict-badge" id="verdictBadge">--</div>
+          </div>
+          <div class="verdict-right">
+            <div class="verdict-symbol" id="verdictSymbol">--</div>
+            <div class="verdict-price" id="verdictPrice">--</div>
+            <div class="verdict-confidence-row">
+              <span class="confidence-label">Confidence</span>
+              <span class="confidence-value" id="verdictConfidence">--%</span>
+            </div>
+            <div class="verdict-reason" id="verdictReason"></div>
+          </div>
+        </div>
+
+        <!-- ② Metrics row -->
+        <div class="trader-metrics-row">
+
+          <!-- RSI Gauge -->
+          <div class="metric-card">
+            <div class="metric-title">RSI (14)</div>
+            <div class="rsi-wrap">
+              <svg class="rsi-gauge" id="rsiGaugeSvg" viewBox="0 0 180 110" preserveAspectRatio="xMidYMid meet"></svg>
+              <div class="rsi-readout">
+                <span class="rsi-number" id="rsiNumber">--</span>
+                <span class="rsi-zone-label" id="rsiZoneLabel">--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Volume bar -->
+          <div class="metric-card">
+            <div class="metric-title">Volume vs 10-Day Avg</div>
+            <div class="vol-wrap">
+              <div class="vol-row">
+                <span class="vol-label">Today</span>
+                <div class="vol-track"><div class="vol-bar vol-today" id="volBarToday" style="width:0%"></div></div>
+                <span class="vol-val" id="volToday">--</span>
+              </div>
+              <div class="vol-row">
+                <span class="vol-label">10d Avg</span>
+                <div class="vol-track"><div class="vol-bar vol-avg" id="volBarAvg" style="width:100%"></div></div>
+                <span class="vol-val" id="volAvg">--</span>
+              </div>
+              <div class="vol-diff-badge" id="volDiffBadge"></div>
+            </div>
+          </div>
+
+          <!-- Day range slider -->
+          <div class="metric-card">
+            <div class="metric-title">Day Range Position</div>
+            <div class="range-wrap">
+              <div class="range-labels-top">
+                <span id="rangeLow">--</span>
+                <span id="rangeCurrent" class="range-current-label">--</span>
+                <span id="rangeHigh">--</span>
+              </div>
+              <div class="range-track-outer">
+                <div class="range-track-inner">
+                  <div class="range-fill-bar" id="rangeFillBar" style="width:50%"></div>
+                  <div class="range-dot-marker" id="rangeDotMarker" style="left:50%"></div>
+                </div>
+              </div>
+              <div class="range-pct-label" id="rangePctLabel">-- in today's range</div>
+            </div>
+          </div>
+
+        </div><!-- /trader-metrics-row -->
+
+        <!-- ③ Second row: Direction + Support/Resistance -->
+        <div class="trader-metrics-row">
+
+          <!-- Day direction -->
+          <div class="metric-card direction-card-wrap">
+            <div class="metric-title">Day Direction</div>
+            <div class="direction-inner" id="directionInner">
+              <div class="direction-arrow" id="directionArrow">▲</div>
+              <div class="direction-label" id="directionLabel">Bullish</div>
+              <div class="direction-pct" id="directionPct">+0.00% from open</div>
+            </div>
+          </div>
+
+          <!-- Support / Resistance table -->
+          <div class="metric-card sr-card">
+            <div class="metric-title">Support &amp; Resistance — 14-Day Levels</div>
+            <div class="sr-table" id="srTable"></div>
+          </div>
+
+        </div><!-- /trader-metrics-row -->
+
+        <!-- ④ Auto-refresh countdown -->
+        <div class="refresh-countdown-row">
+          <div class="countdown-ring-wrap">
+            <svg class="countdown-ring-svg" viewBox="0 0 44 44">
+              <circle class="countdown-track" cx="22" cy="22" r="18"/>
+              <circle class="countdown-arc"  cx="22" cy="22" r="18" id="countdownArc"/>
+            </svg>
+            <span class="countdown-num" id="countdownNum">60</span>
+          </div>
+          <span class="countdown-label">Auto-refresh in <strong id="countdownSecs">60</strong>s</span>
+          <button class="trader-refresh-now-btn" id="traderRefreshBtn">Refresh Now</button>
+        </div>
+
+      </div><!-- /trader-results -->
+
+    </div><!-- /page-trader -->
+
   </main>
 
   <!-- Panel backdrop (mobile) -->
@@ -248,5 +405,6 @@
   </div>
 
   <script src="/js/app.js"></script>
+  <script src="/js/trader.js"></script>
 </body>
 </html>

@@ -295,6 +295,55 @@ app.get('/api/stock/:ticker', async (req, res) => {
   }
 });
 
+// ─── /api/historical/:symbol ─────────────────────────────────────────────────
+// OHLCV daily history via Yahoo Finance chart API (free, no key required).
+// Returns { symbol, historical: [...] } newest-first, matching FMP's shape.
+
+app.get('/api/historical/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const url    = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2mo`;
+
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; StockPulse/1.0)' },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Yahoo Finance returned ${response.status}` });
+    }
+
+    const data  = await response.json();
+    const result = data?.chart?.result?.[0];
+
+    if (!result) return res.status(404).json({ error: 'Symbol not found' });
+
+    const timestamps = result.timestamp         || [];
+    const quote      = result.indicators?.quote?.[0] || {};
+    const opens      = quote.open   || [];
+    const highs      = quote.high   || [];
+    const lows       = quote.low    || [];
+    const closes     = quote.close  || [];
+    const volumes    = quote.volume || [];
+
+    // Build newest-first array (Yahoo is oldest-first)
+    const historical = timestamps
+      .map((ts, i) => ({
+        date:   new Date(ts * 1000).toISOString().slice(0, 10),
+        open:   opens[i]   ?? null,
+        high:   highs[i]   ?? null,
+        low:    lows[i]    ?? null,
+        close:  closes[i]  ?? null,
+        volume: volumes[i] ?? null,
+      }))
+      .filter(d => d.close !== null)
+      .reverse(); // newest first
+
+    res.json({ symbol, historical });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── FALLBACK ──────────────────────────────────────────────────────────────────
 
 app.use((req, res) => {

@@ -65,10 +65,11 @@ Preferred communication style: Simple, everyday language.
 - `GET /api/bars/:symbol?timeframe=&limit=` — Yahoo Finance OHLCV bars `{t,o,h,l,c,v}`
 - `GET /api/historical/:symbol` — Yahoo Finance daily OHLCV, newest-first, for Realtime Trader
 - `GET /api/search?q=...` — Yahoo Finance search (equity symbols, US exchanges)
-- `GET /api/news/:symbol` — FMP articles with Yahoo Finance fallback
+- `GET /api/news/:symbol` — NewsAPI.org primary (20 articles w/ images + summaries), FMP fallback, Yahoo fallback
 - `GET /api/stock/:ticker` — FMP analyst ratings, price targets, upgrades/downgrades (graceful empty on rate limit)
 
 ## Available Environment Variables
-- `FMP_API_KEY` — Financial Modeling Prep API key (primary data source)
+- `FMP_API_KEY` — Financial Modeling Prep (analyst ratings, price targets, upgrades)
+- `NEWSAPI_KEY` — NewsAPI.org (primary news source — 20 articles with images/summaries)
 - `AIML_API_KEY` — available, not currently used
 - `SESSION_SECRET` — available, not currently used

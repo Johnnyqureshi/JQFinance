@@ -6,7 +6,8 @@ const fetch   = require('node-fetch');
 
 const app     = express();
 const PORT    = 5000;
-const FMP_KEY = process.env.FMP_API_KEY;
+const FMP_KEY  = process.env.FMP_API_KEY;
+const NEWS_KEY = process.env.NEWSAPI_KEY;
 
 app.use(cors());
 app.use(express.json());
@@ -134,19 +135,48 @@ app.get('/api/historical/:symbol', async (req, res) => {
 
 // ── GET /api/news/:symbol ─────────────────────────────────────────────────
 app.get('/api/news/:symbol', async (req, res) => {
-  const sym = req.params.symbol.toUpperCase();
-  // Try FMP first
+  const sym  = req.params.symbol.toUpperCase();
+  const name = req.query.name || sym;
+
+  // 1. NewsAPI.org — everything about the ticker
+  if (NEWS_KEY) {
+    try {
+      const q   = encodeURIComponent(`${sym} stock`);
+      const url = `https://newsapi.org/v2/everything?q=${q}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${NEWS_KEY}`;
+      const r   = await fetch(url);
+      if (r.ok) {
+        const data = await r.json();
+        const articles = (data.articles || []).filter(a => a.title && a.title !== '[Removed]');
+        if (articles.length) {
+          return res.json({
+            news: articles.map(a => ({
+              headline:   a.title,
+              url:        a.url,
+              source:     a.source?.name || '',
+              image:      a.urlToImage || null,
+              summary:    a.description || '',
+              created_at: a.publishedAt || null,
+            })),
+            source: 'newsapi',
+          });
+        }
+      }
+    } catch {}
+  }
+
+  // 2. FMP fallback
   try {
-    const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${sym}&limit=20&apikey=${FMP_KEY}`;
-    const r   = await fetch(url);
+    const url  = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${sym}&limit=20&apikey=${FMP_KEY}`;
+    const r    = await fetch(url);
     if (r.ok) {
       const data = await r.json();
       if (Array.isArray(data) && data.length) {
-        return res.json({ news: data.map(n => ({ headline: n.title, url: n.url, source: n.site, created_at: n.publishedDate })) });
+        return res.json({ news: data.map(n => ({ headline: n.title, url: n.url, source: n.site, created_at: n.publishedDate })), source: 'fmp' });
       }
     }
   } catch {}
-  // Yahoo fallback
+
+  // 3. Yahoo fallback
   try {
     const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&quotesCount=0&newsCount=12`;
     const r    = await fetch(url, { headers: YH });
@@ -155,8 +185,8 @@ app.get('/api/news/:symbol', async (req, res) => {
       headline:   n.title, url: n.link, source: n.publisher,
       created_at: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
     }));
-    res.json({ news });
-  } catch { res.json({ news: [] }); }
+    res.json({ news, source: 'yahoo' });
+  } catch { res.json({ news: [], source: 'none' }); }
 });
 
 // ── GET /api/stock/:symbol (analyst data via FMP, graceful fallback) ───────

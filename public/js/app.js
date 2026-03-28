@@ -398,16 +398,37 @@ function renderNews(news) {
     $('tab-news').innerHTML = '<div class="news-feed"><p class="no-data" style="padding:24px">No recent news found.</p></div>';
     return;
   }
-  $('tab-news').innerHTML = `
-    <div class="news-feed">
-      ${news.slice(0,14).map(n => {
-        const date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
-        return `<div class="news-item" onclick="window.open('${n.url||'#'}','_blank')">
-          <div class="news-hl">${n.headline||n.title||'No title'}</div>
-          <div class="news-meta">${n.source?`<span class="news-src">${n.source}</span>`:''}${date?`<span>${date}</span>`:''}</div>
-        </div>`;
-      }).join('')}
+  const cards = news.slice(0, 20).map(n => {
+    const date  = n.created_at ? timeAgo(n.created_at) : '';
+    const title = (n.headline || n.title || '').replace(/"/g, '&quot;');
+    const safe  = (n.url || '#').replace(/"/g, '%22');
+    const img   = n.image ? `<div class="ni-thumb" style="background-image:url('${n.image.replace(/'/g,'%27')}')"></div>` : '';
+    const sum   = n.summary ? `<div class="ni-summary">${n.summary.slice(0, 120)}${n.summary.length>120?'…':''}</div>` : '';
+    return `<div class="news-item2" onclick="window.open('${safe}','_blank')">
+      ${img}
+      <div class="ni-body">
+        <div class="ni-headline">${title}</div>
+        ${sum}
+        <div class="ni-meta">
+          ${n.source ? `<span class="ni-src">${n.source}</span>` : ''}
+          ${date    ? `<span class="ni-date">${date}</span>` : ''}
+        </div>
+      </div>
     </div>`;
+  }).join('');
+  $('tab-news').innerHTML = `<div class="news-grid">${cards}</div>`;
+}
+
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff/60000);
+  if (m < 1)   return 'just now';
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m/60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h/24);
+  if (d < 7)   return `${d}d ago`;
+  return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric'});
 }
 
 // ── Markets ────────────────────────────────────────────────────────────────────

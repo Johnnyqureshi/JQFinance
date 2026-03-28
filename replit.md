@@ -23,21 +23,24 @@ Preferred communication style: Simple, everyday language.
 - **Theme**: Dark navy (#0d1117) with gold (#f0b429) accents, green (#3fb950), red (#f85149)
 
 ### Layout (TipRanks-inspired)
-- **Top nav bar**: Logo + tabs (Search, Markets, Watchlist, Trader) + market status + search input
-- **Default page**: Search hero — large centered search bar, nothing shown until user types
-- **Stock detail page**: Full-page view when a stock is selected, with 4 sub-tabs:
-  - **Overview**: 6 stat boxes (Open, Prev Close, High, Low, Volume, VWAP) + intraday chart
-  - **Chart**: Interactive chart with 2D/1M/3M/6M/1Y timeframes
-  - **Analysts**: Consensus bar, price targets (Low/Median/High), recent rating changes
-  - **News**: Recent news articles
-- **Back button**: Returns to the page you came from (Search, Markets, or Watchlist)
+- **Top nav bar**: Logo + tabs (Search, Markets, Watchlist, WSB Trending) + market status + search input
+- **Default page (Search/Home)**: Compact search bar at top. Empty state until stock searched. When stock selected, shows full analysis workspace in-place.
+- **Analysis workspace** (home page after stock selected):
+  - **Stock header**: Ticker, company name, price, % change, watch button, optional back button
+  - **Left panel (Trading Signals)**: RSI gauge (14-period), volume vs 10-day avg, day range position, day direction, support/resistance levels, 60s auto-refresh countdown
+  - **Right panel (4 tabs)**:
+    - **Overview**: 6 stat boxes + intraday chart + score panel
+    - **Chart**: Interactive chart with multiple timeframes
+    - **Analysts**: Consensus bar, price targets, rating changes
+    - **News**: Recent news articles
+- **Back button**: Appears only when navigating from Markets/Watchlist/WSB; returns to that page
 
 ### Pages
-- **Search** (`default`): Hero with search bar + popular chip shortcuts. No data shown until searched.
+- **Search/Home** (`default`): Compact search bar at top; empty state shown by default. Selecting a stock shows the full analysis workspace (Trader signals + tabs) in-place. No separate stock page — all analysis lives here.
 - **Markets**: 4 sections (Indices, Top Movers, Tech Leaders, Finance) + WSB trending section — loads on tab click
 - **WSB Trending**: Dedicated page — top 10 r/wallstreetbets tickers by 24h mentions. Shows rank, $TICKER, company name, mention count, upvote sentiment bar, 24h mention change (▲/▼), live price + % change. Auto-refreshes every 5 minutes with countdown timer.
 - **Watchlist**: Personal saved symbols stored in localStorage; click row to view stock detail
-- **Trader**: Realtime analysis tool with RSI gauge, volume bars, day range, support/resistance
+- **Trading Signals panel**: Integrated into the Search/Home workspace (left sidebar) — RSI gauge, volume bars, day range position, day direction, support/resistance levels, 60s auto-refresh. Triggered automatically on stock search. No separate Trader page.
 
 ### Key UX Decisions
 - **Search-first**: The landing page is always empty — no pre-loaded stock grids

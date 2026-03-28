@@ -122,14 +122,20 @@ function goPage(page) {
 // ── Stock page ─────────────────────────────────────────────────────────────────
 async function openStock(sym, snap) {
   state.prevPage  = state.page;
-  state.page      = 'stock';
+  state.page      = 'home';
   state.symbol    = sym;
   state.snap      = snap || {};
   state.stockData = null;
 
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page==='home'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  $('page-stock').classList.add('active');
+  $('page-home').classList.add('active');
+
+  $('homeEmpty').style.display = 'none';
+  $('homeWorkspace').style.display = '';
+
+  const backBtn = $('backBtn');
+  if (backBtn) backBtn.style.display = (state.prevPage && state.prevPage !== 'home') ? '' : 'none';
 
   const price = snap?.price || 0;
   const prev  = snap?.previousClose || 0;
@@ -142,14 +148,14 @@ async function openStock(sym, snap) {
   $('sPrice').textContent  = price ? '$'+fmt(price) : '--';
   const sc = $('sChange');
   sc.textContent = price && prev ? `${up?'+':''}${fmt(chg)} (${up?'+':''}${fmt(pct)}%)` : '';
-  sc.className   = 'stock-change ' + (up ? 'up' : 'down');
+  sc.className   = 's-change ' + (up ? 'up' : 'down');
   updateWatchBtn(sym);
 
-  // reset tabs
   document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='overview'));
   document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
-  // fetch all data in parallel
+  trader.analyze(sym);
+
   const [barsData, fmpData, newsData, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),
     api.stock(sym),
@@ -817,45 +823,27 @@ function setupNavSearch() {
 // ── Hero search ────────────────────────────────────────────────────────────────
 let heroTimer=null;
 function setupHeroSearch() {
-  const input=$('heroInput'), hero=document.querySelector('.hero'), sec=$('resultsSection'), list=$('resultsList');
-  if(!input) return;
+  const input=$('heroInput'), drop=$('homeDrop');
+  if(!input||!drop) return;
   input.addEventListener('input',()=>{
     clearTimeout(heroTimer);
     const q=input.value.trim();
-    if(!q){sec.style.display='none';hero.style.display='flex';return;}
+    if(!q){drop.classList.remove('open');return;}
     heroTimer=setTimeout(async()=>{
-      hero.style.display='none'; sec.style.display='block';
-      list.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>';
       const results=await api.search(q);
-      if(!results.length){list.innerHTML='<p class="search-hint">No results found for "'+q+'"</p>';return;}
-      const snaps=await api.snapshots(results.slice(0,8).map(r=>r.symbol));
-      list.innerHTML='';
-      results.slice(0,8).forEach(r=>{
-        const s=snaps[r.symbol]||{};
-        const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
-        const row=document.createElement('div');
-        row.className='result-row';
-        row.innerHTML=`
-          <span class="res-sym">${r.symbol}</span>
-          <span class="res-name">${r.name||''}</span>
-          ${r.exchange?`<span class="res-exch">${r.exchange}</span>`:''}
-          ${px?`<span class="res-price">$${fmt(px)}</span>`:''}
-          ${px&&pv?`<span class="res-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>`:''}
-          <span class="res-arrow">›</span>`;
-        row.addEventListener('click',()=>openStock(r.symbol, s||{symbol:r.symbol,name:r.name}));
-        list.appendChild(row);
+      if(!results.length){drop.classList.remove('open');return;}
+      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${r.symbol}"><span class="drop-sym">${r.symbol}</span><span class="drop-name">${r.name||''}</span></div>`).join('');
+      drop.classList.add('open');
+      drop.querySelectorAll('.drop-item').forEach(item=>{
+        item.addEventListener('click',async()=>{
+          drop.classList.remove('open'); input.value='';
+          const s=await api.snapshots([item.dataset.sym]);
+          openStock(item.dataset.sym, s[item.dataset.sym]||{symbol:item.dataset.sym});
+        });
       });
-    },300);
+    },260);
   });
-
-  // chips
-  document.querySelectorAll('.chip').forEach(chip=>{
-    chip.addEventListener('click',async()=>{
-      const sym=chip.dataset.sym;
-      const s=await api.snapshots([sym]);
-      openStock(sym, s[sym]||{symbol:sym});
-    });
-  });
+  document.addEventListener('click',e=>{ if(!input.contains(e.target)&&!drop.contains(e.target)) drop.classList.remove('open'); });
 }
 
 // ── Watchlist page setup ───────────────────────────────────────────────────────
@@ -886,11 +874,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('backBtn')?.addEventListener('click',()=>{
-    state.page=state.prevPage;
-    document.querySelectorAll('.nav-link').forEach(l=>l.classList.toggle('active',l.dataset.page===state.prevPage));
+    const dest = state.prevPage || 'home';
+    state.page = dest;
+    document.querySelectorAll('.nav-link').forEach(l=>l.classList.toggle('active',l.dataset.page===dest));
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-    $('page-'+state.prevPage)?.classList.add('active');
-    state.symbol=null;
+    $('page-'+dest)?.classList.add('active');
+    state.symbol = null;
+    $('homeWorkspace').style.display = 'none';
+    $('homeEmpty').style.display = '';
   });
 
   $('watchBtn')?.addEventListener('click',()=>{

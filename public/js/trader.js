@@ -9,8 +9,6 @@ const trader = (() => {
   // ── DOM refs ────────────────────────────────────────────────────────────────
   const $  = id => document.getElementById(id);
   const ui = {
-    input:   ()=>$('traderInput'),
-    btn:     ()=>$('traderBtn'),
     loading: ()=>$('traderLoading'),
     loadSym: ()=>$('traderLoadingTicker'),
     error:   ()=>$('traderError'),
@@ -230,7 +228,6 @@ const trader = (() => {
     ui.error().style.display='none';
     ui.results().style.display='none';
     if(ui.loadSym()) ui.loadSym().textContent=sym;
-    ui.btn().disabled=true;
 
     clearInterval(cdTimer);
 
@@ -250,24 +247,15 @@ const trader = (() => {
       ui.loading().style.display='none';
       ui.error().style.display='flex';
       if($('traderErrorMsg')) $('traderErrorMsg').textContent=e.message||'Failed to analyze. Please try again.';
-    } finally {
-      ui.btn().disabled=false;
     }
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
-    const inp  = $('traderInput');
-    const btn  = $('traderBtn');
-    const now  = $('cdNow');
-    if (!inp||!btn) return;
-
-    btn.addEventListener('click',()=>{ const s=inp.value.trim(); if(s)analyze(s); });
-    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){const s=inp.value.trim();if(s)analyze(s);} });
-    now?.addEventListener('click',()=>{ if(currentSym)analyze(currentSym); });
+    $('cdNow')?.addEventListener('click', () => { if (currentSym) analyze(currentSym); });
   }
 
-  return { init };
+  return { init, analyze };
 })();
 
 document.addEventListener('DOMContentLoaded', () => trader.init());

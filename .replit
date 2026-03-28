@@ -6,7 +6,7 @@ packages = ["cargo", "iana-etc", "libiconv", "libxcrypt", "openssl", "pkg-config
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["node", "server.js"]
 
 [workflows]
 runButton = "Project"

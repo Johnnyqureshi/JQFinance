@@ -550,11 +550,19 @@ async function loadMarkets() {
 
   // ticker tape
   const tape = $('tickerTape');
-  if (tape) tape.innerHTML = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'].map(sym => {
-    const s=snaps[sym]; if(!s?.price) return '';
-    const ch=s.price-(s.previousClose||0), pt=(s.previousClose?(ch/s.previousClose)*100:0);
-    return`<div class="tape-item"><span class="tape-sym">${sym}</span><span class="tape-price">$${fmt(s.price)}</span><span class="tape-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span></div>`;
-  }).join('');
+  if (tape) {
+    tape.textContent = '';
+    ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'].forEach(sym => {
+      const s = snaps[sym]; if (!s?.price) return;
+      const ch = s.price - (s.previousClose || 0), pt = (s.previousClose ? (ch / s.previousClose) * 100 : 0);
+      const item = document.createElement('div'); item.className = 'tape-item';
+      const symEl = document.createElement('span'); symEl.className = 'tape-sym'; symEl.textContent = sym;
+      const priceEl = document.createElement('span'); priceEl.className = 'tape-price'; priceEl.textContent = `$${fmt(s.price)}`;
+      const chgEl = document.createElement('span'); chgEl.className = `tape-chg ${cls(ch)}`; chgEl.textContent = `${ch >= 0 ? '+' : ''}${fmt(pt)}%`;
+      item.appendChild(symEl); item.appendChild(priceEl); item.appendChild(chgEl);
+      tape.appendChild(item);
+    });
+  }
 }
 
 // ── WSB Trending Page ──────────────────────────────────────────────────────────

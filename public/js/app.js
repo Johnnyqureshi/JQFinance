@@ -397,11 +397,11 @@ function renderAnalystsTab(fmpData, price) {
   const panel = document.getElementById('tab-analysts');
   if (!panel) return;
 
-  const ratings    = fmpData?.ratings;
+  const ratings     = fmpData?.ratings;
   const priceTarget = fmpData?.priceTarget;
-  const upgrades   = fmpData?.upgrades || [];
+  const upgrades    = fmpData?.upgrades || [];
 
-  // Build consensus
+  // ── Consensus card ──────────────────────────────────────────────────────────
   let ratingsHtml = '<p class="no-data">No analyst data available</p>';
   if (ratings && ratings.total > 0) {
     const { strongBuy = 0, buy = 0, hold = 0, sell = 0, strongSell = 0, total } = ratings;
@@ -411,10 +411,29 @@ function renderAnalystsTab(fmpData, price) {
                     : totalSell > hold && totalSell > totalBuy ? 'sell'
                     : 'hold';
     const consensusLabel = totalBuy > totalSell * 2 ? 'Strong Buy'
-                         : totalBuy > totalSell ? 'Buy'
+                         : totalBuy > totalSell     ? 'Buy'
                          : totalSell > totalBuy * 2 ? 'Strong Sell'
-                         : totalSell > totalBuy ? 'Sell'
+                         : totalSell > totalBuy     ? 'Sell'
                          : 'Hold';
+
+    // Donut chart via SVG
+    const buyPct  = (totalBuy  / total) * 100;
+    const holdPct = (hold      / total) * 100;
+    const sellPct = (totalSell / total) * 100;
+    const R = 38, CX = 50, CY = 50, CIRC = 2 * Math.PI * R;
+    function donutSlice(pct, offset, color) {
+      const len = (pct / 100) * CIRC;
+      return `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none"
+        stroke="${color}" stroke-width="12"
+        stroke-dasharray="${len.toFixed(2)} ${(CIRC - len).toFixed(2)}"
+        stroke-dashoffset="${(-offset * CIRC / 100).toFixed(2)}"
+        stroke-linecap="butt"/>`;
+    }
+    const buySlice  = donutSlice(buyPct,  0,          'var(--green)');
+    const holdSlice = donutSlice(holdPct, buyPct,     'var(--gold)');
+    const sellSlice = donutSlice(sellPct, buyPct + holdPct, 'var(--red)');
+
+    const pctColor = consensus === 'buy' ? 'var(--green)' : consensus === 'sell' ? 'var(--red)' : 'var(--gold)';
 
     const barRow = (label, count, cls) => count > 0 ? `
       <div class="analyst-bar-row">
@@ -424,57 +443,101 @@ function renderAnalystsTab(fmpData, price) {
       </div>` : '';
 
     ratingsHtml = `
-      <span class="consensus-badge ${consensus}">${consensusLabel}</span>
-      ${barRow('Buy', strongBuy + buy, 'buy')}
+      <div class="consensus-wrap">
+        <div class="consensus-donut-wrap">
+          <svg class="consensus-donut-svg" viewBox="0 0 100 100">
+            <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--border)" stroke-width="12"/>
+            ${buySlice}${holdSlice}${sellSlice}
+          </svg>
+          <div class="consensus-center">
+            <span class="consensus-pct" style="color:${pctColor}">${buyPct.toFixed(0)}%</span>
+            <span class="consensus-label-sm">Buy</span>
+          </div>
+        </div>
+        <div class="consensus-legend">
+          <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span><span class="legend-name">Buy</span><span class="legend-val">${totalBuy}</span></div>
+          <div class="legend-row"><span class="legend-dot" style="background:var(--gold)"></span><span class="legend-name">Hold</span><span class="legend-val">${hold}</span></div>
+          <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span><span class="legend-name">Sell</span><span class="legend-val">${totalSell}</span></div>
+        </div>
+      </div>
+      <span class="consensus-badge ${consensus}" style="margin-bottom:14px;">${consensusLabel}</span>
+      ${barRow('Buy', totalBuy, 'buy')}
       ${barRow('Hold', hold, 'hold')}
-      ${barRow('Sell', sell + strongSell, 'sell')}
-      <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">${total} analyst ratings</p>
+      ${barRow('Sell', totalSell, 'sell')}
+      <p style="font-size:11px;color:var(--text-muted);margin-top:12px;">${total} analyst ratings</p>
     `;
   }
 
-  // Build price targets
+  // ── Price target card ────────────────────────────────────────────────────────
   let ptHtml = '<p class="no-data">No price target data</p>';
   if (priceTarget?.targetMedian) {
     const { targetLow, targetMedian, targetHigh } = priceTarget;
-    const upside    = price > 0 ? ((targetMedian - price) / price) * 100 : 0;
+    const range   = targetHigh - targetLow || 1;
+    const curPct  = price     > 0 ? Math.max(0, Math.min(100, ((price       - targetLow) / range) * 100)) : null;
+    const medPct  = Math.max(0, Math.min(100, ((targetMedian - targetLow) / range) * 100));
+    const upside  = price > 0 ? ((targetMedian - price) / price) * 100 : 0;
     const upsideCls = upside >= 0 ? 'up' : 'down';
-    const upsideStr = (upside >= 0 ? '+' : '') + upside.toFixed(1) + '%';
+
     ptHtml = `
-      <div class="pt-layout">
-        <div class="pt-row"><span class="pt-label">Low</span><span class="pt-val">$${fmt(targetLow)}</span></div>
-        <div class="pt-row">
-          <span class="pt-label">Median</span>
-          <span class="pt-val pt-median-val">$${fmt(targetMedian)}</span>
-          <span class="pt-upside ${upsideCls}">${upsideStr} upside</span>
+      <div class="pt-bar-wrap">
+        <div class="pt-bar-labels">
+          <div class="pt-bar-label-item">
+            <span class="pt-bar-label-name">Low</span>
+            <span class="pt-bar-label-val">$${fmt(targetLow)}</span>
+          </div>
+          ${curPct !== null ? `
+          <div class="pt-bar-label-item">
+            <span class="pt-bar-label-name">Current</span>
+            <span class="pt-bar-label-val current">$${fmt(price)}</span>
+          </div>` : ''}
+          <div class="pt-bar-label-item">
+            <span class="pt-bar-label-name">Median</span>
+            <span class="pt-bar-label-val median">$${fmt(targetMedian)}</span>
+          </div>
+          <div class="pt-bar-label-item">
+            <span class="pt-bar-label-name">High</span>
+            <span class="pt-bar-label-val">$${fmt(targetHigh)}</span>
+          </div>
         </div>
-        <div class="pt-row"><span class="pt-label">High</span><span class="pt-val">$${fmt(targetHigh)}</span></div>
+        <div class="pt-bar-track">
+          <div class="pt-bar-fill" style="width:${medPct.toFixed(1)}%"></div>
+          ${curPct !== null ? `<div class="pt-bar-pin current" style="left:${curPct.toFixed(1)}%"></div>` : ''}
+          <div class="pt-bar-pin median" style="left:${medPct.toFixed(1)}%"></div>
+        </div>
+        <span class="pt-upside ${upsideCls}">${upside >= 0 ? '+' : ''}${upside.toFixed(1)}% upside to median</span>
       </div>
     `;
   }
 
-  // Build upgrades
+  // ── Upgrades table ───────────────────────────────────────────────────────────
   let upgradesHtml = '<p class="no-data">No recent rating changes</p>';
   if (upgrades.length > 0) {
-    upgradesHtml = upgrades.slice(0, 8).map(u => {
-      const firm    = u.gradingCompany || u.firm || 'Unknown';
-      const prev    = u.previousGrade  || u.previousRating || '—';
-      const next    = u.newGrade       || u.newRating      || '—';
-      const date    = u.date ? new Date(u.date).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
-      const action  = u.action || (
-        ratingBadgeClass(next) === 'upgrade' && ratingBadgeClass(prev) === 'reiterate' ? 'initiated'
-        : ratingBadgeClass(next) > ratingBadgeClass(prev) ? 'downgrade'
-        : 'upgrade'
-      );
-      const actionCls = ratingBadgeClass(next);
-      return `
-        <div class="upgrade-row">
-          <span class="upgrade-firm">${firm}</span>
-          <span class="upgrade-action ${actionCls}">${next}</span>
-          <span class="upgrade-rating">${prev} → ${next}</span>
-          <span class="upgrade-date">${date}</span>
-        </div>
-      `;
-    }).join('');
+    upgradesHtml = `
+      <table class="upgrades-table">
+        <thead>
+          <tr>
+            <th>Firm</th>
+            <th>Rating</th>
+            <th>Change</th>
+            <th style="text-align:right">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${upgrades.slice(0, 10).map(u => {
+            const firm = u.gradingCompany || 'Unknown';
+            const prev = u.previousGrade  || '—';
+            const next = u.newGrade       || '—';
+            const date = u.date ? new Date(u.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'2-digit' }) : '';
+            const cls  = ratingBadgeClass(next);
+            return `<tr>
+              <td class="upgrade-firm">${firm}</td>
+              <td><span class="upgrade-action-badge ${cls}">${next}</span></td>
+              <td class="upgrade-rating-text">${prev} → ${next}</td>
+              <td class="upgrade-date-text">${date}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
   }
 
   panel.innerHTML = `
@@ -506,12 +569,17 @@ function renderNewsTab(newsData) {
 
   panel.innerHTML = `
     <div class="news-list">
-      ${newsData.slice(0, 10).map(n => `
+      ${newsData.slice(0, 12).map(n => {
+        const date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+        return `
         <div class="news-item" onclick="window.open('${n.url || '#'}','_blank')">
           <div class="news-headline">${n.headline || n.title || 'No title'}</div>
-          <div class="news-meta">${n.source || ''} · ${n.created_at ? new Date(n.created_at).toLocaleDateString() : ''}</div>
-        </div>
-      `).join('')}
+          <div class="news-meta">
+            ${n.source ? `<span class="news-source">${n.source}</span>` : ''}
+            ${date ? `<span>${date}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
     </div>
   `;
 }

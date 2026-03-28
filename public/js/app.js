@@ -215,26 +215,29 @@ async function loadScorePanel(fmp, price) {
   const totalSell = (r.sell||0)+(r.strongSell||0);
   const hold      = r.hold || 0;
 
-  // compute a 1-10 score from analyst data
-  let score = 5;
+  let scoreCardHtml = '';
   if (total > 0) {
     const buyRatio  = totalBuy / total;
     const sellRatio = totalSell / total;
-    score = Math.round(1 + buyRatio*7 + (0.5-sellRatio)*2);
-    score = Math.max(1, Math.min(10, score));
-  }
-  const scoreClass = score >= 7 ? 'bull' : score >= 4 ? 'neut' : 'bear';
-  const verdict    = score >= 7 ? 'Bullish' : score >= 4 ? 'Neutral' : 'Bearish';
-  const sub        = total > 0 ? `Based on ${total} analyst ratings` : 'No analyst data available';
+    const score     = Math.max(1, Math.min(10, Math.round(1 + buyRatio*7 + (0.5-sellRatio)*2)));
+    const scoreClass = score >= 7 ? 'bull' : score >= 4 ? 'neut' : 'bear';
+    const verdict    = score >= 7 ? 'Bullish' : score >= 4 ? 'Neutral' : 'Bearish';
 
-  // donut slices
-  let donutHtml = '';
-  if (total > 0) {
     const R=30, CX=40, CY=40, CIRC=2*Math.PI*R;
     const slice=(pct,off,color)=>{const len=(pct/100)*CIRC;return`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="10" stroke-dasharray="${len.toFixed(2)} ${(CIRC-len).toFixed(2)}" stroke-dashoffset="${(-(off)*CIRC/100).toFixed(2)}"/>`;};
     const buyPct=totalBuy/total*100, holdPct=hold/total*100, sellPct=totalSell/total*100;
     const col = scoreClass==='bull'?'var(--green)':scoreClass==='neut'?'var(--gold)':'var(--red)';
-    donutHtml = `
+
+    scoreCardHtml = `
+    <div class="score-card">
+      <div class="score-card-title">StockPulse Score</div>
+      <div class="score-badge-wrap">
+        <div class="score-badge ${scoreClass}">${score}</div>
+        <div>
+          <div class="score-verdict">${verdict}</div>
+          <div class="score-sub">Based on ${total} analyst ratings</div>
+        </div>
+      </div>
       <div class="donut-row">
         <div class="donut-wrap">
           <svg class="donut-svg" viewBox="0 0 80 80">
@@ -253,25 +256,12 @@ async function loadScorePanel(fmp, price) {
         </div>
       </div>
       <div class="analyst-bars">
-        ${barRow('Buy',  totalBuy,  total,'buy')}
-        ${barRow('Hold', hold,      total,'hold')}
-        ${barRow('Sell', totalSell, total,'sell')}
-      </div>`;
+        ${barRow('Buy',totalBuy,total,'buy')}${barRow('Hold',hold,total,'hold')}${barRow('Sell',totalSell,total,'sell')}
+      </div>
+    </div>`;
   }
 
-  panel.innerHTML = `
-    <div class="score-card">
-      <div class="score-card-title">StockPulse Score</div>
-      <div class="score-badge-wrap">
-        <div class="score-badge ${scoreClass}">${score}</div>
-        <div>
-          <div class="score-verdict">${verdict}</div>
-          <div class="score-sub">${sub}</div>
-        </div>
-      </div>
-      ${donutHtml}
-    </div>
-    ${ptCard(fmp?.priceTarget, price)}`;
+  panel.innerHTML = `${scoreCardHtml}${ptCard(fmp?.priceTarget, price)}`;
 }
 
 function barRow(label, count, total, cls) {

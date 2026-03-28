@@ -835,6 +835,211 @@ input  { font-family:inherit; }
 .cd-now   { background:none; border:1px solid var(--teal-bdr); color:var(--teal); border-radius:var(--radius-sm); padding:7px 16px; font-size:12px; font-weight:600; cursor:pointer; transition:background var(--tr); white-space:nowrap; }
 .cd-now:hover { background:var(--teal-dim); }
 
+/* ── WSB TRENDING PAGE ─────────────────────────────────────────────────────── */
+.wsb-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.wsb-page-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.wsb-page-icon {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: #ff4500;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; flex-shrink: 0;
+  box-shadow: 0 0 20px rgba(255,69,0,.35);
+}
+.wsb-page-sub {
+  font-size: 12px; color: var(--t2); margin: 3px 0 0;
+}
+.wsb-page-controls {
+  display: flex; align-items: center; gap: 14px;
+}
+.wsb-live-badge {
+  font-size: 11px; font-weight: 700; color: var(--green);
+  font-family: 'DM Mono', monospace; letter-spacing: .04em;
+  animation: livePulse 2s infinite;
+}
+@keyframes livePulse {
+  0%,100% { opacity:1 }
+  50%      { opacity:.45 }
+}
+.wsb-next-refresh {
+  font-size: 11px; color: var(--t2);
+  font-family: 'DM Mono', monospace;
+  min-width: 130px;
+}
+.wsb-page-refresh-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none;
+  border: 1px solid rgba(245,200,66,.35);
+  color: var(--gold);
+  border-radius: 8px; padding: 7px 14px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .2s, border-color .2s, box-shadow .2s;
+}
+.wsb-page-refresh-btn:hover {
+  background: rgba(245,200,66,.08);
+  border-color: var(--gold);
+  box-shadow: 0 0 14px rgba(245,200,66,.15);
+}
+
+.wsb-page-body {
+  padding: 24px 32px 40px;
+}
+.wsb-page-card {
+  background: var(--card);
+  border: 1px solid rgba(245,200,66,.18);
+  border-top: 2px solid var(--gold);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 4px 32px rgba(0,0,0,.35);
+}
+
+/* Table layout — shared between head and rows */
+.wsb-table-head,
+.wsbt-row {
+  display: grid;
+  grid-template-columns: 60px 100px 1fr 110px 200px 100px 84px 80px;
+  align-items: center;
+  gap: 0;
+}
+.wsb-table-head {
+  padding: 0 24px;
+  height: 40px;
+  background: rgba(245,200,66,.06);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--gold);
+}
+.wsb-table-head span { padding: 0 8px; }
+.wsbt-col-rank    { text-align: center; }
+.wsbt-col-bar     { padding-left: 8px !important; }
+.wsbt-col-mentions,
+.wsbt-col-chg,
+.wsbt-col-price,
+.wsbt-col-pct     { text-align: right; }
+
+.wsbt-row {
+  padding: 0 24px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+  outline: none;
+}
+.wsbt-row:last-child { border-bottom: none; }
+.wsbt-row:hover {
+  background: rgba(245,200,66,.04);
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+.wsbt-row:focus-visible { background: rgba(245,200,66,.06); }
+.wsbt-cell {
+  padding: 0 8px;
+  display: flex; align-items: center;
+}
+.wsbt-col-rank    { justify-content: center; }
+.wsbt-col-mentions,
+.wsbt-col-chg,
+.wsbt-col-price,
+.wsbt-col-pct     { justify-content: flex-end; }
+
+/* Rank */
+.wsbt-medal   { font-size: 22px; line-height: 1; }
+.wsbt-ranknum {
+  font-size: 13px; font-weight: 700; color: var(--t2);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Ticker */
+.wsbt-sym-btn {
+  font-size: 15px; font-weight: 800;
+  font-family: 'DM Mono', monospace;
+  color: var(--gold);
+  letter-spacing: .02em;
+  transition: color .15s;
+}
+.wsbt-row:hover .wsbt-sym-btn { color: #ffd966; }
+
+/* Company name */
+.wsbt-col-name {
+  font-size: 12px; color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Mentions */
+.wsbt-mention-count {
+  font-size: 14px; font-weight: 700;
+  font-family: 'DM Mono', monospace; color: var(--t1);
+}
+.wsbt-mention-label {
+  display: none;
+}
+
+/* Upvote bar */
+.wsbt-col-bar { gap: 10px; }
+.wsbt-bar-wrap {
+  flex: 1; height: 6px;
+  background: rgba(255,255,255,.06);
+  border-radius: 3px; overflow: hidden;
+}
+.wsbt-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold) 0%, #ffaa00 100%);
+  border-radius: 3px;
+  transition: width .6s ease;
+}
+.wsbt-bar-label {
+  font-size: 11px; color: var(--t2);
+  font-family: 'DM Mono', monospace;
+  white-space: nowrap;
+}
+
+/* 24h change */
+.wsbt-chg {
+  font-size: 12px; font-weight: 700;
+  font-family: 'DM Mono', monospace;
+}
+.wsbt-chg.up   { color: var(--green); }
+.wsbt-chg.down { color: var(--red); }
+.wsbt-chg.flat { color: var(--t2); }
+
+/* Price / pct */
+.wsbt-col-price {
+  font-size: 13px; font-family: 'DM Mono', monospace; color: var(--t1);
+}
+.wsbt-col-pct {
+  font-size: 13px; font-weight: 700; font-family: 'DM Mono', monospace;
+}
+.wsbt-col-pct.up   { color: var(--green); }
+.wsbt-col-pct.down { color: var(--red); }
+
+/* Skeleton */
+.wsbt-skel { cursor: default; pointer-events: none; }
+.wsbt-skel:hover { background: none; box-shadow: none; }
+.wsbt-skel-inner { padding: 0 8px; }
+
+/* Empty state */
+.wsbt-empty {
+  padding: 48px; text-align: center;
+  color: var(--t2); font-size: 14px;
+}
+
+/* Footer */
+.wsb-page-footer {
+  display: flex; justify-content: space-between;
+  padding: 14px 0 0;
+  font-size: 11px; color: var(--t2);
+}
+.wsb-page-footer a { color: var(--gold); text-decoration: none; }
+.wsb-page-footer a:hover { text-decoration: underline; }
+
 /* ── WSB SECTION ───────────────────────────────────────────────────────────── */
 .wsb-card {
   background: var(--card);
@@ -934,6 +1139,16 @@ input  { font-family:inherit; }
   .markets-grid { grid-template-columns:1fr; }
   .stat-strip { grid-template-columns:repeat(3,1fr); }
   .wsb-cols { grid-template-columns:1fr; }
+  /* WSB page — hide bar and company on medium screens */
+  .wsb-table-head, .wsbt-row { grid-template-columns: 52px 90px 1fr 90px 90px 80px 72px; }
+  .wsbt-col-bar  { display: none; }
+}
+@media (max-width:820px) {
+  .wsb-page-header { flex-direction: column; align-items: flex-start; }
+  .wsb-page-body { padding: 0 16px 32px; }
+  /* compact 5-col layout */
+  .wsb-table-head, .wsbt-row { grid-template-columns: 48px 84px 1fr 80px 68px; }
+  .wsbt-col-name, .wsbt-col-bar, .wsbt-col-price { display: none; }
 }
 @media (max-width:768px) {
   .nav { padding:0 16px; }

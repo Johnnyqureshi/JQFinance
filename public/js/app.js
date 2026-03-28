@@ -118,6 +118,7 @@ function goPage(page) {
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
   if (page==='watchlist') loadWatchlist();
+  if (page==='wsb')       initWSBPage();
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────
@@ -551,6 +552,137 @@ async function loadMarkets() {
     const ch=s.price-(s.previousClose||0), pt=(s.previousClose?(ch/s.previousClose)*100:0);
     return`<div class="tape-item"><span class="tape-sym">${sym}</span><span class="tape-price">$${fmt(s.price)}</span><span class="tape-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span></div>`;
   }).join('');
+}
+
+// ── WSB Trending Page ──────────────────────────────────────────────────────────
+let _wsbTimer = null;
+let _wsbSecs  = 300;
+
+async function fetchAndRenderWSBPage() {
+  const tbl = $('wsbPageTable'), lu = $('wsbLastUpdated');
+  if (!tbl) return;
+
+  // skeleton
+  tbl.innerHTML = Array(10).fill(0).map(()=>`
+    <div class="wsbt-row wsbt-skel">
+      <div class="wsbt-skel-inner"><div class="skel" style="width:32px;height:20px;border-radius:6px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:52px;height:14px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:90px;height:11px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:44px;height:13px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:100%;height:6px;border-radius:3px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:50px;height:13px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:52px;height:13px"></div></div>
+      <div class="wsbt-skel-inner"><div class="skel" style="width:44px;height:13px"></div></div>
+    </div>`).join('');
+
+  const data = await api.wsb();
+  const rows = data?.tickers || [];
+  if (!rows.length) {
+    tbl.innerHTML = '<div class="wsbt-empty">No data available — try refreshing.</div>';
+    return;
+  }
+
+  // fetch live prices
+  const snaps = await api.snapshots(rows.map(t => t.sym));
+
+  const maxUpvotes  = Math.max(...rows.map(t => t.upvotes || 0), 1);
+  const rankLabels  = ['🥇','🥈','🥉'];
+
+  tbl.innerHTML = rows.map((t, i) => {
+    // price info
+    const s   = snaps[t.sym] || {};
+    const px  = s.price || 0, pv = s.previousClose || 0;
+    const pch = px - pv, ppt = pv ? (pch/pv)*100 : 0;
+
+    // upvote bar (% of top entry's upvotes)
+    const upvPct = Math.round(((t.upvotes||0) / maxUpvotes) * 100);
+    const upvLabel = (t.upvotes||0) >= 1000
+      ? ((t.upvotes/1000).toFixed(1) + 'k')
+      : String(t.upvotes||0);
+
+    // 24h mention change
+    const mentChg = (t.mentions||0) - (t.mentionsAgo||0);
+    let chgHtml;
+    if      (mentChg > 0) chgHtml = `<span class="wsbt-chg up">▲ +${mentChg}</span>`;
+    else if (mentChg < 0) chgHtml = `<span class="wsbt-chg down">▼ ${mentChg}</span>`;
+    else                   chgHtml = `<span class="wsbt-chg flat">—</span>`;
+
+    // rank badge
+    const rankDisplay = i < 3
+      ? `<span class="wsbt-medal">${rankLabels[i]}</span>`
+      : `<span class="wsbt-ranknum">#${t.rank}</span>`;
+
+    return `<div class="wsbt-row" data-sym="${t.sym}" role="button" tabindex="0">
+      <div class="wsbt-cell wsbt-col-rank">${rankDisplay}</div>
+      <div class="wsbt-cell wsbt-col-ticker">
+        <span class="wsbt-sym-btn">\$${t.sym}</span>
+      </div>
+      <div class="wsbt-cell wsbt-col-name">${(t.name||'').replace(/&amp;/g,'&')}</div>
+      <div class="wsbt-cell wsbt-col-mentions">
+        <span class="wsbt-mention-count">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+        <span class="wsbt-mention-label">mentions</span>
+      </div>
+      <div class="wsbt-cell wsbt-col-bar">
+        <div class="wsbt-bar-wrap">
+          <div class="wsbt-bar-fill" style="width:${upvPct}%"></div>
+        </div>
+        <span class="wsbt-bar-label">${upvLabel} ↑</span>
+      </div>
+      <div class="wsbt-cell wsbt-col-chg">${chgHtml}</div>
+      <div class="wsbt-cell wsbt-col-price">${px ? '$'+fmt(px) : '--'}</div>
+      <div class="wsbt-cell wsbt-col-pct ${pch>=0?'up':'down'}">${px ? (pch>=0?'+':'')+fmt(ppt)+'%' : '--'}</div>
+    </div>`;
+  }).join('');
+
+  // click to open stock
+  tbl.querySelectorAll('.wsbt-row').forEach(row => {
+    const open = () => {
+      const sym = row.dataset.sym;
+      openStock(sym, snaps[sym] || { symbol: sym });
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', e => { if (e.key==='Enter') open(); });
+  });
+
+  // updated timestamp
+  if (lu && data.updated) {
+    const d = new Date(data.updated);
+    lu.textContent = 'Updated ' + d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  }
+}
+
+function initWSBPage() {
+  // clear any running timer
+  clearInterval(_wsbTimer);
+  _wsbSecs = 300;
+
+  // wire refresh button (idempotent)
+  const btn = $('wsbPageRefresh');
+  if (btn) {
+    btn.onclick = () => {
+      clearInterval(_wsbTimer);
+      _wsbSecs = 300;
+      fetchAndRenderWSBPage();
+      startWsbCountdown();
+    };
+  }
+
+  fetchAndRenderWSBPage();
+  startWsbCountdown();
+}
+
+function startWsbCountdown() {
+  clearInterval(_wsbTimer);
+  _wsbSecs = 300;
+  _wsbTimer = setInterval(() => {
+    _wsbSecs--;
+    const cd = $('wsbCountdown');
+    if (cd) cd.textContent = `Next refresh in ${_wsbSecs}s`;
+    if (_wsbSecs <= 0) {
+      fetchAndRenderWSBPage();
+      _wsbSecs = 300;
+    }
+  }, 1000);
 }
 
 // ── WSB ────────────────────────────────────────────────────────────────────────

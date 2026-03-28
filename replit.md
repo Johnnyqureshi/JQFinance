@@ -34,7 +34,8 @@ Preferred communication style: Simple, everyday language.
 
 ### Pages
 - **Search** (`default`): Hero with search bar + popular chip shortcuts. No data shown until searched.
-- **Markets**: 4 sections (Indices, Top Movers, Tech Leaders, Finance) — loads on tab click
+- **Markets**: 4 sections (Indices, Top Movers, Tech Leaders, Finance) + WSB trending section — loads on tab click
+- **WSB Trending**: Dedicated page — top 10 r/wallstreetbets tickers by 24h mentions. Shows rank, $TICKER, company name, mention count, upvote sentiment bar, 24h mention change (▲/▼), live price + % change. Auto-refreshes every 5 minutes with countdown timer.
 - **Watchlist**: Personal saved symbols stored in localStorage; click row to view stock detail
 - **Trader**: Realtime analysis tool with RSI gauge, volume bars, day range, support/resistance
 

@@ -523,7 +523,7 @@ async function loadMarkets() {
     const ch = px-pv, pt = pv?(ch/pv)*100:0;
     return `<div class="mrow" data-sym="${sym}">
       <span class="mrow-sym">${sym}</span>
-      <span class="mrow-name">${s.name||''}</span>
+      <span class="mrow-name">${escapeHtml(s.name||'')}</span>
       <span class="mrow-px">${px?'$'+fmt(px):'--'}</span>
       <span class="mrow-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>
     </div>`;

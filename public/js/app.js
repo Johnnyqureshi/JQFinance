@@ -623,12 +623,15 @@ async function fetchAndRenderWSBPage() {
       ? `<span class="wsbt-medal">${rankLabels[i]}</span>`
       : `<span class="wsbt-ranknum">#${t.rank}</span>`;
 
-    return `<div class="wsbt-row" data-sym="${t.sym}" role="button" tabindex="0">
+    const safeSym  = escapeHtml(t.sym  || '');
+    const safeName = escapeHtml(t.name || '');
+
+    return `<div class="wsbt-row" data-sym="${safeSym}" role="button" tabindex="0">
       <div class="wsbt-cell wsbt-col-rank">${rankDisplay}</div>
       <div class="wsbt-cell wsbt-col-ticker">
-        <span class="wsbt-sym-btn">\$${t.sym}</span>
+        <span class="wsbt-sym-btn">\$${safeSym}</span>
       </div>
-      <div class="wsbt-cell wsbt-col-name">${(t.name||'').replace(/&amp;/g,'&')}</div>
+      <div class="wsbt-cell wsbt-col-name">${safeName}</div>
       <div class="wsbt-cell wsbt-col-mentions">
         <span class="wsbt-mention-count">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
         <span class="wsbt-mention-label">mentions</span>
@@ -732,11 +735,13 @@ async function loadWSB() {
       : rankChg < 0
         ? `<span class="wsb-rank-dn">▼${Math.abs(rankChg)}</span>`
         : `<span class="wsb-rank-eq">—</span>`;
-    return `<div class="wsb-ticker-row" data-sym="${t.sym}">
+    const safeSym  = escapeHtml(t.sym  || '');
+    const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
+    return `<div class="wsb-ticker-row" data-sym="${safeSym}">
       <span class="wsb-rank">#${t.rank}</span>
       ${rankBadge}
-      <span class="wsb-sym">${t.sym}</span>
-      ${showBar ? `<div class="wsb-bar-wrap"><div class="wsb-bar" style="width:${bar}%"></div></div>` : `<span class="wsb-name-sm">${(t.name||'').split(' ').slice(0,2).join(' ')}</span>`}
+      <span class="wsb-sym">${safeSym}</span>
+      ${showBar ? `<div class="wsb-bar-wrap"><div class="wsb-bar" style="width:${bar}%"></div></div>` : `<span class="wsb-name-sm">${safeName}</span>`}
       <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
       ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
     </div>`;
@@ -746,11 +751,13 @@ async function loadWSB() {
     const s  = snaps[t.sym] || {};
     const px = s.price||0, pv = s.previousClose||0;
     const ch = px-pv, pt = pv?(ch/pv)*100:0;
-    return `<div class="wsb-ticker-row" data-sym="${t.sym}">
+    const safeSym  = escapeHtml(t.sym  || '');
+    const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
+    return `<div class="wsb-ticker-row" data-sym="${safeSym}">
       <span class="wsb-rank">#${t.rank}</span>
       <span class="wsb-rank-up">▲${t.rankGain}</span>
-      <span class="wsb-sym">${t.sym}</span>
-      <span class="wsb-name-sm">${(t.name||'').split(' ').slice(0,2).join(' ')}</span>
+      <span class="wsb-sym">${safeSym}</span>
+      <span class="wsb-name-sm">${safeName}</span>
       <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
       ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
     </div>`;

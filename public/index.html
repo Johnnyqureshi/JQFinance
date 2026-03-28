@@ -1,293 +1,279 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StockPulse</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>StockPulse — Smart Stock Research</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/style.css"/>
 </head>
 <body>
 
-  <!-- TOP NAV -->
-  <nav class="topnav">
-    <div class="nav-logo">
-      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-        <path d="M4 24L10 16L16 20L22 8L28 12" stroke="#f0b429" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="28" cy="12" r="2.5" fill="#f0b429"/>
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-logo">
+    <div class="nav-logo-icon">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        <path d="M3 22L9 14L15 18L21 7L29 12" stroke="#1dd6a3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="29" cy="12" r="2.5" fill="#1dd6a3"/>
       </svg>
-      <span>StockPulse</span>
+    </div>
+    <span class="nav-logo-text">Stock<span>Pulse</span></span>
+  </div>
+
+  <div class="nav-links">
+    <button class="nav-link active" data-page="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      Search
+    </button>
+    <button class="nav-link" data-page="markets">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Markets
+    </button>
+    <button class="nav-link" data-page="watchlist">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
+      Watchlist
+    </button>
+    <button class="nav-link" data-page="trader">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg>
+      Realtime Trader
+    </button>
+  </div>
+
+  <div class="nav-right">
+    <div class="market-pill">
+      <span class="market-dot" id="mktDot"></span>
+      <span id="mktText">Checking…</span>
+    </div>
+    <div class="nav-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="navInput" placeholder="Search any stock…" autocomplete="off" spellcheck="false"/>
+      <div class="search-drop" id="navDrop"></div>
+    </div>
+  </div>
+</nav>
+
+<main class="main">
+
+<!-- HOME PAGE -->
+<div class="page active" id="page-home">
+  <div class="hero">
+    <div class="hero-eyebrow">Smart Stock Research Platform</div>
+    <h1>Research stocks like<br/><em>a professional</em></h1>
+    <p class="hero-sub">Real-time prices, analyst consensus, interactive charts and proprietary trading signals — all in one place.</p>
+    <div class="hero-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="heroInput" placeholder="Search by ticker or company name…" autocomplete="off" spellcheck="false"/>
+    </div>
+    <div class="hero-chips">
+      <span class="chip-label">Trending:</span>
+      <button class="chip" data-sym="AAPL">AAPL</button>
+      <button class="chip" data-sym="NVDA">NVDA</button>
+      <button class="chip" data-sym="TSLA">TSLA</button>
+      <button class="chip" data-sym="MSFT">MSFT</button>
+      <button class="chip" data-sym="META">META</button>
+      <button class="chip" data-sym="AMZN">AMZN</button>
+      <button class="chip" data-sym="GOOGL">GOOGL</button>
+    </div>
+  </div>
+  <div class="results-section" id="resultsSection" style="display:none">
+    <div class="results-list" id="resultsList"></div>
+  </div>
+</div>
+
+<!-- STOCK PAGE -->
+<div class="page" id="page-stock">
+  <div class="stock-topbar">
+    <button class="back-btn" id="backBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </button>
+    <div class="stock-id">
+      <div class="stock-ticker" id="sTicker">--</div>
+      <div class="stock-co-name" id="sName"></div>
+    </div>
+    <div class="stock-price-block">
+      <span class="s-price" id="sPrice">--</span>
+      <span class="s-change" id="sChange"></span>
+    </div>
+    <button class="watch-btn" id="watchBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
+      <span id="watchBtnLabel">+ Watch</span>
+    </button>
+  </div>
+
+  <div class="stock-subnav">
+    <button class="stock-tab active" data-tab="overview">Overview</button>
+    <button class="stock-tab" data-tab="chart">Chart</button>
+    <button class="stock-tab" data-tab="analysts">Analysts</button>
+    <button class="stock-tab" data-tab="news">News</button>
+  </div>
+
+  <div class="stock-body">
+    <div class="tab-pane active" id="tab-overview"><div class="tab-spin"><div class="spinner"></div></div></div>
+    <div class="tab-pane" id="tab-chart"><div class="tab-spin"><div class="spinner"></div></div></div>
+    <div class="tab-pane" id="tab-analysts"><div class="tab-spin"><div class="spinner"></div></div></div>
+    <div class="tab-pane" id="tab-news"><div class="tab-spin"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<!-- MARKETS PAGE -->
+<div class="page" id="page-markets">
+  <div class="page-header">
+    <h1 class="page-title">Markets</h1>
+    <div class="ticker-tape" id="tickerTape"></div>
+  </div>
+  <div class="markets-body">
+    <div class="markets-grid">
+      <div class="market-card"><div class="mcard-head">Major Indices</div><div id="indicesTable"></div></div>
+      <div class="market-card"><div class="mcard-head">Top Movers</div><div id="moversTable"></div></div>
+      <div class="market-card"><div class="mcard-head">Tech Leaders</div><div id="techTable"></div></div>
+      <div class="market-card"><div class="mcard-head">Finance &amp; Banks</div><div id="financeTable"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- WATCHLIST PAGE -->
+<div class="page" id="page-watchlist">
+  <div class="page-header">
+    <h1 class="page-title">My Watchlist</h1>
+  </div>
+  <div class="watchlist-body">
+    <div class="wl-toolbar">
+      <span class="wl-toolbar-title"></span>
+      <button class="btn-teal" id="addBtn">+ Add Symbol</button>
+    </div>
+    <div class="add-row" id="addRow">
+      <input type="text" id="addInput" placeholder="e.g. AAPL" maxlength="10"/>
+      <button class="btn-teal" id="addConfirm">Add</button>
+      <button class="btn-outline" id="addCancel">Cancel</button>
+    </div>
+    <div class="wl-table" id="wlTable"></div>
+  </div>
+</div>
+
+<!-- REALTIME TRADER PAGE -->
+<div class="page" id="page-trader">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title" style="color:transparent;background:linear-gradient(135deg,#1dd6a3,#f5c842);-webkit-background-clip:text;background-clip:text;font-size:26px;">⚡ Realtime Trader</h1>
+      <div style="font-size:13px;color:var(--t2);margin-top:4px;">Live trading signals powered by RSI, volume analysis and support/resistance levels</div>
+    </div>
+  </div>
+  <div class="trader-body">
+    <div class="trader-input-wrap">
+      <div class="trader-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg>
+        <input type="text" id="traderInput" placeholder="Enter ticker… e.g. TSLA" maxlength="10" autocomplete="off"/>
+        <button class="analyze-btn" id="traderBtn">Analyze</button>
+      </div>
     </div>
 
-    <div class="nav-tabs">
-      <a class="nav-tab active" data-page="search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        Search
-      </a>
-      <a class="nav-tab" data-page="markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Markets
-      </a>
-      <a class="nav-tab" data-page="watchlist">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        Watchlist
-      </a>
-      <a class="nav-tab" data-page="trader">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Realtime Trader
-      </a>
+    <div class="trader-loading" id="traderLoading" style="display:none">
+      <div class="t-spinner"></div>
+      <p>Analyzing <strong id="traderLoadingTicker"></strong>…</p>
+    </div>
+    <div class="trader-error" id="traderError" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg>
+      <p id="traderErrorMsg">Unable to analyze this symbol. Please try another.</p>
     </div>
 
-    <div class="nav-right">
-      <div class="market-status" id="marketStatus">
-        <span class="status-dot"></span>
-        <span class="status-text">Checking…</span>
-      </div>
-      <div class="nav-search-wrap">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="navSearchInput" placeholder="Search ticker…" autocomplete="off" autocapitalize="characters" spellcheck="false" />
-        <div class="nav-dropdown" id="navDropdown"></div>
-      </div>
-    </div>
-  </nav>
-
-  <!-- MAIN -->
-  <main class="main">
-
-    <!-- SEARCH PAGE (default) -->
-    <div class="page active" id="page-search">
-      <div class="search-hero" id="searchHero">
-        <h1 class="hero-title">Analyze <span>any stock</span></h1>
-        <p class="hero-sub">Real-time prices, analyst ratings, charts and trading signals</p>
-        <div class="hero-search-bar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="heroSearchInput" placeholder="Search by ticker or company name…" autocomplete="off" autocapitalize="characters" spellcheck="false" />
-        </div>
-        <div class="hero-chips">
-          <span class="chips-label">Popular:</span>
-          <button class="chip" data-sym="AAPL">AAPL</button>
-          <button class="chip" data-sym="NVDA">NVDA</button>
-          <button class="chip" data-sym="TSLA">TSLA</button>
-          <button class="chip" data-sym="MSFT">MSFT</button>
-          <button class="chip" data-sym="AMZN">AMZN</button>
-          <button class="chip" data-sym="META">META</button>
-        </div>
-      </div>
-      <div class="search-results-wrap" id="searchResultsWrap" style="display:none">
-        <div class="search-results-list" id="searchResultsList"></div>
-      </div>
-    </div>
-
-    <!-- STOCK DETAIL PAGE -->
-    <div class="page" id="page-stock">
-      <div class="stock-header" id="stockHeader">
-        <button class="back-btn" id="backBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-          Back
-        </button>
-        <div class="stock-header-main">
-          <span class="stock-symbol" id="detailSymbol">--</span>
-          <span class="stock-name" id="detailName"></span>
-        </div>
-        <div class="stock-header-price">
-          <span class="stock-price" id="detailPrice">--</span>
-          <span class="stock-change" id="detailChange"></span>
-        </div>
-        <button class="watch-btn" id="detailWatchBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          <span id="watchBtnLabel">Watch</span>
-        </button>
-      </div>
-
-      <div class="stock-tabs" id="stockTabs">
-        <button class="stock-tab active" data-tab="overview">Overview</button>
-        <button class="stock-tab" data-tab="chart">Chart</button>
-        <button class="stock-tab" data-tab="analysts">Analysts</button>
-        <button class="stock-tab" data-tab="news">News</button>
-      </div>
-
-      <div class="stock-tab-panels">
-        <div class="tab-panel active" id="tab-overview">
-          <div class="tab-loading"><div class="spinner"></div></div>
-        </div>
-        <div class="tab-panel" id="tab-chart">
-          <div class="tab-loading"><div class="spinner"></div></div>
-        </div>
-        <div class="tab-panel" id="tab-analysts">
-          <div class="tab-loading"><div class="spinner"></div></div>
-        </div>
-        <div class="tab-panel" id="tab-news">
-          <div class="tab-loading"><div class="spinner"></div></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- MARKETS PAGE -->
-    <div class="page" id="page-markets">
-      <div class="page-header">
-        <h1 class="page-title">Markets</h1>
-        <div class="ticker-strip" id="tickerStrip"></div>
-      </div>
-      <div class="markets-grid">
-        <div class="markets-section">
-          <h2 class="section-label">Major Indices</h2>
-          <div class="markets-table" id="indicesTable"></div>
-        </div>
-        <div class="markets-section">
-          <h2 class="section-label">Top Movers</h2>
-          <div class="markets-table" id="moversTable"></div>
-        </div>
-        <div class="markets-section">
-          <h2 class="section-label">Tech Leaders</h2>
-          <div class="markets-table" id="techTable"></div>
-        </div>
-        <div class="markets-section">
-          <h2 class="section-label">Finance</h2>
-          <div class="markets-table" id="financeTable"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- WATCHLIST PAGE -->
-    <div class="page" id="page-watchlist">
-      <div class="page-header">
-        <h1 class="page-title">Watchlist</h1>
-        <button class="icon-btn" id="addToWatchlistBtn" title="Add symbol">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-          Add
-        </button>
-      </div>
-      <div class="add-form" id="addSymbolForm" style="display:none">
-        <input type="text" id="watchlistInput" placeholder="Enter ticker (e.g. AAPL)" maxlength="10" autocapitalize="characters" />
-        <button id="confirmAddSymbol" class="btn-gold">Add</button>
-        <button id="cancelAddSymbol" class="btn-ghost">Cancel</button>
-      </div>
-      <div class="watchlist-list" id="watchlistGrid"></div>
-    </div>
-
-    <!-- REALTIME TRADER PAGE -->
-    <div class="page" id="page-trader">
-
-      <div class="page-header">
-        <h1 class="page-title trader-page-title">Realtime Trader</h1>
-      </div>
-
-      <div class="trader-input-wrap">
-        <div class="trader-input-bar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          <input type="text" id="traderTickerInput" placeholder="Enter ticker… e.g. TSLA" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" />
-          <button class="trader-analyze-btn" id="traderAnalyzeBtn">Analyze</button>
-        </div>
-      </div>
-
-      <div class="trader-loading" id="traderLoading" style="display:none">
-        <div class="trader-spinner"></div>
-        <p>Analyzing <strong id="traderLoadingTicker"></strong>…</p>
-      </div>
-
-      <div class="trader-error" id="traderError" style="display:none">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <p id="traderErrorMsg">Unable to analyze this symbol.</p>
-      </div>
-
-      <div class="trader-results" id="traderResults" style="display:none">
-        <div class="verdict-card" id="verdictCard">
-          <div class="verdict-left">
-            <div class="verdict-badge" id="verdictBadge">--</div>
+    <div class="trader-results" id="traderResults" style="display:none">
+      <div class="verdict-card" id="verdictCard">
+        <div class="v-badge" id="verdictBadge">--</div>
+        <div class="v-info">
+          <div class="v-sym" id="verdictSym">--</div>
+          <div class="v-price" id="verdictPrice">--</div>
+          <div class="v-conf-row">
+            <span class="v-conf-label">Confidence</span>
+            <span class="v-conf-val" id="verdictConf">--%</span>
           </div>
-          <div class="verdict-right">
-            <div class="verdict-symbol" id="verdictSymbol">--</div>
-            <div class="verdict-price" id="verdictPrice">--</div>
-            <div class="verdict-confidence-row">
-              <span class="confidence-label">Confidence</span>
-              <span class="confidence-value" id="verdictConfidence">--%</span>
-            </div>
-            <div class="verdict-reason" id="verdictReason"></div>
-          </div>
+          <div class="v-reason" id="verdictReason"></div>
         </div>
+      </div>
 
-        <div class="trader-metrics-row">
-          <div class="metric-card">
-            <div class="metric-title">RSI (14)</div>
-            <div class="rsi-wrap">
-              <svg class="rsi-gauge" id="rsiGaugeSvg" viewBox="0 0 180 110" preserveAspectRatio="xMidYMid meet"></svg>
-              <div class="rsi-readout">
-                <span class="rsi-number" id="rsiNumber">--</span>
-                <span class="rsi-zone-label" id="rsiZoneLabel">--</span>
-              </div>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-title">Volume vs 10-Day Avg</div>
-            <div class="vol-wrap">
-              <div class="vol-row">
-                <span class="vol-label">Today</span>
-                <div class="vol-track"><div class="vol-bar vol-today" id="volBarToday" style="width:0%"></div></div>
-                <span class="vol-val" id="volToday">--</span>
-              </div>
-              <div class="vol-row">
-                <span class="vol-label">10d Avg</span>
-                <div class="vol-track"><div class="vol-bar vol-avg" id="volBarAvg" style="width:100%"></div></div>
-                <span class="vol-val" id="volAvg">--</span>
-              </div>
-              <div class="vol-diff-badge" id="volDiffBadge"></div>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-title">Day Range Position</div>
-            <div class="range-wrap">
-              <div class="range-labels-top">
-                <span id="rangeLow">--</span>
-                <span id="rangeCurrent" class="range-current-label">--</span>
-                <span id="rangeHigh">--</span>
-              </div>
-              <div class="range-track-outer">
-                <div class="range-track-inner">
-                  <div class="range-fill-bar" id="rangeFillBar" style="width:50%"></div>
-                  <div class="range-dot-marker" id="rangeDotMarker" style="left:50%"></div>
-                </div>
-              </div>
-              <div class="range-pct-label" id="rangePctLabel">-- in today's range</div>
+      <div class="metrics-grid">
+        <div class="m-card">
+          <div class="m-card-title">RSI (14-Period)</div>
+          <div class="rsi-wrap">
+            <svg class="rsi-svg" id="rsiSvg" viewBox="0 0 180 110" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="rsi-read">
+              <span class="rsi-num" id="rsiNum">--</span>
+              <span class="rsi-zone" id="rsiZone">--</span>
             </div>
           </div>
         </div>
-
-        <div class="trader-metrics-row">
-          <div class="metric-card direction-card-wrap">
-            <div class="metric-title">Day Direction</div>
-            <div class="direction-inner" id="directionInner">
-              <div class="direction-arrow" id="directionArrow">▲</div>
-              <div class="direction-label" id="directionLabel">Bullish</div>
-              <div class="direction-pct" id="directionPct">+0.00% from open</div>
+        <div class="m-card">
+          <div class="m-card-title">Volume vs 10-Day Avg</div>
+          <div class="vol-wrap">
+            <div class="vol-row">
+              <span class="vol-lbl">Today</span>
+              <div class="vol-track"><div class="vol-bar vol-today" id="volBarT" style="width:0%"></div></div>
+              <span class="vol-val" id="volToday">--</span>
             </div>
-          </div>
-          <div class="metric-card sr-card">
-            <div class="metric-title">Support &amp; Resistance — 14-Day Levels</div>
-            <div class="sr-table" id="srTable"></div>
+            <div class="vol-row">
+              <span class="vol-lbl">10d Avg</span>
+              <div class="vol-track"><div class="vol-bar vol-avg" id="volBarA" style="width:100%"></div></div>
+              <span class="vol-val" id="volAvg">--</span>
+            </div>
+            <div class="vol-badge" id="volBadge"></div>
           </div>
         </div>
-
-        <div class="refresh-countdown-row">
-          <div class="countdown-ring-wrap">
-            <svg class="countdown-ring-svg" viewBox="0 0 44 44">
-              <circle class="countdown-track" cx="22" cy="22" r="18"/>
-              <circle class="countdown-arc" cx="22" cy="22" r="18" id="countdownArc"/>
-            </svg>
-            <span class="countdown-num" id="countdownNum">60</span>
+        <div class="m-card">
+          <div class="m-card-title">Day Range Position</div>
+          <div class="range-wrap">
+            <div class="range-top">
+              <span id="rLow">--</span>
+              <span class="range-cur-lbl" id="rCur">--</span>
+              <span id="rHigh">--</span>
+            </div>
+            <div class="range-outer">
+              <div class="range-inner">
+                <div class="range-fill" id="rangeFill" style="width:50%"></div>
+                <div class="range-dot" id="rangeDot" style="left:50%"></div>
+              </div>
+            </div>
+            <div class="range-pct" id="rangePct">-- in today's range</div>
           </div>
-          <span class="countdown-label">Auto-refresh in <strong id="countdownSecs">60</strong>s</span>
-          <button class="trader-refresh-now-btn" id="traderRefreshBtn">Refresh Now</button>
         </div>
       </div>
 
-    </div><!-- /page-trader -->
+      <div class="metrics-grid">
+        <div class="m-card">
+          <div class="m-card-title">Day Direction</div>
+          <div class="dir-inner" id="dirInner">
+            <div class="dir-arrow" id="dirArrow">▲</div>
+            <div class="dir-label" id="dirLabel">Bullish</div>
+            <div class="dir-pct" id="dirPct">+0.00% from open</div>
+          </div>
+        </div>
+        <div class="m-card sr-span">
+          <div class="m-card-title">Support &amp; Resistance — 14-Day Levels</div>
+          <div class="sr-table" id="srTable"></div>
+        </div>
+      </div>
 
-  </main>
+      <div class="cd-row">
+        <div class="cd-ring-wrap">
+          <svg class="cd-ring-svg" viewBox="0 0 44 44">
+            <circle class="cd-track" cx="22" cy="22" r="18"/>
+            <circle class="cd-arc" cx="22" cy="22" r="18" id="cdArc"/>
+          </svg>
+          <span class="cd-num" id="cdNum">60</span>
+        </div>
+        <span class="cd-label">Auto-refresh in <strong id="cdSecs">60</strong>s</span>
+        <button class="cd-now" id="cdNow">Refresh Now</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-  <script src="/js/app.js"></script>
-  <script src="/js/trader.js"></script>
+</main>
+
+<script src="/js/app.js"></script>
+<script src="/js/trader.js"></script>
 </body>
 </html>

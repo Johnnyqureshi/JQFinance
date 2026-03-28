@@ -1,923 +1,611 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// StockPulse — Main App
-// ─────────────────────────────────────────────────────────────────────────────
+// ── StockPulse — Main App ──────────────────────────────────────────────────────
 
-const INDICES    = ['SPY','QQQ','DIA','IWM','GLD'];
-const TECH       = ['AAPL','MSFT','NVDA','GOOGL','META','AMD','TSLA'];
-const FINANCE    = ['JPM','BAC','GS','V','MA','PYPL'];
-const MOVERS_SYM = ['AMZN','NFLX','UBER','COIN','PLTR','ROKU','RBLX','SNAP'];
-
-// ─── STATE ────────────────────────────────────────────────────────────────────
+const INDICES  = ['SPY','QQQ','DIA','IWM'];
+const TECH     = ['AAPL','MSFT','NVDA','GOOGL','META','AMD','TSLA'];
+const FINANCE  = ['JPM','BAC','GS','V','MA','BRK-B'];
+const MOVERS   = ['AMZN','NFLX','UBER','COIN','PLTR','ROKU','RBLX','SNAP'];
 
 const state = {
-  snapshots:    {},
-  currentPage:  'search',
-  prevPage:     'search',
-  currentSymbol: null,
-  currentSnap:   null,
-  stockData:     null,    // { bars, fmp, news } — fetched when stock opens
-  watchlist: JSON.parse(localStorage.getItem('sp_watchlist') || '["AAPL","MSFT","NVDA"]'),
+  page:        'home',
+  prevPage:    'home',
+  symbol:      null,
+  snap:        null,
+  stockData:   null,
+  watchlist:   JSON.parse(localStorage.getItem('sp_wl') || '["AAPL","MSFT","NVDA","TSLA"]'),
 };
 
-// ─── UTILS ────────────────────────────────────────────────────────────────────
+// ── utils ──────────────────────────────────────────────────────────────────────
+const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtV = v => { if(!v) return '--'; if(v>=1e9) return (v/1e9).toFixed(1)+'B'; if(v>=1e6) return (v/1e6).toFixed(1)+'M'; if(v>=1e3) return (v/1e3).toFixed(0)+'K'; return String(v); };
+const cls  = v => v >= 0 ? 'up' : 'down';
+const $    = id => document.getElementById(id);
+const saveWL = () => localStorage.setItem('sp_wl', JSON.stringify(state.watchlist));
 
-function fmt(n, d = 2) {
-  if (n == null || isNaN(n)) return '--';
-  return Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-}
+// ── API ────────────────────────────────────────────────────────────────────────
+const api = {
+  async snapshots(syms) {
+    try { const r = await fetch(`/api/snapshots?symbols=${syms.join(',')}`); return r.ok ? r.json() : {}; } catch { return {}; }
+  },
+  async bars(sym, tf='1Day', limit=60) {
+    try { const r = await fetch(`/api/bars/${sym}?timeframe=${tf}&limit=${limit}`); return r.ok ? r.json() : null; } catch { return null; }
+  },
+  async news(sym) {
+    try { const r = await fetch(`/api/news/${sym}`); const d = await r.json(); return d.news || []; } catch { return []; }
+  },
+  async search(q) {
+    try { const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`); return r.ok ? r.json() : []; } catch { return []; }
+  },
+  async stock(sym) {
+    try { const r = await fetch(`/api/stock/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
+  },
+};
 
-function cls(val) { return val >= 0 ? 'up' : 'down'; }
-
-function fmtVol(v) {
-  if (!v) return '--';
-  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
-  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
-  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
-  return String(v);
-}
-
-function saveWatchlist() {
-  localStorage.setItem('sp_watchlist', JSON.stringify(state.watchlist));
-}
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-
-async function fetchSnapshots(symbols) {
-  try {
-    const r = await fetch(`/api/snapshots?symbols=${symbols.join(',')}`);
-    if (!r.ok) return {};
-    return await r.json();
-  } catch { return {}; }
-}
-
-async function fetchBars(symbol, timeframe = '1Day', limit = 60) {
-  try {
-    const r = await fetch(`/api/bars/${symbol}?timeframe=${timeframe}&limit=${limit}`);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; }
-}
-
-async function fetchNews(symbol) {
-  try {
-    const r = await fetch(`/api/news/${symbol}`);
-    if (!r.ok) return [];
-    const d = await r.json();
-    return d.news || [];
-  } catch { return []; }
-}
-
-async function searchSymbols(q) {
-  try {
-    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-    if (!r.ok) return [];
-    return await r.json();
-  } catch { return []; }
-}
-
-async function fetchStockAnalysis(symbol) {
-  try {
-    const r = await fetch(`/api/stock/${symbol}`);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; }
-}
-
-// ─── MARKET STATUS ────────────────────────────────────────────────────────────
-
+// ── Market status ──────────────────────────────────────────────────────────────
 function updateMarketStatus() {
-  const now = new Date();
-  const et  = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const day = et.getDay();
-  const mins = et.getHours() * 60 + et.getMinutes();
-  const isOpen = day >= 1 && day <= 5 && mins >= 570 && mins < 960;
-
-  const dot  = document.querySelector('.status-dot');
-  const text = document.querySelector('.status-text');
-  if (dot)  dot.className  = 'status-dot ' + (isOpen ? 'open' : 'closed');
-  if (text) text.textContent = isOpen ? 'Market Open' : 'Market Closed';
+  const et   = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day  = et.getDay();
+  const mins = et.getHours()*60 + et.getMinutes();
+  const open = day>=1 && day<=5 && mins>=570 && mins<960;
+  $('mktDot').className  = 'market-dot ' + (open ? 'open' : 'closed');
+  $('mktText').textContent = open ? 'Market Open' : 'Market Closed';
 }
 
-// ─── MINI CHART ───────────────────────────────────────────────────────────────
-
-function drawMiniChart(canvas, prices, isUp) {
-  if (!canvas || !prices || prices.length < 2) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.offsetWidth || 220;
-  const h = 48;
+// ── Chart drawing ──────────────────────────────────────────────────────────────
+function drawChart(canvas, bars, color, h=300) {
+  if (!canvas || !bars?.length) return;
+  const ctx  = canvas.getContext('2d');
+  const w    = canvas.offsetWidth || canvas.parentElement.clientWidth - 40;
   canvas.width  = w;
   canvas.height = h;
-
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  const range = max - min || 1;
-  const color = isUp ? '#3fb950' : '#f85149';
-  const step  = w / (prices.length - 1);
-
-  ctx.clearRect(0, 0, w, h);
-
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, isUp ? 'rgba(63,185,80,0.3)' : 'rgba(248,81,73,0.3)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-
-  ctx.beginPath();
-  prices.forEach((p, i) => {
-    const x = i * step;
-    const y = h - ((p - min) / range) * (h - 4) - 2;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  const lastX = (prices.length - 1) * step;
-  const lastY = h - ((prices[prices.length - 1] - min) / range) * (h - 4) - 2;
-  ctx.lineTo(lastX, h); ctx.lineTo(0, h); ctx.closePath();
-  ctx.fillStyle = grad; ctx.fill();
-
-  ctx.beginPath();
-  prices.forEach((p, i) => {
-    const x = i * step;
-    const y = h - ((p - min) / range) * (h - 4) - 2;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
-}
-
-// ─── FULL CHART ───────────────────────────────────────────────────────────────
-
-function drawFullChart(canvas, bars, color) {
-  if (!canvas || !bars || bars.length === 0) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.offsetWidth || canvas.parentElement.offsetWidth - 48;
-  const h = canvas.offsetHeight || 300;
-  canvas.width  = w;
-  canvas.height = h;
-
   const prices = bars.map(b => b.c);
-  const min    = Math.min(...prices) * 0.999;
-  const max    = Math.max(...prices) * 1.001;
+  const min    = Math.min(...prices) * 0.998;
+  const max    = Math.max(...prices) * 1.002;
   const range  = max - min || 1;
-
-  const pad = { top: 12, right: 12, bottom: 28, left: 54 };
-  const cw  = w - pad.left - pad.right;
-  const ch  = h - pad.top  - pad.bottom;
-  const step = cw / (prices.length - 1);
-
+  const pad    = { t:10, r:10, b:30, l:56 };
+  const cw = w - pad.l - pad.r;
+  const ch = h - pad.t  - pad.b;
+  const sx = cw / (prices.length - 1);
   ctx.clearRect(0, 0, w, h);
 
-  // Grid lines
-  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y   = pad.top + (ch / 4) * i;
-    const val = max - (range / 4) * i;
-    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
-    ctx.fillStyle = '#484f58'; ctx.font = '10px Inter'; ctx.textAlign = 'right';
-    ctx.fillText('$' + fmt(val), pad.left - 4, y + 3);
+  // grid
+  ctx.strokeStyle = '#1c2a42'; ctx.lineWidth = 1;
+  for (let i=0; i<=4; i++) {
+    const y = pad.t + (ch/4)*i;
+    const v = max - (range/4)*i;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    ctx.fillStyle='#3d5070'; ctx.font='10px Inter'; ctx.textAlign='right';
+    ctx.fillText('$'+fmt(v), pad.l-4, y+3);
   }
 
-  // Gradient fill
-  const grad = ctx.createLinearGradient(0, pad.top, 0, h - pad.bottom);
-  grad.addColorStop(0, color + '44'); grad.addColorStop(1, color + '00');
+  // gradient fill
+  const grad = ctx.createLinearGradient(0,pad.t,0,h-pad.b);
+  grad.addColorStop(0, color+'55'); grad.addColorStop(1, color+'00');
   ctx.beginPath();
-  prices.forEach((p, i) => {
-    const x = pad.left + i * step;
-    const y = pad.top + ch - ((p - min) / range) * ch;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  prices.forEach((p,i) => {
+    const x=pad.l+i*sx, y=pad.t+ch-((p-min)/range)*ch;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
   });
-  ctx.lineTo(pad.left + (prices.length - 1) * step, h - pad.bottom);
-  ctx.lineTo(pad.left, h - pad.bottom); ctx.closePath();
-  ctx.fillStyle = grad; ctx.fill();
+  ctx.lineTo(pad.l+(prices.length-1)*sx, h-pad.b);
+  ctx.lineTo(pad.l, h-pad.b); ctx.closePath();
+  ctx.fillStyle=grad; ctx.fill();
 
-  // Line
+  // line
   ctx.beginPath();
-  prices.forEach((p, i) => {
-    const x = pad.left + i * step;
-    const y = pad.top + ch - ((p - min) / range) * ch;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  prices.forEach((p,i) => {
+    const x=pad.l+i*sx, y=pad.t+ch-((p-min)/range)*ch;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
   });
-  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke();
 
-  // Dot at last price
-  const lastX = pad.left + (prices.length - 1) * step;
-  const lastY = pad.top + ch - ((prices[prices.length - 1] - min) / range) * ch;
-  ctx.beginPath(); ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-  ctx.fillStyle = color; ctx.fill();
+  // last dot
+  const lx=pad.l+(prices.length-1)*sx, ly=pad.t+ch-((prices.at(-1)-min)/range)*ch;
+  ctx.beginPath(); ctx.arc(lx,ly,4,0,Math.PI*2);
+  ctx.fillStyle=color; ctx.fill();
 }
 
-// ─── ANALYST HELPERS ──────────────────────────────────────────────────────────
-
-function ratingBadgeClass(r) {
-  if (!r) return 'reiterate';
-  const s = r.toLowerCase();
-  if (s.includes('strong buy'))  return 'upgrade';
-  if (s.includes('buy') || s === 'overweight' || s === 'outperform' || s === 'accumulate') return 'upgrade';
-  if (s.includes('strong sell')) return 'downgrade';
-  if (s.includes('sell') || s === 'underweight' || s === 'underperform') return 'downgrade';
-  if (s.includes('initiat') || s.includes('coverage')) return 'initiated';
-  return 'reiterate';
-}
-
-// ─── NAVIGATION ───────────────────────────────────────────────────────────────
-
-function switchTab(page) {
-  state.prevPage = state.currentPage;
-  state.currentPage = page;
-
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
+// ── Navigation ─────────────────────────────────────────────────────────────────
+function goPage(page) {
+  state.prevPage = state.page;
+  state.page     = page;
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page===page));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-
-  const pageEl = document.getElementById('page-' + page);
-  if (pageEl) pageEl.classList.add('active');
-
-  if (page === 'markets')   loadMarkets();
-  if (page === 'watchlist') loadWatchlist();
+  $('page-'+page).classList.add('active');
+  if (page==='markets')   loadMarkets();
+  if (page==='watchlist') loadWatchlist();
 }
 
-// ─── STOCK DETAIL PAGE ────────────────────────────────────────────────────────
+// ── Stock page ─────────────────────────────────────────────────────────────────
+async function openStock(sym, snap) {
+  state.prevPage  = state.page;
+  state.page      = 'stock';
+  state.symbol    = sym;
+  state.snap      = snap || {};
+  state.stockData = null;
 
-async function openStock(symbol, snap) {
-  state.prevPage     = state.currentPage;
-  state.currentPage  = 'stock';
-  state.currentSymbol = symbol;
-  state.currentSnap   = snap;
-  state.stockData     = null;
-
-  // Deactivate all nav tabs while on stock page
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-stock').classList.add('active');
+  $('page-stock').classList.add('active');
 
-  // Stock header
-  const price     = snap?.price || 0;
-  const prev      = snap?.previousClose || 0;
-  const change    = price - prev;
-  const pct       = prev ? (change / prev) * 100 : 0;
-  const isUp      = change >= 0;
+  const price = snap?.price || 0;
+  const prev  = snap?.previousClose || 0;
+  const chg   = price - prev;
+  const pct   = prev ? (chg/prev)*100 : 0;
+  const up    = chg >= 0;
 
-  document.getElementById('detailSymbol').textContent = symbol;
-  document.getElementById('detailName').textContent   = '';
-  document.getElementById('detailPrice').textContent  = price ? '$' + fmt(price) : '--';
+  $('sTicker').textContent = sym;
+  $('sName').textContent   = snap?.name || '';
+  $('sPrice').textContent  = price ? '$'+fmt(price) : '--';
+  const sc = $('sChange');
+  sc.textContent = price && prev ? `${up?'+':''}${fmt(chg)} (${up?'+':''}${fmt(pct)}%)` : '';
+  sc.className   = 'stock-change ' + (up ? 'up' : 'down');
+  updateWatchBtn(sym);
 
-  const changeEl = document.getElementById('detailChange');
-  changeEl.textContent = price && prev
-    ? `${isUp ? '+' : ''}${fmt(change)} (${isUp ? '+' : ''}${fmt(pct)}%)`
-    : '';
-  changeEl.className = 'stock-change ' + cls(change);
+  // reset tabs
+  document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='overview'));
+  document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
-  updateWatchBtn(symbol);
-
-  // Reset to Overview tab
-  document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'overview'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-overview'));
-  ['overview','chart','analysts','news'].forEach(t => {
-    const el = document.getElementById('tab-' + t);
-    if (el) el.innerHTML = '<div class="tab-loading"><div class="spinner"></div></div>';
-  });
-
-  // Fetch all data in parallel
+  // fetch all data in parallel
   const [barsData, fmpData, newsData] = await Promise.all([
-    fetchBars(symbol, '1Hour', 48),
-    fetchStockAnalysis(symbol),
-    fetchNews(symbol),
+    api.bars(sym, '1Hour', 48),
+    api.stock(sym),
+    api.news(sym),
   ]);
-
-  state.stockData = { snap, bars: barsData, fmp: fmpData, news: newsData, symbol };
-
-  // Render Overview (active tab)
-  renderOverviewTab(snap, barsData, isUp);
+  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData };
+  renderOverview(snap, barsData, up);
 }
 
-function updateWatchBtn(symbol) {
-  const btn   = document.getElementById('detailWatchBtn');
-  const label = document.getElementById('watchBtnLabel');
-  if (!btn || !label) return;
-  const watching = state.watchlist.includes(symbol);
-  btn.classList.toggle('watching', watching);
-  label.textContent = watching ? 'Watching' : 'Watch';
+function updateWatchBtn(sym) {
+  const on = state.watchlist.includes(sym);
+  $('watchBtn').classList.toggle('on', on);
+  $('watchBtnLabel').textContent = on ? '✓ Watching' : '+ Watch';
 }
 
 function switchStockTab(tab) {
-  document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
-
+  document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id==='tab-'+tab));
   const d = state.stockData;
   if (!d) return;
-
-  const snap   = d.snap;
-  const price  = snap?.price || 0;
-  const prev   = snap?.previousClose || 0;
-  const isUp   = price >= prev;
-
-  if (tab === 'overview') renderOverviewTab(snap, d.bars, isUp);
-  if (tab === 'chart')    renderChartTab(d.symbol, d.bars, isUp);
-  if (tab === 'analysts') renderAnalystsTab(d.fmp, price);
-  if (tab === 'news')     renderNewsTab(d.news);
+  const up = (d.snap?.price||0) >= (d.snap?.previousClose||0);
+  if (tab==='overview') renderOverview(d.snap, d.bars, up);
+  if (tab==='chart')    renderChart(d.sym, d.bars, up);
+  if (tab==='analysts') renderAnalysts(d.fmp, d.snap?.price||0);
+  if (tab==='news')     renderNews(d.news);
 }
 
-function renderOverviewTab(snap, barsData, isUp) {
-  const panel  = document.getElementById('tab-overview');
-  if (!panel) return;
-
-  const price  = snap?.price         || 0;
-  const prev   = snap?.previousClose || 0;
-  const open   = snap?.open          || 0;
-  const high   = snap?.dayHigh       || 0;
-  const low    = snap?.dayLow        || 0;
-  const vol    = snap?.volume        || 0;
-  const vwap   = snap?.price         || 0;
-
-  panel.innerHTML = `
-    <div class="overview-stats-grid">
-      <div class="stat-box"><label>Open</label><span>$${fmt(open)}</span></div>
-      <div class="stat-box"><label>Prev Close</label><span>$${fmt(prev)}</span></div>
-      <div class="stat-box"><label>Day High</label><span>$${fmt(high)}</span></div>
-      <div class="stat-box"><label>Day Low</label><span>$${fmt(low)}</span></div>
-      <div class="stat-box"><label>Volume</label><span>${fmtVol(vol)}</span></div>
-      <div class="stat-box"><label>VWAP</label><span>${vwap ? '$' + fmt(vwap) : '--'}</span></div>
-    </div>
-    <div class="overview-chart-card">
-      <h3>Intraday (48h)</h3>
-      <canvas id="overviewChartCanvas" style="height:140px;"></canvas>
-    </div>
-  `;
-
-  const canvas = document.getElementById('overviewChartCanvas');
-  if (canvas && barsData?.bars?.length >= 2) {
-    const color = isUp ? '#3fb950' : '#f85149';
-    requestAnimationFrame(() => drawFullChart(canvas, barsData.bars, color));
-  }
+// ── Overview tab ───────────────────────────────────────────────────────────────
+function renderOverview(snap, bars, up) {
+  const p = snap || {};
+  const color = up ? '#1dd6a3' : '#e84545';
+  $('tab-overview').innerHTML = `
+    <div class="overview-layout">
+      <div>
+        <div class="stat-strip">
+          <div class="stat-cell"><label>Open</label><span>$${fmt(p.open)}</span></div>
+          <div class="stat-cell"><label>Prev Close</label><span>$${fmt(p.previousClose)}</span></div>
+          <div class="stat-cell"><label>Day High</label><span>$${fmt(p.dayHigh)}</span></div>
+          <div class="stat-cell"><label>Day Low</label><span>$${fmt(p.dayLow)}</span></div>
+          <div class="stat-cell"><label>Volume</label><span>${fmtV(p.volume)}</span></div>
+          <div class="stat-cell"><label>Avg Volume</label><span>${fmtV(p.avgVolume)}</span></div>
+        </div>
+        <div class="chart-card">
+          <h3>Intraday — Last 48 hours</h3>
+          <canvas id="ovCanvas" style="height:220px"></canvas>
+        </div>
+      </div>
+      <div id="scorePanel"></div>
+    </div>`;
+  const canvas = $('ovCanvas');
+  if (canvas && bars?.bars?.length >= 2) requestAnimationFrame(() => drawChart(canvas, bars.bars, color, 220));
+  // async score panel
+  loadScorePanel(state.stockData?.fmp, p.price||0);
 }
 
-function renderChartTab(symbol, initialBars, isUp) {
-  const panel = document.getElementById('tab-chart');
+async function loadScorePanel(fmp, price) {
+  const panel = $('scorePanel');
   if (!panel) return;
+  const r = fmp?.ratings || {};
+  const total   = r.total || 0;
+  const totalBuy  = (r.strongBuy||0)+(r.buy||0);
+  const totalSell = (r.sell||0)+(r.strongSell||0);
+  const hold      = r.hold || 0;
+
+  // compute a 1-10 score from analyst data
+  let score = 5;
+  if (total > 0) {
+    const buyRatio  = totalBuy / total;
+    const sellRatio = totalSell / total;
+    score = Math.round(1 + buyRatio*7 + (0.5-sellRatio)*2);
+    score = Math.max(1, Math.min(10, score));
+  }
+  const scoreClass = score >= 7 ? 'bull' : score >= 4 ? 'neut' : 'bear';
+  const verdict    = score >= 7 ? 'Bullish' : score >= 4 ? 'Neutral' : 'Bearish';
+  const sub        = total > 0 ? `Based on ${total} analyst ratings` : 'No analyst data available';
+
+  // donut slices
+  let donutHtml = '';
+  if (total > 0) {
+    const R=30, CX=40, CY=40, CIRC=2*Math.PI*R;
+    const slice=(pct,off,color)=>{const len=(pct/100)*CIRC;return`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="10" stroke-dasharray="${len.toFixed(2)} ${(CIRC-len).toFixed(2)}" stroke-dashoffset="${(-(off)*CIRC/100).toFixed(2)}"/>`;};
+    const buyPct=totalBuy/total*100, holdPct=hold/total*100, sellPct=totalSell/total*100;
+    const col = scoreClass==='bull'?'var(--green)':scoreClass==='neut'?'var(--gold)':'var(--red)';
+    donutHtml = `
+      <div class="donut-row">
+        <div class="donut-wrap">
+          <svg class="donut-svg" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="30" fill="none" stroke="var(--border)" stroke-width="10"/>
+            ${slice(buyPct,0,'var(--green)')}${slice(holdPct,buyPct,'var(--gold)')}${slice(sellPct,buyPct+holdPct,'var(--red)')}
+          </svg>
+          <div class="donut-center">
+            <span class="donut-pct" style="color:${col}">${buyPct.toFixed(0)}%</span>
+            <span class="donut-lbl">Buy</span>
+          </div>
+        </div>
+        <div class="donut-legend">
+          <div class="leg-row"><span class="leg-dot" style="background:var(--green)"></span><span class="leg-name">Buy</span><span class="leg-n">${totalBuy}</span></div>
+          <div class="leg-row"><span class="leg-dot" style="background:var(--gold)"></span><span class="leg-name">Hold</span><span class="leg-n">${hold}</span></div>
+          <div class="leg-row"><span class="leg-dot" style="background:var(--red)"></span><span class="leg-name">Sell</span><span class="leg-n">${totalSell}</span></div>
+        </div>
+      </div>
+      <div class="analyst-bars">
+        ${barRow('Buy',  totalBuy,  total,'buy')}
+        ${barRow('Hold', hold,      total,'hold')}
+        ${barRow('Sell', totalSell, total,'sell')}
+      </div>`;
+  }
 
   panel.innerHTML = `
-    <div class="chart-timeframes">
-      <button class="tf-btn active" data-tf="1Hour" data-limit="48">2D</button>
-      <button class="tf-btn" data-tf="1Day" data-limit="30">1M</button>
-      <button class="tf-btn" data-tf="1Day" data-limit="90">3M</button>
-      <button class="tf-btn" data-tf="1Day" data-limit="180">6M</button>
-      <button class="tf-btn" data-tf="1Day" data-limit="365">1Y</button>
+    <div class="score-card">
+      <div class="score-card-title">StockPulse Score</div>
+      <div class="score-badge-wrap">
+        <div class="score-badge ${scoreClass}">${score}</div>
+        <div>
+          <div class="score-verdict">${verdict}</div>
+          <div class="score-sub">${sub}</div>
+        </div>
+      </div>
+      ${donutHtml}
     </div>
-    <div class="chart-card">
-      <canvas id="mainChartCanvas" style="height:340px;"></canvas>
+    ${ptCard(fmp?.priceTarget, price)}`;
+}
+
+function barRow(label, count, total, cls) {
+  if (!total) return '';
+  const w = ((count/total)*100).toFixed(1);
+  return `<div class="abar-row"><span class="abar-lbl">${label}</span><div class="abar-track"><div class="abar-fill ${cls}" style="width:${w}%"></div></div><span class="abar-n">${count}</span></div>`;
+}
+
+function ptCard(pt, price) {
+  if (!pt?.targetMedian) return '';
+  const { targetLow:low, targetMedian:med, targetHigh:high } = pt;
+  const rng  = (high-low)||1;
+  const curP = price>0 ? Math.max(0,Math.min(100,((price-low)/rng)*100)) : null;
+  const medP = Math.max(0,Math.min(100,((med-low)/rng)*100));
+  const ups  = price>0 ? ((med-price)/price)*100 : 0;
+  return `
+    <div class="pt-card">
+      <div class="pt-card-title">Analyst Price Targets</div>
+      <div class="pt-labels">
+        <div class="pt-lbl"><span class="pt-lbl-name">Low</span><span class="pt-lbl-val">$${fmt(low)}</span></div>
+        ${curP!==null?`<div class="pt-lbl"><span class="pt-lbl-name">Current</span><span class="pt-lbl-val cur">$${fmt(price)}</span></div>`:''}
+        <div class="pt-lbl"><span class="pt-lbl-name">Median</span><span class="pt-lbl-val med">$${fmt(med)}</span></div>
+        <div class="pt-lbl"><span class="pt-lbl-name">High</span><span class="pt-lbl-val">$${fmt(high)}</span></div>
+      </div>
+      <div class="pt-bar">
+        <div class="pt-fill" style="width:${medP.toFixed(1)}%"></div>
+        ${curP!==null?`<div class="pt-pin cur" style="left:${curP.toFixed(1)}%"></div>`:''}
+        <div class="pt-pin med" style="left:${medP.toFixed(1)}%"></div>
+      </div>
+      <span class="pt-upside ${ups>=0?'up':'down'}">${ups>=0?'+':''}${ups.toFixed(1)}% upside to median target</span>
+    </div>`;
+}
+
+// ── Chart tab ──────────────────────────────────────────────────────────────────
+function renderChart(sym, initBars, up) {
+  const color = up ? '#1dd6a3' : '#e84545';
+  $('tab-chart').innerHTML = `
+    <div class="tf-row">
+      <button class="tf-btn active" data-tf="1Hour" data-lim="48">2D</button>
+      <button class="tf-btn" data-tf="1Day" data-lim="30">1M</button>
+      <button class="tf-btn" data-tf="1Day" data-lim="90">3M</button>
+      <button class="tf-btn" data-tf="1Day" data-lim="180">6M</button>
+      <button class="tf-btn" data-tf="1Day" data-lim="365">1Y</button>
     </div>
-  `;
-
-  const canvas = document.getElementById('mainChartCanvas');
-
-  async function loadChartTab(tf, limit) {
-    if (canvas) {
-      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    }
-    const data = await fetchBars(symbol, tf, limit);
-    if (!data?.bars || !canvas) return;
-    const prices = data.bars.map(b => b.c);
-    const up     = prices[prices.length - 1] >= prices[0];
-    const color  = up ? '#3fb950' : '#f85149';
-    requestAnimationFrame(() => drawFullChart(canvas, data.bars, color));
-  }
-
-  // Render the initial bars immediately if we have them
-  if (initialBars?.bars?.length >= 2 && canvas) {
-    const color = isUp ? '#3fb950' : '#f85149';
-    requestAnimationFrame(() => drawFullChart(canvas, initialBars.bars, color));
-  } else {
-    loadChartTab('1Hour', 48);
-  }
-
-  panel.querySelectorAll('.tf-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      panel.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    <div class="chart-card"><canvas id="mainCanvas" style="height:340px"></canvas></div>`;
+  const canvas = $('mainCanvas');
+  if (initBars?.bars?.length>=2) requestAnimationFrame(() => drawChart(canvas, initBars.bars, color, 340));
+  else api.bars(sym,'1Hour',48).then(d => d?.bars && requestAnimationFrame(() => drawChart(canvas, d.bars, color, 340)));
+  $('tab-chart').querySelectorAll('.tf-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      $('tab-chart').querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      loadChartTab(btn.dataset.tf, parseInt(btn.dataset.limit));
+      const d = await api.bars(sym, btn.dataset.tf, +btn.dataset.lim);
+      if (!d?.bars) return;
+      const up2  = d.bars.at(-1)?.c >= d.bars[0]?.c;
+      requestAnimationFrame(() => drawChart(canvas, d.bars, up2?'#1dd6a3':'#e84545', 340));
     });
   });
 }
 
-function renderAnalystsTab(fmpData, price) {
-  const panel = document.getElementById('tab-analysts');
-  if (!panel) return;
-
-  const ratings     = fmpData?.ratings;
-  const priceTarget = fmpData?.priceTarget;
-  const upgrades    = fmpData?.upgrades || [];
-
-  // ── Consensus card ──────────────────────────────────────────────────────────
-  let ratingsHtml = '<p class="no-data">No analyst data available</p>';
-  if (ratings && ratings.total > 0) {
-    const { strongBuy = 0, buy = 0, hold = 0, sell = 0, strongSell = 0, total } = ratings;
-    const totalBuy  = strongBuy + buy;
-    const totalSell = sell + strongSell;
-    const consensus = totalBuy > hold && totalBuy > totalSell ? 'buy'
-                    : totalSell > hold && totalSell > totalBuy ? 'sell'
-                    : 'hold';
-    const consensusLabel = totalBuy > totalSell * 2 ? 'Strong Buy'
-                         : totalBuy > totalSell     ? 'Buy'
-                         : totalSell > totalBuy * 2 ? 'Strong Sell'
-                         : totalSell > totalBuy     ? 'Sell'
-                         : 'Hold';
-
-    // Donut chart via SVG
-    const buyPct  = (totalBuy  / total) * 100;
-    const holdPct = (hold      / total) * 100;
-    const sellPct = (totalSell / total) * 100;
-    const R = 38, CX = 50, CY = 50, CIRC = 2 * Math.PI * R;
-    function donutSlice(pct, offset, color) {
-      const len = (pct / 100) * CIRC;
-      return `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none"
-        stroke="${color}" stroke-width="12"
-        stroke-dasharray="${len.toFixed(2)} ${(CIRC - len).toFixed(2)}"
-        stroke-dashoffset="${(-offset * CIRC / 100).toFixed(2)}"
-        stroke-linecap="butt"/>`;
-    }
-    const buySlice  = donutSlice(buyPct,  0,          'var(--green)');
-    const holdSlice = donutSlice(holdPct, buyPct,     'var(--gold)');
-    const sellSlice = donutSlice(sellPct, buyPct + holdPct, 'var(--red)');
-
-    const pctColor = consensus === 'buy' ? 'var(--green)' : consensus === 'sell' ? 'var(--red)' : 'var(--gold)';
-
-    const barRow = (label, count, cls) => count > 0 ? `
-      <div class="analyst-bar-row">
-        <span class="analyst-bar-label">${label}</span>
-        <div class="analyst-bar-track"><div class="analyst-bar-fill ${cls}" style="width:${((count/total)*100).toFixed(1)}%"></div></div>
-        <span class="analyst-bar-count">${count}</span>
-      </div>` : '';
-
-    ratingsHtml = `
-      <div class="consensus-wrap">
-        <div class="consensus-donut-wrap">
-          <svg class="consensus-donut-svg" viewBox="0 0 100 100">
-            <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--border)" stroke-width="12"/>
-            ${buySlice}${holdSlice}${sellSlice}
-          </svg>
-          <div class="consensus-center">
-            <span class="consensus-pct" style="color:${pctColor}">${buyPct.toFixed(0)}%</span>
-            <span class="consensus-label-sm">Buy</span>
-          </div>
-        </div>
-        <div class="consensus-legend">
-          <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span><span class="legend-name">Buy</span><span class="legend-val">${totalBuy}</span></div>
-          <div class="legend-row"><span class="legend-dot" style="background:var(--gold)"></span><span class="legend-name">Hold</span><span class="legend-val">${hold}</span></div>
-          <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span><span class="legend-name">Sell</span><span class="legend-val">${totalSell}</span></div>
-        </div>
-      </div>
-      <span class="consensus-badge ${consensus}" style="margin-bottom:14px;">${consensusLabel}</span>
-      ${barRow('Buy', totalBuy, 'buy')}
-      ${barRow('Hold', hold, 'hold')}
-      ${barRow('Sell', totalSell, 'sell')}
-      <p style="font-size:11px;color:var(--text-muted);margin-top:12px;">${total} analyst ratings</p>
-    `;
-  }
-
-  // ── Price target card ────────────────────────────────────────────────────────
-  let ptHtml = '<p class="no-data">No price target data</p>';
-  if (priceTarget?.targetMedian) {
-    const { targetLow, targetMedian, targetHigh } = priceTarget;
-    const range   = targetHigh - targetLow || 1;
-    const curPct  = price     > 0 ? Math.max(0, Math.min(100, ((price       - targetLow) / range) * 100)) : null;
-    const medPct  = Math.max(0, Math.min(100, ((targetMedian - targetLow) / range) * 100));
-    const upside  = price > 0 ? ((targetMedian - price) / price) * 100 : 0;
-    const upsideCls = upside >= 0 ? 'up' : 'down';
-
-    ptHtml = `
-      <div class="pt-bar-wrap">
-        <div class="pt-bar-labels">
-          <div class="pt-bar-label-item">
-            <span class="pt-bar-label-name">Low</span>
-            <span class="pt-bar-label-val">$${fmt(targetLow)}</span>
-          </div>
-          ${curPct !== null ? `
-          <div class="pt-bar-label-item">
-            <span class="pt-bar-label-name">Current</span>
-            <span class="pt-bar-label-val current">$${fmt(price)}</span>
-          </div>` : ''}
-          <div class="pt-bar-label-item">
-            <span class="pt-bar-label-name">Median</span>
-            <span class="pt-bar-label-val median">$${fmt(targetMedian)}</span>
-          </div>
-          <div class="pt-bar-label-item">
-            <span class="pt-bar-label-name">High</span>
-            <span class="pt-bar-label-val">$${fmt(targetHigh)}</span>
-          </div>
-        </div>
-        <div class="pt-bar-track">
-          <div class="pt-bar-fill" style="width:${medPct.toFixed(1)}%"></div>
-          ${curPct !== null ? `<div class="pt-bar-pin current" style="left:${curPct.toFixed(1)}%"></div>` : ''}
-          <div class="pt-bar-pin median" style="left:${medPct.toFixed(1)}%"></div>
-        </div>
-        <span class="pt-upside ${upsideCls}">${upside >= 0 ? '+' : ''}${upside.toFixed(1)}% upside to median</span>
-      </div>
-    `;
-  }
-
-  // ── Upgrades table ───────────────────────────────────────────────────────────
-  let upgradesHtml = '<p class="no-data">No recent rating changes</p>';
-  if (upgrades.length > 0) {
-    upgradesHtml = `
-      <table class="upgrades-table">
-        <thead>
-          <tr>
-            <th>Firm</th>
-            <th>Rating</th>
-            <th>Change</th>
-            <th style="text-align:right">Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${upgrades.slice(0, 10).map(u => {
-            const firm = u.gradingCompany || 'Unknown';
-            const prev = u.previousGrade  || '—';
-            const next = u.newGrade       || '—';
-            const date = u.date ? new Date(u.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'2-digit' }) : '';
-            const cls  = ratingBadgeClass(next);
-            return `<tr>
-              <td class="upgrade-firm">${firm}</td>
-              <td><span class="upgrade-action-badge ${cls}">${next}</span></td>
-              <td class="upgrade-rating-text">${prev} → ${next}</td>
-              <td class="upgrade-date-text">${date}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-  }
-
-  panel.innerHTML = `
-    <div class="analysts-layout">
-      <div class="analyst-card">
-        <div class="analyst-card-title">Analyst Consensus</div>
-        ${ratingsHtml}
-      </div>
-      <div class="analyst-card">
-        <div class="analyst-card-title">Price Targets</div>
-        ${ptHtml}
-      </div>
-    </div>
-    <div class="upgrades-card">
-      <div class="upgrades-card-title">Recent Rating Changes</div>
-      ${upgradesHtml}
-    </div>
-  `;
+// ── Analysts tab ───────────────────────────────────────────────────────────────
+function ratingCls(r) {
+  if (!r) return 'hold';
+  const s = r.toLowerCase();
+  if (s.includes('buy')||s==='outperform'||s==='overweight'||s==='accumulate') return 'buy';
+  if (s.includes('sell')||s==='underperform'||s==='underweight') return 'sell';
+  return 'hold';
 }
 
-function renderNewsTab(newsData) {
-  const panel = document.getElementById('tab-news');
-  if (!panel) return;
+function renderAnalysts(fmp, price) {
+  const r  = fmp?.ratings || {};
+  const pt = fmp?.priceTarget;
+  const up = fmp?.upgrades || [];
+  const total    = r.total||0;
+  const totalBuy = (r.strongBuy||0)+(r.buy||0);
+  const totalSell= (r.sell||0)+(r.strongSell||0);
+  const hold     = r.hold||0;
 
-  if (!newsData || newsData.length === 0) {
-    panel.innerHTML = '<div class="news-list"><p class="no-data">No recent news found.</p></div>';
+  let consensusHtml = '<p class="no-data">Analyst data is temporarily unavailable (API rate limit may apply).</p>';
+  if (total > 0) {
+    const buyPct=totalBuy/total*100, holdPct=hold/total*100, sellPct=totalSell/total*100;
+    const R=32,CX=40,CY=40,CIRC=2*Math.PI*R;
+    const sl=(pct,off,color)=>{const len=(pct/100)*CIRC;return`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="12" stroke-dasharray="${len.toFixed(2)} ${(CIRC-len).toFixed(2)}" stroke-dashoffset="${(-(off)*CIRC/100).toFixed(2)}"/>`;};
+    const consensus = totalBuy>totalSell&&totalBuy>hold?'buy':totalSell>totalBuy&&totalSell>hold?'sell':'hold';
+    const cLabel    = totalBuy>totalSell*2?'Strong Buy':totalBuy>totalSell?'Buy':totalSell>totalBuy*2?'Strong Sell':totalSell>totalBuy?'Sell':'Hold';
+    const cCol = consensus==='buy'?'var(--green)':consensus==='sell'?'var(--red)':'var(--gold)';
+    consensusHtml = `
+      <div class="donut-row">
+        <div class="donut-wrap">
+          <svg class="donut-svg" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="var(--border)" stroke-width="12"/>
+            ${sl(buyPct,0,'var(--green)')}${sl(holdPct,buyPct,'var(--gold)')}${sl(sellPct,buyPct+holdPct,'var(--red)')}
+          </svg>
+          <div class="donut-center"><span class="donut-pct" style="color:${cCol}">${buyPct.toFixed(0)}%</span><span class="donut-lbl">Buy</span></div>
+        </div>
+        <div class="donut-legend">
+          <div class="leg-row"><span class="leg-dot" style="background:var(--green)"></span><span class="leg-name">Buy</span><span class="leg-n">${totalBuy}</span></div>
+          <div class="leg-row"><span class="leg-dot" style="background:var(--gold)"></span><span class="leg-name">Hold</span><span class="leg-n">${hold}</span></div>
+          <div class="leg-row"><span class="leg-dot" style="background:var(--red)"></span><span class="leg-name">Sell</span><span class="leg-n">${totalSell}</span></div>
+        </div>
+      </div>
+      <span class="consensus-chip ${consensus}">${cLabel}</span>
+      <div class="analyst-bars">
+        ${barRow('Buy',totalBuy,total,'buy')}${barRow('Hold',hold,total,'hold')}${barRow('Sell',totalSell,total,'sell')}
+      </div>
+      <p style="font-size:11px;color:var(--t3);margin-top:10px;">${total} analyst ratings</p>`;
+  }
+
+  const upgradesHtml = up.length ? `
+    <table class="up-table">
+      <thead><tr><th>Firm</th><th>Rating</th><th>Change</th><th style="text-align:right">Date</th></tr></thead>
+      <tbody>${up.slice(0,10).map(u=>{
+        const d = u.date?new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}):'';
+        const c = ratingCls(u.newGrade);
+        return`<tr><td class="up-firm">${u.gradingCompany||'—'}</td><td><span class="up-badge ${c}">${u.newGrade||'—'}</span></td><td class="up-prev">${u.previousGrade||'—'} → ${u.newGrade||'—'}</td><td class="up-date">${d}</td></tr>`;
+      }).join('')}</tbody>
+    </table>` : '<p class="no-data">No recent rating changes.</p>';
+
+  $('tab-analysts').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+      <div class="score-card"><div class="score-card-title">Analyst Consensus</div>${consensusHtml}</div>
+      <div>${ptCard(pt,price)}</div>
+    </div>
+    <div class="upgrades-card"><div class="upgrades-title">Recent Rating Changes</div>${upgradesHtml}</div>`;
+}
+
+// ── News tab ───────────────────────────────────────────────────────────────────
+function renderNews(news) {
+  if (!news?.length) {
+    $('tab-news').innerHTML = '<div class="news-feed"><p class="no-data" style="padding:24px">No recent news found.</p></div>';
     return;
   }
-
-  panel.innerHTML = `
-    <div class="news-list">
-      ${newsData.slice(0, 12).map(n => {
-        const date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
-        return `
-        <div class="news-item" onclick="window.open('${n.url || '#'}','_blank')">
-          <div class="news-headline">${n.headline || n.title || 'No title'}</div>
-          <div class="news-meta">
-            ${n.source ? `<span class="news-source">${n.source}</span>` : ''}
-            ${date ? `<span>${date}</span>` : ''}
-          </div>
+  $('tab-news').innerHTML = `
+    <div class="news-feed">
+      ${news.slice(0,14).map(n => {
+        const date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+        return `<div class="news-item" onclick="window.open('${n.url||'#'}','_blank')">
+          <div class="news-hl">${n.headline||n.title||'No title'}</div>
+          <div class="news-meta">${n.source?`<span class="news-src">${n.source}</span>`:''}${date?`<span>${date}</span>`:''}</div>
         </div>`;
       }).join('')}
-    </div>
-  `;
+    </div>`;
 }
 
-// ─── MARKETS ──────────────────────────────────────────────────────────────────
-
-function buildMarketRow(sym, snaps) {
-  const s     = snaps[sym];
-  const price = s?.price || 0;
-  const prev  = s?.previousClose || 0;
-  const chg   = price - prev;
-  const pct   = prev ? (chg / prev) * 100 : 0;
-  const isUp  = chg >= 0;
-
-  const div = document.createElement('div');
-  div.className = 'market-row';
-  div.innerHTML = `
-    <span class="mrow-sym">${sym}</span>
-    <span class="mrow-name"></span>
-    <span class="mrow-price">${price ? '$' + fmt(price) : '--'}</span>
-    <span class="mrow-change ${cls(chg)}">${isUp ? '+' : ''}${fmt(pct)}%</span>
-  `;
-  div.addEventListener('click', () => openStock(sym, s || { symbol: sym }));
-  return div;
+// ── Markets ────────────────────────────────────────────────────────────────────
+function skelRows(n=5) {
+  return Array(n).fill(`<div class="skel-row"><div class="skel" style="width:52px;height:13px"></div><div class="skel" style="flex:1;height:10px"></div><div class="skel" style="width:60px;height:13px"></div></div>`).join('');
 }
 
 async function loadMarkets() {
-  const allSyms = [...new Set([...INDICES, ...TECH, ...FINANCE, ...MOVERS_SYM])];
+  ['indicesTable','moversTable','techTable','financeTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
+  const all  = [...new Set([...INDICES,...TECH,...FINANCE,...MOVERS])];
+  const snaps= await api.snapshots(all);
 
-  // Show skeletons
-  ['indicesTable','moversTable','techTable','financeTable'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = [1,2,3,4,5].map(() => `
-      <div class="market-row-skeleton">
-        <div class="skel" style="width:48px;height:14px;"></div>
-        <div class="skel" style="flex:1;height:10px;"></div>
-        <div class="skel" style="width:56px;height:14px;"></div>
-      </div>
-    `).join('');
-  });
+  const buildRow = sym => {
+    const s  = snaps[sym]||{};
+    const px = s.price||0, pv = s.previousClose||0;
+    const ch = px-pv, pt = pv?(ch/pv)*100:0;
+    return `<div class="mrow" data-sym="${sym}">
+      <span class="mrow-sym">${sym}</span>
+      <span class="mrow-name">${s.name||''}</span>
+      <span class="mrow-px">${px?'$'+fmt(px):'--'}</span>
+      <span class="mrow-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>
+    </div>`;
+  };
 
-  const snaps = await fetchSnapshots(allSyms);
-  Object.assign(state.snapshots, snaps);
-
-  const fill = (id, syms) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.innerHTML = '';
-    syms.forEach(sym => el.appendChild(buildMarketRow(sym, snaps)));
+  const fill=(id,syms)=>{
+    const el=$(id); if(!el) return;
+    el.innerHTML = syms.map(buildRow).join('');
+    el.querySelectorAll('.mrow').forEach(row => {
+      row.addEventListener('click', () => openStock(row.dataset.sym, snaps[row.dataset.sym]||{symbol:row.dataset.sym}));
+    });
   };
 
   fill('indicesTable', INDICES);
   fill('techTable', TECH);
   fill('financeTable', FINANCE);
 
-  const sorted = MOVERS_SYM.slice().sort((a, b) => {
-    const pctOf = s => { const snap = snaps[s]; const p = snap?.price||0; const pv = snap?.previousClose||0; return pv ? Math.abs((p-pv)/pv) : 0; };
-    return pctOf(b) - pctOf(a);
+  const sorted = [...MOVERS].sort((a,b)=>{
+    const abs=s=>{const snap=snaps[s];const p=snap?.price||0;const pv=snap?.previousClose||0;return pv?Math.abs((p-pv)/pv):0;};
+    return abs(b)-abs(a);
   });
   fill('moversTable', sorted);
 
-  // Ticker strip
-  updateTickerStrip(snaps);
-}
-
-function updateTickerStrip(snaps) {
-  const strip = document.getElementById('tickerStrip');
-  if (!strip) return;
-  const syms = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'];
-  strip.innerHTML = syms.map(sym => {
-    const s    = snaps[sym];
-    const price = s?.price || 0;
-    const prev  = s?.previousClose || 0;
-    const chg   = price - prev;
-    const pct   = prev ? (chg / prev) * 100 : 0;
-    return price ? `
-      <div class="ticker-item">
-        <span class="t-sym">${sym}</span>
-        <span class="t-price">$${fmt(price)}</span>
-        <span class="t-change ${cls(chg)}">${chg >= 0 ? '+' : ''}${fmt(pct)}%</span>
-      </div>` : '';
+  // ticker tape
+  const tape = $('tickerTape');
+  if (tape) tape.innerHTML = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'].map(sym => {
+    const s=snaps[sym]; if(!s?.price) return '';
+    const ch=s.price-(s.previousClose||0), pt=(s.previousClose?(ch/s.previousClose)*100:0);
+    return`<div class="tape-item"><span class="tape-sym">${sym}</span><span class="tape-price">$${fmt(s.price)}</span><span class="tape-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span></div>`;
   }).join('');
 }
 
-// ─── WATCHLIST ────────────────────────────────────────────────────────────────
-
+// ── Watchlist ──────────────────────────────────────────────────────────────────
 async function loadWatchlist() {
-  const grid = document.getElementById('watchlistGrid');
-  if (!grid) return;
-
-  if (state.watchlist.length === 0) {
-    grid.innerHTML = `
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-        </svg>
-        <p>Your watchlist is empty</p>
-        <span>Add symbols to track them here</span>
-      </div>`;
+  const tbl = $('wlTable');
+  if (!tbl) return;
+  if (!state.watchlist.length) {
+    tbl.innerHTML=`<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg><p>Your watchlist is empty</p><small>Add symbols to start tracking them</small></div>`;
     return;
   }
-
-  grid.innerHTML = '<div class="tab-loading"><div class="spinner"></div></div>';
-  const snaps = await fetchSnapshots(state.watchlist);
-
-  grid.innerHTML = '';
+  tbl.innerHTML = '<div class="tab-spin"><div class="spinner"></div></div>';
+  const snaps = await api.snapshots(state.watchlist);
+  tbl.innerHTML = '';
   state.watchlist.forEach(sym => {
-    const s     = snaps[sym];
-    const price = s?.price || 0;
-    const prev  = s?.previousClose || 0;
-    const chg   = price - prev;
-    const pct   = prev ? (chg / prev) * 100 : 0;
-    const isUp  = chg >= 0;
-
+    const s=snaps[sym]||{};
+    const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
     const row = document.createElement('div');
-    row.className = 'watchlist-row';
-    row.innerHTML = `
-      <span class="wrow-sym">${sym}</span>
-      <span class="wrow-price">${price ? '$' + fmt(price) : '--'}</span>
-      <span class="wrow-change ${cls(chg)}">${isUp ? '+' : ''}${fmt(pct)}%</span>
-      <button class="wrow-remove" title="Remove" data-sym="${sym}">×</button>
-    `;
+    row.className='wl-row';
+    row.innerHTML=`
+      <span class="wl-sym">${sym}</span>
+      <span class="wl-name">${s.name||''}</span>
+      <span class="wl-px">${px?'$'+fmt(px):'--'}</span>
+      <span class="wl-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>
+      <button class="wl-rm" data-sym="${sym}" title="Remove">×</button>`;
     row.addEventListener('click', e => {
-      if (e.target.closest('.wrow-remove')) return;
-      openStock(sym, s || { symbol: sym });
+      if (e.target.closest('.wl-rm')) return;
+      openStock(sym, s||{symbol:sym});
     });
-    row.querySelector('.wrow-remove').addEventListener('click', () => {
-      state.watchlist.splice(state.watchlist.indexOf(sym), 1);
-      saveWatchlist();
-      loadWatchlist();
+    row.querySelector('.wl-rm').addEventListener('click', () => {
+      state.watchlist.splice(state.watchlist.indexOf(sym),1);
+      saveWL(); loadWatchlist();
     });
-    grid.appendChild(row);
+    tbl.appendChild(row);
   });
 }
 
-// ─── NAV SEARCH (dropdown) ────────────────────────────────────────────────────
-
-let searchTimer = null;
-
+// ── Nav search ─────────────────────────────────────────────────────────────────
+let navTimer=null;
 function setupNavSearch() {
-  const input    = document.getElementById('navSearchInput');
-  const dropdown = document.getElementById('navDropdown');
-  if (!input || !dropdown) return;
-
-  input.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = input.value.trim();
-    if (!q) { dropdown.classList.remove('open'); return; }
-    searchTimer = setTimeout(async () => {
-      const results = await searchSymbols(q);
-      if (!results.length) { dropdown.classList.remove('open'); return; }
-      dropdown.innerHTML = results.slice(0, 8).map(r => `
-        <div class="dropdown-item" data-sym="${r.symbol}">
-          <span class="dropdown-sym">${r.symbol}</span>
-          <span class="dropdown-name">${r.name || ''}</span>
-        </div>`).join('');
-      dropdown.classList.add('open');
-      dropdown.querySelectorAll('.dropdown-item').forEach(item => {
-        item.addEventListener('click', async () => {
-          const sym = item.dataset.sym;
-          dropdown.classList.remove('open');
-          input.value = '';
-          const snaps = await fetchSnapshots([sym]);
-          openStock(sym, snaps[sym] || { symbol: sym });
+  const input=$('navInput'), drop=$('navDrop');
+  if (!input||!drop) return;
+  input.addEventListener('input',()=>{
+    clearTimeout(navTimer);
+    const q=input.value.trim();
+    if(!q){drop.classList.remove('open');return;}
+    navTimer=setTimeout(async()=>{
+      const results=await api.search(q);
+      if(!results.length){drop.classList.remove('open');return;}
+      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${r.symbol}"><span class="drop-sym">${r.symbol}</span><span class="drop-name">${r.name||''}</span></div>`).join('');
+      drop.classList.add('open');
+      drop.querySelectorAll('.drop-item').forEach(item=>{
+        item.addEventListener('click',async()=>{
+          drop.classList.remove('open'); input.value='';
+          const s=await api.snapshots([item.dataset.sym]);
+          openStock(item.dataset.sym, s[item.dataset.sym]||{symbol:item.dataset.sym});
         });
       });
-    }, 280);
+    },260);
   });
-
-  document.addEventListener('click', e => {
-    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-      dropdown.classList.remove('open');
-    }
-  });
+  document.addEventListener('click',e=>{ if(!input.contains(e.target)&&!drop.contains(e.target)) drop.classList.remove('open'); });
 }
 
-// ─── HERO SEARCH ──────────────────────────────────────────────────────────────
-
+// ── Hero search ────────────────────────────────────────────────────────────────
+let heroTimer=null;
 function setupHeroSearch() {
-  const input       = document.getElementById('heroSearchInput');
-  const resultsWrap = document.getElementById('searchResultsWrap');
-  const resultsList = document.getElementById('searchResultsList');
-  const hero        = document.getElementById('searchHero');
-  if (!input || !resultsWrap || !resultsList || !hero) return;
-
-  let heroTimer = null;
-
-  input.addEventListener('input', () => {
+  const input=$('heroInput'), hero=document.querySelector('.hero'), sec=$('resultsSection'), list=$('resultsList');
+  if(!input) return;
+  input.addEventListener('input',()=>{
     clearTimeout(heroTimer);
-    const q = input.value.trim();
-    if (!q) {
-      resultsWrap.style.display = 'none';
-      hero.style.display = 'flex';
-      return;
-    }
-    heroTimer = setTimeout(async () => {
-      hero.style.display = 'none';
-      resultsWrap.style.display = 'block';
-      resultsList.innerHTML = '<div class="tab-loading"><div class="spinner"></div></div>';
-      const results = await searchSymbols(q);
-      if (!results.length) {
-        resultsList.innerHTML = '<p class="search-hint">No results found</p>';
-        return;
-      }
-      renderSearchResults(results, resultsList);
-    }, 320);
+    const q=input.value.trim();
+    if(!q){sec.style.display='none';hero.style.display='flex';return;}
+    heroTimer=setTimeout(async()=>{
+      hero.style.display='none'; sec.style.display='block';
+      list.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>';
+      const results=await api.search(q);
+      if(!results.length){list.innerHTML='<p class="search-hint">No results found for "'+q+'"</p>';return;}
+      const snaps=await api.snapshots(results.slice(0,8).map(r=>r.symbol));
+      list.innerHTML='';
+      results.slice(0,8).forEach(r=>{
+        const s=snaps[r.symbol]||{};
+        const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
+        const row=document.createElement('div');
+        row.className='result-row';
+        row.innerHTML=`
+          <span class="res-sym">${r.symbol}</span>
+          <span class="res-name">${r.name||''}</span>
+          ${r.exchange?`<span class="res-exch">${r.exchange}</span>`:''}
+          ${px?`<span class="res-price">$${fmt(px)}</span>`:''}
+          ${px&&pv?`<span class="res-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>`:''}
+          <span class="res-arrow">›</span>`;
+        row.addEventListener('click',()=>openStock(r.symbol, s||{symbol:r.symbol,name:r.name}));
+        list.appendChild(row);
+      });
+    },300);
   });
 
-  // Chip clicks
-  document.querySelectorAll('.chip').forEach(chip => {
-    chip.addEventListener('click', async () => {
-      const sym   = chip.dataset.sym;
-      const snaps = await fetchSnapshots([sym]);
-      openStock(sym, snaps[sym] || { symbol: sym });
+  // chips
+  document.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click',async()=>{
+      const sym=chip.dataset.sym;
+      const s=await api.snapshots([sym]);
+      openStock(sym, s[sym]||{symbol:sym});
     });
   });
 }
 
-async function renderSearchResults(results, container) {
-  const snaps = await fetchSnapshots(results.slice(0, 8).map(r => r.symbol));
-  container.innerHTML = '';
-  results.slice(0, 8).forEach(r => {
-    const s     = snaps[r.symbol];
-    const price = s?.price || 0;
-    const prev  = s?.previousClose || 0;
-    const chg   = price - prev;
-    const pct   = prev ? (chg / prev) * 100 : 0;
-
-    const row = document.createElement('div');
-    row.className = 'result-row';
-    row.innerHTML = `
-      <span class="result-sym">${r.symbol}</span>
-      <span class="result-name">${r.name || ''}</span>
-      ${r.exchangeShortName ? `<span class="result-exchange">${r.exchangeShortName}</span>` : ''}
-      ${price ? `<span class="mrow-price">$${fmt(price)}</span>` : ''}
-      ${price && prev ? `<span class="mrow-change ${cls(chg)}">${chg >= 0 ? '+' : ''}${fmt(pct)}%</span>` : ''}
-      <span class="result-arrow">›</span>
-    `;
-    row.addEventListener('click', () => openStock(r.symbol, s || { symbol: r.symbol, name: r.name }));
-    container.appendChild(row);
-  });
-}
-
-// ─── BACK BUTTON ──────────────────────────────────────────────────────────────
-
-function setupBackBtn() {
-  const btn = document.getElementById('backBtn');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    const prev = state.prevPage;
-    state.currentPage = prev;
-    state.currentSymbol = null;
-
-    document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.page === prev));
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    const prevEl = document.getElementById('page-' + prev);
-    if (prevEl) prevEl.classList.add('active');
-  });
-}
-
-// ─── WATCHLIST WATCH BUTTON ───────────────────────────────────────────────────
-
-function setupWatchBtn() {
-  const btn = document.getElementById('detailWatchBtn');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    const sym = state.currentSymbol;
-    if (!sym) return;
-    const idx = state.watchlist.indexOf(sym);
-    if (idx >= 0) {
-      state.watchlist.splice(idx, 1);
-    } else {
-      state.watchlist.push(sym);
-    }
-    saveWatchlist();
-    updateWatchBtn(sym);
-  });
-}
-
-// ─── ADD TO WATCHLIST (page) ──────────────────────────────────────────────────
-
+// ── Watchlist page setup ───────────────────────────────────────────────────────
 function setupWatchlistPage() {
-  const addBtn      = document.getElementById('addToWatchlistBtn');
-  const form        = document.getElementById('addSymbolForm');
-  const confirmBtn  = document.getElementById('confirmAddSymbol');
-  const cancelBtn   = document.getElementById('cancelAddSymbol');
-  const input       = document.getElementById('watchlistInput');
-  if (!addBtn || !form) return;
-
-  addBtn.addEventListener('click', () => {
-    form.style.display = form.style.display === 'none' ? 'flex' : 'none';
-    if (form.style.display === 'flex') input?.focus();
+  const addBtn=$('addBtn'), row=$('addRow'), inp=$('addInput'), ok=$('addConfirm'), cancel=$('addCancel');
+  if (!addBtn) return;
+  addBtn.addEventListener('click',()=>{row.classList.toggle('open');inp?.focus();});
+  ok?.addEventListener('click',async()=>{
+    const sym=inp.value.trim().toUpperCase();
+    if(sym&&!state.watchlist.includes(sym)){state.watchlist.push(sym);saveWL();}
+    inp.value=''; row.classList.remove('open'); loadWatchlist();
   });
-
-  confirmBtn?.addEventListener('click', async () => {
-    const sym = input?.value.trim().toUpperCase();
-    if (!sym) return;
-    if (!state.watchlist.includes(sym)) {
-      state.watchlist.push(sym);
-      saveWatchlist();
-    }
-    if (input) input.value = '';
-    form.style.display = 'none';
-    loadWatchlist();
-  });
-
-  cancelBtn?.addEventListener('click', () => {
-    form.style.display = 'none';
-    if (input) input.value = '';
-  });
-
-  input?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') confirmBtn?.click();
-  });
+  cancel?.addEventListener('click',()=>{row.classList.remove('open');inp.value='';});
+  inp?.addEventListener('keydown',e=>{if(e.key==='Enter')ok?.click();});
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-
+// ── INIT ───────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
 
-  // Top nav tab clicks
-  document.querySelectorAll('.nav-tab').forEach(tab => {
-    tab.addEventListener('click', e => {
-      e.preventDefault();
-      switchTab(tab.dataset.page);
-    });
+  document.querySelectorAll('.nav-link').forEach(tab=>{
+    tab.addEventListener('click',()=>goPage(tab.dataset.page));
   });
 
-  // Stock sub-tab clicks
-  document.querySelectorAll('.stock-tab').forEach(tab => {
-    tab.addEventListener('click', () => switchStockTab(tab.dataset.tab));
+  document.querySelectorAll('.stock-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>switchStockTab(tab.dataset.tab));
+  });
+
+  $('backBtn')?.addEventListener('click',()=>{
+    state.page=state.prevPage;
+    document.querySelectorAll('.nav-link').forEach(l=>l.classList.toggle('active',l.dataset.page===state.prevPage));
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    $('page-'+state.prevPage)?.classList.add('active');
+    state.symbol=null;
+  });
+
+  $('watchBtn')?.addEventListener('click',()=>{
+    const sym=state.symbol; if(!sym) return;
+    const idx=state.watchlist.indexOf(sym);
+    idx>=0 ? state.watchlist.splice(idx,1) : state.watchlist.push(sym);
+    saveWL(); updateWatchBtn(sym);
   });
 
   setupNavSearch();
   setupHeroSearch();
-  setupBackBtn();
-  setupWatchBtn();
   setupWatchlistPage();
 });

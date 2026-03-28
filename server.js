@@ -7,283 +7,185 @@ const fetch   = require('node-fetch');
 const app     = express();
 const PORT    = 5000;
 const FMP_KEY = process.env.FMP_API_KEY;
-const FMP_V3  = 'https://financialmodelingprep.com/api/v3';
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Yahoo Finance helpers ─────────────────────────────────────────────────────
+const YH = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
-const YF_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept': 'application/json',
-};
-
-async function yahooOneQuote(symbol) {
+// ── Yahoo chart → quote object ─────────────────────────────────────────────
+async function yfChartQuote(symbol) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
-  const r   = await fetch(url, { headers: YF_HEADERS });
+  const r   = await fetch(url, { headers: YH });
   if (!r.ok) return null;
-  const data   = await r.json();
-  const result = data?.chart?.result?.[0];
-  if (!result) return null;
-
-  const meta  = result.meta || {};
-  const ohlcv = result.indicators?.quote?.[0] || {};
-  const closes = (ohlcv.close || []).filter(v => v != null);
-  const opens  = (ohlcv.open  || []).filter(v => v != null);
-  const vols   = (ohlcv.volume|| []).filter(v => v != null);
-
-  const price  = meta.regularMarketPrice ?? closes[closes.length - 1] ?? null;
-  const prev   = meta.chartPreviousClose ?? (closes.length >= 2 ? closes[closes.length - 2] : null);
-  const open   = opens[opens.length - 1]  ?? null;
+  const d  = await r.json();
+  const rs = d?.chart?.result?.[0];
+  if (!rs) return null;
+  const m     = rs.meta || {};
+  const ohlcv = rs.indicators?.quote?.[0] || {};
+  const closes = (ohlcv.close  || []).filter(v => v != null);
+  const opens  = (ohlcv.open   || []).filter(v => v != null);
+  const vols   = (ohlcv.volume || []).filter(v => v != null);
+  const price  = m.regularMarketPrice ?? closes.at(-1) ?? null;
+  const prev   = m.chartPreviousClose ?? closes.at(-2) ?? null;
   const change = price != null && prev != null ? price - prev : null;
-  const changePct = change != null && prev ? (change / prev) * 100 : null;
-
-  // 5-day avg volume
-  const avgVolume = vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null;
-
   return {
-    symbol:            meta.symbol || symbol,
-    name:              meta.longName || meta.shortName || symbol,
+    symbol:            m.symbol || symbol,
+    name:              m.longName || m.shortName || symbol,
     price,
     change,
-    changesPercentage: changePct,
-    open,
-    dayHigh:           meta.regularMarketDayHigh ?? null,
-    dayLow:            meta.regularMarketDayLow  ?? null,
+    changesPercentage: change != null && prev ? (change / prev) * 100 : null,
+    open:              opens.at(-1) ?? null,
+    dayHigh:           m.regularMarketDayHigh ?? null,
+    dayLow:            m.regularMarketDayLow  ?? null,
     previousClose:     prev,
-    volume:            meta.regularMarketVolume  ?? (vols.length ? vols[vols.length - 1] : null),
-    avgVolume,
+    volume:            m.regularMarketVolume ?? vols.at(-1) ?? null,
+    avgVolume:         vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null,
   };
 }
 
-async function yahooQuotes(symbols) {
-  if (!symbols.length) return {};
-  const results = await Promise.all(
-    symbols.map(sym => yahooOneQuote(sym).then(q => ({ sym, q })).catch(() => ({ sym, q: null })))
-  );
-  const out = {};
-  results.forEach(({ sym, q }) => { if (q) out[sym] = q; });
-  return out;
-}
-
-// ─── FMP helper (graceful — never throws to caller) ──────────────────────────
-
-async function fmpGet(endpoint) {
-  const sep = endpoint.includes('?') ? '&' : '?';
-  const url = `${FMP_V3}${endpoint}${sep}apikey=${FMP_KEY}`;
-  const r   = await fetch(url);
-  if (!r.ok) throw new Error(`FMP ${r.status}`);
-  return r.json();
-}
-
-// ─── GET /api/snapshots?symbols=A,B,C  (Yahoo Finance — no rate limit) ────────
-app.get('/api/snapshots', async (req, res) => {
-  const raw  = (req.query.symbols || '').trim();
-  if (!raw) return res.json({});
-  const syms = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-  try {
-    const results = await yahooQuotes(syms);
-    res.json(results);
-  } catch (e) {
-    console.error('[snapshots]', e.message);
-    res.json({});
-  }
-});
-
-// ─── GET /api/quote/:symbol  (Yahoo Finance — no rate limit) ─────────────────
+// ── GET /api/quote/:symbol ─────────────────────────────────────────────────
 app.get('/api/quote/:symbol', async (req, res) => {
-  const sym = req.params.symbol.toUpperCase();
   try {
-    const results = await yahooQuotes([sym]);
-    const q = results[sym];
-    if (!q) return res.status(404).json({ error: 'Symbol not found' });
+    const q = await yfChartQuote(req.params.symbol.toUpperCase());
+    if (!q) return res.status(404).json({ error: 'Not found' });
     res.json(q);
-  } catch (e) {
-    console.error('[quote]', e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── GET /api/search?q=query  (Yahoo Finance search — no rate limit) ─────────
+// ── GET /api/snapshots?symbols=A,B ────────────────────────────────────────
+app.get('/api/snapshots', async (req, res) => {
+  const syms = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  if (!syms.length) return res.json({});
+  try {
+    const all = await Promise.all(syms.map(s => yfChartQuote(s).catch(() => null)));
+    const out = {};
+    all.forEach((q, i) => { if (q) out[syms[i]] = q; });
+    res.json(out);
+  } catch (e) { res.json({}); }
+});
+
+// ── GET /api/search?q= ────────────────────────────────────────────────────
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
   try {
-    const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
-    const r    = await fetch(url, { headers: YF_HEADERS });
+    const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0`;
+    const r    = await fetch(url, { headers: YH });
     const data = await r.json();
-    const quotes = (data?.quotes || []).filter(x =>
-      x.quoteType === 'EQUITY' && x.symbol && !x.symbol.includes('.')
-    );
-    res.json(quotes.slice(0, 8).map(x => ({
-      symbol:            x.symbol,
-      name:              x.shortname || x.longname || x.symbol,
-      exchangeShortName: x.exchange  || '',
-    })));
-  } catch (e) {
-    console.error('[search]', e.message);
-    res.json([]);
-  }
+    const out  = (data?.quotes || [])
+      .filter(x => x.quoteType === 'EQUITY' && x.symbol && !x.symbol.includes('.'))
+      .slice(0, 8)
+      .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '' }));
+    res.json(out);
+  } catch { res.json([]); }
 });
 
-// ─── GET /api/bars/:symbol  (Yahoo Finance OHLCV — no rate limit) ────────────
+// ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────
 app.get('/api/bars/:symbol', async (req, res) => {
-  const symbol    = req.params.symbol.toUpperCase();
-  const timeframe = req.query.timeframe || '1Day';
-  const limit     = parseInt(req.query.limit) || 60;
-
-  const intervalMap = { '1Hour': '1h', '1Day': '1d', '1Min': '1m', '5Min': '5m', '15Min': '15m' };
-  const interval    = intervalMap[timeframe] || '1d';
-  const range       = limit <= 7 ? '5d' : limit <= 30 ? '1mo' : limit <= 90 ? '3mo' : limit <= 180 ? '6mo' : '1y';
-
+  const sym      = req.params.symbol.toUpperCase();
+  const tf       = req.query.timeframe || '1Day';
+  const limit    = parseInt(req.query.limit) || 60;
+  const iMap     = { '1Hour':'1h', '1Day':'1d', '5Min':'5m', '15Min':'15m' };
+  const interval = iMap[tf] || '1d';
+  const range    = limit <= 7 ? '5d' : limit <= 30 ? '1mo' : limit <= 90 ? '3mo' : limit <= 180 ? '6mo' : '1y';
   try {
-    const url    = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}`;
-    const r      = await fetch(url, { headers: YF_HEADERS });
-    if (!r.ok) return res.status(r.status).json({ bars: [] });
-    const data   = await r.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return res.json({ bars: [] });
-
-    const times = result.timestamp || [];
-    const ohlcv = result.indicators?.quote?.[0] || {};
-    const { open = [], high = [], low = [], close = [], volume = [] } = ohlcv;
-
-    const bars = times.map((t, i) => ({
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}`;
+    const r   = await fetch(url, { headers: YH });
+    if (!r.ok) return res.json({ bars: [] });
+    const d   = await r.json();
+    const rs  = d?.chart?.result?.[0];
+    if (!rs) return res.json({ bars: [] });
+    const times = rs.timestamp || [];
+    const q     = rs.indicators?.quote?.[0] || {};
+    const bars  = times.map((t, i) => ({
       t: new Date(t * 1000).toISOString(),
-      o: open[i]   ?? null,
-      h: high[i]   ?? null,
-      l: low[i]    ?? null,
-      c: close[i]  ?? null,
-      v: volume[i] ?? null,
-    })).filter(b => b.c !== null);
-
-    res.json({ bars: bars.slice(-limit) });
-  } catch (e) {
-    console.error('[bars]', e.message);
-    res.status(500).json({ error: e.message });
-  }
+      o: q.open?.[i]   ?? null, h: q.high?.[i]   ?? null,
+      l: q.low?.[i]    ?? null, c: q.close?.[i]  ?? null,
+      v: q.volume?.[i] ?? null,
+    })).filter(b => b.c != null).slice(-limit);
+    res.json({ bars });
+  } catch (e) { res.json({ bars: [] }); }
 });
 
-// ─── GET /api/historical/:symbol  (Yahoo Finance daily — for Trader RSI) ──────
+// ── GET /api/historical/:symbol?timeseries=N ──────────────────────────────
 app.get('/api/historical/:symbol', async (req, res) => {
-  const symbol     = req.params.symbol.toUpperCase();
-  const timeseries = parseInt(req.query.timeseries) || 30;
+  const sym = req.params.symbol.toUpperCase();
+  const n   = parseInt(req.query.timeseries) || 30;
+  const range = n <= 30 ? '1mo' : n <= 90 ? '3mo' : '6mo';
   try {
-    const range = timeseries <= 30 ? '1mo' : timeseries <= 90 ? '3mo' : '6mo';
-    const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
-    const r     = await fetch(url, { headers: YF_HEADERS });
-    if (!r.ok) return res.status(r.status).json({ historical: [] });
-    const data   = await r.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return res.json({ historical: [] });
-
-    const times = result.timestamp || [];
-    const ohlcv = result.indicators?.quote?.[0] || {};
-    const { open = [], high = [], low = [], close = [], volume = [] } = ohlcv;
-
-    // Return newest-first to match original FMP shape
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=${range}`;
+    const r   = await fetch(url, { headers: YH });
+    const d   = await r.json();
+    const rs  = d?.chart?.result?.[0];
+    if (!rs) return res.json({ historical: [] });
+    const times = rs.timestamp || [];
+    const q     = rs.indicators?.quote?.[0] || {};
     const historical = times.map((t, i) => ({
-      date:   new Date(t * 1000).toISOString().slice(0, 10),
-      open:   open[i]   ?? null,
-      high:   high[i]   ?? null,
-      low:    low[i]    ?? null,
-      close:  close[i]  ?? null,
-      volume: volume[i] ?? null,
-    })).filter(b => b.close !== null).reverse();
-
-    res.json({ historical: historical.slice(0, timeseries) });
-  } catch (e) {
-    console.error('[historical]', e.message);
-    res.status(500).json({ error: e.message });
-  }
+      date: new Date(t * 1000).toISOString().slice(0, 10),
+      open: q.open?.[i] ?? null, high: q.high?.[i] ?? null,
+      low:  q.low?.[i]  ?? null, close: q.close?.[i] ?? null,
+      volume: q.volume?.[i] ?? null,
+    })).filter(b => b.close != null).reverse().slice(0, n);
+    res.json({ historical });
+  } catch { res.json({ historical: [] }); }
 });
 
-// ─── GET /api/news/:symbol  (FMP with graceful fallback) ─────────────────────
+// ── GET /api/news/:symbol ─────────────────────────────────────────────────
 app.get('/api/news/:symbol', async (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
+  const sym = req.params.symbol.toUpperCase();
+  // Try FMP first
   try {
-    const data = await fmpGet(`/stock_news?tickers=${symbol}&limit=20`);
-    const news = (Array.isArray(data) ? data : []).map(n => ({
-      headline:   n.title,
-      title:      n.title,
-      summary:    n.text,
-      url:        n.url,
-      source:     n.site,
-      created_at: n.publishedDate,
+    const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${sym}&limit=20&apikey=${FMP_KEY}`;
+    const r   = await fetch(url);
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data) && data.length) {
+        return res.json({ news: data.map(n => ({ headline: n.title, url: n.url, source: n.site, created_at: n.publishedDate })) });
+      }
+    }
+  } catch {}
+  // Yahoo fallback
+  try {
+    const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&quotesCount=0&newsCount=12`;
+    const r    = await fetch(url, { headers: YH });
+    const data = await r.json();
+    const news = (data?.news || []).map(n => ({
+      headline:   n.title, url: n.link, source: n.publisher,
+      created_at: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
     }));
     res.json({ news });
-  } catch (e) {
-    console.error('[news]', e.message);
-    // Fallback: Yahoo Finance news
-    try {
-      const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${symbol}&quotesCount=0&newsCount=10`;
-      const r    = await fetch(url, { headers: YF_HEADERS });
-      const data = await r.json();
-      const news = (data?.news || []).map(n => ({
-        headline:   n.title,
-        title:      n.title,
-        url:        n.link,
-        source:     n.publisher,
-        created_at: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
-      }));
-      res.json({ news });
-    } catch {
-      res.json({ news: [] });
-    }
-  }
+  } catch { res.json({ news: [] }); }
 });
 
-// ─── GET /api/stock/:symbol  (FMP analyst data with graceful fallback) ────────
+// ── GET /api/stock/:symbol (analyst data via FMP, graceful fallback) ───────
 app.get('/api/stock/:symbol', async (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
-
-  const empty = { ratings: { strongBuy:0, buy:0, hold:0, sell:0, strongSell:0, total:0 }, priceTarget: null, upgrades: [] };
-
+  const sym   = req.params.symbol.toUpperCase();
+  const empty = { ratings: { strongBuy:0,buy:0,hold:0,sell:0,strongSell:0,total:0 }, priceTarget:null, upgrades:[] };
   try {
-    const [ratingData, ptData, upgradesData] = await Promise.all([
-      fmpGet(`/analyst-stock-recommendations/${symbol}`).catch(() => []),
-      fmpGet(`/price-target-consensus?symbol=${symbol}`).catch(() => []),
-      fmpGet(`/upgrades-downgrades?symbol=${symbol}`).catch(() => []),
+    const hdr = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+    const base = `https://financialmodelingprep.com/api/v3`;
+    const key  = `apikey=${FMP_KEY}`;
+    const [rd, pd, ud] = await Promise.all([
+      fetch(`${base}/analyst-stock-recommendations/${sym}?${key}`, hdr).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/price-target-consensus?symbol=${sym}&${key}`, hdr).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/upgrades-downgrades?symbol=${sym}&${key}`, hdr).then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
-
-    const rEntry = Array.isArray(ratingData) && ratingData[0] ? ratingData[0] : null;
-    const ratings = rEntry ? {
-      strongBuy:  rEntry.analystRatingsStrongBuy  || 0,
-      buy:        rEntry.analystRatingsbuy         || 0,
-      hold:       rEntry.analystRatingsHold        || 0,
-      sell:       rEntry.analystRatingsSell        || 0,
-      strongSell: rEntry.analystRatingsStrongSell  || 0,
-      total: (rEntry.analystRatingsStrongBuy  || 0)
-           + (rEntry.analystRatingsbuy         || 0)
-           + (rEntry.analystRatingsHold        || 0)
-           + (rEntry.analystRatingsSell        || 0)
-           + (rEntry.analystRatingsStrongSell  || 0),
+    const re = Array.isArray(rd) && rd[0] ? rd[0] : null;
+    const ratings = re ? {
+      strongBuy:  re.analystRatingsStrongBuy  || 0,
+      buy:        re.analystRatingsbuy         || 0,
+      hold:       re.analystRatingsHold        || 0,
+      sell:       re.analystRatingsSell        || 0,
+      strongSell: re.analystRatingsStrongSell  || 0,
+      total: (re.analystRatingsStrongBuy||0)+(re.analystRatingsbuy||0)+(re.analystRatingsHold||0)+(re.analystRatingsSell||0)+(re.analystRatingsStrongSell||0),
     } : empty.ratings;
-
-    const pt = Array.isArray(ptData) ? ptData[0] : ptData;
-    const priceTarget = pt ? {
-      targetLow:    pt.targetLow,
-      targetMedian: pt.targetMedian || pt.targetConsensus,
-      targetHigh:   pt.targetHigh,
-    } : null;
-
-    const upgrades = (Array.isArray(upgradesData) ? upgradesData : []).slice(0, 10).map(u => ({
-      gradingCompany: u.gradingCompany,
-      date:           u.publishedDate || u.date,
-      previousGrade:  u.previousGrade,
-      newGrade:       u.newGrade,
-      action:         u.action,
-    }));
-
+    const pt = Array.isArray(pd) ? pd[0] : pd;
+    const priceTarget = pt?.targetMedian ? { targetLow: pt.targetLow, targetMedian: pt.targetMedian || pt.targetConsensus, targetHigh: pt.targetHigh } : null;
+    const upgrades = (Array.isArray(ud) ? ud : []).slice(0,10).map(u => ({ gradingCompany: u.gradingCompany, date: u.publishedDate||u.date, previousGrade: u.previousGrade, newGrade: u.newGrade }));
     res.json({ ratings, priceTarget, upgrades });
-  } catch (e) {
-    console.error('[stock]', e.message);
-    res.json(empty);
-  }
+  } catch { res.json(empty); }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`StockPulse running on port ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`StockPulse on :${PORT}`));

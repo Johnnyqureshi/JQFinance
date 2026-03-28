@@ -1,502 +1,273 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// StockPulse — Realtime Trader module
-// All analysis math runs client-side; data comes from FMP via /api/* proxies.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── StockPulse — Realtime Trader ──────────────────────────────────────────────
 
-(function () {
-  'use strict';
+const trader = (() => {
+  const REFRESH_SECS = 60;
+  let   countdown    = 0;
+  let   cdTimer      = null;
+  let   currentSym   = null;
 
-  // ─── State ────────────────────────────────────────────────────────────────
-
-  const trader = {
-    symbol:        null,
-    countdownTimer: null,
-    countdownSecs:  60,
-    refreshPending: false,
+  // ── DOM refs ────────────────────────────────────────────────────────────────
+  const $  = id => document.getElementById(id);
+  const ui = {
+    input:   ()=>$('traderInput'),
+    btn:     ()=>$('traderBtn'),
+    loading: ()=>$('traderLoading'),
+    loadSym: ()=>$('traderLoadingTicker'),
+    error:   ()=>$('traderError'),
+    errorMsg:()=>$('traderErrorMsg'),
+    results: ()=>$('traderResults'),
   };
 
-  const CIRCUMFERENCE = 2 * Math.PI * 18; // countdown ring r=18
+  // ── Utils ───────────────────────────────────────────────────────────────────
+  const fmt  = (n,d=2) => n==null||isNaN(n)?'--':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+  const fmtV = v => !v?'--':v>=1e9?(v/1e9).toFixed(1)+'B':v>=1e6?(v/1e6).toFixed(1)+'M':v>=1e3?(v/1e3).toFixed(0)+'K':String(v);
 
-  // ─── DOM refs (resolved after DOMContentLoaded) ───────────────────────────
-
-  let $input, $btn, $loading, $loadingTicker, $error, $errorMsg, $results;
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
-  function fmtNum(n, dec = 2) {
-    if (n == null || isNaN(n)) return '--';
-    return Number(n).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-  }
-
-  function fmtVol(v) {
-    if (v == null || isNaN(v)) return '--';
-    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
-    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
-    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
-    return String(v);
-  }
-
-  // ─── Math: RSI (Wilder smoothing) ─────────────────────────────────────────
-
-  function calcRSI(closes, period = 14) {
-    // closes must be oldest-first
-    if (closes.length < period + 1) return null;
-
-    let gains = 0, losses = 0;
-
-    // Seed: first 'period' changes
-    for (let i = 1; i <= period; i++) {
-      const diff = closes[i] - closes[i - 1];
-      if (diff >= 0) gains  += diff;
-      else           losses -= diff;
+  // ── RSI (Wilder, 14-period) ─────────────────────────────────────────────────
+  function calcRSI(closes, period=14) {
+    if (closes.length < period+1) return null;
+    let gains=0, losses=0;
+    for (let i=1; i<=period; i++) {
+      const d = closes[i]-closes[i-1];
+      d>=0 ? gains+=d : losses+=Math.abs(d);
     }
-
-    let avgGain = gains  / period;
-    let avgLoss = losses / period;
-
-    // Wilder smoothing for remaining data
-    for (let i = period + 1; i < closes.length; i++) {
-      const diff = closes[i] - closes[i - 1];
-      const g = diff > 0 ? diff : 0;
-      const l = diff < 0 ? -diff : 0;
-      avgGain = (avgGain * (period - 1) + g) / period;
-      avgLoss = (avgLoss * (period - 1) + l) / period;
+    let avgG=gains/period, avgL=losses/period;
+    for (let i=period+1; i<closes.length; i++) {
+      const d = closes[i]-closes[i-1];
+      avgG = (avgG*(period-1)+(d>=0?d:0))/period;
+      avgL = (avgL*(period-1)+(d<0?Math.abs(d):0))/period;
     }
-
-    if (avgLoss === 0) return 100;
-    const rs = avgGain / avgLoss;
-    return parseFloat((100 - 100 / (1 + rs)).toFixed(2));
+    if (!avgL) return 100;
+    return 100 - 100/(1+avgG/avgL);
   }
 
-  // ─── Math: 10-day average volume ──────────────────────────────────────────
-
-  function calcAvgVolume(historical) {
-    // historical is newest-first; skip index 0 (today) for average
-    const past = historical.slice(1, 11).map(d => d.volume).filter(v => v > 0);
-    if (!past.length) return null;
-    return past.reduce((a, b) => a + b, 0) / past.length;
+  // ── Support / Resistance (pivot clusters in 14-day data) ───────────────────
+  function calcSR(bars) {
+    const price = bars[0]?.c;
+    if (!bars.length || !price) return { support:[], resistance:[] };
+    const pivots = [];
+    for (let i=1; i<bars.length-1; i++) {
+      const h = bars[i].h, l = bars[i].l;
+      if (h > bars[i-1].h && h > bars[i+1].h) pivots.push({ type:'r', val:h });
+      if (l < bars[i-1].l && l < bars[i+1].l) pivots.push({ type:'s', val:l });
+    }
+    const cluster=(arr,tol=0.02)=>{
+      const merged=[]; arr.sort((a,b)=>a-b);
+      for(const v of arr){
+        const g=merged.find(g=>Math.abs(g.center-v)/g.center<tol);
+        g ? (g.sum+=v,g.n++,g.center=g.sum/g.n) : merged.push({center:v,sum:v,n:1});
+      }
+      return merged.sort((a,b)=>b.n-a.n).map(g=>g.center);
+    };
+    const rs=cluster(pivots.filter(p=>p.type==='r').map(p=>p.val)).filter(v=>v>price);
+    const ss=cluster(pivots.filter(p=>p.type==='s').map(p=>p.val)).filter(v=>v<price);
+    return { resistance: rs.slice(0,2), support: ss.slice(0,2) };
   }
 
-  // ─── Math: Support & Resistance from 14-day highs/lows ───────────────────
+  // ── Signal logic ────────────────────────────────────────────────────────────
+  function computeSignal(rsi, price, open, volume, avgVol, sr) {
+    const bearishDay  = price < open;
+    const bullishDay  = price >= open;
+    const volumeSurge = avgVol>0 && volume/avgVol > 1.5;
+    const nearRes     = sr.resistance.length>0 && Math.abs(price-sr.resistance[0])/price < 0.015;
 
-  function calcSupportResistance(historical) {
-    // historical newest-first; use all 14 rows
-    const rows = historical.slice(0, 14);
-    const highs = rows.map(d => d.high).filter(Boolean).sort((a, b) => b - a);
-    const lows  = rows.map(d => d.low ).filter(Boolean).sort((a, b) => a - b);
+    let signal='HOLD', confidence=50, reasons=[];
 
-    const resistance = [...new Set(highs)].slice(0, 2);
-    const support    = [...new Set(lows)].slice(0, 2);
-
-    return { resistance, support };
-  }
-
-  // ─── Verdict logic ────────────────────────────────────────────────────────
-
-  function computeVerdict({ rsi, price, open, high, low, volume, avgVolume, resistance }) {
-    const isBullish   = price > open;
-    const isBearish   = price < open;
-    const volSurge    = avgVolume && volume >= avgVolume * 1.5;
-    const nearRes     = resistance.some(r => price >= r * 0.98 && price <= r * 1.02);
-
-    let verdict;
-    if (rsi !== null && rsi < 45 && isBullish && volSurge) {
-      verdict = 'BUY';
-    } else if (rsi !== null && (rsi > 70 || (nearRes && isBearish))) {
-      verdict = 'SELL';
+    if (rsi<45 && bullishDay && volumeSurge) {
+      signal='BUY'; confidence=75;
+      reasons=['RSI below 45 (oversold momentum)','Bullish day — price above open','Volume surge (+50% above average)'];
+    } else if (rsi>70 || (nearRes && bearishDay)) {
+      signal='SELL'; confidence=rsi>70?72:60;
+      if (rsi>70)        reasons.push('RSI overbought (above 70)');
+      if (nearRes)       reasons.push('Price near resistance level');
+      if (bearishDay)    reasons.push('Bearish day — price below open');
     } else {
-      verdict = 'HOLD';
+      reasons=['RSI in neutral range','No extreme volume signal','No strong directional bias'];
+      confidence = rsi<55 ? 60 : 52;
     }
 
-    // Confidence
-    let confidence = 50;
-    if (verdict === 'BUY') {
-      confidence += Math.round((45 - rsi) / 45 * 22);       // RSI room (0–22)
-      const surge = avgVolume ? volume / avgVolume : 1;
-      confidence += Math.round(Math.min((surge - 1.5) * 18, 18)); // vol (0–18)
-      const pctOpen = open ? ((price - open) / open) * 100 : 0;
-      confidence += Math.round(Math.min(pctOpen * 3, 10));  // bullish day (0–10)
-    } else if (verdict === 'SELL') {
-      if (rsi !== null && rsi > 70) confidence += Math.round((rsi - 70) / 30 * 28);
-      if (nearRes) confidence += 16;
-      if (isBearish && open) {
-        const pctOpen = ((open - price) / open) * 100;
-        confidence += Math.round(Math.min(pctOpen * 3, 10));
-      }
-    } else {
-      // HOLD: score how far from both thresholds
-      const distBuy  = rsi !== null ? Math.max(0, rsi - 45) : 25;
-      const distSell = rsi !== null ? Math.max(0, 70 - rsi) : 25;
-      confidence = 52 + Math.round(Math.min(distBuy, distSell) / 25 * 30);
-    }
-
-    confidence = Math.min(Math.max(confidence, 42), 95);
-
-    // Reason string
-    const reasons = [];
-    if (rsi !== null) reasons.push(`RSI ${rsi.toFixed(1)}`);
-    if (volSurge) reasons.push(`Volume surge ${avgVolume ? (volume / avgVolume).toFixed(1) + '×' : ''}`);
-    if (isBullish) reasons.push('Trading above open');
-    if (isBearish) reasons.push('Trading below open');
-    if (nearRes) reasons.push('Near resistance');
-
-    return { verdict, confidence, reasons };
+    return { signal, confidence, reasons };
   }
 
-  // ─── Rendering ────────────────────────────────────────────────────────────
-
-  // RSI arc gauge (SVG)
-  function renderRSIGauge(rsi) {
-    const svg = document.getElementById('rsiGaugeSvg');
-    if (!svg) return;
-
-    const cx = 90, cy = 100, r = 80, sw = 16;
-
-    function rsiToPoint(v) {
-      const angle = Math.PI * (1 - v / 100);
-      return {
-        x: (cx + r * Math.cos(angle)).toFixed(2),
-        y: (cy - r * Math.sin(angle)).toFixed(2),
-      };
-    }
-
-    function arcPath(v1, v2) {
-      const p1 = rsiToPoint(v1);
-      const p2 = rsiToPoint(v2);
-      // Spans < 180° so large-arc = 0; going right through top = sweep 0 (CCW in SVG)
-      return `M ${p1.x} ${p1.y} A ${r} ${r} 0 0 0 ${p2.x} ${p2.y}`;
-    }
-
-    const needleColor = rsi == null ? '#444' : rsi < 45 ? '#22c55e' : rsi <= 70 ? '#FFD700' : '#ef4444';
-    const np = rsi != null ? rsiToPoint(rsi) : rsiToPoint(50);
-
-    svg.innerHTML = `
-      <path d="${arcPath(0.5, 99.5)}" fill="none" stroke="#1e1e1e" stroke-width="${sw}" stroke-linecap="round"/>
-      <path d="${arcPath(0.5, 44.5)}" fill="none" stroke="#22c55e" stroke-width="${sw - 4}" stroke-linecap="round" opacity="0.7"/>
-      <path d="${arcPath(45.5, 69.5)}" fill="none" stroke="#FFD700" stroke-width="${sw - 4}" stroke-linecap="round" opacity="0.7"/>
-      <path d="${arcPath(70.5, 99.5)}" fill="none" stroke="#ef4444" stroke-width="${sw - 4}" stroke-linecap="round" opacity="0.7"/>
-      ${rsi != null ? `
-        <line x1="${cx}" y1="${cy}" x2="${np.x}" y2="${np.y}" stroke="${needleColor}" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="${cx}" cy="${cy}" r="5" fill="${needleColor}"/>
-        <circle cx="${np.x}" cy="${np.y}" r="6" fill="${needleColor}" opacity="0.9"/>
-      ` : ''}
-      <!-- Zone labels -->
-      <text x="10"  y="108" fill="#22c55e" font-size="9" font-family="DM Mono,monospace" opacity="0.8">0</text>
-      <text x="90"  y="22"  fill="#FFD700" font-size="9" font-family="DM Mono,monospace" text-anchor="middle" opacity="0.8">50</text>
-      <text x="164" y="108" fill="#ef4444" font-size="9" font-family="DM Mono,monospace" opacity="0.8">100</text>
-    `;
-
-    // Numeric readout
-    const numEl   = document.getElementById('rsiNumber');
-    const zoneEl  = document.getElementById('rsiZoneLabel');
-    if (numEl)  numEl.textContent  = rsi != null ? rsi.toFixed(1) : '--';
-    if (zoneEl) {
-      if (rsi == null) {
-        zoneEl.textContent  = 'N/A';
-        zoneEl.className    = 'rsi-zone-label';
-      } else if (rsi < 30) {
-        zoneEl.textContent  = 'Extremely Oversold';
-        zoneEl.className    = 'rsi-zone-label oversold';
-      } else if (rsi < 45) {
-        zoneEl.textContent  = 'Oversold';
-        zoneEl.className    = 'rsi-zone-label oversold';
-      } else if (rsi <= 70) {
-        zoneEl.textContent  = 'Neutral';
-        zoneEl.className    = 'rsi-zone-label neutral';
-      } else {
-        zoneEl.textContent  = 'Overbought';
-        zoneEl.className    = 'rsi-zone-label overbought';
+  // ── RSI gauge SVG ──────────────────────────────────────────────────────────
+  function drawRSI(rsi) {
+    const svg  = $('rsiSvg'); if (!svg) return;
+    const cx=90, cy=90, r=70, sw=12;
+    const ARC  = Math.PI;
+    const angle= (rsi/100)*ARC;
+    const startX=cx-r, startY=cy;
+    const endX=cx+r*Math.cos(Math.PI-angle), endY=cy-r*Math.sin(angle);
+    const colors=[{s:0,e:30,c:'#1dd6a3'},{s:30,e:70,c:'#f5c842'},{s:70,e:100,c:'#e84545'}];
+    let trackSeg='', fillSeg='';
+    const ptOnArc=(pct)=>{ const a=pct/100*Math.PI; return {x:cx-r*Math.cos(Math.PI-a),y:cy-r*Math.sin(a)}; };
+    for(const seg of colors){
+      const p0=ptOnArc(seg.s), p1=ptOnArc(seg.e);
+      trackSeg+=`<path d="M${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A${r} ${r} 0 0 1 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}" stroke="${seg.c}" stroke-width="${sw}" fill="none" opacity=".15"/>`;
+      if(rsi>seg.s){
+        const eEnd=Math.min(rsi,seg.e);
+        const q0=ptOnArc(seg.s),q1=ptOnArc(eEnd);
+        const large=eEnd-seg.s>50?1:0;
+        fillSeg+=`<path d="M${q0.x.toFixed(2)} ${q0.y.toFixed(2)} A${r} ${r} 0 ${large} 1 ${q1.x.toFixed(2)} ${q1.y.toFixed(2)}" stroke="${seg.c}" stroke-width="${sw}" fill="none" stroke-linecap="round"/>`;
       }
     }
+    const needleA=(rsi/100)*Math.PI;
+    const nx=cx+58*Math.cos(Math.PI+needleA), ny=cy-58*Math.sin(needleA);
+    svg.innerHTML=`
+      ${trackSeg}${fillSeg}
+      <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(2)}" y2="${ny.toFixed(2)}" stroke="var(--t1)" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="${cx}" cy="${cy}" r="4" fill="var(--teal)"/>
+      <text x="${cx-r-2}" y="${cy+18}" font-size="8" fill="var(--t3)" text-anchor="middle">0</text>
+      <text x="${cx}" y="${cy-r-8}" font-size="8" fill="var(--t3)" text-anchor="middle">50</text>
+      <text x="${cx+r+2}" y="${cy+18}" font-size="8" fill="var(--t3)" text-anchor="middle">100</text>`;
   }
 
-  // Verdict card
-  function renderVerdict(symbol, price, verdict, confidence, reasons) {
-    const card = document.getElementById('verdictCard');
-    const badge = document.getElementById('verdictBadge');
-    if (card)  { card.className  = `verdict-card ${verdict.toLowerCase()}`; }
-    if (badge) { badge.textContent = verdict; badge.className = `verdict-badge ${verdict.toLowerCase()}`; }
-
-    const symEl  = document.getElementById('verdictSymbol');
-    const priceEl= document.getElementById('verdictPrice');
-    const confEl = document.getElementById('verdictConfidence');
-    const rsnEl  = document.getElementById('verdictReason');
-
-    if (symEl)  symEl.textContent  = symbol;
-    if (priceEl) priceEl.textContent = '$' + fmtNum(price);
-    if (confEl) confEl.textContent  = confidence + '%';
-    if (rsnEl)  rsnEl.textContent   = reasons.join(' · ');
+  // ── Countdown ring ─────────────────────────────────────────────────────────
+  function startCountdown(onTick) {
+    clearInterval(cdTimer);
+    countdown = REFRESH_SECS;
+    const arc = $('cdArc'), num = $('cdNum'), secs = $('cdSecs');
+    const CIRC = 2*Math.PI*18; // r=18
+    const update = () => {
+      if (!arc||!num||!secs) return;
+      const pct = countdown/REFRESH_SECS;
+      arc.style.strokeDashoffset = (CIRC*(1-pct)).toFixed(2);
+      num.textContent  = countdown;
+      secs.textContent = countdown;
+    };
+    update();
+    cdTimer = setInterval(()=>{ countdown--; update(); if(countdown<=0){clearInterval(cdTimer);if(onTick)onTick();} },1000);
   }
 
-  // Volume bars
-  function renderVolume(volume, avgVolume) {
-    const todayEl  = document.getElementById('volToday');
-    const avgEl    = document.getElementById('volAvg');
-    const barToday = document.getElementById('volBarToday');
-    const barAvg   = document.getElementById('volBarAvg');
-    const diffEl   = document.getElementById('volDiffBadge');
-
-    if (todayEl) todayEl.textContent = fmtVol(volume);
-    if (avgEl)   avgEl.textContent   = avgVolume ? fmtVol(Math.round(avgVolume)) : '--';
-
-    if (barToday && barAvg && avgVolume) {
-      const ratio   = volume / avgVolume;
-      const todayPct = Math.min(ratio * 100, 200);  // cap bar at 200% of avg
-      barToday.style.width = Math.min(todayPct / 2, 100) + '%';
-      barAvg.style.width   = '50%'; // avg always at 50% reference
-
-      if (diffEl) {
-        const pctDiff = ((ratio - 1) * 100).toFixed(0);
-        const surge   = ratio >= 1.5;
-        diffEl.textContent = (ratio >= 1 ? '+' : '') + pctDiff + '% vs avg' + (surge ? ' — Volume Surge ⚡' : '');
-        diffEl.className   = 'vol-diff-badge ' + (surge ? 'surge' : 'normal');
-      }
-    } else if (diffEl) {
-      diffEl.textContent = 'Volume avg unavailable';
-      diffEl.className   = 'vol-diff-badge normal';
-    }
-  }
-
-  // Day range slider
-  function renderDayRange(price, low, high) {
-    const lowEl   = document.getElementById('rangeLow');
-    const highEl  = document.getElementById('rangeHigh');
-    const curEl   = document.getElementById('rangeCurrent');
-    const fillBar = document.getElementById('rangeFillBar');
-    const dotEl   = document.getElementById('rangeDotMarker');
-    const pctEl   = document.getElementById('rangePctLabel');
-
-    if (lowEl)  lowEl.textContent  = '$' + fmtNum(low,  2);
-    if (highEl) highEl.textContent = '$' + fmtNum(high, 2);
-    if (curEl)  curEl.textContent  = '$' + fmtNum(price,2);
-
-    const range = high - low;
-    const pct   = range > 0 ? Math.max(0, Math.min(100, ((price - low) / range) * 100)) : 50;
-
-    if (fillBar) fillBar.style.width = pct + '%';
-    if (dotEl)   dotEl.style.left    = pct + '%';
-    if (pctEl)   pctEl.textContent   = fmtNum(pct, 1) + '% of today\'s range';
-  }
-
-  // Day direction
-  function renderDirection(price, open) {
-    const arrow = document.getElementById('directionArrow');
-    const label = document.getElementById('directionLabel');
-    const pct   = document.getElementById('directionPct');
+  // ── Render results ─────────────────────────────────────────────────────────
+  function render(sym, data, hist) {
+    const { price, open, dayHigh, dayLow, volume, avgVolume } = data;
+    const closes  = hist.map(h=>h.close);
+    const rsi     = calcRSI([...closes].reverse());
+    const tenDayV = hist.slice(0,10).reduce((s,h)=>s+h.volume,0)/Math.min(hist.length,10);
+    const sr      = calcSR(hist.map(h=>({c:h.close,h:h.high,l:h.low})));
+    const { signal, confidence, reasons } = computeSignal(rsi, price, open, volume, tenDayV, sr);
 
     const bullish = price >= open;
-    const change  = open ? ((price - open) / open) * 100 : 0;
-    const sign    = change >= 0 ? '+' : '';
+    const dayRngPct = dayHigh>dayLow ? ((price-dayLow)/(dayHigh-dayLow)*100) : 50;
+    const fromOpen  = open ? ((price-open)/open*100) : 0;
+    const rsiZone   = rsi===null?'--':rsi<30?'Oversold':rsi>70?'Overbought':'Neutral';
+    const rsiZoneCls= rsi===null?'':rsi<30?'oversold':rsi>70?'overbought':'neutral';
 
-    if (arrow) { arrow.textContent = bullish ? '▲' : '▼'; arrow.className = 'direction-arrow ' + (bullish ? 'up' : 'down'); }
-    if (label) { label.textContent = bullish ? 'Bullish' : 'Bearish'; label.className = 'direction-label ' + (bullish ? 'up' : 'down'); }
-    if (pct)   pct.textContent  = sign + fmtNum(change, 2) + '% from open';
-  }
+    // verdict
+    const vc = $('verdictCard');
+    const vb = $('verdictBadge');
+    const cls= signal.toLowerCase();
+    ['buy','hold','sell'].forEach(c=>{ vc.classList.remove(c); vb.classList.remove(c); });
+    vc.classList.add(cls); vb.classList.add(cls);
+    $('verdictBadge').textContent  = signal;
+    $('verdictSym').textContent    = sym;
+    $('verdictPrice').textContent  = '$'+fmt(price);
+    $('verdictConf').textContent   = confidence+'%';
+    $('verdictReason').textContent = reasons.join(' · ');
 
-  // Support/Resistance table
-  function renderSR(resistance, support) {
-    const table = document.getElementById('srTable');
-    if (!table) return;
+    // RSI
+    if (rsi!==null) { drawRSI(rsi); $('rsiNum').textContent=fmt(rsi,1); $('rsiZone').textContent=rsiZone; $('rsiZone').className='rsi-zone '+rsiZoneCls; }
+    else { $('rsiNum').textContent='--'; $('rsiZone').textContent='Insufficient data'; }
 
-    const rows = [
-      ...resistance.map((p, i) => ({ type: 'resistance', label: `R${i + 1}`, price: p, tag: 'Take Profit' })),
-      ...support.map(   (p, i) => ({ type: 'support',    label: `S${i + 1}`, price: p, tag: 'Buy Zone'   })),
-    ];
+    // volume
+    const vMax    = Math.max(volume||0, tenDayV||0);
+    const vPctT   = vMax?(volume/vMax*100):0;
+    const vPctA   = vMax?(tenDayV/vMax*100):0;
+    const surge   = tenDayV>0 && volume/tenDayV>1.5;
+    const el=$('volBarT'); if(el){el.style.width=vPctT.toFixed(1)+'%';}
+    const elA=$('volBarA'); if(elA){elA.style.width=vPctA.toFixed(1)+'%';}
+    $('volToday').textContent = fmtV(volume);
+    $('volAvg').textContent   = fmtV(Math.round(tenDayV));
+    const vb2=$('volBadge');
+    vb2.textContent = surge?'Volume Surge':'Normal Volume';
+    vb2.className = 'vol-badge '+(surge?'surge':'normal');
 
-    table.innerHTML = rows.map(row => `
-      <div class="sr-row ${row.type}">
-        <div class="sr-level-info">
-          <span class="sr-type">${row.type}</span>
-          <span class="sr-name">${row.label} — 14-Day ${row.type === 'resistance' ? 'High' : 'Low'}</span>
-        </div>
-        <span class="sr-price">$${fmtNum(row.price)}</span>
-        <span class="sr-tag">${row.tag}</span>
-      </div>
-    `).join('');
-  }
+    // day range
+    $('rLow').textContent  = '$'+fmt(dayLow);
+    $('rCur').textContent  = '$'+fmt(price);
+    $('rHigh').textContent = '$'+fmt(dayHigh);
+    const dp = Math.max(0,Math.min(100,dayRngPct));
+    const rf=$('rangeFill');const rd=$('rangeDot');
+    if(rf) rf.style.width=dp.toFixed(1)+'%';
+    if(rd) rd.style.left=dp.toFixed(1)+'%';
+    $('rangePct').textContent = dp.toFixed(0)+'% position in today\'s range';
 
-  // ─── Countdown ring ───────────────────────────────────────────────────────
+    // direction
+    const dArrow=$('dirArrow'), dLabel=$('dirLabel'), dPct=$('dirPct');
+    if(dArrow){ dArrow.className='dir-arrow '+(bullish?'up':'down'); dArrow.textContent=bullish?'▲':'▼'; }
+    if(dLabel){ dLabel.className='dir-label '+(bullish?'up':'down'); dLabel.textContent=bullish?'Bullish':'Bearish'; }
+    if(dPct)  dPct.textContent=(fromOpen>=0?'+':'')+fmt(fromOpen)+'% from open ($'+fmt(open)+')';
 
-  function startCountdown() {
-    stopCountdown();
-    trader.countdownSecs = 60;
-    updateCountdownUI(60);
-
-    trader.countdownTimer = setInterval(() => {
-      trader.countdownSecs -= 1;
-      updateCountdownUI(trader.countdownSecs);
-
-      if (trader.countdownSecs <= 0) {
-        stopCountdown();
-        if (trader.symbol) runAnalysis(trader.symbol);
-      }
-    }, 1000);
-  }
-
-  function stopCountdown() {
-    if (trader.countdownTimer) {
-      clearInterval(trader.countdownTimer);
-      trader.countdownTimer = null;
+    // S/R
+    const srTbl = $('srTable');
+    if (srTbl) {
+      const resRows = sr.resistance.slice(0,2).map((v,i)=>`
+        <div class="sr-row res">
+          <div class="sr-left"><span class="sr-type">Resistance</span><span class="sr-desc">Level ${i+1} — ${((v-price)/price*100).toFixed(2)}% above</span></div>
+          <span class="sr-price">$${fmt(v)}</span>
+          <span class="sr-tag">SELL ZONE</span>
+        </div>`).join('');
+      const supRows = sr.support.slice(0,2).map((v,i)=>`
+        <div class="sr-row sup">
+          <div class="sr-left"><span class="sr-type">Support</span><span class="sr-desc">Level ${i+1} — ${((price-v)/price*100).toFixed(2)}% below</span></div>
+          <span class="sr-price">$${fmt(v)}</span>
+          <span class="sr-tag">BUY ZONE</span>
+        </div>`).join('');
+      srTbl.innerHTML = resRows + supRows || '<p style="font-size:13px;color:var(--t3);padding:12px 0">Insufficient price history for S/R levels.</p>';
     }
+
+    // show results
+    ui.results().style.display='flex';
+    startCountdown(()=>analyze(sym));
   }
 
-  function updateCountdownUI(secs) {
-    const numEl  = document.getElementById('countdownNum');
-    const secsEl = document.getElementById('countdownSecs');
-    const arc    = document.getElementById('countdownArc');
+  // ── Analyze ────────────────────────────────────────────────────────────────
+  async function analyze(sym) {
+    sym = sym.toUpperCase().trim();
+    if (!sym) return;
+    currentSym = sym;
 
-    if (numEl)  numEl.textContent  = secs;
-    if (secsEl) secsEl.textContent = secs;
+    ui.loading().style.display='flex';
+    ui.error().style.display='none';
+    ui.results().style.display='none';
+    if(ui.loadSym()) ui.loadSym().textContent=sym;
+    ui.btn().disabled=true;
 
-    if (arc) {
-      const offset = CIRCUMFERENCE * (1 - secs / 60);
-      arc.style.strokeDashoffset = offset;
-    }
-  }
-
-  // ─── States ───────────────────────────────────────────────────────────────
-
-  function showLoading(symbol) {
-    $loading.style.display = 'flex';
-    $results.style.display = 'none';
-    $error.style.display   = 'none';
-    $loadingTicker.textContent = symbol;
-    $btn.disabled = true;
-  }
-
-  function showError(msg) {
-    $loading.style.display = 'none';
-    $results.style.display = 'none';
-    $error.style.display   = 'flex';
-    $errorMsg.textContent  = msg;
-    $btn.disabled = false;
-  }
-
-  function showResults() {
-    $loading.style.display = 'none';
-    $error.style.display   = 'none';
-    $results.style.display = 'flex';
-    $btn.disabled = false;
-  }
-
-  // ─── Core: fetch + analyze ────────────────────────────────────────────────
-
-  async function runAnalysis(symbol) {
-    trader.symbol = symbol;
-    showLoading(symbol);
-    stopCountdown();
+    clearInterval(cdTimer);
 
     try {
       const [quoteRes, histRes] = await Promise.all([
-        fetch(`/api/quote/${symbol}`),
-        fetch(`/api/historical/${symbol}?timeseries=30`),
+        fetch(`/api/quote/${sym}`).then(r=>r.ok?r.json():null),
+        fetch(`/api/historical/${sym}?timeseries=30`).then(r=>r.ok?r.json():null),
       ]);
 
-      if (!quoteRes.ok) throw new Error(`Quote fetch failed (${quoteRes.status})`);
+      if (!quoteRes?.price) throw new Error('Unable to fetch quote data for '+sym);
+      const hist = histRes?.historical||[];
+      if (hist.length<5) throw new Error('Insufficient historical data for '+sym);
 
-      const quoteData = await quoteRes.json();
-      if (quoteData.error) throw new Error(quoteData.error);
-
-      // Flat FMP fields from /api/quote
-      const price = quoteData?.price;
-      const open  = quoteData?.open;
-      const high  = quoteData?.dayHigh;
-      const low   = quoteData?.dayLow;
-      const vol   = quoteData?.volume;
-
-      if (!price) throw new Error('No price data returned for this symbol.');
-
-      // Historical data for RSI + avg volume
-      let closes = [], historical = [], avgVolume = null, rsi = null;
-      let resistance = [], support = [];
-
-      if (histRes.ok) {
-        const histData = await histRes.json();
-        historical = histData?.historical || [];
-
-        if (historical.length >= 2) {
-          // Reverse: FMP is newest-first; RSI needs oldest-first
-          closes = [...historical].reverse().map(d => d.close);
-          rsi    = calcRSI(closes, 14);
-          avgVolume = calcAvgVolume(historical);
-          const sr = calcSupportResistance(historical);
-          resistance = sr.resistance;
-          support    = sr.support;
-        }
-      }
-
-      // Compute verdict
-      const { verdict, confidence, reasons } = computeVerdict({
-        rsi, price, open, high, low,
-        volume: vol, avgVolume,
-        resistance,
-      });
-
-      // Render all components
-      renderVerdict(symbol, price, verdict, confidence, reasons);
-      renderRSIGauge(rsi);
-      renderVolume(vol, avgVolume);
-      renderDayRange(price, low, high);
-      renderDirection(price, open);
-      renderSR(resistance, support);
-
-      showResults();
-      startCountdown();
-
-    } catch (err) {
-      console.error('[Trader]', err);
-      showError(err.message || 'Could not analyze this symbol. Check the ticker and try again.');
+      ui.loading().style.display='none';
+      render(sym, quoteRes, hist);
+    } catch(e) {
+      ui.loading().style.display='none';
+      ui.error().style.display='flex';
+      if($('traderErrorMsg')) $('traderErrorMsg').textContent=e.message||'Failed to analyze. Please try again.';
+    } finally {
+      ui.btn().disabled=false;
     }
   }
 
-  // ─── Boot ─────────────────────────────────────────────────────────────────
+  // ── Init ───────────────────────────────────────────────────────────────────
+  function init() {
+    const inp  = $('traderInput');
+    const btn  = $('traderBtn');
+    const now  = $('cdNow');
+    if (!inp||!btn) return;
 
-  function boot() {
-    $input        = document.getElementById('traderTickerInput');
-    $btn          = document.getElementById('traderAnalyzeBtn');
-    $loading      = document.getElementById('traderLoading');
-    $loadingTicker= document.getElementById('traderLoadingTicker');
-    $error        = document.getElementById('traderError');
-    $errorMsg     = document.getElementById('traderErrorMsg');
-    $results      = document.getElementById('traderResults');
-
-    if (!$input || !$btn) return;
-
-    function triggerAnalysis() {
-      const sym = $input.value.trim().toUpperCase();
-      if (!sym) { $input.focus(); return; }
-      runAnalysis(sym);
-    }
-
-    $btn.addEventListener('click', triggerAnalysis);
-
-    $input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') triggerAnalysis();
-    });
-
-    const refreshBtn = document.getElementById('traderRefreshBtn');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => {
-        if (trader.symbol) runAnalysis(trader.symbol);
-      });
-    }
-
-    // Stop countdown when user leaves the Trader page
-    document.querySelectorAll('.nav-tab').forEach(item => {
-      item.addEventListener('click', () => {
-        if (item.dataset.page !== 'trader') stopCountdown();
-        else if (trader.symbol) {
-          // Coming back to trader — restart if we have data
-          // (results already showing, countdown just resumes)
-        }
-      });
-    });
+    btn.addEventListener('click',()=>{ const s=inp.value.trim(); if(s)analyze(s); });
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){const s=inp.value.trim();if(s)analyze(s);} });
+    now?.addEventListener('click',()=>{ if(currentSym)analyze(currentSym); });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-
+  return { init };
 })();
+
+document.addEventListener('DOMContentLoaded', () => trader.init());

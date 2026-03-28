@@ -38,6 +38,9 @@ const api = {
   async stock(sym) {
     try { const r = await fetch(`/api/stock/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
   },
+  async valuation(sym) {
+    try { const r = await fetch(`/api/valuation/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
+  },
 };
 
 // ── Market status ──────────────────────────────────────────────────────────────
@@ -145,12 +148,13 @@ async function openStock(sym, snap) {
   document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
   // fetch all data in parallel
-  const [barsData, fmpData, newsData] = await Promise.all([
+  const [barsData, fmpData, newsData, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),
     api.stock(sym),
     api.news(sym),
+    api.valuation(sym),
   ]);
-  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData };
+  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData, val: valData };
   renderOverview(snap, barsData, up);
 }
 
@@ -168,7 +172,7 @@ function switchStockTab(tab) {
   const up = (d.snap?.price||0) >= (d.snap?.previousClose||0);
   if (tab==='overview') renderOverview(d.snap, d.bars, up);
   if (tab==='chart')    renderChart(d.sym, d.bars, up);
-  if (tab==='analysts') renderAnalysts(d.fmp, d.snap?.price||0);
+  if (tab==='analysts') renderAnalysts(d.fmp, d.snap?.price||0, d.val);
   if (tab==='news')     renderNews(d.news);
 }
 
@@ -335,7 +339,58 @@ function ratingCls(r) {
   return 'hold';
 }
 
-function renderAnalysts(fmp, price) {
+// color indicator based on metric thresholds
+function metricIndicator(key, value) {
+  if (value == null) return 'neutral';
+  const v = Number(value);
+  switch (key) {
+    case 'pe':            return v <= 0 ? 'weak' : v < 15 ? 'strong' : v < 30 ? 'neutral' : 'weak';
+    case 'eps':           return v > 2  ? 'strong' : v > 0   ? 'neutral' : 'weak';
+    case 'revenueGrowth': return v > 10 ? 'strong' : v >= 0  ? 'neutral' : 'weak';
+    case 'netMargin':     return v > 15 ? 'strong' : v > 5   ? 'neutral' : 'weak';
+    case 'grossMargin':   return v > 40 ? 'strong' : v > 20  ? 'neutral' : 'weak';
+    default: return 'neutral';
+  }
+}
+
+function valuationRow(label, key, value, formatted) {
+  const ind = metricIndicator(key, value);
+  const dot = `<span class="val-dot ${ind}"></span>`;
+  return `
+    <div class="val-row">
+      <span class="val-label">${dot}${label}</span>
+      <span class="val-value ${ind}">${formatted}</span>
+    </div>`;
+}
+
+function renderValuation(val) {
+  if (!val) return '<p class="no-data">Valuation data unavailable.</p>';
+
+  const hasAny = val.pe != null || val.eps != null || val.revenueGrowth != null || val.netMargin != null || val.grossMargin != null;
+  if (!hasAny) return '<p class="no-data">Valuation data unavailable — FMP rate limit may apply.</p>';
+
+  const pe  = val.pe  != null ? fmt(val.pe, 1) + 'x' : '--';
+  const eps = val.eps != null ? (val.eps >= 0 ? '$' : '-$') + fmt(Math.abs(val.eps), 2) : '--';
+  const rev = val.revenueGrowth != null ? (val.revenueGrowth >= 0 ? '+' : '') + fmt(val.revenueGrowth, 1) + '%' : '--';
+  const net = val.netMargin   != null ? fmt(val.netMargin, 1)   + '%' : '--';
+  const grs = val.grossMargin != null ? fmt(val.grossMargin, 1) + '%' : '--';
+  const period = val.date ? `<span class="val-period">Latest annual · ${val.date.slice(0,4)}</span>` : '';
+
+  return `
+    <div class="val-header">${period}</div>
+    ${valuationRow('P/E Ratio',           'pe',            val.pe,            pe)}
+    ${valuationRow('EPS (Diluted)',        'eps',           val.eps,           eps)}
+    ${valuationRow('Revenue Growth (YoY)','revenueGrowth', val.revenueGrowth, rev)}
+    ${valuationRow('Net Profit Margin',   'netMargin',     val.netMargin,     net)}
+    ${valuationRow('Gross Margin',        'grossMargin',   val.grossMargin,   grs)}
+    <div class="val-legend">
+      <span><i class="val-dot strong"></i>Healthy</span>
+      <span><i class="val-dot neutral"></i>Neutral</span>
+      <span><i class="val-dot weak"></i>Weak</span>
+    </div>`;
+}
+
+function renderAnalysts(fmp, price, val) {
   const r  = fmp?.ratings || {};
   const pt = fmp?.priceTarget;
   const up = fmp?.upgrades || [];
@@ -385,11 +440,24 @@ function renderAnalysts(fmp, price) {
     </table>` : '<p class="no-data">No recent rating changes.</p>';
 
   $('tab-analysts').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
-      <div class="score-card"><div class="score-card-title">Analyst Consensus</div>${consensusHtml}</div>
-      <div>${ptCard(pt,price)}</div>
-    </div>
-    <div class="upgrades-card"><div class="upgrades-title">Recent Rating Changes</div>${upgradesHtml}</div>`;
+    <div class="analysts-layout">
+      <div class="analysts-main">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="score-card"><div class="score-card-title">Analyst Consensus</div>${consensusHtml}</div>
+          <div>${ptCard(pt,price)}</div>
+        </div>
+        <div class="upgrades-card"><div class="upgrades-title">Recent Rating Changes</div>${upgradesHtml}</div>
+      </div>
+      <div class="analysts-side">
+        <div class="val-card">
+          <div class="val-card-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            Valuation Metrics
+          </div>
+          ${renderValuation(val)}
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── News tab ───────────────────────────────────────────────────────────────────

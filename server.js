@@ -3,6 +3,8 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 const fetch   = require('node-fetch');
+const YahooFinance = require('yahoo-finance2').default;
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 const app     = express();
 const PORT    = 5000;
@@ -215,6 +217,30 @@ app.get('/api/stock/:symbol', async (req, res) => {
     const priceTarget = pt?.targetMedian ? { targetLow: pt.targetLow, targetMedian: pt.targetMedian || pt.targetConsensus, targetHigh: pt.targetHigh } : null;
     const upgrades = (Array.isArray(ud) ? ud : []).slice(0,10).map(u => ({ gradingCompany: u.gradingCompany, date: u.publishedDate||u.date, previousGrade: u.previousGrade, newGrade: u.newGrade }));
     res.json({ ratings, priceTarget, upgrades });
+  } catch { res.json(empty); }
+});
+
+// ── GET /api/valuation/:symbol ─────────────────────────────────────────────────
+app.get('/api/valuation/:symbol', async (req, res) => {
+  const sym   = req.params.symbol.toUpperCase();
+  const empty = { pe: null, eps: null, revenueGrowth: null, netMargin: null, grossMargin: null };
+  try {
+    const d  = await yf.quoteSummary(sym, {
+      modules: ['defaultKeyStatistics', 'financialData', 'summaryDetail'],
+    });
+    const fd = d.financialData        || {};
+    const ks = d.defaultKeyStatistics || {};
+    const sd = d.summaryDetail        || {};
+
+    const rev  = fd.revenueGrowth ?? null;
+    res.json({
+      pe:            sd.trailingPE    ?? null,
+      eps:           ks.trailingEps   ?? null,
+      revenueGrowth: rev != null ? rev * 100 : null,
+      netMargin:     fd.profitMargins != null ? fd.profitMargins * 100 : null,
+      grossMargin:   fd.grossMargins  != null ? fd.grossMargins  * 100 : null,
+      date:          null,
+    });
   } catch { res.json(empty); }
 });
 

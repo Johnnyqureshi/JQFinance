@@ -432,6 +432,92 @@ input  { font-family:inherit; }
 }
 @keyframes spin { to { transform:rotate(360deg); } }
 
+/* ── ANALYSTS LAYOUT ───────────────────────────────────────────────────────── */
+.analysts-layout {
+  display:grid;
+  grid-template-columns:1fr 300px;
+  gap:20px;
+  align-items:start;
+}
+.analysts-main { display:flex; flex-direction:column; gap:0; }
+.analysts-side  { display:flex; flex-direction:column; gap:16px; }
+
+/* valuation card */
+.val-card {
+  background:var(--card);
+  border:1px solid var(--gold-bdr);
+  border-radius:var(--radius);
+  overflow:hidden;
+  position:sticky; top:calc(var(--nav-h) + 16px);
+}
+
+.val-card-title {
+  display:flex; align-items:center; gap:8px;
+  font-size:11px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.12em; color:var(--gold);
+  padding:14px 18px 12px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(135deg, rgba(245,200,66,.06) 0%, transparent 100%);
+}
+
+.val-header {
+  padding:9px 18px 0;
+  min-height:10px;
+}
+.val-period {
+  font-size:10px; color:var(--t3);
+  font-family:'DM Mono',monospace; letter-spacing:.04em;
+}
+
+.val-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 18px;
+  border-bottom:1px solid var(--border);
+  transition:background var(--tr);
+}
+.val-row:last-of-type { border-bottom:none; }
+.val-card .val-row:hover { background:var(--card2); }
+
+.val-label {
+  display:flex; align-items:center; gap:9px;
+  font-size:13px; color:var(--t2);
+}
+
+.val-value {
+  font-family:'DM Mono',monospace;
+  font-size:14px; font-weight:700;
+}
+.val-value.strong { color:var(--green); }
+.val-value.neutral { color:var(--gold); }
+.val-value.weak    { color:var(--red); }
+
+/* indicator dot */
+.val-dot {
+  display:inline-block;
+  width:8px; height:8px; border-radius:50%;
+  flex-shrink:0;
+}
+.val-dot.strong { background:var(--green); box-shadow:0 0 5px rgba(29,214,163,.5); }
+.val-dot.neutral { background:var(--gold);  box-shadow:0 0 5px rgba(245,200,66,.4); }
+.val-dot.weak    { background:var(--red);   box-shadow:0 0 5px rgba(232,69,69,.4); }
+
+.val-legend {
+  display:flex; align-items:center; gap:14px;
+  padding:10px 18px 12px;
+  border-top:1px solid var(--border);
+  background:var(--bg2);
+}
+.val-legend span {
+  display:flex; align-items:center; gap:5px;
+  font-size:10px; color:var(--t3);
+}
+.val-legend i { font-style:normal; }
+
+@media (max-width:1100px) {
+  .analysts-layout { grid-template-columns:1fr; }
+  .val-card { position:static; }
+}
+
 /* ── NEWS GRID ─────────────────────────────────────────────────────────────── */
 .news-grid {
   display:grid;

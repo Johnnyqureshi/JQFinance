@@ -807,12 +807,13 @@ async function loadWatchlist() {
     const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
     const row = document.createElement('div');
     row.className='wl-row';
+    const eSym = escapeHtml(sym);
     row.innerHTML=`
-      <span class="wl-sym">${sym}</span>
-      <span class="wl-name">${s.name||''}</span>
+      <span class="wl-sym">${eSym}</span>
+      <span class="wl-name">${escapeHtml(s.name||'')}</span>
       <span class="wl-px">${px?'$'+fmt(px):'--'}</span>
       <span class="wl-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>
-      <button class="wl-rm" data-sym="${sym}" title="Remove">×</button>`;
+      <button class="wl-rm" data-sym="${eSym}" title="Remove">×</button>`;
     row.addEventListener('click', e => {
       if (e.target.closest('.wl-rm')) return;
       openStock(sym, s||{symbol:sym});
@@ -837,7 +838,7 @@ function setupNavSearch() {
     navTimer=setTimeout(async()=>{
       const results=await api.search(q);
       if(!results.length){drop.classList.remove('open');return;}
-      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${r.symbol}"><span class="drop-sym">${r.symbol}</span><span class="drop-name">${r.name||''}</span></div>`).join('');
+      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${escapeHtml(r.symbol)}"><span class="drop-sym">${escapeHtml(r.symbol)}</span><span class="drop-name">${escapeHtml(r.name||'')}</span></div>`).join('');
       drop.classList.add('open');
       drop.querySelectorAll('.drop-item').forEach(item=>{
         item.addEventListener('click',async()=>{
@@ -863,7 +864,7 @@ function setupHeroSearch() {
     heroTimer=setTimeout(async()=>{
       const results=await api.search(q);
       if(!results.length){drop.classList.remove('open');return;}
-      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${r.symbol}"><span class="drop-sym">${r.symbol}</span><span class="drop-name">${r.name||''}</span></div>`).join('');
+      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${escapeHtml(r.symbol)}"><span class="drop-sym">${escapeHtml(r.symbol)}</span><span class="drop-name">${escapeHtml(r.name||'')}</span></div>`).join('');
       drop.classList.add('open');
       drop.querySelectorAll('.drop-item').forEach(item=>{
         item.addEventListener('click',async()=>{

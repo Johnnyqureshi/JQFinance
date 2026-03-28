@@ -728,8 +728,10 @@ async function loadWSB() {
     const s  = snaps[t.sym] || {};
     const px = s.price||0, pv = s.previousClose||0;
     const ch = px-pv, pt = pv?(ch/pv)*100:0;
-    const bar = Math.round((t.mentions/maxMentions)*100);
-    const rankChg = (t.rankAgo||t.rank) - t.rank;
+    const rank     = Number(t.rank)     || 0;
+    const mentions = Number(t.mentions) || 0;
+    const bar = Math.round((mentions/maxMentions)*100);
+    const rankChg = (Number(t.rankAgo) || rank) - rank;
     const rankBadge = rankChg > 0
       ? `<span class="wsb-rank-up">▲${rankChg}</span>`
       : rankChg < 0
@@ -738,11 +740,11 @@ async function loadWSB() {
     const safeSym  = escapeHtml(t.sym  || '');
     const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
     return `<div class="wsb-ticker-row" data-sym="${safeSym}">
-      <span class="wsb-rank">#${t.rank}</span>
+      <span class="wsb-rank">#${rank}</span>
       ${rankBadge}
       <span class="wsb-sym">${safeSym}</span>
       ${showBar ? `<div class="wsb-bar-wrap"><div class="wsb-bar" style="width:${bar}%"></div></div>` : `<span class="wsb-name-sm">${safeName}</span>`}
-      <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+      <span class="wsb-mentions">${mentions >= 1000 ? (mentions/1000).toFixed(1)+'k' : mentions}</span>
       ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
     </div>`;
   };
@@ -751,14 +753,17 @@ async function loadWSB() {
     const s  = snaps[t.sym] || {};
     const px = s.price||0, pv = s.previousClose||0;
     const ch = px-pv, pt = pv?(ch/pv)*100:0;
+    const rank     = Number(t.rank)     || 0;
+    const rankGain = Number(t.rankGain) || 0;
+    const mentions = Number(t.mentions) || 0;
     const safeSym  = escapeHtml(t.sym  || '');
     const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
     return `<div class="wsb-ticker-row" data-sym="${safeSym}">
-      <span class="wsb-rank">#${t.rank}</span>
-      <span class="wsb-rank-up">▲${t.rankGain}</span>
+      <span class="wsb-rank">#${rank}</span>
+      <span class="wsb-rank-up">▲${rankGain}</span>
       <span class="wsb-sym">${safeSym}</span>
       <span class="wsb-name-sm">${safeName}</span>
-      <span class="wsb-mentions">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+      <span class="wsb-mentions">${mentions >= 1000 ? (mentions/1000).toFixed(1)+'k' : mentions}</span>
       ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
     </div>`;
   };

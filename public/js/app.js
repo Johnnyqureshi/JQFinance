@@ -188,24 +188,23 @@ function switchStockTab(tab) {
 function renderOverview(snap, bars, up) {
   const p = snap || {};
   const color = up ? '#1dd6a3' : '#e84545';
-  $('tab-overview').innerHTML = `
-    <div class="overview-layout">
-      <div>
-        <div class="stat-strip">
-          <div class="stat-cell"><label>Open</label><span>$${fmt(p.open)}</span></div>
-          <div class="stat-cell"><label>Prev Close</label><span>$${fmt(p.previousClose)}</span></div>
-          <div class="stat-cell"><label>Day High</label><span>$${fmt(p.dayHigh)}</span></div>
-          <div class="stat-cell"><label>Day Low</label><span>$${fmt(p.dayLow)}</span></div>
-          <div class="stat-cell"><label>Volume</label><span>${fmtV(p.volume)}</span></div>
-          <div class="stat-cell"><label>Avg Volume</label><span>${fmtV(p.avgVolume)}</span></div>
-        </div>
-        <div class="chart-card">
-          <h3>Intraday — Last 48 hours</h3>
-          <canvas id="ovCanvas" style="height:220px"></canvas>
-        </div>
-      </div>
-      <div id="scorePanel"></div>
-    </div>`;
+  $('tab-overview').innerHTML =
+    '<div class="overview-layout"><div><div class="stat-strip">' +
+    '<div class="stat-cell"><label>Open</label><span id="ov-open"></span></div>' +
+    '<div class="stat-cell"><label>Prev Close</label><span id="ov-prev"></span></div>' +
+    '<div class="stat-cell"><label>Day High</label><span id="ov-high"></span></div>' +
+    '<div class="stat-cell"><label>Day Low</label><span id="ov-low"></span></div>' +
+    '<div class="stat-cell"><label>Volume</label><span id="ov-vol"></span></div>' +
+    '<div class="stat-cell"><label>Avg Volume</label><span id="ov-avgvol"></span></div>' +
+    '</div><div class="chart-card"><h3>Intraday \u2014 Last 48 hours</h3>' +
+    '<canvas id="ovCanvas" style="height:220px"></canvas></div></div>' +
+    '<div id="scorePanel"></div></div>';
+  $('ov-open').textContent   = '$' + fmt(p.open);
+  $('ov-prev').textContent   = '$' + fmt(p.previousClose);
+  $('ov-high').textContent   = '$' + fmt(p.dayHigh);
+  $('ov-low').textContent    = '$' + fmt(p.dayLow);
+  $('ov-vol').textContent    = fmtV(p.volume);
+  $('ov-avgvol').textContent = fmtV(p.avgVolume);
   const canvas = $('ovCanvas');
   if (canvas && bars?.bars?.length >= 2) requestAnimationFrame(() => drawChart(canvas, bars.bars, color, 220));
   // async score panel

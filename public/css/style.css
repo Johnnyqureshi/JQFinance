@@ -373,6 +373,84 @@ body {
   background: rgba(255, 215, 0, 0.2);
 }
 
+/* ─── FEED SEARCH ────────────────────────────────── */
+
+.feed-search-wrap {
+  margin-bottom: 20px;
+}
+
+.feed-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 10px 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.feed-search-bar:focus-within {
+  border-color: rgba(255,215,0,0.4);
+  box-shadow: 0 0 0 3px rgba(255,215,0,0.06);
+}
+
+.feed-search-bar svg {
+  width: 17px;
+  height: 17px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.feed-search-bar input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.feed-search-bar input::placeholder { color: #444; }
+
+.feed-search-btn {
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  color: var(--gold);
+  cursor: pointer;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.feed-search-btn:hover { background: rgba(255,215,0,0.2); }
+
+.feed-search-btn.loading { opacity: 0.5; pointer-events: none; }
+
+.feed-search-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.feed-search-msg {
+  font-size: 12px;
+  margin-top: 7px;
+  padding-left: 4px;
+  min-height: 16px;
+  transition: opacity 0.2s ease;
+}
+
+.feed-search-msg.error  { color: #ef4444; }
+.feed-search-msg.success { color: #22c55e; }
+.feed-search-msg.info   { color: #888; }
+
 /* ─── FEED GRID ─────────────────────────────────── */
 
 .feed-grid {
@@ -380,6 +458,65 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
 }
+
+/* ─── CARD ANIMATIONS ────────────────────────────── */
+
+@keyframes cardFadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.stock-card.card-reveal {
+  animation: cardFadeUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ─── SKELETON CARD ──────────────────────────────── */
+
+.stock-card.card-skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.stock-card.card-skeleton::after { display: none; }
+
+@keyframes skeletonShimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skel {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    #242424 25%,
+    #2e2e2e 50%,
+    #242424 75%
+  );
+  background-size: 400px 100%;
+  animation: skeletonShimmer 1.6s ease-in-out infinite;
+}
+
+/* Gold-tinted shimmer on the gauge skeleton */
+.card-skeleton .gauge-skeleton {
+  background: linear-gradient(
+    90deg,
+    #1e1a00 25%,
+    #2d2600 50%,
+    #1e1a00 75%
+  );
+  background-size: 400px 100%;
+  animation: skeletonShimmer 1.6s ease-in-out infinite;
+  border-color: #2d2600;
+}
+
+.skel-sym   { height: 22px; width: 60%; margin-bottom: 6px; }
+.skel-price { height: 17px; width: 45%; margin-bottom: 4px; }
+.skel-change{ height: 12px; width: 55%; }
+.skel-badge { height: 22px; width: 38%; border-radius: 20px; }
+.skel-chart { height: 44px; }
+.skel-bar   { height: 42px; }
+.skel-stat  { height: 28px; flex: 1; }
+.skel-label { height: 9px; width: 50px; border-radius: 4px; }
 
 /* ─── STOCK CARD COMPONENT ───────────────────────── */
 
@@ -1384,10 +1521,26 @@ body {
   .modal-stats { grid-template-columns: repeat(2, 1fr); }
 
   .markets-sections { grid-template-columns: 1fr; }
+
+  /* Feed search grows full width */
+  .feed-search-wrap { margin-bottom: 16px; }
+  .feed-search-bar { padding: 9px 12px; }
+  .feed-search-bar input { font-size: 14px; }
+
+  /* Ticker strip hidden on small tablets */
+  .ticker-strip { display: none; }
 }
 
 @media (max-width: 480px) {
   .page { padding: 16px; }
   .topbar { padding: 0 12px; }
-  .feed-grid { grid-template-columns: 1fr; }
+  .feed-grid { grid-template-columns: 1fr; gap: 12px; }
+
+  /* Feed cards go edge-to-edge on mobile */
+  .feed-search-bar { border-radius: 10px; }
+  .card-bottom-stats { gap: 6px; }
+  .stat-item { padding: 6px 6px; }
+
+  /* Skeletons slightly shorter on mobile */
+  .skel-chart { height: 36px; }
 }

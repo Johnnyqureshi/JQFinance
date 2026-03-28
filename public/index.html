@@ -84,24 +84,46 @@
 
     <!-- FEED PAGE -->
     <div class="page active" id="page-feed">
-      <div class="feed-header">
-        <h1 class="page-title">Market Feed</h1>
-        <div class="feed-controls">
-          <button class="btn-refresh" id="refreshFeed">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+
+      <!-- Feed search / add ticker -->
+      <div class="feed-search-wrap">
+        <div class="feed-search-bar" id="feedSearchBar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            type="text"
+            id="feedSearch"
+            placeholder="Add a ticker to your feed… e.g. AAPL"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+          />
+          <button class="feed-search-btn" id="feedSearchBtn" aria-label="Add ticker">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <polyline points="19 12 12 19 5 12"/>
             </svg>
-            Refresh
           </button>
         </div>
+        <div class="feed-search-msg" id="feedSearchMsg"></div>
       </div>
-      <div class="feed-grid" id="feedGrid">
-        <div class="loading-state">
-          <div class="spinner"></div>
-          <p>Loading market data...</p>
-        </div>
+
+      <!-- Feed header -->
+      <div class="feed-header">
+        <h1 class="page-title">Market Feed</h1>
+        <button class="btn-refresh" id="refreshFeed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Refresh
+        </button>
       </div>
+
+      <!-- Card grid -->
+      <div class="feed-grid" id="feedGrid"></div>
+
     </div>
 
     <!-- MARKETS PAGE -->

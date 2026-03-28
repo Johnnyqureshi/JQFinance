@@ -232,6 +232,35 @@ function drawFullChart(canvas, bars, color) {
   ctx.fill();
 }
 
+// ─── SKELETON CARD ────────────────────────────────────────────────────────────
+
+function buildSkeletonCard() {
+  const div = document.createElement('div');
+  div.className = 'stock-card card-skeleton';
+  div.innerHTML = `
+    <div class="card-top-row">
+      <div class="card-left">
+        <div class="skel skel-sym"></div>
+        <div class="skel skel-price"></div>
+        <div class="skel skel-change"></div>
+      </div>
+      <div class="card-gauge-wrap">
+        <div class="gauge-skeleton"></div>
+        <div class="skel skel-label"></div>
+      </div>
+    </div>
+    <div class="skel skel-badge" style="margin-top:10px;"></div>
+    <div class="skel skel-chart" style="margin-top:12px;"></div>
+    <div class="skel skel-bar"   style="margin-top:10px;"></div>
+    <div class="card-bottom-stats" style="margin-top:10px;">
+      <div class="skel skel-stat"></div>
+      <div class="skel skel-stat"></div>
+      <div class="skel skel-stat"></div>
+    </div>
+  `;
+  return div;
+}
+
 // ─── STOCK CARD COMPONENT ─────────────────────────────────────────────────────
 
 function computeSmartScore(ratings) {
@@ -406,36 +435,47 @@ async function loadFMPCard(symbol, cardEl) {
   }
 }
 
+function revealCard(card, delayMs) {
+  card.style.animationDelay = `${delayMs}ms`;
+  card.classList.add('card-reveal');
+}
+
 async function loadFeed() {
   const grid = document.getElementById('feedGrid');
-  grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading market data...</p></div>';
 
+  // 1. Show skeleton placeholders immediately
+  grid.innerHTML = '';
+  FEED_SYMBOLS.forEach(() => grid.appendChild(buildSkeletonCard()));
+
+  // 2. Fetch live data
   const snaps = await fetchSnapshots(FEED_SYMBOLS);
   state.snapshots = snaps;
 
-  grid.innerHTML = '';
   if (!snaps || Object.keys(snaps).length === 0) {
     grid.innerHTML = '<div class="loading-state"><p>Unable to load market data. Check API keys.</p></div>';
     return;
   }
 
+  // 3. Replace skeletons with real cards, staggered fade-in
+  grid.innerHTML = '';
   const cards = [];
-  FEED_SYMBOLS.forEach(sym => {
+  FEED_SYMBOLS.forEach((sym, i) => {
     const snap = snaps[sym];
     if (!snap) return;
     const card = buildCard(sym, snap);
+    revealCard(card, i * 40); // 40ms stagger per card
     grid.appendChild(card);
     cards.push({ sym, card });
   });
 
   updateTickerStrip(snaps);
 
-  // Load mini charts immediately
+  // 4. Load mini charts
   cards.forEach(({ sym, card }) => {
     loadMiniChart(sym, card.querySelector('.mini-chart'));
   });
 
-  // Load FMP data (Smart Score + consensus + price targets) in batches of 5
+  // 5. Load FMP data in batches of 5
   const BATCH = 5;
   for (let i = 0; i < cards.length; i += BATCH) {
     const batch = cards.slice(i, i + BATCH);
@@ -811,6 +851,81 @@ function setupSearch() {
   });
 }
 
+// ─── FEED SEARCH ──────────────────────────────────────────────────────────────
+
+function setupFeedSearch() {
+  const input  = document.getElementById('feedSearch');
+  const btn    = document.getElementById('feedSearchBtn');
+  const msg    = document.getElementById('feedSearchMsg');
+  if (!input || !btn || !msg) return;
+
+  async function addTickerToFeed() {
+    const sym = input.value.trim().toUpperCase().replace(/[^A-Z.]/g, '');
+    if (!sym) return;
+
+    // Prevent duplicate (skip if already in feed)
+    const grid = document.getElementById('feedGrid');
+    if (grid.querySelector(`.stock-card[data-symbol="${sym}"]`)) {
+      msg.textContent = `${sym} is already in your feed`;
+      msg.className   = 'feed-search-msg info';
+      setTimeout(() => { msg.textContent = ''; msg.className = 'feed-search-msg'; }, 2500);
+      input.value = '';
+      return;
+    }
+
+    // Show loading state
+    btn.classList.add('loading');
+    msg.textContent = `Fetching ${sym}…`;
+    msg.className   = 'feed-search-msg info';
+
+    // Insert skeleton at the top first
+    const skeleton = buildSkeletonCard();
+    grid.prepend(skeleton);
+
+    try {
+      const res   = await fetch(`/api/quote/${sym}`);
+      const data  = await res.json();
+      const snap  = data?.snapshot || data;
+
+      if (!snap || (!snap.latestTrade && !snap.latestQuote)) {
+        throw new Error('Not found');
+      }
+
+      // Replace skeleton with real card
+      const card = buildCard(sym, snap);
+      revealCard(card, 0);
+      grid.replaceChild(card, skeleton);
+
+      // Update local state
+      if (!state.snapshots) state.snapshots = {};
+      state.snapshots[sym] = snap;
+
+      // Load chart + FMP data
+      loadMiniChart(sym, card.querySelector('.mini-chart'));
+      loadFMPCard(sym, card);
+
+      msg.textContent = `${sym} added to your feed`;
+      msg.className   = 'feed-search-msg success';
+      input.value = '';
+      setTimeout(() => { msg.textContent = ''; msg.className = 'feed-search-msg'; }, 3000);
+
+    } catch {
+      grid.removeChild(skeleton);
+      msg.textContent = `Couldn't find "${sym}" — check the ticker symbol`;
+      msg.className   = 'feed-search-msg error';
+      setTimeout(() => { msg.textContent = ''; msg.className = 'feed-search-msg'; }, 3500);
+    }
+
+    btn.classList.remove('loading');
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTickerToFeed();
+  });
+
+  btn.addEventListener('click', addTickerToFeed);
+}
+
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
 
 function setupNav() {
@@ -844,6 +959,9 @@ function setupNav() {
   document.getElementById('panelClose').addEventListener('click', closePanel);
 
   document.getElementById('refreshFeed').addEventListener('click', loadFeed);
+
+  // ── Feed search: add a ticker to the top of the feed ──────────────────────
+  setupFeedSearch();
 
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('chartModal').addEventListener('click', e => {

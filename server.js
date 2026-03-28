@@ -5,7 +5,7 @@ const path    = require('path');
 const fetch   = require('node-fetch');
 
 const app = express();
-const PORT = 3000;
+const PORT = 5000;
 const FMP_KEY = process.env.FMP_API_KEY;
 
 app.use(cors());

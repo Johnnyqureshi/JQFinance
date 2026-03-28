@@ -1368,6 +1368,228 @@ body {
   background: var(--bg-hover);
 }
 
+/* ─── PANEL LOADING / EMPTY ─────────────────────── */
+
+.panel-loading-sm {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold) 0%, #222 100%);
+  background-size: 200% 100%;
+  animation: panelPulse 1.4s ease-in-out infinite;
+  margin: 6px 0 16px;
+}
+
+@keyframes panelPulse {
+  0%   { opacity: 0.3; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+
+.panel-no-data {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 4px 0 16px;
+}
+
+/* ─── ANALYST RATINGS BAR ────────────────────────── */
+
+.analyst-bar-wrap { margin-bottom: 16px; }
+
+.analyst-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 20px;
+  overflow: hidden;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.analyst-bar-seg {
+  height: 100%;
+  border-radius: 20px;
+  transition: width 0.5s ease;
+  min-width: 3px;
+}
+
+.analyst-bar-seg.strong-buy  { background: #FFD700; }
+.analyst-bar-seg.buy         { background: #22c55e; }
+.analyst-bar-seg.hold        { background: #6b7280; }
+.analyst-bar-seg.sell        { background: #ef4444; }
+.analyst-bar-seg.strong-sell { background: #991b1b; }
+
+.analyst-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.analyst-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.al-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.al-dot.strong-buy  { background: #FFD700; }
+.al-dot.buy         { background: #22c55e; }
+.al-dot.hold        { background: #6b7280; }
+.al-dot.sell        { background: #ef4444; }
+.al-dot.strong-sell { background: #991b1b; }
+
+.al-count { font-weight: 600; color: var(--text-primary); }
+
+/* ─── PRICE TARGET STAT BOXES ────────────────────── */
+
+.pt-stat-boxes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pt-stat-box {
+  background: var(--bg-card);
+  border: 1px solid #1e1e1e;
+  border-radius: var(--radius-sm);
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.pt-stat-box.median {
+  border-color: rgba(255, 215, 0, 0.28);
+  background: rgba(255, 215, 0, 0.04);
+}
+
+.pt-stat-box label {
+  display: block;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 7px;
+}
+
+.pt-stat-box .pt-val {
+  font-family: 'Playfair Display', serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pt-stat-box.median .pt-val { color: var(--gold); }
+
+.pt-upside-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.pt-upside-note strong.up   { color: var(--green); }
+.pt-upside-note strong.down { color: var(--red); }
+
+/* ─── UPGRADES / DOWNGRADES LIST ─────────────────── */
+
+.upgrades-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding-right: 2px;
+  margin-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+
+.upgrades-list::-webkit-scrollbar { width: 3px; }
+.upgrades-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+.upgrade-item {
+  background: var(--bg-card);
+  border: 1px solid #1e1e1e;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color var(--transition);
+}
+
+.upgrade-item:hover { border-color: #2a2a2a; }
+
+.upgrade-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.upgrade-firm {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.upgrade-date {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.upgrade-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.upgrade-arrow {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.upgrade-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.upgrade-badge.strong-buy  { background: rgba(255,215,0,0.14);  color: #FFD700; }
+.upgrade-badge.buy         { background: rgba(34,197,94,0.14);   color: #22c55e; }
+.upgrade-badge.hold        { background: rgba(107,114,128,0.18); color: #9ca3af; }
+.upgrade-badge.sell        { background: rgba(239,68,68,0.14);   color: #ef4444; }
+.upgrade-badge.strong-sell { background: rgba(153,27,27,0.18);   color: #f87171; }
+.upgrade-badge.neutral     { background: rgba(107,114,128,0.18); color: #9ca3af; }
+
+/* ─── PANEL BACKDROP (mobile overlay) ───────────────*/
+
+.panel-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 199;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.panel-backdrop.visible {
+  display: block;
+  opacity: 1;
+}
+
 /* ─── MODAL ─────────────────────────────────────── */
 
 .modal-overlay {
@@ -1501,7 +1723,22 @@ body {
 /* ─── RESPONSIVE ─────────────────────────────────── */
 
 @media (max-width: 1100px) {
-  .detail-panel { display: none; }
+  .detail-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 200;
+    width: min(380px, 92vw);
+    height: 100dvh;
+    transform: translateX(100%);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: -6px 0 32px rgba(0, 0, 0, 0.6);
+  }
+
+  .detail-panel.open { transform: translateX(0); }
+
+  .panel-close { display: flex !important; }
 }
 
 @media (max-width: 768px) {

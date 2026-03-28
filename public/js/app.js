@@ -511,21 +511,26 @@ function updateTickerStrip(snaps) {
 
 async function openDetail(symbol, snap) {
   state.currentSymbol = symbol;
-  const panel = document.getElementById('panelContent');
-  const pc = document.getElementById('panelClose');
-  pc.style.display = 'block';
+  const panelEl      = document.getElementById('detailPanel');
+  const panelContent = document.getElementById('panelContent');
+  const backdrop     = document.getElementById('panelBackdrop');
 
-  const price = snap?.latestTrade?.p || 0;
-  const prev = snap?.prevDailyBar?.c || 0;
+  // Slide panel in (mobile overlay)
+  panelEl.classList.add('open');
+  if (backdrop) backdrop.classList.add('visible');
+  document.getElementById('panelClose').style.display = 'flex';
+
+  const price = snap?.latestTrade?.p || snap?.latestQuote?.ap || 0;
+  const prev  = snap?.prevDailyBar?.c || 0;
   const change = price - prev;
-  const pct = prev ? (change / prev) * 100 : 0;
-  const isUp = change >= 0;
-  const high = snap?.dailyBar?.h || 0;
-  const low = snap?.dailyBar?.l || 0;
-  const open = snap?.dailyBar?.o || 0;
-  const vol = snap?.dailyBar?.v || 0;
+  const pct    = prev ? (change / prev) * 100 : 0;
+  const isUp   = change >= 0;
+  const high   = snap?.dailyBar?.h  || 0;
+  const low    = snap?.dailyBar?.l  || 0;
+  const open   = snap?.dailyBar?.o  || 0;
+  const vol    = snap?.dailyBar?.v  || 0;
 
-  panel.innerHTML = `
+  panelContent.innerHTML = `
     <div class="panel-header">
       <div class="panel-symbol">${symbol}</div>
     </div>
@@ -539,7 +544,7 @@ async function openDetail(symbol, snap) {
       <div class="panel-stat"><label>Prev Close</label><span>$${fmt(prev)}</span></div>
       <div class="panel-stat"><label>High</label><span>$${fmt(high)}</span></div>
       <div class="panel-stat"><label>Low</label><span>$${fmt(low)}</span></div>
-      <div class="panel-stat"><label>Volume</label><span>${vol > 1e6 ? (vol/1e6).toFixed(2)+'M' : vol > 1000 ? (vol/1000).toFixed(0)+'K' : vol||'--'}</span></div>
+      <div class="panel-stat"><label>Volume</label><span>${fmtVol(vol)}</span></div>
       <div class="panel-stat"><label>VWAP</label><span>$${fmt(snap?.dailyBar?.vw)}</span></div>
     </div>
     <div class="panel-actions">
@@ -548,25 +553,63 @@ async function openDetail(symbol, snap) {
         ${state.watchlist.includes(symbol) ? '★ Watchlist' : '☆ Watch'}
       </button>
     </div>
+
+    <div class="panel-section-title">Analyst Ratings</div>
+    <div id="panelAnalyst"><div class="panel-loading-sm"></div></div>
+
+    <div class="panel-section-title">Price Targets</div>
+    <div id="panelPriceTargets"><div class="panel-loading-sm"></div></div>
+
+    <div class="panel-section-title">Upgrades &amp; Downgrades</div>
+    <div id="panelUpgrades"><div class="panel-loading-sm"></div></div>
+
     <div class="panel-section-title">Recent News</div>
-    <div class="panel-news" id="panelNews"><div class="spinner" style="margin:20px auto;width:24px;height:24px;border-width:2px"></div></div>
+    <div class="panel-news" id="panelNews"><div class="panel-loading-sm"></div></div>
   `;
 
-  // Load panel chart
-  const data = await fetchBars(symbol, '1Hour', 48);
+  // Fetch chart, FMP analyst data, and news all in parallel
+  const [chartData, fmpData, news] = await Promise.all([
+    fetchBars(symbol, '1Hour', 48),
+    fetchStockAnalysis(symbol),
+    fetchNews(symbol),
+  ]);
+
+  // Chart
   const pCanvas = document.getElementById('panelChartCanvas');
-  if (pCanvas && data?.bars) {
-    const color = isUp ? '#22c55e' : '#ef4444';
+  if (pCanvas && chartData?.bars) {
     pCanvas.style.height = '120px';
-    drawFullChart(pCanvas, data.bars, color);
+    drawFullChart(pCanvas, chartData.bars, isUp ? '#22c55e' : '#ef4444');
   }
 
-  // Load news
-  const news = await fetchNews(symbol);
+  // Analyst ratings bar
+  const analystEl = document.getElementById('panelAnalyst');
+  if (analystEl) {
+    analystEl.innerHTML = fmpData?.ratings
+      ? buildAnalystBar(fmpData.ratings)
+      : '<p class="panel-no-data">No analyst data available</p>';
+  }
+
+  // Price targets
+  const ptEl = document.getElementById('panelPriceTargets');
+  if (ptEl) {
+    ptEl.innerHTML = fmpData?.priceTarget
+      ? buildPtStatBoxes(fmpData.priceTarget, price)
+      : '<p class="panel-no-data">No price target data available</p>';
+  }
+
+  // Upgrades / downgrades
+  const upgradesEl = document.getElementById('panelUpgrades');
+  if (upgradesEl) {
+    upgradesEl.innerHTML = fmpData?.upgrades?.length
+      ? buildUpgradesList(fmpData.upgrades.slice(0, 5))
+      : '<p class="panel-no-data">No recent rating changes</p>';
+  }
+
+  // News
   const newsEl = document.getElementById('panelNews');
   if (newsEl) {
-    if (news.length === 0) {
-      newsEl.innerHTML = '<p style="color:var(--text-muted);font-size:12px">No recent news found.</p>';
+    if (!news.length) {
+      newsEl.innerHTML = '<p class="panel-no-data">No recent news found.</p>';
     } else {
       newsEl.innerHTML = news.slice(0, 5).map(n => `
         <div class="news-item" onclick="window.open('${n.url}','_blank')">
@@ -579,6 +622,11 @@ async function openDetail(symbol, snap) {
 }
 
 function closePanel() {
+  const panelEl  = document.getElementById('detailPanel');
+  const backdrop = document.getElementById('panelBackdrop');
+  panelEl.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('visible');
+  document.getElementById('panelClose').style.display = 'none';
   document.getElementById('panelContent').innerHTML = `
     <div class="panel-placeholder">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -587,8 +635,105 @@ function closePanel() {
       <p>Select a stock to view details</p>
     </div>
   `;
-  document.getElementById('panelClose').style.display = 'none';
   state.currentSymbol = null;
+}
+
+// ─── PANEL BUILDER HELPERS ────────────────────────────────────────────────────
+
+function buildAnalystBar(ratings) {
+  const { strongBuy = 0, buy = 0, hold = 0, sell = 0, strongSell = 0, total = 0 } = ratings;
+  if (total === 0) return '<p class="panel-no-data">No analyst rating data</p>';
+
+  const pct = n => ((n / total) * 100).toFixed(1);
+  const segments = [
+    { cls: 'strong-buy',  count: strongBuy,  label: 'Strong Buy'  },
+    { cls: 'buy',         count: buy,         label: 'Buy'         },
+    { cls: 'hold',        count: hold,        label: 'Hold'        },
+    { cls: 'sell',        count: sell,        label: 'Sell'        },
+    { cls: 'strong-sell', count: strongSell,  label: 'Strong Sell' },
+  ].filter(s => s.count > 0);
+
+  const barSegs = segments
+    .map(s => `<div class="analyst-bar-seg ${s.cls}" style="width:${pct(s.count)}%"></div>`)
+    .join('');
+
+  const legend = segments
+    .map(s => `
+      <div class="analyst-legend-item">
+        <span class="al-dot ${s.cls}"></span>
+        <span class="al-count">${s.count}</span>
+        <span>${s.label}</span>
+      </div>`)
+    .join('');
+
+  return `
+    <div class="analyst-bar-wrap">
+      <div class="analyst-bar">${barSegs}</div>
+      <div class="analyst-legend">${legend}</div>
+    </div>`;
+}
+
+function buildPtStatBoxes(priceTarget, currentPrice) {
+  const { targetLow, targetMedian, targetHigh } = priceTarget;
+  if (!targetMedian) return '<p class="panel-no-data">No price target data</p>';
+
+  const upside = currentPrice > 0 ? ((targetMedian - currentPrice) / currentPrice) * 100 : 0;
+  const upsideCls = upside >= 0 ? 'up' : 'down';
+  const upsideStr = (upside >= 0 ? '+' : '') + upside.toFixed(1) + '%';
+
+  return `
+    <div class="pt-stat-boxes">
+      <div class="pt-stat-box">
+        <label>Low</label>
+        <div class="pt-val">$${fmt(targetLow)}</div>
+      </div>
+      <div class="pt-stat-box median">
+        <label>Median</label>
+        <div class="pt-val">$${fmt(targetMedian)}</div>
+      </div>
+      <div class="pt-stat-box">
+        <label>High</label>
+        <div class="pt-val">$${fmt(targetHigh)}</div>
+      </div>
+    </div>
+    <p class="pt-upside-note">
+      <strong class="${upsideCls}">${upsideStr}</strong> upside to analyst median
+    </p>`;
+}
+
+function ratingBadgeClass(ratingStr) {
+  if (!ratingStr) return 'neutral';
+  const r = ratingStr.toLowerCase();
+  if (r.includes('strong buy') || r === 'strong_buy') return 'strong-buy';
+  if (r.includes('buy') || r === 'overweight' || r === 'outperform' || r === 'accumulate') return 'buy';
+  if (r.includes('strong sell') || r === 'strong_sell') return 'strong-sell';
+  if (r.includes('sell') || r === 'underweight' || r === 'underperform') return 'sell';
+  if (r.includes('hold') || r === 'neutral' || r === 'market perform' || r === 'equal weight' || r === 'in-line') return 'hold';
+  return 'neutral';
+}
+
+function buildUpgradesList(upgrades) {
+  if (!upgrades || upgrades.length === 0) return '<p class="panel-no-data">No recent changes</p>';
+  return `<div class="upgrades-list">` + upgrades.map(u => {
+    const prevCls = ratingBadgeClass(u.previousGrade || u.previousRating);
+    const newCls  = ratingBadgeClass(u.newGrade || u.newRating);
+    const firm    = u.gradingCompany || u.firm || 'Unknown';
+    const prev    = u.previousGrade || u.previousRating || '—';
+    const next    = u.newGrade      || u.newRating      || '—';
+    const date    = u.date ? new Date(u.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    return `
+      <div class="upgrade-item">
+        <div class="upgrade-top">
+          <span class="upgrade-firm">${firm}</span>
+          <span class="upgrade-date">${date}</span>
+        </div>
+        <div class="upgrade-bottom">
+          <span class="upgrade-badge ${prevCls}">${prev}</span>
+          <span class="upgrade-arrow">→</span>
+          <span class="upgrade-badge ${newCls}">${next}</span>
+        </div>
+      </div>`;
+  }).join('') + `</div>`;
 }
 
 // ─── MODAL CHART ──────────────────────────────────────────────────────────────
@@ -957,6 +1102,7 @@ function setupNav() {
   });
 
   document.getElementById('panelClose').addEventListener('click', closePanel);
+  document.getElementById('panelBackdrop').addEventListener('click', closePanel);
 
   document.getElementById('refreshFeed').addEventListener('click', loadFeed);
 

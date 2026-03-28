@@ -19,7 +19,7 @@ const YAHOO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; StockPulse/1.0)'
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-// Transform an FMP quote object into the Alpaca snapshot shape the frontend expects
+// Transform an FMP quote object into the snapshot shape the frontend expects
 function fmpToSnapshot(q) {
   if (!q || !q.symbol) return null;
   return {
@@ -54,9 +54,8 @@ function gradeCategory(grade) {
 }
 
 // ─── /api/snapshots ───────────────────────────────────────────────────────────
-// Returns batch price snapshots in Alpaca snapshot shape.
-// FMP free plan doesn't support comma-delimited batch quotes, so we fetch each
-// symbol individually in parallel (cheap on latency, ~200ms per batch).
+// Returns batch price snapshots via parallel individual FMP quote calls.
+// (FMP free plan doesn't support comma-delimited batch queries.)
 
 app.get('/api/snapshots', async (req, res) => {
   try {
@@ -88,9 +87,7 @@ app.get('/api/snapshots', async (req, res) => {
 });
 
 // ─── /api/bars/:symbol ────────────────────────────────────────────────────────
-// Historical OHLCV bars via Yahoo Finance — returns Alpaca bar shape so the
-// existing frontend chart code works without any changes.
-//
+// Historical OHLCV bars via Yahoo Finance.
 // Timeframe mapping:
 //   1Hour  → Yahoo interval=1h,  range derived from limit
 //   1Day   → Yahoo interval=1d,  range derived from limit
@@ -131,7 +128,7 @@ app.get('/api/bars/:symbol', async (req, res) => {
     const closes     = q.close  || [];
     const volumes    = q.volume || [];
 
-    // Transform to Alpaca bar shape: { t, o, h, l, c, v }
+    // Build OHLCV bar objects
     const bars = timestamps
       .map((ts, i) => ({
         t: new Date(ts * 1000).toISOString(),

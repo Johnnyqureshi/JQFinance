@@ -397,7 +397,7 @@
       const quoteData = await quoteRes.json();
       if (quoteData.error) throw new Error(quoteData.error);
 
-      // FMP quote comes back in Alpaca snapshot shape from our proxy
+      // FMP quote via our proxy — extract price fields
       const price = quoteData?.latestTrade?.p;
       const open  = quoteData?.dailyBar?.o;
       const high  = quoteData?.dailyBar?.h;

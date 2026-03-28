@@ -521,8 +521,9 @@ async function loadMarkets() {
     const s  = snaps[sym]||{};
     const px = s.price||0, pv = s.previousClose||0;
     const ch = px-pv, pt = pv?(ch/pv)*100:0;
-    return `<div class="mrow" data-sym="${sym}">
-      <span class="mrow-sym">${sym}</span>
+    const eSym = escapeHtml(sym);
+    return `<div class="mrow" data-sym="${eSym}">
+      <span class="mrow-sym">${eSym}</span>
       <span class="mrow-name">${escapeHtml(s.name||'')}</span>
       <span class="mrow-px">${px?'$'+fmt(px):'--'}</span>
       <span class="mrow-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>

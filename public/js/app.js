@@ -232,48 +232,178 @@ function drawFullChart(canvas, bars, color) {
   ctx.fill();
 }
 
-// ─── STOCK CARDS (Feed) ───────────────────────────────────────────────────────
+// ─── STOCK CARD COMPONENT ─────────────────────────────────────────────────────
+
+function computeSmartScore(ratings) {
+  if (!ratings || ratings.total === 0) return null;
+  const { strongBuy, buy, hold, sell, strongSell, total } = ratings;
+  const weighted = (strongBuy * 10 + buy * 7.5 + hold * 5 + sell * 2.5 + strongSell * 0) / total;
+  return Math.max(1, Math.min(10, Math.round(weighted)));
+}
+
+function buildGaugeSVG(score) {
+  const r = 15.9155;
+  const circ = 100; // 2π * 15.9155 ≈ 100
+  const pct  = score != null ? (score / 10) * circ : 0;
+  const gap  = circ - pct;
+  const scoreCls = score == null ? 'score-empty'
+                 : score >= 7   ? 'score-high'
+                 : score >= 4   ? 'score-mid'
+                 :                'score-low';
+  return `
+    <svg class="smart-gauge" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+      <circle class="gauge-track" cx="18" cy="18" r="${r}"/>
+      <circle class="gauge-fill ${scoreCls}" cx="18" cy="18" r="${r}"
+        stroke-dasharray="${pct.toFixed(1)} ${gap.toFixed(1)}"
+        stroke-dashoffset="25"/>
+      <text class="gauge-num ${scoreCls}" x="18" y="18">
+        ${score != null ? score : '—'}
+      </text>
+    </svg>
+    <div class="gauge-label">Smart Score</div>`;
+}
+
+function buildConsensusBadge(consensus) {
+  const map = {
+    'Strong Buy':  { cls: 'strong-buy',  label: 'Strong Buy'  },
+    'Buy':         { cls: 'buy',         label: 'Buy'         },
+    'Hold':        { cls: 'hold',        label: 'Hold'        },
+    'Sell':        { cls: 'sell',        label: 'Sell'        },
+    'Strong Sell': { cls: 'strong-sell', label: 'Strong Sell' },
+  };
+  const m = map[consensus] || map['Hold'];
+  return `<span class="consensus-badge ${m.cls}">
+    <span class="badge-dot"></span>${m.label}
+  </span>`;
+}
+
+function buildPriceTargetBar(priceTarget, currentPrice) {
+  if (!priceTarget) return '';
+  const { targetLow, targetHigh, targetMedian } = priceTarget;
+  if (!targetLow || !targetHigh || targetHigh <= targetLow) return '';
+
+  const range = targetHigh - targetLow;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const currentPct = clamp(((currentPrice - targetLow) / range) * 100, 2, 98);
+  const medianPct  = clamp(((targetMedian - targetLow)  / range) * 100, 2, 98);
+
+  const upside = currentPrice > 0 ? ((targetMedian - currentPrice) / currentPrice) * 100 : 0;
+  const upsideStr = (upside >= 0 ? '+' : '') + upside.toFixed(1) + '%';
+  const upsideCls = upside >= 0 ? 'up' : 'down';
+
+  return `
+    <div class="pt-section">
+      <div class="pt-label-row">
+        <span class="pt-label-text">Price Targets</span>
+        <span class="pt-upside ${upsideCls}">${upsideStr} to median</span>
+      </div>
+      <div class="pt-bar-track">
+        <div class="pt-range-fill"></div>
+        <div class="pt-median-line" style="left:${medianPct.toFixed(1)}%"></div>
+        <div class="pt-current-dot" style="left:${currentPct.toFixed(1)}%"></div>
+      </div>
+      <div class="pt-endpoints">
+        <span>$${fmt(targetLow)}</span>
+        <span>$${fmt(targetMedian)}</span>
+        <span>$${fmt(targetHigh)}</span>
+      </div>
+    </div>`;
+}
+
+function fmtVol(v) {
+  if (!v) return '--';
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+  return v;
+}
 
 function buildCard(symbol, snap) {
-  const q = snap?.dailyBar || snap?.latestTrade || {};
-  const price = snap?.latestTrade?.p || snap?.latestQuote?.ap || 0;
+  const price     = snap?.latestTrade?.p || snap?.latestQuote?.ap || 0;
   const prevClose = snap?.prevDailyBar?.c || 0;
-  const change = price - prevClose;
+  const change    = price - prevClose;
   const changePct = prevClose ? (change / prevClose) * 100 : 0;
-  const isUp = change >= 0;
-  const vol = snap?.dailyBar?.v || 0;
-  const high = snap?.dailyBar?.h || 0;
-  const low = snap?.dailyBar?.l || 0;
+  const isUp      = change >= 0;
+  const vol       = snap?.dailyBar?.v  || 0;
+  const high      = snap?.dailyBar?.h  || 0;
+  const low       = snap?.dailyBar?.l  || 0;
 
   const div = document.createElement('div');
   div.className = 'stock-card';
   div.dataset.symbol = symbol;
+  div.dataset.price  = price.toString();
+
   div.innerHTML = `
-    <div class="card-header">
-      <div>
+    <div class="card-top-row">
+      <div class="card-left">
         <div class="card-symbol">${symbol}</div>
+        <div class="card-price">$${fmt(price)}</div>
+        <div class="card-change ${cls(change)}">${isUp ? '+' : ''}${fmt(change)} (${isUp ? '+' : ''}${fmt(Math.abs(changePct))}%)</div>
       </div>
-      <div class="card-badge ${cls(change)}">${isUp ? '▲' : '▼'} ${fmt(Math.abs(changePct))}%</div>
+      <div class="card-gauge-wrap">
+        <div class="gauge-skeleton"></div>
+        <div class="gauge-label">Smart Score</div>
+      </div>
     </div>
-    <div class="card-price">$${fmt(price)}</div>
-    <div class="card-stats">
+
+    <div class="consensus-badge-wrap"></div>
+
+    <div class="mini-chart"><canvas></canvas></div>
+
+    <div class="pt-section-wrap"></div>
+
+    <div class="card-bottom-stats">
       <div class="card-stat">
-        <label>Change</label>
-        <span style="color:var(--${isUp ? 'green' : 'red'})">${isUp ? '+' : ''}${fmt(change)}</span>
+        <label>Volume</label>
+        <span>${fmtVol(vol)}</span>
       </div>
       <div class="card-stat">
-        <label>High</label>
+        <label>Day High</label>
         <span>${high ? '$' + fmt(high) : '--'}</span>
       </div>
       <div class="card-stat">
-        <label>Volume</label>
-        <span>${vol > 1e6 ? (vol / 1e6).toFixed(1) + 'M' : vol > 1000 ? (vol / 1000).toFixed(0) + 'K' : vol || '--'}</span>
+        <label>Day Low</label>
+        <span>${low ? '$' + fmt(low) : '--'}</span>
       </div>
     </div>
-    <div class="mini-chart"><canvas></canvas></div>
   `;
+
   div.addEventListener('click', () => openDetail(symbol, snap));
   return div;
+}
+
+async function fetchStockAnalysis(symbol) {
+  try {
+    const r = await fetch(`/api/stock/${symbol}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function loadFMPCard(symbol, cardEl) {
+  const data = await fetchStockAnalysis(symbol);
+  if (!data) return;
+
+  const currentPrice = parseFloat(cardEl.dataset.price || '0');
+
+  // Smart Score gauge
+  const gaugeWrap = cardEl.querySelector('.card-gauge-wrap');
+  if (gaugeWrap) {
+    const score = computeSmartScore(data.ratings);
+    gaugeWrap.innerHTML = buildGaugeSVG(score);
+  }
+
+  // Consensus badge
+  const badgeWrap = cardEl.querySelector('.consensus-badge-wrap');
+  if (badgeWrap && data.ratings?.consensus) {
+    badgeWrap.innerHTML = buildConsensusBadge(data.ratings.consensus);
+  }
+
+  // Price target bar
+  const ptWrap = cardEl.querySelector('.pt-section-wrap');
+  if (ptWrap && data.priceTarget) {
+    ptWrap.innerHTML = buildPriceTargetBar(data.priceTarget, currentPrice);
+  }
 }
 
 async function loadFeed() {
@@ -298,13 +428,22 @@ async function loadFeed() {
     cards.push({ sym, card });
   });
 
-  // Load mini charts async in batches
-  for (const { sym, card } of cards) {
-    const mc = card.querySelector('.mini-chart');
-    loadMiniChart(sym, mc);
-  }
-
   updateTickerStrip(snaps);
+
+  // Load mini charts immediately
+  cards.forEach(({ sym, card }) => {
+    loadMiniChart(sym, card.querySelector('.mini-chart'));
+  });
+
+  // Load FMP data (Smart Score + consensus + price targets) in batches of 5
+  const BATCH = 5;
+  for (let i = 0; i < cards.length; i += BATCH) {
+    const batch = cards.slice(i, i + BATCH);
+    batch.forEach(({ sym, card }) => loadFMPCard(sym, card));
+    if (i + BATCH < cards.length) {
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
 }
 
 // ─── TICKER STRIP ─────────────────────────────────────────────────────────────

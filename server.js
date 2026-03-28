@@ -14,15 +14,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 const FMP_API_KEY = process.env.FMP_API_KEY;
 const FMP_BASE    = 'https://financialmodelingprep.com/stable';
 
-const ALPACA_KEY    = process.env.ALPACA_API_KEY;
-const ALPACA_SECRET = process.env.ALPACA_API_SECRET;
-const ALPACA_DATA   = 'https://data.alpaca.markets/v2';
-
-const alpacaHeaders = {
-  'APCA-API-KEY-ID':     ALPACA_KEY,
-  'APCA-API-SECRET-KEY': ALPACA_SECRET,
-  'Content-Type':        'application/json',
-};
+const YAHOO_BASE  = 'https://query1.finance.yahoo.com/v8/finance/chart';
+const YAHOO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; StockPulse/1.0)' };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -95,28 +88,63 @@ app.get('/api/snapshots', async (req, res) => {
 });
 
 // ─── /api/bars/:symbol ────────────────────────────────────────────────────────
-// Historical OHLCV bars — tries Alpaca; returns empty array on auth failure
+// Historical OHLCV bars via Yahoo Finance — returns Alpaca bar shape so the
+// existing frontend chart code works without any changes.
+//
+// Timeframe mapping:
+//   1Hour  → Yahoo interval=1h,  range derived from limit
+//   1Day   → Yahoo interval=1d,  range derived from limit
 
 app.get('/api/bars/:symbol', async (req, res) => {
   const symbol    = req.params.symbol.toUpperCase();
   const timeframe = req.query.timeframe || '1Day';
-  const limit     = req.query.limit     || 60;
+  const limit     = parseInt(req.query.limit, 10) || 60;
 
   try {
-    const url = `${ALPACA_DATA}/stocks/${symbol}/bars?timeframe=${timeframe}&limit=${limit}&feed=iex&adjustment=raw`;
-    const response = await fetch(url, { headers: alpacaHeaders });
+    let interval, range;
 
-    if (response.ok) {
-      return res.json(await response.json());
+    if (timeframe === '1Hour') {
+      interval = '1h';
+      range    = limit <= 24 ? '5d' : limit <= 72 ? '5d' : '1mo';
+    } else {
+      interval = '1d';
+      if      (limit <= 30)  range = '2mo';
+      else if (limit <= 90)  range = '6mo';
+      else if (limit <= 180) range = '1y';
+      else                   range = '2y';
     }
 
-    // Alpaca auth failure — return empty bars so UI degrades gracefully
-    if (response.status === 401 || response.status === 403) {
-      return res.json({ bars: [], alpaca_error: 'Alpaca API keys invalid or expired' });
-    }
+    const url = `${YAHOO_BASE}/${symbol}?interval=${interval}&range=${range}`;
+    const response = await fetch(url, { headers: YAHOO_HEADERS });
 
-    const err = await response.text();
-    return res.status(response.status).json({ bars: [], error: err });
+    if (!response.ok) return res.json({ bars: [] });
+
+    const data   = await response.json();
+    const result = data?.chart?.result?.[0];
+    if (!result)  return res.json({ bars: [] });
+
+    const timestamps = result.timestamp             || [];
+    const q          = result.indicators?.quote?.[0] || {};
+    const opens      = q.open   || [];
+    const highs      = q.high   || [];
+    const lows       = q.low    || [];
+    const closes     = q.close  || [];
+    const volumes    = q.volume || [];
+
+    // Transform to Alpaca bar shape: { t, o, h, l, c, v }
+    const bars = timestamps
+      .map((ts, i) => ({
+        t: new Date(ts * 1000).toISOString(),
+        o: opens[i]   ?? null,
+        h: highs[i]   ?? null,
+        l: lows[i]    ?? null,
+        c: closes[i]  ?? null,
+        v: volumes[i] ?? null,
+      }))
+      .filter(b => b.c !== null)
+      .slice(-limit); // respect the requested limit
+
+    res.json({ bars });
   } catch (e) {
     res.json({ bars: [], error: e.message });
   }

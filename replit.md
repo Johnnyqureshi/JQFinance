@@ -44,35 +44,32 @@ Preferred communication style: Simple, everyday language.
 
 ## External Dependencies
 
-### Financial Modeling Prep (FMP) — Primary Data Source
+### Financial Modeling Prep (FMP) — Prices, Ratings, News, Search
 - **Base URL**: `https://financialmodelingprep.com/stable`
 - **Required env var**: `FMP_API_KEY`
 - **Endpoints used**:
-  - `/stable/quote?symbol=X` — single quote (price, change, volume, high/low)
+  - `/stable/quote?symbol=X` — single quote (price, volume, high/low, open, prev close)
   - `/stable/grades?symbol=X` — analyst grades & upgrades/downgrades
   - `/stable/price-target-consensus?symbol=X` — low/median/high price targets
   - `/stable/fmp-articles` — market news articles
   - `/stable/search-name?query=X` — symbol + company name search
 - **Note**: FMP free plan does not support batch (`symbol=A,B,C`) quote queries; snapshots fetch each symbol individually in parallel
 
-### Alpaca Trading API — Chart Data Only (currently non-functional)
-- **Market Data**: `https://data.alpaca.markets/v2`
-- **Authentication**: APCA-API-KEY-ID, APCA-API-SECRET-KEY headers
-- **Required env vars**: `ALPACA_API_KEY`, `ALPACA_API_SECRET`
-- **Status**: Keys expired/revoked (401). Charts degrade gracefully to "Chart unavailable" state.
-- **Used for**: `/api/bars/:symbol` — OHLCV historical bar data for sparkline/full charts
+### Yahoo Finance Chart API — Historical OHLCV (no key required)
+- **Base URL**: `https://query1.finance.yahoo.com/v8/finance/chart`
+- **Used for**: all bar/chart data — sparklines, panel charts, modal charts, Realtime Trader history
+- **Timeframe mapping**: `1Hour` → `interval=1h`, `1Day` → `interval=1d`; range auto-derived from `limit`
 
 ### API Endpoints (server.js)
-- `GET /api/snapshots?symbols=A,B,C` — parallel FMP individual quotes, returned in Alpaca snapshot shape
-- `GET /api/quote/:symbol` — single FMP quote in Alpaca snapshot shape
-- `GET /api/bars/:symbol?timeframe=&limit=` — Alpaca OHLCV bars; returns `{bars:[]}` on auth failure
-- `GET /api/news/:symbol` — FMP articles (filtered by ticker if available, else general market news)
+- `GET /api/snapshots?symbols=A,B,C` — parallel FMP individual quotes (Alpaca snapshot shape)
+- `GET /api/quote/:symbol` — single FMP quote (Alpaca snapshot shape)
+- `GET /api/bars/:symbol?timeframe=&limit=` — Yahoo Finance OHLCV bars (Alpaca bar shape `{t,o,h,l,c,v}`)
+- `GET /api/historical/:symbol` — Yahoo Finance daily OHLCV, newest-first, for Realtime Trader
+- `GET /api/news/:symbol` — FMP articles (filtered by ticker, falls back to general market news)
 - `GET /api/search?q=...` — FMP name search filtered to US exchanges (NASDAQ, NYSE, AMEX, etc.)
 - `GET /api/stock/:ticker` — FMP analyst ratings, price targets, upgrades/downgrades
 
 ## Available Environment Variables
 - `FMP_API_KEY` — Financial Modeling Prep API key (primary data source)
-- `ALPACA_API_KEY` — Alpaca API key (charts only, currently expired)
-- `ALPACA_API_SECRET` — Alpaca API secret (charts only, currently expired)
 - `AIML_API_KEY` — (available, not currently used)
 - `SESSION_SECRET` — (available, not currently used)

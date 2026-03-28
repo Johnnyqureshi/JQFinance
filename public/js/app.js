@@ -16,6 +16,7 @@ const state = {
 const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtV = v => { if(!v) return '--'; if(v>=1e9) return (v/1e9).toFixed(1)+'B'; if(v>=1e6) return (v/1e6).toFixed(1)+'M'; if(v>=1e3) return (v/1e3).toFixed(0)+'K'; return String(v); };
 const cls  = v => v >= 0 ? 'up' : 'down';
+const escapeHtml = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const $    = id => document.getElementById(id);
 const saveWL = () => localStorage.setItem('sp_wl', JSON.stringify(state.watchlist));
 
@@ -371,7 +372,7 @@ function renderValuation(val) {
   const rev = val.revenueGrowth != null ? (val.revenueGrowth >= 0 ? '+' : '') + fmt(val.revenueGrowth, 1) + '%' : '--';
   const net = val.netMargin   != null ? fmt(val.netMargin, 1)   + '%' : '--';
   const grs = val.grossMargin != null ? fmt(val.grossMargin, 1) + '%' : '--';
-  const period = val.date ? `<span class="val-period">Latest annual · ${val.date.slice(0,4)}</span>` : '';
+  const period = val.date ? `<span class="val-period">Latest annual · ${escapeHtml(val.date.slice(0,4))}</span>` : '';
 
   return `
     <div class="val-header">${period}</div>
@@ -432,7 +433,7 @@ function renderAnalysts(fmp, price, val) {
       <tbody>${up.slice(0,10).map(u=>{
         const d = u.date?new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}):'';
         const c = ratingCls(u.newGrade);
-        return`<tr><td class="up-firm">${u.gradingCompany||'—'}</td><td><span class="up-badge ${c}">${u.newGrade||'—'}</span></td><td class="up-prev">${u.previousGrade||'—'} → ${u.newGrade||'—'}</td><td class="up-date">${d}</td></tr>`;
+        return`<tr><td class="up-firm">${escapeHtml(u.gradingCompany)||'—'}</td><td><span class="up-badge ${c}">${escapeHtml(u.newGrade)||'—'}</span></td><td class="up-prev">${escapeHtml(u.previousGrade)||'—'} → ${escapeHtml(u.newGrade)||'—'}</td><td class="up-date">${d}</td></tr>`;
       }).join('')}</tbody>
     </table>` : '<p class="no-data">No recent rating changes.</p>';
 

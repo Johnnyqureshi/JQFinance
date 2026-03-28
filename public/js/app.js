@@ -91,6 +91,9 @@ function updateMarketStatus() {
   const text = document.querySelector('.status-text');
   dot.className = 'status-dot ' + (isOpen ? 'open' : 'closed');
   text.textContent = isOpen ? 'Market Open' : 'Market Closed';
+
+  const liveBadge = document.getElementById('liveBadge');
+  if (liveBadge) liveBadge.style.display = isOpen ? 'flex' : 'none';
 }
 
 // ─── MINI CHART ───────────────────────────────────────────────────────────────

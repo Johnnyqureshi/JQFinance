@@ -606,10 +606,11 @@ async function fetchAndRenderWSBPage() {
     const pch = px - pv, ppt = pv ? (pch/pv)*100 : 0;
 
     // upvote bar (% of top entry's upvotes)
-    const upvPct = Math.round(((t.upvotes||0) / maxUpvotes) * 100);
-    const upvLabel = (t.upvotes||0) >= 1000
-      ? ((t.upvotes/1000).toFixed(1) + 'k')
-      : String(t.upvotes||0);
+    const safeUpvotes = Number(t.upvotes) || 0;
+    const upvPct = Math.round((safeUpvotes / maxUpvotes) * 100);
+    const upvLabel = safeUpvotes >= 1000
+      ? ((safeUpvotes / 1000).toFixed(1) + 'k')
+      : String(safeUpvotes);
 
     // 24h mention change
     const mentChg = (t.mentions||0) - (t.mentionsAgo||0);

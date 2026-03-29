@@ -844,6 +844,24 @@ async function loadWatchlist() {
   });
 }
 
+// ── Shared dropdown builder (safe alternative to innerHTML) ────────────────────
+function buildDropItems(results) {
+  return results.slice(0, 8).map(r => {
+    const item = document.createElement('div');
+    item.className = 'drop-item';
+    item.dataset.sym = r.symbol;
+    const sym = document.createElement('span');
+    sym.className = 'drop-sym';
+    sym.textContent = r.symbol;
+    const name = document.createElement('span');
+    name.className = 'drop-name';
+    name.textContent = r.name || '';
+    item.appendChild(sym);
+    item.appendChild(name);
+    return item;
+  });
+}
+
 // ── Nav search ─────────────────────────────────────────────────────────────────
 let navTimer=null;
 function setupNavSearch() {
@@ -856,7 +874,7 @@ function setupNavSearch() {
     navTimer=setTimeout(async()=>{
       const results=await api.search(q);
       if(!results.length){drop.classList.remove('open');return;}
-      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${escapeHtml(r.symbol)}"><span class="drop-sym">${escapeHtml(r.symbol)}</span><span class="drop-name">${escapeHtml(r.name||'')}</span></div>`).join('');
+      drop.replaceChildren(...buildDropItems(results));
       drop.classList.add('open');
       drop.querySelectorAll('.drop-item').forEach(item=>{
         item.addEventListener('click',async()=>{
@@ -882,7 +900,7 @@ function setupHeroSearch() {
     heroTimer=setTimeout(async()=>{
       const results=await api.search(q);
       if(!results.length){drop.classList.remove('open');return;}
-      drop.innerHTML=results.slice(0,8).map(r=>`<div class="drop-item" data-sym="${escapeHtml(r.symbol)}"><span class="drop-sym">${escapeHtml(r.symbol)}</span><span class="drop-name">${escapeHtml(r.name||'')}</span></div>`).join('');
+      drop.replaceChildren(...buildDropItems(results));
       drop.classList.add('open');
       drop.querySelectorAll('.drop-item').forEach(item=>{
         item.addEventListener('click',async()=>{

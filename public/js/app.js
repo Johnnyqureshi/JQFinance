@@ -619,12 +619,15 @@ async function fetchAndRenderWSBPage() {
     else                   chgHtml = `<span class="wsbt-chg flat">—</span>`;
 
     // rank badge
+    const safeRank = Number(t.rank) || 0;
     const rankDisplay = i < 3
       ? `<span class="wsbt-medal">${rankLabels[i]}</span>`
-      : `<span class="wsbt-ranknum">#${t.rank}</span>`;
+      : `<span class="wsbt-ranknum">#${safeRank}</span>`;
 
-    const safeSym  = escapeHtml(t.sym  || '');
-    const safeName = escapeHtml(t.name || '');
+    const safeSym      = escapeHtml(t.sym  || '');
+    const safeName     = escapeHtml(t.name || '');
+    const safeMentions = Number(t.mentions) || 0;
+    const mentionDisplay = safeMentions >= 1000 ? (safeMentions/1000).toFixed(1)+'k' : safeMentions;
 
     return `<div class="wsbt-row" data-sym="${safeSym}" role="button" tabindex="0">
       <div class="wsbt-cell wsbt-col-rank">${rankDisplay}</div>
@@ -633,7 +636,7 @@ async function fetchAndRenderWSBPage() {
       </div>
       <div class="wsbt-cell wsbt-col-name">${safeName}</div>
       <div class="wsbt-cell wsbt-col-mentions">
-        <span class="wsbt-mention-count">${t.mentions >= 1000 ? (t.mentions/1000).toFixed(1)+'k' : t.mentions}</span>
+        <span class="wsbt-mention-count">${mentionDisplay}</span>
         <span class="wsbt-mention-label">mentions</span>
       </div>
       <div class="wsbt-cell wsbt-col-bar">

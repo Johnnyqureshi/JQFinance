@@ -810,13 +810,28 @@ async function loadWatchlist() {
     const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
     const row = document.createElement('div');
     row.className='wl-row';
-    const eSym = escapeHtml(sym);
-    row.innerHTML=`
-      <span class="wl-sym">${eSym}</span>
-      <span class="wl-name">${escapeHtml(s.name||'')}</span>
-      <span class="wl-px">${px?'$'+fmt(px):'--'}</span>
-      <span class="wl-chg ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>
-      <button class="wl-rm" data-sym="${eSym}" title="Remove">×</button>`;
+    const symSpan = document.createElement('span');
+    symSpan.className = 'wl-sym';
+    symSpan.textContent = sym;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'wl-name';
+    nameSpan.textContent = s.name || '';
+    const pxSpan = document.createElement('span');
+    pxSpan.className = 'wl-px';
+    pxSpan.textContent = px ? '$' + fmt(px) : '--';
+    const chgSpan = document.createElement('span');
+    chgSpan.className = `wl-chg ${cls(ch)}`;
+    chgSpan.textContent = `${ch >= 0 ? '+' : ''}${fmt(pt)}%`;
+    const rmBtn = document.createElement('button');
+    rmBtn.className = 'wl-rm';
+    rmBtn.dataset.sym = sym;
+    rmBtn.title = 'Remove';
+    rmBtn.textContent = '×';
+    row.appendChild(symSpan);
+    row.appendChild(nameSpan);
+    row.appendChild(pxSpan);
+    row.appendChild(chgSpan);
+    row.appendChild(rmBtn);
     row.addEventListener('click', e => {
       if (e.target.closest('.wl-rm')) return;
       openStock(sym, s||{symbol:sym});

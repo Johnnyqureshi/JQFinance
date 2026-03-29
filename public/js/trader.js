@@ -138,6 +138,36 @@ const trader = (() => {
     cdTimer = setInterval(()=>{ countdown--; update(); if(countdown<=0){clearInterval(cdTimer);if(onTick)onTick();} },1000);
   }
 
+  // ── S/R row builder (safe DOM, no innerHTML) ────────────────────────────────
+  function makeSRRow(type, level, pct, pctDir, formattedPrice, tag) {
+    const row = document.createElement('div');
+    row.className = 'sr-row ' + type;
+
+    const left = document.createElement('div');
+    left.className = 'sr-left';
+
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'sr-type';
+    typeSpan.textContent = type === 'res' ? 'Resistance' : 'Support';
+
+    const descSpan = document.createElement('span');
+    descSpan.className = 'sr-desc';
+    descSpan.textContent = 'Level ' + level + ' \u2014 ' + pct + '% ' + pctDir;
+
+    left.append(typeSpan, descSpan);
+
+    const priceSpan = document.createElement('span');
+    priceSpan.className = 'sr-price';
+    priceSpan.textContent = '$' + formattedPrice;
+
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'sr-tag';
+    tagSpan.textContent = tag;
+
+    row.append(left, priceSpan, tagSpan);
+    return row;
+  }
+
   // ── Render results ─────────────────────────────────────────────────────────
   function render(sym, data, hist) {
     const { price, open, dayHigh, dayLow, volume, avgVolume } = data;
@@ -201,19 +231,19 @@ const trader = (() => {
     // S/R
     const srTbl = $('srTable');
     if (srTbl) {
-      const resRows = sr.resistance.slice(0,2).map((v,i)=>`
-        <div class="sr-row res">
-          <div class="sr-left"><span class="sr-type">Resistance</span><span class="sr-desc">Level ${i+1} — ${((v-price)/price*100).toFixed(2)}% above</span></div>
-          <span class="sr-price">$${fmt(v)}</span>
-          <span class="sr-tag">SELL ZONE</span>
-        </div>`).join('');
-      const supRows = sr.support.slice(0,2).map((v,i)=>`
-        <div class="sr-row sup">
-          <div class="sr-left"><span class="sr-type">Support</span><span class="sr-desc">Level ${i+1} — ${((price-v)/price*100).toFixed(2)}% below</span></div>
-          <span class="sr-price">$${fmt(v)}</span>
-          <span class="sr-tag">BUY ZONE</span>
-        </div>`).join('');
-      srTbl.innerHTML = resRows + supRows || '<p style="font-size:13px;color:var(--t3);padding:12px 0">Insufficient price history for S/R levels.</p>';
+      const rows = [
+        ...sr.resistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'SELL ZONE')),
+        ...sr.support.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'BUY ZONE')),
+      ];
+      srTbl.replaceChildren();
+      if (rows.length) {
+        srTbl.append(...rows);
+      } else {
+        const p = document.createElement('p');
+        p.style.cssText = 'font-size:13px;color:var(--t3);padding:12px 0';
+        p.textContent = 'Insufficient price history for S/R levels.';
+        srTbl.appendChild(p);
+      }
     }
 
     // show results

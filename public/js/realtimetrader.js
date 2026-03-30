@@ -262,8 +262,6 @@ const rtTrader = (() => {
 
   // ── Public: load from main search ───────────────────────────────────────────
   function load(sym) {
-    const con = $('rtConsole');
-    if (con) con.style.display = '';
     analyze(sym);
   }
 

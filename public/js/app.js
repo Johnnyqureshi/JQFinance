@@ -156,6 +156,7 @@ async function openStock(sym, snap) {
   document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
   trader.analyze(sym);
+  if (typeof rtTrader !== 'undefined') rtTrader.load(sym);
 
   const [barsData, fmpData, newsData, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),

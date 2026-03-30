@@ -244,6 +244,36 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── GET /api/intraday/:symbol (5-min bars for today) ──────────────────────────
+app.get('/api/intraday/:symbol', async (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d`;
+    const r   = await fetch(url, { headers: YH });
+    if (!r.ok) return res.json({ bars: [], price: null });
+    const d   = await r.json();
+    const rs  = d?.chart?.result?.[0];
+    if (!rs)  return res.json({ bars: [], price: null });
+    const meta  = rs.meta || {};
+    const times = rs.timestamp || [];
+    const q     = rs.indicators?.quote?.[0] || {};
+    const bars  = times.map((t, i) => ({
+      t: new Date(t * 1000).toISOString(),
+      o: q.open?.[i]   ?? null,
+      h: q.high?.[i]   ?? null,
+      l: q.low?.[i]    ?? null,
+      c: q.close?.[i]  ?? null,
+      v: q.volume?.[i] ?? null,
+    })).filter(b => b.c != null);
+    res.json({
+      bars,
+      price:         meta.regularMarketPrice    ?? bars.at(-1)?.c ?? null,
+      previousClose: meta.chartPreviousClose    ?? null,
+      open:          meta.regularMarketDayOpen  ?? bars[0]?.o     ?? null,
+    });
+  } catch (e) { res.json({ bars: [], price: null }); }
+});
+
 // ── GET /api/wsb ─────────────────────────────────────────────────────────────
 const WSB_BLOCKLIST = new Set([
   'DD','YOLO','HOLD','BUY','SELL','PUTS','CALL','CALLS','OTM','ITM','ATM',

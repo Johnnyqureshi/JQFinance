@@ -1,23 +1,143 @@
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-const fetch   = require('node-fetch');
+const express      = require('express');
+const cors         = require('cors');
+const path         = require('path');
+const fetch        = require('node-fetch');
 const YahooFinance = require('yahoo-finance2').default;
+const Database     = require('better-sqlite3');
+const bcrypt       = require('bcryptjs');
+const session      = require('express-session');
+
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
-const app     = express();
-const PORT    = 5000;
+const app      = express();
+const PORT     = 5000;
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
 
-app.use(cors());
+// ── SQLite Database ────────────────────────────────────────────────────────────
+const db = new Database('jqf.db');
+db.pragma('journal_mode = WAL');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    UNIQUE NOT NULL,
+    password_hash TEXT    NOT NULL,
+    created_at    TEXT    DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS watchlists (
+    user_id   INTEGER NOT NULL,
+    symbol    TEXT    NOT NULL,
+    added_at  TEXT    DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// ── Middleware ─────────────────────────────────────────────────────────────────
+app.use(cors({ credentials: true }));
 app.use(express.json());
+app.use(session({
+  secret:            process.env.SESSION_SECRET || 'jqf-dev-secret-change-me',
+  resave:            false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure:   false,   // set true if behind HTTPS proxy in production
+    maxAge:   7 * 24 * 60 * 60 * 1000,   // 7 days
+  },
+}));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Auth guard helper
+function requireAuth(req, res, next) {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  next();
+}
 
 const YH = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
-// ── Yahoo chart → quote object ─────────────────────────────────────────────
+// ── Auth Routes ────────────────────────────────────────────────────────────────
+
+// Register
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password are required.' });
+
+  const u = username.trim();
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(u))
+    return res.status(400).json({ error: 'Username must be 3–20 characters (letters, numbers, _).' });
+  if (password.length < 6)
+    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const stmt = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)');
+    const info = stmt.run(u, hash);
+    req.session.userId   = info.lastInsertRowid;
+    req.session.username = u;
+    res.json({ id: info.lastInsertRowid, username: u });
+  } catch (e) {
+    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken.' });
+    res.status(500).json({ error: 'Registration failed.' });
+  }
+});
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password are required.' });
+
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
+  if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
+
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });
+
+  req.session.userId   = user.id;
+  req.session.username = user.username;
+  res.json({ id: user.id, username: user.username });
+});
+
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+// Current user
+app.get('/api/auth/me', (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  res.json({ id: req.session.userId, username: req.session.username });
+});
+
+// ── Watchlist Routes (auth-protected) ─────────────────────────────────────────
+
+// Get watchlist
+app.get('/api/watchlist', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT symbol FROM watchlists WHERE user_id = ? ORDER BY added_at ASC').all(req.session.userId);
+  res.json({ watchlist: rows.map(r => r.symbol) });
+});
+
+// Add symbol
+app.post('/api/watchlist', requireAuth, (req, res) => {
+  const sym = (req.body?.symbol || '').toUpperCase().trim();
+  if (!sym) return res.status(400).json({ error: 'Symbol required.' });
+  db.prepare('INSERT OR IGNORE INTO watchlists (user_id, symbol) VALUES (?, ?)').run(req.session.userId, sym);
+  const rows = db.prepare('SELECT symbol FROM watchlists WHERE user_id = ? ORDER BY added_at ASC').all(req.session.userId);
+  res.json({ watchlist: rows.map(r => r.symbol) });
+});
+
+// Remove symbol
+app.delete('/api/watchlist/:symbol', requireAuth, (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  db.prepare('DELETE FROM watchlists WHERE user_id = ? AND symbol = ?').run(req.session.userId, sym);
+  const rows = db.prepare('SELECT symbol FROM watchlists WHERE user_id = ? ORDER BY added_at ASC').all(req.session.userId);
+  res.json({ watchlist: rows.map(r => r.symbol) });
+});
+
+// ── Yahoo chart → quote object ─────────────────────────────────────────────────
 async function yfChartQuote(symbol) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
   const r   = await fetch(url, { headers: YH });
@@ -48,7 +168,7 @@ async function yfChartQuote(symbol) {
   };
 }
 
-// ── GET /api/quote/:symbol ─────────────────────────────────────────────────
+// ── GET /api/quote/:symbol ─────────────────────────────────────────────────────
 app.get('/api/quote/:symbol', async (req, res) => {
   try {
     const q = await yfChartQuote(req.params.symbol.toUpperCase());
@@ -57,7 +177,7 @@ app.get('/api/quote/:symbol', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── GET /api/snapshots?symbols=A,B ────────────────────────────────────────
+// ── GET /api/snapshots?symbols=A,B ────────────────────────────────────────────
 app.get('/api/snapshots', async (req, res) => {
   const syms = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   if (!syms.length) return res.json({});
@@ -69,7 +189,7 @@ app.get('/api/snapshots', async (req, res) => {
   } catch (e) { res.json({}); }
 });
 
-// ── GET /api/search?q= ────────────────────────────────────────────────────
+// ── GET /api/search?q= ────────────────────────────────────────────────────────
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
@@ -85,7 +205,7 @@ app.get('/api/search', async (req, res) => {
   } catch { res.json([]); }
 });
 
-// ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────
+// ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────────
 app.get('/api/bars/:symbol', async (req, res) => {
   const sym      = req.params.symbol.toUpperCase();
   const tf       = req.query.timeframe || '1Day';
@@ -112,7 +232,7 @@ app.get('/api/bars/:symbol', async (req, res) => {
   } catch (e) { res.json({ bars: [] }); }
 });
 
-// ── GET /api/historical/:symbol?timeseries=N ──────────────────────────────
+// ── GET /api/historical/:symbol?timeseries=N ──────────────────────────────────
 app.get('/api/historical/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   const n   = parseInt(req.query.timeseries) || 30;
@@ -135,12 +255,11 @@ app.get('/api/historical/:symbol', async (req, res) => {
   } catch { res.json({ historical: [] }); }
 });
 
-// ── GET /api/news/:symbol ─────────────────────────────────────────────────
+// ── GET /api/news/:symbol ──────────────────────────────────────────────────────
 app.get('/api/news/:symbol', async (req, res) => {
   const sym  = req.params.symbol.toUpperCase();
   const name = req.query.name || sym;
 
-  // 1. NewsAPI.org — everything about the ticker
   if (NEWS_KEY) {
     try {
       const q   = encodeURIComponent(`${sym} stock`);
@@ -152,11 +271,8 @@ app.get('/api/news/:symbol', async (req, res) => {
         if (articles.length) {
           return res.json({
             news: articles.map(a => ({
-              headline:   a.title,
-              url:        a.url,
-              source:     a.source?.name || '',
-              image:      a.urlToImage || null,
-              summary:    a.description || '',
+              headline:   a.title, url: a.url, source: a.source?.name || '',
+              image:      a.urlToImage || null, summary: a.description || '',
               created_at: a.publishedAt || null,
             })),
             source: 'newsapi',
@@ -166,7 +282,6 @@ app.get('/api/news/:symbol', async (req, res) => {
     } catch {}
   }
 
-  // 2. FMP fallback
   try {
     const url  = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${sym}&limit=20&apikey=${FMP_KEY}`;
     const r    = await fetch(url);
@@ -178,7 +293,6 @@ app.get('/api/news/:symbol', async (req, res) => {
     }
   } catch {}
 
-  // 3. Yahoo fallback
   try {
     const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&quotesCount=0&newsCount=12`;
     const r    = await fetch(url, { headers: YH });
@@ -191,7 +305,7 @@ app.get('/api/news/:symbol', async (req, res) => {
   } catch { res.json({ news: [], source: 'none' }); }
 });
 
-// ── GET /api/stock/:symbol (analyst data via FMP, graceful fallback) ───────
+// ── GET /api/stock/:symbol ─────────────────────────────────────────────────────
 app.get('/api/stock/:symbol', async (req, res) => {
   const sym   = req.params.symbol.toUpperCase();
   const empty = { ratings: { strongBuy:0,buy:0,hold:0,sell:0,strongSell:0,total:0 }, priceTarget:null, upgrades:[] };
@@ -231,7 +345,6 @@ app.get('/api/valuation/:symbol', async (req, res) => {
     const fd = d.financialData        || {};
     const ks = d.defaultKeyStatistics || {};
     const sd = d.summaryDetail        || {};
-
     const rev  = fd.revenueGrowth ?? null;
     res.json({
       pe:            sd.trailingPE    ?? null,
@@ -259,22 +372,20 @@ app.get('/api/intraday/:symbol', async (req, res) => {
     const q     = rs.indicators?.quote?.[0] || {};
     const bars  = times.map((t, i) => ({
       t: new Date(t * 1000).toISOString(),
-      o: q.open?.[i]   ?? null,
-      h: q.high?.[i]   ?? null,
-      l: q.low?.[i]    ?? null,
-      c: q.close?.[i]  ?? null,
+      o: q.open?.[i]   ?? null, h: q.high?.[i]   ?? null,
+      l: q.low?.[i]    ?? null, c: q.close?.[i]  ?? null,
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null);
     res.json({
       bars,
-      price:         meta.regularMarketPrice    ?? bars.at(-1)?.c ?? null,
-      previousClose: meta.chartPreviousClose    ?? null,
-      open:          meta.regularMarketDayOpen  ?? bars[0]?.o     ?? null,
+      price:         meta.regularMarketPrice   ?? bars.at(-1)?.c ?? null,
+      previousClose: meta.chartPreviousClose   ?? null,
+      open:          meta.regularMarketDayOpen ?? bars[0]?.o     ?? null,
     });
   } catch (e) { res.json({ bars: [], price: null }); }
 });
 
-// ── GET /api/wsb ─────────────────────────────────────────────────────────────
+// ── GET /api/wsb ───────────────────────────────────────────────────────────────
 const WSB_BLOCKLIST = new Set([
   'DD','YOLO','HOLD','BUY','SELL','PUTS','CALL','CALLS','OTM','ITM','ATM',
   'ETF','FED','SEC','CEO','CFO','CTO','COO','IPO','USA','USD','EUR','GBP',
@@ -300,7 +411,6 @@ app.get('/api/wsb', async (req, res) => {
     const data = await r.json();
     const all  = (data.results || []).filter(x => x.ticker && x.mentions);
 
-    // top 10 by 24h mentions
     const tickers = all.slice(0, 10).map(x => ({
       sym:         x.ticker,
       name:        x.name || '',
@@ -311,7 +421,6 @@ app.get('/api/wsb', async (req, res) => {
       mentionsAgo: x.mentions_24h_ago || 0,
     }));
 
-    // top 10 biggest rank gainers (rank improved most vs 24h ago)
     const risers = [...all]
       .filter(x => x.rank_24h_ago && x.rank_24h_ago > x.rank)
       .sort((a, b) => (b.rank_24h_ago - b.rank) - (a.rank_24h_ago - a.rank))

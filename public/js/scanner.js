@@ -252,7 +252,7 @@ const scanner = (() => {
   // ── Scan ─────────────────────────────────────────────────────────────────────
   async function runScan() {
     setLoading(true);
-    _scWatchlist = JSON.parse(localStorage.getItem('sp_wl') || '[]');
+    _scWatchlist = typeof state !== 'undefined' ? state.watchlist : JSON.parse(localStorage.getItem('sp_wl') || '[]');
 
     const syms  = UNIVERSE.map(u => u.sym);
     const snaps = await fetchSnaps(syms);
@@ -428,11 +428,16 @@ const scanner = (() => {
   }
 
   // ── Watchlist toggle ─────────────────────────────────────────────────────────
-  function toggleWatch(sym, btn) {
-    _scWatchlist = JSON.parse(localStorage.getItem('sp_wl') || '[]');
-    const idx = _scWatchlist.indexOf(sym);
-    idx >= 0 ? _scWatchlist.splice(idx,1) : _scWatchlist.push(sym);
-    localStorage.setItem('sp_wl', JSON.stringify(_scWatchlist));
+  async function toggleWatch(sym, btn) {
+    const alreadyOn = (typeof state !== 'undefined' ? state.watchlist : _scWatchlist).includes(sym);
+    if (alreadyOn) {
+      if (typeof wlAPI !== 'undefined') await wlAPI.remove(sym);
+      else _scWatchlist.splice(_scWatchlist.indexOf(sym), 1);
+    } else {
+      if (typeof wlAPI !== 'undefined') await wlAPI.add(sym);
+      else _scWatchlist.push(sym);
+    }
+    _scWatchlist = typeof state !== 'undefined' ? state.watchlist : _scWatchlist;
     const on = _scWatchlist.includes(sym);
     const r = lastResults.find(x => x.sym === sym);
     if (r) r.watched = on;

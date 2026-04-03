@@ -12,6 +12,42 @@
 </head>
 <body>
 
+<!-- AUTH OVERLAY -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <path d="M3 22L9 14L15 18L21 7L29 12" stroke="#1dd6a3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="29" cy="12" r="2.5" fill="#1dd6a3"/>
+      </svg>
+      <span class="auth-brand">JQ<span>Finance</span></span>
+    </div>
+    <h2 class="auth-title" id="authTitle">Welcome back</h2>
+    <p class="auth-sub" id="authSub">Sign in to access your personalised watchlist</p>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLogin" data-tab="login">Sign In</button>
+      <button class="auth-tab"        id="tabReg"   data-tab="register">Create Account</button>
+    </div>
+
+    <form class="auth-form" id="authForm" autocomplete="off">
+      <div class="auth-field">
+        <label class="auth-label">Username</label>
+        <input class="auth-input" type="text" id="authUser" placeholder="e.g. johnny_q" autocomplete="username" maxlength="20"/>
+      </div>
+      <div class="auth-field">
+        <label class="auth-label">Password</label>
+        <input class="auth-input" type="password" id="authPass" placeholder="••••••••" autocomplete="current-password"/>
+      </div>
+      <div class="auth-error" id="authError"></div>
+      <button class="auth-submit" id="authSubmit" type="submit">Sign In</button>
+    </form>
+    <p class="auth-footer-note" id="authSwitch">
+      No account? <a href="#" id="authSwitchLink">Create one free</a>
+    </p>
+  </div>
+</div>
+
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-logo">
@@ -47,6 +83,12 @@
     <div class="market-pill">
       <span class="market-dot" id="mktDot"></span>
       <span id="mktText">Checking…</span>
+    </div>
+    <div class="nav-user" id="navUser" style="display:none">
+      <span class="nav-username" id="navUsername"></span>
+      <button class="nav-logout" id="navLogout" title="Sign out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
     </div>
     <div class="nav-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>

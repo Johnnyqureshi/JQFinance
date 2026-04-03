@@ -9,7 +9,8 @@ const state = {
   symbol:      null,
   snap:        null,
   stockData:   null,
-  watchlist:   JSON.parse(localStorage.getItem('sp_wl') || '["AAPL","MSFT","NVDA","TSLA"]'),
+  watchlist:   [],
+  currentUser: null,
 };
 
 // ── utils ──────────────────────────────────────────────────────────────────────
@@ -18,7 +19,21 @@ const fmtV = v => { if(!v) return '--'; if(v>=1e9) return (v/1e9).toFixed(1)+'B'
 const cls  = v => v >= 0 ? 'up' : 'down';
 const escapeHtml = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const $    = id => document.getElementById(id);
-const saveWL = () => localStorage.setItem('sp_wl', JSON.stringify(state.watchlist));
+
+// ── Auth API ────────────────────────────────────────────────────────────────────
+const authAPI = {
+  async me()          { try { const r=await fetch('/api/auth/me'); return r.ok ? r.json() : null; } catch { return null; } },
+  async login(u,p)    { const r=await fetch('/api/auth/login',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; },
+  async register(u,p) { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; },
+  async logout()      { await fetch('/api/auth/logout', {method:'POST'}); },
+};
+
+// ── Watchlist API ───────────────────────────────────────────────────────────────
+const wlAPI = {
+  async load()     { try { const r=await fetch('/api/watchlist'); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
+  async add(sym)   { try { const r=await fetch('/api/watchlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})}); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
+  async remove(sym){ try { const r=await fetch(`/api/watchlist/${encodeURIComponent(sym)}`,{method:'DELETE'}); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
+};
 
 // ── API ────────────────────────────────────────────────────────────────────────
 const api = {
@@ -832,9 +847,9 @@ async function loadWatchlist() {
       if (e.target.closest('.wl-rm')) return;
       openStock(sym, s||{symbol:sym});
     });
-    row.querySelector('.wl-rm').addEventListener('click', () => {
-      state.watchlist.splice(state.watchlist.indexOf(sym),1);
-      saveWL(); loadWatchlist();
+    row.querySelector('.wl-rm').addEventListener('click', async () => {
+      await wlAPI.remove(sym);
+      loadWatchlist();
     });
     tbl.appendChild(row);
   });
@@ -917,15 +932,90 @@ function setupWatchlistPage() {
   addBtn.addEventListener('click',()=>{row.classList.toggle('open');inp?.focus();});
   ok?.addEventListener('click',async()=>{
     const sym=inp.value.trim().toUpperCase();
-    if(sym&&!state.watchlist.includes(sym)){state.watchlist.push(sym);saveWL();}
+    if(sym&&!state.watchlist.includes(sym)) await wlAPI.add(sym);
     inp.value=''; row.classList.remove('open'); loadWatchlist();
   });
   cancel?.addEventListener('click',()=>{row.classList.remove('open');inp.value='';});
   inp?.addEventListener('keydown',e=>{if(e.key==='Enter')ok?.click();});
 }
 
+// ── Auth overlay helpers ────────────────────────────────────────────────────────
+function showApp(user) {
+  state.currentUser = user;
+  $('authOverlay').classList.add('auth-hidden');
+  $('navUser').style.display = 'flex';
+  $('navUsername').textContent = user.username;
+}
+
+function showAuthOverlay() {
+  $('authOverlay').classList.remove('auth-hidden');
+  $('navUser').style.display = 'none';
+  state.currentUser = null;
+  state.watchlist   = [];
+}
+
+function setupAuthUI() {
+  let mode = 'login';
+
+  function setMode(m) {
+    mode = m;
+    const isReg = m === 'register';
+    $('authTitle').textContent  = isReg ? 'Create your account' : 'Welcome back';
+    $('authSub').textContent    = isReg ? 'Start tracking your personal watchlist' : 'Sign in to access your personalised watchlist';
+    $('authSubmit').textContent = isReg ? 'Create Account' : 'Sign In';
+    $('authSwitch').innerHTML   = isReg
+      ? 'Already have an account? <a href="#" id="authSwitchLink">Sign in</a>'
+      : 'No account? <a href="#" id="authSwitchLink">Create one free</a>';
+    $('authError').textContent  = '';
+    $('tabLogin').classList.toggle('active', !isReg);
+    $('tabReg').classList.toggle('active',    isReg);
+    $('authSwitchLink')?.addEventListener('click', e=>{ e.preventDefault(); setMode(isReg?'login':'register'); });
+  }
+
+  $('tabLogin').addEventListener('click', () => setMode('login'));
+  $('tabReg').addEventListener('click',   () => setMode('register'));
+  $('authSwitchLink')?.addEventListener('click', e=>{ e.preventDefault(); setMode(mode==='login'?'register':'login'); });
+
+  $('authForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const u = $('authUser').value.trim();
+    const p = $('authPass').value;
+    $('authError').textContent = '';
+    $('authSubmit').disabled   = true;
+    $('authSubmit').textContent = mode === 'login' ? 'Signing in…' : 'Creating account…';
+
+    const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p);
+
+    if (res.ok) {
+      await wlAPI.load();
+      showApp(res.data);
+    } else {
+      $('authError').textContent  = res.data?.error || 'Something went wrong.';
+      $('authSubmit').disabled    = false;
+      $('authSubmit').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
+    }
+  });
+}
+
 // ── INIT ───────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  setupAuthUI();
+
+  // Check if already logged in
+  const me = await authAPI.me();
+  if (me) {
+    await wlAPI.load();
+    showApp(me);
+  }
+
+  // Logout
+  $('navLogout')?.addEventListener('click', async () => {
+    await authAPI.logout();
+    showAuthOverlay();
+    $('authUser').value = '';
+    $('authPass').value = '';
+  });
+
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
 
@@ -948,11 +1038,11 @@ document.addEventListener('DOMContentLoaded', () => {
     $('homeEmpty').style.display = '';
   });
 
-  $('watchBtn')?.addEventListener('click',()=>{
+  $('watchBtn')?.addEventListener('click',async()=>{
     const sym=state.symbol; if(!sym) return;
-    const idx=state.watchlist.indexOf(sym);
-    idx>=0 ? state.watchlist.splice(idx,1) : state.watchlist.push(sym);
-    saveWL(); updateWatchBtn(sym);
+    if(state.watchlist.includes(sym)) await wlAPI.remove(sym);
+    else await wlAPI.add(sym);
+    updateWatchBtn(sym);
   });
 
   setupNavSearch();

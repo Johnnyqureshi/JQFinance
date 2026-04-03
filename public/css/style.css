@@ -2623,6 +2623,184 @@ option { background: var(--card); }
 .jqf-panel-foot a { color: var(--t3); text-decoration: none; }
 .jqf-panel-foot a:hover { color: var(--teal); }
 
+/* ── Realtime Trader — Next Day Prediction Panel ─────────────────────────── */
+.rt-pred-panel {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(245,200,66,0.05) 0%, rgba(245,200,66,0.02) 100%);
+  border: 1px solid rgba(245,200,66,0.18);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.rt-pred-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t3);
+}
+.rt-pred-header svg { flex-shrink: 0; }
+.rt-pred-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+}
+.rt-pred-date {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--t3);
+  font-family: 'DM Mono', monospace;
+}
+
+.rt-pred-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.rt-pred-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.rt-pred-dir-badge {
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 12px;
+  border-radius: 20px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.rt-pred-dir-badge.bull { background: rgba(29,214,163,0.12); color: var(--teal); border: 1px solid rgba(29,214,163,0.25); }
+.rt-pred-dir-badge.bear { background: rgba(232,69,69,0.12);  color: var(--red);  border: 1px solid rgba(232,69,69,0.25); }
+.rt-pred-dir-badge.neut { background: rgba(245,200,66,0.10); color: var(--gold); border: 1px solid rgba(245,200,66,0.25); }
+
+.rt-pred-conf {
+  font-size: 0.67rem;
+  font-family: 'DM Mono', monospace;
+  font-weight: 600;
+}
+.rt-pred-conf.bull { color: var(--teal); }
+.rt-pred-conf.bear { color: var(--red);  }
+.rt-pred-conf.neut { color: var(--gold); }
+
+.rt-pred-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rt-pred-target-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.rt-pred-target-lbl {
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--t3);
+}
+.rt-pred-target-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--gold);
+  font-family: 'DM Mono', monospace;
+}
+
+.rt-pred-range-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rt-pred-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.67rem;
+  color: var(--t2);
+  font-family: 'DM Mono', monospace;
+}
+.rt-pred-bar {
+  height: 7px;
+  background: var(--border);
+  border-radius: 4px;
+  position: relative;
+  overflow: visible;
+}
+.rt-pred-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(245,200,66,0.25), rgba(245,200,66,0.55));
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+.rt-pred-pin {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+.rt-pred-pin.cur { background: var(--t2);   width: 8px; height: 8px; }
+.rt-pred-pin.tgt { background: var(--gold); z-index: 2; }
+
+.rt-pred-range-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6rem;
+  color: var(--t3);
+}
+
+.rt-pred-factors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rt-pred-factor {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.71rem;
+}
+.rt-pred-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rt-pred-dot.bull { background: var(--teal); }
+.rt-pred-dot.bear { background: var(--red);  }
+.rt-pred-dot.neut { background: var(--t3);   }
+.rt-pred-factor-lbl  { color: var(--t2); flex: 1; }
+.rt-pred-factor-note {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.67rem;
+  color: var(--t3);
+  margin-left: auto;
+}
+.rt-pred-factor.bull .rt-pred-factor-lbl { color: var(--t1); }
+.rt-pred-factor.bear .rt-pred-factor-lbl { color: var(--t1); }
+
+.rt-pred-disclaimer {
+  font-size: 0.6rem;
+  color: var(--t3);
+  text-align: center;
+  padding-top: 2px;
+  opacity: 0.7;
+}
+
 /* ── Agent widget — mobile ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .jqf-agent {

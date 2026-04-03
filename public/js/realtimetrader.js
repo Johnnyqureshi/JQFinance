@@ -119,6 +119,178 @@ const rtTrader = (() => {
     return { signal, confidence, reasons };
   }
 
+  // ── ATR (Average True Range, 14-period on daily bars) ───────────────────────
+  function calcATR(dailyBars, period = 14) {
+    if (!dailyBars || dailyBars.length < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < dailyBars.length && trs.length < period; i++) {
+      const cur  = dailyBars[i];
+      const prev = dailyBars[i + 1]; // bars are newest-first from the server
+      if (!cur || !prev || !cur.high || !cur.low || !cur.close || !prev.close) continue;
+      trs.push(Math.max(
+        cur.high - cur.low,
+        Math.abs(cur.high - prev.close),
+        Math.abs(cur.low  - prev.close)
+      ));
+    }
+    if (trs.length < Math.floor(period / 2)) return null;
+    return trs.reduce((s, v) => s + v, 0) / trs.length;
+  }
+
+  // ── Next-Day Price Prediction ────────────────────────────────────────────────
+  function calcPrediction(price, vwap, rsi, momentum, volData, dailyBars) {
+    const atr = calcATR(dailyBars);
+
+    // Score each signal: +1 bullish, -1 bearish, 0 neutral
+    let score = 0;
+    const factors = [];
+
+    // VWAP position — weight 2 (strongest intraday structural signal)
+    if (vwap != null) {
+      const vwapPct = ((price - vwap) / vwap * 100);
+      if (price > vwap) {
+        score += 2;
+        factors.push({ label: 'Trading above VWAP', dir: 'bull', note: '+' + vwapPct.toFixed(2) + '%' });
+      } else {
+        score -= 2;
+        factors.push({ label: 'Trading below VWAP', dir: 'bear', note: vwapPct.toFixed(2) + '%' });
+      }
+    }
+
+    // RSI — weight 1
+    if (rsi != null) {
+      if (rsi < 38) {
+        score += 1;
+        factors.push({ label: 'RSI deeply oversold', dir: 'bull', note: rsi.toFixed(1) });
+      } else if (rsi < 48) {
+        score += 1;
+        factors.push({ label: 'RSI in recovery zone', dir: 'bull', note: rsi.toFixed(1) });
+      } else if (rsi > 72) {
+        score -= 1;
+        factors.push({ label: 'RSI overbought', dir: 'bear', note: rsi.toFixed(1) });
+      } else if (rsi > 62) {
+        score -= 1;
+        factors.push({ label: 'RSI elevated', dir: 'bear', note: rsi.toFixed(1) });
+      } else {
+        factors.push({ label: 'RSI neutral', dir: 'neut', note: rsi.toFixed(1) });
+      }
+    }
+
+    // Candle momentum — weight 1
+    if (momentum >= 2) {
+      score += 1;
+      factors.push({ label: 'Bullish bar sequence', dir: 'bull', note: '+' + momentum + ' net bars' });
+    } else if (momentum <= -2) {
+      score -= 1;
+      factors.push({ label: 'Bearish bar sequence', dir: 'bear', note: momentum + ' net bars' });
+    } else {
+      factors.push({ label: 'Mixed candle sentiment', dir: 'neut', note: momentum + ' net bars' });
+    }
+
+    // Volume — amplifies the current directional bias
+    if (volData.surge && volData.avgVol > 0) {
+      const ratio = (volData.lastVol / volData.avgVol).toFixed(1);
+      if (score > 0) {
+        score += 1;
+        factors.push({ label: 'Volume surge — bull confirm', dir: 'bull', note: ratio + 'x avg' });
+      } else if (score < 0) {
+        score -= 1;
+        factors.push({ label: 'Volume surge — bear confirm', dir: 'bear', note: ratio + 'x avg' });
+      }
+    }
+
+    // Direction verdict
+    let direction, dirClass;
+    if      (score >= 3)  { direction = 'Bullish';      dirClass = 'bull'; }
+    else if (score === 2) { direction = 'Mild Bullish'; dirClass = 'bull'; }
+    else if (score <= -3) { direction = 'Bearish';      dirClass = 'bear'; }
+    else if (score === -2){ direction = 'Mild Bearish'; dirClass = 'bear'; }
+    else                  { direction = 'Neutral';       dirClass = 'neut'; }
+
+    // Confidence: stronger signal alignment → higher confidence
+    const maxScore = 5;
+    const confidence = Math.min(88, Math.round(50 + (Math.abs(score) / maxScore) * 38));
+
+    // Price range using ATR (Daily Average True Range)
+    let low = null, high = null, target = null;
+    if (atr) {
+      // Distribute ATR range based on directional bias
+      // Bullish: more range above; Bearish: more range below; Neutral: symmetric
+      const bias    = Math.max(-1, Math.min(1, score / maxScore)); // -1 to +1
+      const upMult  = 0.5 + bias * 0.25;  // 0.25–0.75
+      const dnMult  = 0.5 - bias * 0.25;  // 0.25–0.75
+      high   = price + atr * upMult;
+      low    = price - atr * dnMult;
+      target = price + atr * bias * 0.35;
+    }
+
+    const nextDate = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + (d.getDay() === 5 ? 3 : d.getDay() === 6 ? 2 : 1));
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    })();
+
+    return { direction, dirClass, score, confidence, factors, low, high, target, atr, nextDate };
+  }
+
+  // ── Render prediction panel ──────────────────────────────────────────────────
+  function renderPrediction(pred, price) {
+    const panel = $('rtPredPanel');
+    if (!panel) return;
+
+    $('rtPredDir').textContent    = pred.direction;
+    $('rtPredDir').className      = 'rt-pred-dir-badge ' + pred.dirClass;
+    $('rtPredDate').textContent   = pred.nextDate;
+    $('rtPredConf').textContent   = pred.confidence + '% confidence';
+    $('rtPredConf').className     = 'rt-pred-conf ' + pred.dirClass;
+
+    // Price range
+    if (pred.low != null && pred.high != null) {
+      $('rtPredLow').textContent    = '$' + fmt(pred.low);
+      $('rtPredHigh').textContent   = '$' + fmt(pred.high);
+      $('rtPredTarget').textContent = pred.target != null ? '$' + fmt(pred.target) : '$' + fmt(price);
+
+      // Position current price on the range bar
+      const rng = pred.high - pred.low;
+      const curPct = rng > 0 ? Math.max(2, Math.min(98, ((price - pred.low) / rng) * 100)) : 50;
+      const tgtPct = pred.target != null && rng > 0
+        ? Math.max(2, Math.min(98, ((pred.target - pred.low) / rng) * 100)) : curPct;
+
+      const bar = $('rtPredBarFill');
+      const curPin = $('rtPredCurPin');
+      const tgtPin = $('rtPredTgtPin');
+      if (bar)    bar.style.width    = tgtPct.toFixed(1) + '%';
+      if (curPin) curPin.style.left  = curPct.toFixed(1) + '%';
+      if (tgtPin) tgtPin.style.left  = tgtPct.toFixed(1) + '%';
+
+      $('rtPredRangeWrap').style.display = '';
+    } else {
+      $('rtPredRangeWrap').style.display = 'none';
+    }
+
+    // Factors
+    const factorsEl = $('rtPredFactors');
+    if (factorsEl) {
+      factorsEl.replaceChildren();
+      pred.factors.slice(0, 4).forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'rt-pred-factor ' + f.dir;
+        const dot = document.createElement('span');
+        dot.className = 'rt-pred-dot ' + f.dir;
+        const lbl = document.createElement('span');
+        lbl.className = 'rt-pred-factor-lbl';
+        lbl.textContent = f.label;
+        const note = document.createElement('span');
+        note.className = 'rt-pred-factor-note';
+        note.textContent = f.note;
+        row.append(dot, lbl, note);
+        factorsEl.appendChild(row);
+      });
+    }
+
+    panel.style.display = '';
+  }
+
   // ── Countdown timer ─────────────────────────────────────────────────────────
   function startCountdown(onDone) {
     clearInterval(cdTimer);
@@ -134,7 +306,7 @@ const rtTrader = (() => {
   }
 
   // ── Render results ──────────────────────────────────────────────────────────
-  function render(sym, bars, price) {
+  function render(sym, bars, price, dailyBars) {
     const closes  = bars.map(b => b.c);
     const vwap    = calcVWAP(bars);
     const rsi     = calcRSI(closes);
@@ -224,6 +396,10 @@ const rtTrader = (() => {
     $('rtError').style.display   = 'none';
     $('rtResults').style.display = 'grid';
 
+    // Next-day price prediction
+    const pred = calcPrediction(price, vwap, rsi, momentum, volData, dailyBars || []);
+    renderPrediction(pred, price);
+
     startCountdown(() => analyze(sym));
   }
 
@@ -240,19 +416,21 @@ const rtTrader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, intradayRes] = await Promise.all([
+      const [quoteRes, intradayRes, histRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
-      const price = quoteRes?.price ?? intradayRes?.price ?? null;
-      const bars  = intradayRes?.bars || [];
+      const price     = quoteRes?.price ?? intradayRes?.price ?? null;
+      const bars      = intradayRes?.bars || [];
+      const dailyBars = histRes?.historical || [];
 
       if (!price)       throw new Error('Unable to fetch quote for ' + sym);
       if (bars.length < 5) throw new Error('Insufficient intraday data for ' + sym + ' (market may be closed)');
 
       $('rtInput').value = sym;
-      render(sym, bars, price);
+      render(sym, bars, price, dailyBars);
     } catch (e) {
       $('rtLoading').style.display = 'none';
       $('rtError').style.display   = 'flex';

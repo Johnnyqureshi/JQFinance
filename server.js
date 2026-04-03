@@ -294,7 +294,7 @@ const WSB_BLOCKLIST = new Set([
 app.get('/api/wsb', async (req, res) => {
   try {
     const r = await fetch('https://apewisdom.io/api/v1.0/filter/wallstreetbets/page/1', {
-      headers: { 'User-Agent': 'StockPulse/1.0', 'Accept': 'application/json' },
+      headers: { 'User-Agent': 'JohnnyQureshiFinance/1.0', 'Accept': 'application/json' },
     });
     if (!r.ok) return res.json({ tickers: [], risers: [], error: 'ApeWisdom unavailable' });
     const data = await r.json();
@@ -329,4 +329,4 @@ app.get('/api/wsb', async (req, res) => {
   } catch (e) { res.json({ tickers: [], risers: [], error: e.message }); }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`StockPulse on :${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

@@ -1,8 +1,8 @@
-# StockPulse
+# Johnny Qureshi Finance
 
 ## Overview
 
-StockPulse is a real-time stock market dashboard inspired by TipRanks. Built with Node.js/Express backend and vanilla HTML/CSS/JS frontend.
+Johnny Qureshi Finance is a real-time stock market dashboard inspired by TipRanks. Built with Node.js/Express backend and vanilla HTML/CSS/JS frontend.
 
 ## User Preferences
 

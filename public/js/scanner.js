@@ -1,4 +1,4 @@
-// ── StockPulse — Stock Scanner ────────────────────────────────────────────────
+// ── Johnny Qureshi Finance — Stock Scanner ──────────────────────────────────────
 // API CONFIG — swap in live keys here
 // const CFG = {
 //   alphaVantage: 'YOUR_KEY', // https://www.alphavantage.co

@@ -1,4 +1,4 @@
-// ── StockPulse — Main App ──────────────────────────────────────────────────────
+// ── Johnny Qureshi Finance — Main App ──────────────────────────────────────────
 
 const INDICES  = ['SPY','QQQ','DIA','IWM'];
 const MOVERS   = ['AAPL','MSFT','NVDA','TSLA','AMZN','META','GOOGL','NFLX','UBER','COIN','PLTR','AMD'];
@@ -237,7 +237,7 @@ async function loadScorePanel(fmp, price) {
 
     scoreCardHtml = `
     <div class="score-card">
-      <div class="score-card-title">StockPulse Score</div>
+      <div class="score-card-title">JQF Score</div>
       <div class="score-badge-wrap">
         <div class="score-badge ${scoreClass}">${score}</div>
         <div>

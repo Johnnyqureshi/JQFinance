@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "951TfvqCxGFZpSdMtyr00"
+uri = "file://ELEVENLABS_KNOWLEDGE_BASE.md"
+type = "text"
+title = "JQFinance — ElevenLabs Agent Knowledge Base"

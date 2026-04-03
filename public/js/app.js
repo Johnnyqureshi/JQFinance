@@ -131,7 +131,7 @@ function goPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
-  if (page==='watchlist') loadWatchlist();
+  if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); }
   if (page==='scanner')   scanner.open();
 }
 
@@ -852,6 +852,127 @@ async function loadWatchlist() {
       loadWatchlist();
     });
     tbl.appendChild(row);
+  });
+}
+
+// ── Sector Rotation Heatmap ────────────────────────────────────────────────────
+const SECTORS = [
+  { sym: 'XLK',  name: 'Technology'        },
+  { sym: 'XLC',  name: 'Comm. Services'    },
+  { sym: 'XLF',  name: 'Financials'        },
+  { sym: 'XLV',  name: 'Healthcare'        },
+  { sym: 'XLI',  name: 'Industrials'       },
+  { sym: 'XLY',  name: 'Consumer Disc.'    },
+  { sym: 'XLP',  name: 'Consumer Staples'  },
+  { sym: 'XLE',  name: 'Energy'            },
+  { sym: 'XLB',  name: 'Materials'         },
+  { sym: 'XLRE', name: 'Real Estate'       },
+  { sym: 'XLU',  name: 'Utilities'         },
+];
+
+function srBarColor(pct) {
+  if (pct == null) return 'var(--border)';
+  if (pct >= 0) {
+    const t = Math.min(pct / 3, 1);
+    return `rgba(29,214,163,${0.4 + t * 0.6})`;
+  } else {
+    const t = Math.min(Math.abs(pct) / 3, 1);
+    return `rgba(239,83,80,${0.4 + t * 0.6})`;
+  }
+}
+
+async function loadSectorHeatmap() {
+  const grid    = $('srGrid');
+  const summary = $('srSummary');
+  if (!grid) return;
+
+  grid.innerHTML    = '<div class="sr-loading"><div class="spinner"></div></div>';
+  if (summary) summary.innerHTML = '';
+
+  const syms  = SECTORS.map(s => s.sym);
+  const snaps = await api.snapshots(syms);
+
+  // Build enriched list sorted by % change desc
+  const data = SECTORS.map(s => {
+    const q   = snaps[s.sym] || {};
+    const pct = q.changesPercentage ?? null;
+    return { ...s, q, pct };
+  }).sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+
+  const inCount  = data.filter(d => d.pct != null && d.pct > 0.25).length;
+  const outCount = data.filter(d => d.pct != null && d.pct < -0.25).length;
+
+  // Summary badges
+  if (summary) {
+    summary.innerHTML = `
+      <span class="sr-badge sr-badge-in">&#9650; ${inCount} Rotating In</span>
+      <span class="sr-badge sr-badge-out">&#9660; ${outCount} Rotating Out</span>
+    `;
+  }
+
+  grid.innerHTML = '';
+  data.forEach((d, i) => {
+    const pct  = d.pct;
+    const px   = d.q.price;
+    const pctCls = pct == null ? 'flat' : pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    const pctTxt = pct == null ? '--' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+
+    let signalCls, signalTxt;
+    if      (pct == null)    { signalCls = 'sig-neutral'; signalTxt = '→ No data';   }
+    else if (pct > 1.0)      { signalCls = 'sig-in';      signalTxt = '▲ Strong In'; }
+    else if (pct > 0.25)     { signalCls = 'sig-in';      signalTxt = '↑ Rotating In'; }
+    else if (pct < -1.0)     { signalCls = 'sig-out';     signalTxt = '▼ Strong Out'; }
+    else if (pct < -0.25)    { signalCls = 'sig-out';     signalTxt = '↓ Rotating Out'; }
+    else                     { signalCls = 'sig-neutral';  signalTxt = '→ Neutral';   }
+
+    const tileCls = pct == null ? '' : pct > 0.25 ? 'sr-in' : pct < -0.25 ? 'sr-out' : '';
+
+    const tile = document.createElement('div');
+    tile.className = `sr-tile ${tileCls}`;
+
+    const rankEl = document.createElement('span');
+    rankEl.className = 'sr-rank';
+    rankEl.textContent = `#${i + 1}`;
+
+    const symEl = document.createElement('span');
+    symEl.className = 'sr-tile-sym';
+    symEl.textContent = d.sym;
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'sr-tile-name';
+    nameEl.textContent = d.name;
+
+    const pctEl = document.createElement('span');
+    pctEl.className = `sr-tile-pct ${pctCls}`;
+    pctEl.textContent = pctTxt;
+
+    const priceEl = document.createElement('span');
+    priceEl.className = 'sr-tile-price';
+    priceEl.textContent = px != null ? '$' + fmt(px) : '';
+
+    const sigEl = document.createElement('span');
+    sigEl.className = `sr-tile-signal ${signalCls}`;
+    sigEl.textContent = signalTxt;
+
+    const barEl = document.createElement('div');
+    barEl.className = 'sr-tile-bar';
+    barEl.style.background = srBarColor(pct);
+
+    tile.appendChild(rankEl);
+    tile.appendChild(symEl);
+    tile.appendChild(nameEl);
+    tile.appendChild(pctEl);
+    tile.appendChild(priceEl);
+    tile.appendChild(sigEl);
+    tile.appendChild(barEl);
+
+    // Click to open the sector ETF
+    tile.addEventListener('click', async () => {
+      const s = await api.snapshots([d.sym]);
+      openStock(d.sym, s[d.sym] || { symbol: d.sym });
+    });
+
+    grid.appendChild(tile);
   });
 }
 

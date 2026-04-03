@@ -981,6 +981,10 @@ function showAuthOverlay() {
   $('navUser').style.display = 'none';
   state.currentUser = null;
   state.watchlist   = [];
+  // Always land on the Sign In tab — prevents "username already taken" loop
+  _resetAuthToLogin();
+  $('authUser').value = '';
+  $('authPass').value = '';
   // Reset UI to home so stale page content isn't shown on re-login
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === 'home'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -991,6 +995,8 @@ function showAuthOverlay() {
   const he = $('homeEmpty');    if (he) he.style.display = '';
   state.symbol = null;
 }
+
+let _resetAuthToLogin = () => {};   // populated by setupAuthUI
 
 function setupAuthUI() {
   let mode = 'login';
@@ -1041,6 +1047,12 @@ function setupAuthUI() {
       $('authSubmit').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
     }
   });
+
+  // Expose a reset function so showAuthOverlay can restore login mode on logout
+  _resetAuthToLogin = () => {
+    setMode('login');
+    $('authSubmit').disabled = false;
+  };
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
@@ -1058,8 +1070,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('navLogout')?.addEventListener('click', async () => {
     await authAPI.logout();
     showAuthOverlay();
-    $('authUser').value = '';
-    $('authPass').value = '';
   });
 
   updateMarketStatus();

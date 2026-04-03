@@ -117,7 +117,6 @@ function goPage(page) {
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
   if (page==='watchlist') loadWatchlist();
-  if (page==='wsb')       initWSBPage();
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────
@@ -506,9 +505,12 @@ function skelRows(n=5) {
 }
 
 async function loadMarkets() {
-  ['indicesTable','moversTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
-  const all  = [...new Set([...INDICES,...MOVERS])];
-  const snaps= await api.snapshots(all);
+  const TAPE_SYMS = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'];
+  ['gainersTable','losersTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
+  const allFetch = [...new Set([...MOVERS, ...TAPE_SYMS])];
+  const snaps    = await api.snapshots(allFetch);
+
+  const pct = sym => { const s=snaps[sym]||{}; const p=s.price||0,pv=s.previousClose||0; return pv?(p-pv)/pv:0; };
 
   const buildRow = sym => {
     const s  = snaps[sym]||{};
@@ -523,29 +525,28 @@ async function loadMarkets() {
     </div>`;
   };
 
-  const fill=(id,syms)=>{
+  const fill = (id, syms) => {
     const el=$(id); if(!el) return;
-    el.innerHTML = syms.map(buildRow).join('');
+    el.innerHTML = syms.length ? syms.map(buildRow).join('') : '<div class="mrow-empty">No data</div>';
     el.querySelectorAll('.mrow').forEach(row => {
       row.addEventListener('click', () => openStock(row.dataset.sym, snaps[row.dataset.sym]||{symbol:row.dataset.sym}));
     });
   };
 
-  fill('indicesTable', INDICES);
+  const byPct    = [...MOVERS].sort((a,b) => pct(b)-pct(a));
+  const gainers  = byPct.filter(s => pct(s) > 0).slice(0, 8);
+  const losers   = byPct.filter(s => pct(s) < 0).reverse().slice(0, 8);
 
-  const sorted = [...MOVERS].sort((a,b)=>{
-    const abs=s=>{const snap=snaps[s];const p=snap?.price||0;const pv=snap?.previousClose||0;return pv?Math.abs((p-pv)/pv):0;};
-    return abs(b)-abs(a);
-  });
-  fill('moversTable', sorted);
+  fill('gainersTable', gainers);
+  fill('losersTable',  losers);
 
-  loadWSB();
+  initWSBPage();
 
   // ticker tape
   const tape = $('tickerTape');
   if (tape) {
     tape.textContent = '';
-    ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'].forEach(sym => {
+    TAPE_SYMS.forEach(sym => {
       const s = snaps[sym]; if (!s?.price) return;
       const ch = s.price - (s.previousClose || 0), pt = (s.previousClose ? (ch / s.previousClose) * 100 : 0);
       const item = document.createElement('div'); item.className = 'tape-item';
@@ -952,8 +953,6 @@ document.addEventListener('DOMContentLoaded', () => {
     idx>=0 ? state.watchlist.splice(idx,1) : state.watchlist.push(sym);
     saveWL(); updateWatchBtn(sym);
   });
-
-  $('wsbRefresh')?.addEventListener('click', loadWSB);
 
   setupNavSearch();
   setupHeroSearch();

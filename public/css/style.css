@@ -841,7 +841,19 @@ input  { font-family:inherit; }
 .cd-now   { background:none; border:1px solid var(--teal-bdr); color:var(--teal); border-radius:var(--radius-sm); padding:7px 16px; font-size:12px; font-weight:600; cursor:pointer; transition:background var(--tr); white-space:nowrap; }
 .cd-now:hover { background:var(--teal-dim); }
 
+/* ── Mover empty state ─────────────────────────────────────────────────────── */
+.mrow-empty {
+  padding: 16px; font-size: 13px; color: var(--t3); text-align: center;
+}
+
 /* ── WSB TRENDING PAGE ─────────────────────────────────────────────────────── */
+.wsb-page-card .wsb-page-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.wsb-page-title-text {
+  font-size: 15px; font-weight: 700; color: var(--t1);
+}
 .wsb-page-header {
   display: flex;
   align-items: center;
@@ -1040,7 +1052,7 @@ input  { font-family:inherit; }
 /* Footer */
 .wsb-page-footer {
   display: flex; justify-content: space-between;
-  padding: 14px 0 0;
+  padding: 14px 24px 20px;
   font-size: 11px; color: var(--t2);
 }
 .wsb-page-footer a { color: var(--gold); text-decoration: none; }

@@ -78,9 +78,9 @@ app.get('/api/search', async (req, res) => {
     const r    = await fetch(url, { headers: YH });
     const data = await r.json();
     const out  = (data?.quotes || [])
-      .filter(x => x.quoteType === 'EQUITY' && x.symbol && !x.symbol.includes('.'))
+      .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX'].includes(x.quoteType) && x.symbol && !x.symbol.includes('.'))
       .slice(0, 8)
-      .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '' }));
+      .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '', quoteType: x.quoteType || '' }));
     res.json(out);
   } catch { res.json([]); }
 });

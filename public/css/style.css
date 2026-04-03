@@ -1466,6 +1466,20 @@ input  { font-family:inherit; }
 .sc-preset:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
 .sc-preset.active { border-color: var(--green); color: var(--green); background: var(--green-dim); }
 
+.sc-preset-bull:hover, .sc-preset-bull.active {
+  border-color: rgba(29,214,163,.6); color: var(--green); background: var(--green-dim);
+}
+.sc-preset-bear:hover, .sc-preset-bear.active {
+  border-color: rgba(232,69,69,.6); color: var(--red); background: var(--red-dim);
+}
+.sc-preset-vix:hover, .sc-preset-vix.active {
+  border-color: rgba(245,200,66,.6); color: var(--gold); background: var(--gold-dim);
+}
+.sc-preset-divider {
+  color: var(--border); font-size: 14px; padding: 0 2px; user-select: none;
+  align-self: center;
+}
+
 /* Filter bar */
 .sc-filter-bar {
   padding: 0 24px;

@@ -117,6 +117,7 @@ function goPage(page) {
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
   if (page==='watchlist') loadWatchlist();
+  if (page==='scanner')   scanner.open();
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────

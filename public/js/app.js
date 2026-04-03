@@ -23,9 +23,9 @@ const $    = id => document.getElementById(id);
 // ── Auth API ────────────────────────────────────────────────────────────────────
 const authAPI = {
   async me()          { try { const r=await fetch('/api/auth/me'); return r.ok ? r.json() : null; } catch { return null; } },
-  async login(u,p)    { const r=await fetch('/api/auth/login',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; },
-  async register(u,p) { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; },
-  async logout()      { await fetch('/api/auth/logout', {method:'POST'}); },
+  async login(u,p)    { try { const r=await fetch('/api/auth/login',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
+  async register(u,p) { try { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
+  async logout()      { try { await fetch('/api/auth/logout', {method:'POST'}); } catch {} },
 };
 
 // ── Watchlist API ───────────────────────────────────────────────────────────────
@@ -713,98 +713,6 @@ function startWsbCountdown() {
   }, 1000);
 }
 
-// ── WSB ────────────────────────────────────────────────────────────────────────
-async function loadWSB() {
-  const body = $('wsbBody'), upd = $('wsbUpdated');
-  if (!body) return;
-  body.innerHTML = '<div class="tab-spin"><div class="spinner"></div></div>';
-  const data = await api.wsb();
-  if (!data || (!data.tickers?.length && !data.risers?.length)) {
-    body.innerHTML = '<div class="wsb-err">Could not load WSB data — try again shortly.</div>';
-    return;
-  }
-
-  if (upd && data.updated) {
-    const s = Math.floor((Date.now() - new Date(data.updated).getTime()) / 1000);
-    upd.textContent = s < 60 ? 'just now' : `${Math.floor(s/60)}m ago`;
-  }
-
-  // fetch live prices for all relevant tickers
-  const allSyms = [...new Set([
-    ...(data.tickers||[]).map(t=>t.sym),
-    ...(data.risers||[]).map(t=>t.sym),
-  ])];
-  const snaps = allSyms.length ? await api.snapshots(allSyms) : {};
-
-  const maxMentions = data.tickers[0]?.mentions || 1;
-
-  const buildTickerRow = (t, showBar=true) => {
-    const s  = snaps[t.sym] || {};
-    const px = s.price||0, pv = s.previousClose||0;
-    const ch = px-pv, pt = pv?(ch/pv)*100:0;
-    const rank     = Number(t.rank)     || 0;
-    const mentions = Number(t.mentions) || 0;
-    const bar = Math.round((mentions/maxMentions)*100);
-    const rankChg = (Number(t.rankAgo) || rank) - rank;
-    const rankBadge = rankChg > 0
-      ? `<span class="wsb-rank-up">▲${rankChg}</span>`
-      : rankChg < 0
-        ? `<span class="wsb-rank-dn">▼${Math.abs(rankChg)}</span>`
-        : `<span class="wsb-rank-eq">—</span>`;
-    const safeSym  = escapeHtml(t.sym  || '');
-    const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
-    return `<div class="wsb-ticker-row" data-sym="${safeSym}">
-      <span class="wsb-rank">#${rank}</span>
-      ${rankBadge}
-      <span class="wsb-sym">${safeSym}</span>
-      ${showBar ? `<div class="wsb-bar-wrap"><div class="wsb-bar" style="width:${bar}%"></div></div>` : `<span class="wsb-name-sm">${safeName}</span>`}
-      <span class="wsb-mentions">${mentions >= 1000 ? (mentions/1000).toFixed(1)+'k' : mentions}</span>
-      ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
-    </div>`;
-  };
-
-  const buildRiserRow = t => {
-    const s  = snaps[t.sym] || {};
-    const px = s.price||0, pv = s.previousClose||0;
-    const ch = px-pv, pt = pv?(ch/pv)*100:0;
-    const rank     = Number(t.rank)     || 0;
-    const rankGain = Number(t.rankGain) || 0;
-    const mentions = Number(t.mentions) || 0;
-    const safeSym  = escapeHtml(t.sym  || '');
-    const safeName = escapeHtml((t.name||'').split(' ').slice(0,2).join(' '));
-    return `<div class="wsb-ticker-row" data-sym="${safeSym}">
-      <span class="wsb-rank">#${rank}</span>
-      <span class="wsb-rank-up">▲${rankGain}</span>
-      <span class="wsb-sym">${safeSym}</span>
-      <span class="wsb-name-sm">${safeName}</span>
-      <span class="wsb-mentions">${mentions >= 1000 ? (mentions/1000).toFixed(1)+'k' : mentions}</span>
-      ${px ? `<span class="wsb-px">$${fmt(px)}</span><span class="wsb-pct ${cls(ch)}">${ch>=0?'+':''}${fmt(pt)}%</span>` : '<span class="wsb-px wsb-na">--</span><span class="wsb-pct wsb-na">--</span>'}
-    </div>`;
-  };
-
-  const tickerRows = (data.tickers||[]).map(t => buildTickerRow(t, true)).join('');
-  const riserRows  = (data.risers||[]).map(buildRiserRow).join('');
-
-  body.innerHTML = `
-    <div class="wsb-cols">
-      <div class="wsb-left">
-        <div class="wsb-section-label">Most Mentioned — 24h</div>
-        <div class="wsb-tickers">${tickerRows||'<div class="wsb-err">No data</div>'}</div>
-      </div>
-      <div class="wsb-right">
-        <div class="wsb-section-label">Biggest Rank Gainers — vs Yesterday</div>
-        <div class="wsb-tickers">${riserRows||'<div class="wsb-err">No risers today</div>'}</div>
-      </div>
-    </div>`;
-
-  body.querySelectorAll('.wsb-ticker-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const sym = row.dataset.sym;
-      openStock(sym, snaps[sym] || { symbol: sym });
-    });
-  });
-}
-
 // ── Watchlist ──────────────────────────────────────────────────────────────────
 async function loadWatchlist() {
   const tbl = $('wlTable');
@@ -1073,6 +981,15 @@ function showAuthOverlay() {
   $('navUser').style.display = 'none';
   state.currentUser = null;
   state.watchlist   = [];
+  // Reset UI to home so stale page content isn't shown on re-login
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === 'home'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const hp = $('page-home'); if (hp) hp.classList.add('active');
+  state.page = 'home';
+  // Clear any open stock workspace
+  const ws = $('homeWorkspace'); if (ws) ws.style.display = 'none';
+  const he = $('homeEmpty');    if (he) he.style.display = '';
+  state.symbol = null;
 }
 
 function setupAuthUI() {
@@ -1102,7 +1019,14 @@ function setupAuthUI() {
     const u = $('authUser').value.trim();
     const p = $('authPass').value;
     $('authError').textContent = '';
-    $('authSubmit').disabled   = true;
+
+    // Client-side validation
+    if (!u) { $('authError').textContent = 'Please enter a username.'; $('authUser').focus(); return; }
+    if (!p) { $('authError').textContent = 'Please enter a password.';  $('authPass').focus(); return; }
+    if (mode === 'register' && p.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
+    if (mode === 'register' && !/^[a-zA-Z0-9_]{3,20}$/.test(u)) { $('authError').textContent = 'Username must be 3–20 characters (letters, numbers, _).'; return; }
+
+    $('authSubmit').disabled    = true;
     $('authSubmit').textContent = mode === 'login' ? 'Signing in…' : 'Creating account…';
 
     const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p);
@@ -1110,6 +1034,7 @@ function setupAuthUI() {
     if (res.ok) {
       await wlAPI.load();
       showApp(res.data);
+      goPage('home');
     } else {
       $('authError').textContent  = res.data?.error || 'Something went wrong.';
       $('authSubmit').disabled    = false;

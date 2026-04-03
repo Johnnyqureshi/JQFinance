@@ -35,7 +35,7 @@ db.exec(`
 `);
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
-app.use(cors({ credentials: true }));
+app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(session({
   secret:            process.env.SESSION_SECRET || 'jqf-dev-secret-change-me',
@@ -43,7 +43,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure:   false,   // set true if behind HTTPS proxy in production
+    secure:   false,
+    sameSite: 'lax',
     maxAge:   7 * 24 * 60 * 60 * 1000,   // 7 days
   },
 }));

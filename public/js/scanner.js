@@ -252,7 +252,7 @@ const scanner = (() => {
   // ── Scan ─────────────────────────────────────────────────────────────────────
   async function runScan() {
     setLoading(true);
-    _scWatchlist = typeof state !== 'undefined' ? state.watchlist : JSON.parse(localStorage.getItem('sp_wl') || '[]');
+    _scWatchlist = (typeof state !== 'undefined' && state.watchlist) ? state.watchlist : [];
 
     const syms  = UNIVERSE.map(u => u.sym);
     const snaps = await fetchSnaps(syms);

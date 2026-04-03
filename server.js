@@ -439,4 +439,114 @@ app.get('/api/wsb', async (req, res) => {
   } catch (e) { res.json({ tickers: [], risers: [], error: e.message }); }
 });
 
+// ── ElevenLabs Signed URL (voice agent) ───────────────────────────────────────
+app.get('/api/elevenlabs/signed-url', requireAuth, async (req, res) => {
+  const agentId = process.env.ELEVENLABS_AGENT_ID;
+  const apiKey  = process.env.ELEVENLABS_API_KEY;
+  if (!agentId || !apiKey) {
+    return res.status(503).json({ error: 'Voice agent not configured. Add ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID to secrets.' });
+  }
+  try {
+    const r = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`,
+      { headers: { 'xi-api-key': apiKey } }
+    );
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: err.detail?.message || 'ElevenLabs API error.' });
+    }
+    const data = await r.json();
+    res.json({ signedUrl: data.signed_url });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to reach ElevenLabs API.' });
+  }
+});
+
+// ── AI Text Chat (AIML API) ────────────────────────────────────────────────────
+const AGENT_SYSTEM_PROMPT = `You are JQF Agent — an expert AI financial assistant embedded inside JQFinance, a professional stock research and real-time analysis platform built by Johnny Qureshi.
+
+PLATFORM OVERVIEW:
+JQFinance is a single-page application with four main pages:
+1. HOME / SEARCH: Search any stock ticker. Displays real-time Trading Signals (BUY/HOLD/SELL), RSI gauge, support & resistance levels, direction bias, volume analysis, intraday VWAP console, analyst ratings donut chart, price targets, valuation metrics, and recent news.
+2. MARKETS: Top daily gainers and losers, r/WallStreetBets trending stocks (from ApeWisdom), and a live scrolling ticker tape for major indices and mega-caps.
+3. WATCHLIST: User's personally saved stocks with live prices, plus a Sector Rotation Heatmap showing momentum across 11 major ETF sectors (SPY, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLB, XLRE, XLU).
+4. SCANNER: A stock screener covering 130+ symbols across sectors with presets for Momentum, Oversold, and Leveraged Bull/Bear ETFs.
+
+TECHNICAL INDICATORS AVAILABLE ON SCREEN:
+- RSI (Relative Strength Index): Calculated using Wilder's smoothing. Zones: <30 = Oversold, 30-50 = Bearish Neutral, 50-70 = Bullish Neutral, >70 = Overbought.
+- Trading Signal: BUY/HOLD/SELL verdict with confidence %. Generated from RSI, volume surge vs average, and price vs open momentum.
+- Direction Bias: Bullish/Bearish bias derived from multiple factors.
+- Volume Analysis: Current volume vs average volume ratio. "High Volume" = more conviction.
+- Support & Resistance Levels: Auto-detected from historical OHLCV pivot clustering.
+- VWAP (Volume Weighted Average Price): Intraday benchmark — price above VWAP is bullish intraday.
+- Intraday RSI (5-min): Short-term momentum on 5-minute candles.
+- Intraday Verdict: BUY/HOLD/SELL generated from 5-min RSI, VWAP position, and volume.
+
+DATA SOURCES:
+- Yahoo Finance: Real-time quotes, OHLCV bars, intraday 5-min data, search suggestions.
+- Financial Modeling Prep (FMP): Analyst ratings (Strong Buy/Buy/Hold/Sell/Strong Sell counts), price targets (median/high/low), recent rating changes and upgrades/downgrades, company news.
+- ApeWisdom: r/WallStreetBets mention counts, upvotes, rank movements (24h).
+- Internal SQLite: User authentication and personal watchlists.
+
+YOUR CAPABILITIES:
+- You receive the CURRENT SCREEN CONTEXT showing exactly what the user sees right now.
+- You can reference specific RSI values, prices, signals, support/resistance levels, analyst counts, and more from the live data.
+- You can explain what any indicator means and how to interpret it in context.
+- You understand momentum trading, technical analysis, and fundamental valuation.
+
+RESPONSE RULES:
+- Be concise, data-driven, and specific. Reference actual numbers from the screen context.
+- Speak like a sharp, knowledgeable trading mentor — not a cautious compliance officer.
+- Keep responses under 180 words unless the user asks for a detailed breakdown.
+- Format key data in **bold** for easy scanning.
+- Never give specific buy/sell financial advice. Frame everything as educational analysis.
+- If the user asks about something not on screen, answer from your general financial knowledge.
+- Be direct. Skip preambles like "Great question!" or "Certainly!".`;
+
+app.post('/api/agent/chat', requireAuth, async (req, res) => {
+  const { message, context, history } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'Message required.' });
+
+  const apiKey = process.env.AIML_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'AIML_API_KEY not configured.' });
+
+  const systemContent = AGENT_SYSTEM_PROMPT +
+    '\n\nCURRENT SCREEN CONTEXT (live data from the user\'s screen right now):\n```json\n' +
+    (context || '{}') + '\n```';
+
+  const msgs = [{ role: 'system', content: systemContent }];
+
+  if (Array.isArray(history)) {
+    const recent = history.slice(-8);
+    recent.forEach(m => {
+      if (m.role && m.content) msgs.push({ role: m.role, content: m.content });
+    });
+  }
+  msgs.push({ role: 'user', content: message });
+
+  try {
+    const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:      'gpt-4o-mini',
+        messages:   msgs,
+        max_tokens: 400,
+        temperature: 0.65,
+      }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: err.error?.message || `AIML API error (${r.status}).` });
+    }
+
+    const data  = await r.json();
+    const reply = data.choices?.[0]?.message?.content?.trim() || 'Unable to generate a response.';
+    res.json({ reply });
+  } catch (e) {
+    res.status(500).json({ error: 'AI service unreachable.' });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

@@ -119,6 +119,260 @@ const rtTrader = (() => {
     return { signal, confidence, reasons };
   }
 
+  // ── Fixed Range Volume Profile (FRVP) ───────────────────────────────────────
+  function calcVolumeProfile(bars, numBuckets = 24) {
+    if (!bars || bars.length < 3) return null;
+
+    // Global high/low across all intraday bars
+    let hi = -Infinity, lo = Infinity;
+    for (const b of bars) {
+      if (b.h != null && b.h > hi) hi = b.h;
+      if (b.l != null && b.l < lo) lo = b.l;
+    }
+    if (!isFinite(hi) || !isFinite(lo) || hi - lo < 0.001) return null;
+
+    const range      = hi - lo;
+    const bucketSize = range / numBuckets;
+
+    // Create price buckets
+    const buckets = Array.from({ length: numBuckets }, (_, i) => ({
+      low:    lo + i * bucketSize,
+      high:   lo + (i + 1) * bucketSize,
+      center: lo + (i + 0.5) * bucketSize,
+      volume: 0,
+    }));
+
+    // Distribute each bar's volume proportionally across overlapping buckets
+    for (const b of bars) {
+      if (b.h == null || b.l == null || !b.v || b.v <= 0) continue;
+      const bRange = b.h - b.l;
+      if (bRange < 0.001) {
+        // Zero-range bar — put all volume at closest bucket
+        const idx = Math.max(0, Math.min(numBuckets - 1, Math.floor((b.c - lo) / bucketSize)));
+        buckets[idx].volume += b.v;
+        continue;
+      }
+      for (let bi = 0; bi < numBuckets; bi++) {
+        const overlap = Math.min(b.h, buckets[bi].high) - Math.max(b.l, buckets[bi].low);
+        if (overlap > 0) buckets[bi].volume += b.v * (overlap / bRange);
+      }
+    }
+
+    // Point of Control — bucket with the most volume
+    let pocIdx = 0;
+    for (let i = 1; i < numBuckets; i++) {
+      if (buckets[i].volume > buckets[pocIdx].volume) pocIdx = i;
+    }
+
+    // Value Area — expand from POC until 70% of total volume is captured
+    const totalVol = buckets.reduce((s, b) => s + b.volume, 0);
+    const vaTarget = totalVol * 0.70;
+    let vaVol = buckets[pocIdx].volume;
+    let vaLo = pocIdx, vaHi = pocIdx;
+
+    while (vaVol < vaTarget) {
+      const canUp   = vaHi < numBuckets - 1;
+      const canDown = vaLo > 0;
+      if (!canUp && !canDown) break;
+      const upVol   = canUp   ? buckets[vaHi + 1].volume : -1;
+      const downVol = canDown ? buckets[vaLo - 1].volume : -1;
+      if (upVol >= downVol) { vaHi++; vaVol += buckets[vaHi].volume; }
+      else                  { vaLo--; vaVol += buckets[vaLo].volume; }
+    }
+
+    const maxVol = Math.max(...buckets.map(b => b.volume));
+
+    return {
+      buckets, numBuckets, pocIdx, vaLo, vaHi,
+      poc: buckets[pocIdx].center,
+      vah: buckets[vaHi].high,
+      val: buckets[vaLo].low,
+      globalHigh: hi, globalLow: lo,
+      totalVol, maxVol,
+    };
+  }
+
+  // ── Draw Volume Profile on canvas ───────────────────────────────────────────
+  function drawVolumeProfile(vp, price) {
+    const canvas = $('rtVPCanvas');
+    if (!canvas || !vp) return;
+
+    const DPR  = Math.min(window.devicePixelRatio || 1, 2);
+    const W    = canvas.parentElement ? canvas.parentElement.clientWidth || 360 : 360;
+    const H    = 170;
+    canvas.width        = W * DPR;
+    canvas.height       = H * DPR;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(DPR, DPR);
+    ctx.clearRect(0, 0, W, H);
+
+    const PAD_L  = 46; // space for side labels
+    const PAD_R  = 36; // space for price labels on right
+    const PAD_T  = 6;
+    const PAD_B  = 6;
+    const chartW = W - PAD_L - PAD_R;
+    const chartH = H - PAD_T - PAD_B;
+    const n      = vp.numBuckets;
+    const rowH   = chartH / n;
+
+    // Draw each bucket row (bucket 0 = lowest price → bottom of chart)
+    for (let i = 0; i < n; i++) {
+      const bkt    = vp.buckets[i];
+      const barW   = vp.maxVol > 0 ? (bkt.volume / vp.maxVol) * chartW : 0;
+      const y      = PAD_T + (n - 1 - i) * rowH; // high bucket = top of chart
+      const isPOC  = i === vp.pocIdx;
+      const isVA   = i >= vp.vaLo && i <= vp.vaHi;
+
+      // Row background
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.015)';
+        ctx.fillRect(PAD_L, y, chartW, rowH);
+      }
+
+      // Volume bar
+      if (isPOC) {
+        ctx.fillStyle = 'rgba(245,200,66,0.75)';
+      } else if (isVA) {
+        ctx.fillStyle = 'rgba(29,214,163,0.28)';
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      }
+      if (barW > 0.5) ctx.fillRect(PAD_L, y + 1, barW, Math.max(1.5, rowH - 1.5));
+
+      // Right-side price labels for key levels
+      ctx.textAlign    = 'left';
+      ctx.textBaseline = 'middle';
+      const midY = y + rowH / 2;
+      if (isPOC) {
+        ctx.fillStyle = 'rgba(245,200,66,0.95)';
+        ctx.font      = 'bold 8.5px DM Mono, monospace';
+        ctx.fillText('$' + fmt(bkt.center), PAD_L + chartW + 4, midY);
+      } else if (i === vp.vaHi) {
+        ctx.fillStyle = 'rgba(29,214,163,0.80)';
+        ctx.font      = '8px DM Mono, monospace';
+        ctx.fillText('$' + fmt(bkt.high), PAD_L + chartW + 4, midY);
+      } else if (i === vp.vaLo) {
+        ctx.fillStyle = 'rgba(29,214,163,0.80)';
+        ctx.font      = '8px DM Mono, monospace';
+        ctx.fillText('$' + fmt(bkt.low), PAD_L + chartW + 4, midY);
+      }
+    }
+
+    // Left axis labels
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font         = '8px DM Mono, monospace';
+    const labelSteps = [0, 0.25, 0.5, 0.75, 1];
+    for (const t of labelSteps) {
+      const p = vp.globalLow + t * (vp.globalHigh - vp.globalLow);
+      const y = PAD_T + (1 - t) * chartH;
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.fillText('$' + fmt(p), PAD_L - 3, y);
+    }
+
+    const priceToY = p =>
+      PAD_T + ((vp.globalHigh - p) / (vp.globalHigh - vp.globalLow)) * chartH;
+
+    // POC dashed line
+    const pocY = priceToY(vp.poc);
+    ctx.strokeStyle = 'rgba(245,200,66,0.55)';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(PAD_L, pocY); ctx.lineTo(PAD_L + chartW, pocY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Left labels: POC, VAH, VAL
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font         = 'bold 8px DM Mono, monospace';
+    ctx.fillStyle    = 'rgba(245,200,66,0.90)';
+    ctx.fillText('POC', PAD_L - 3, pocY);
+
+    const vahY = priceToY(vp.vah);
+    ctx.strokeStyle = 'rgba(29,214,163,0.35)';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath(); ctx.moveTo(PAD_L, vahY); ctx.lineTo(PAD_L + chartW, vahY); ctx.stroke();
+    ctx.font      = '7.5px DM Mono, monospace';
+    ctx.fillStyle = 'rgba(29,214,163,0.75)';
+    ctx.fillText('VAH', PAD_L - 3, vahY);
+
+    const valY = priceToY(vp.val);
+    ctx.beginPath(); ctx.moveTo(PAD_L, valY); ctx.lineTo(PAD_L + chartW, valY); ctx.stroke();
+    ctx.fillText('VAL', PAD_L - 3, valY);
+    ctx.setLineDash([]);
+
+    // Current price line
+    if (price >= vp.globalLow && price <= vp.globalHigh) {
+      const curY = priceToY(price);
+      ctx.strokeStyle = 'rgba(255,255,255,0.80)';
+      ctx.lineWidth   = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath(); ctx.moveTo(PAD_L, curY); ctx.lineTo(PAD_L + chartW, curY); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // "NOW" label
+      ctx.textAlign    = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font         = 'bold 8px DM Mono, monospace';
+      ctx.fillStyle    = 'rgba(255,255,255,0.85)';
+      ctx.fillText('NOW', PAD_L - 3, curY);
+    }
+  }
+
+  // ── Render Volume Profile panel ──────────────────────────────────────────────
+  function renderVolumeProfile(vp, price) {
+    const panel = $('rtVPPanel');
+    if (!panel) return;
+
+    if (!vp) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    // Draw the canvas chart
+    // Defer to allow panel to be visible + sized first
+    requestAnimationFrame(() => drawVolumeProfile(vp, price));
+
+    // Fill metric cells
+    $('rtVPPoc').textContent = '$' + fmt(vp.poc);
+    $('rtVPVah').textContent = '$' + fmt(vp.vah);
+    $('rtVPVal').textContent = '$' + fmt(vp.val);
+
+    const pocPct = ((price - vp.poc) / vp.poc * 100);
+    const pocEl  = $('rtVPPocSub');
+    if (pocEl) {
+      pocEl.textContent = (pocPct >= 0 ? '+' : '') + pocPct.toFixed(2) + '% vs price';
+      pocEl.className   = 'rt-vp-msub ' + (pocPct >= 0 ? 'above' : 'below');
+    }
+
+    // Price zone label
+    const zoneEl = $('rtVPZone');
+    if (zoneEl) {
+      if (price > vp.vah) {
+        zoneEl.textContent  = '▲ Above Value Area';
+        zoneEl.className    = 'rt-vp-zone above';
+      } else if (price < vp.val) {
+        zoneEl.textContent  = '▼ Below Value Area';
+        zoneEl.className    = 'rt-vp-zone below';
+      } else if (Math.abs(price - vp.poc) / vp.poc < 0.003) {
+        zoneEl.textContent  = '◆ At Point of Control';
+        zoneEl.className    = 'rt-vp-zone poc';
+      } else if (price > vp.poc) {
+        zoneEl.textContent  = '↑ Inside VA — Above POC';
+        zoneEl.className    = 'rt-vp-zone above';
+      } else {
+        zoneEl.textContent  = '↓ Inside VA — Below POC';
+        zoneEl.className    = 'rt-vp-zone below';
+      }
+    }
+
+    panel.style.display = '';
+  }
+
   // ── ATR (Average True Range, 14-period on daily bars) ───────────────────────
   function calcATR(dailyBars, period = 14) {
     if (!dailyBars || dailyBars.length < period + 1) return null;
@@ -395,6 +649,10 @@ const rtTrader = (() => {
     $('rtLoading').style.display = 'none';
     $('rtError').style.display   = 'none';
     $('rtResults').style.display = 'grid';
+
+    // Fixed Range Volume Profile
+    const vp = calcVolumeProfile(bars);
+    renderVolumeProfile(vp, price);
 
     // Next-day price prediction
     const pred = calcPrediction(price, vwap, rsi, momentum, volData, dailyBars || []);

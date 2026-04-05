@@ -2623,6 +2623,104 @@ option { background: var(--card); }
 .jqf-panel-foot a { color: var(--t3); text-decoration: none; }
 .jqf-panel-foot a:hover { color: var(--teal); }
 
+/* ── Realtime Trader — Fixed Range Volume Profile ────────────────────────── */
+.rt-vp-panel {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(29,214,163,0.04) 0%, rgba(29,214,163,0.015) 100%);
+  border: 1px solid rgba(29,214,163,0.15);
+  border-radius: 12px;
+  padding: 13px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.rt-vp-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.rt-vp-header svg { flex-shrink: 0; color: var(--teal); }
+.rt-vp-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+}
+.rt-vp-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--t3);
+  background: var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.rt-vp-zone {
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: 'DM Mono', monospace;
+}
+.rt-vp-zone.above { color: var(--teal); }
+.rt-vp-zone.below { color: var(--red); }
+.rt-vp-zone.poc   { color: var(--gold); }
+
+.rt-vp-canvas-wrap {
+  width: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.15);
+}
+.rt-vp-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+}
+
+.rt-vp-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.rt-vp-metric {
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+}
+.rt-vp-metric:last-child { border-right: none; }
+
+.rt-vp-mlabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--t3);
+}
+.rt-vp-mval {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: 'DM Mono', monospace;
+  color: var(--t1);
+  line-height: 1.2;
+}
+.rt-vp-mval.gold { color: var(--gold); }
+.rt-vp-mval.teal { color: var(--teal); }
+
+.rt-vp-msub {
+  font-size: 0.62rem;
+  color: var(--t3);
+  font-family: 'DM Mono', monospace;
+}
+.rt-vp-msub.above { color: var(--teal); }
+.rt-vp-msub.below { color: var(--red); }
+
 /* ── Realtime Trader — Next Day Prediction Panel ─────────────────────────── */
 .rt-pred-panel {
   grid-column: 1 / -1;

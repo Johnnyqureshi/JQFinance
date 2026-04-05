@@ -355,6 +355,36 @@
 
           </div><!-- .rt-metrics-grid -->
 
+          <!-- Fixed Range Volume Profile Panel -->
+          <div class="rt-vp-panel" id="rtVPPanel" style="display:none">
+            <div class="rt-vp-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="4" height="18" rx="1"/><rect x="10" y="8" width="4" height="13" rx="1"/><rect x="17" y="5" width="4" height="16" rx="1"/></svg>
+              <span class="rt-vp-title">Volume Profile</span>
+              <span class="rt-vp-badge">FIXED RANGE · INTRADAY</span>
+              <span class="rt-vp-zone" id="rtVPZone"></span>
+            </div>
+            <div class="rt-vp-canvas-wrap">
+              <canvas id="rtVPCanvas"></canvas>
+            </div>
+            <div class="rt-vp-metrics">
+              <div class="rt-vp-metric">
+                <div class="rt-vp-mlabel">POC</div>
+                <div class="rt-vp-mval gold" id="rtVPPoc">--</div>
+                <div class="rt-vp-msub" id="rtVPPocSub">Point of Control</div>
+              </div>
+              <div class="rt-vp-metric">
+                <div class="rt-vp-mlabel">VAH</div>
+                <div class="rt-vp-mval teal" id="rtVPVah">--</div>
+                <div class="rt-vp-msub">Value Area High</div>
+              </div>
+              <div class="rt-vp-metric">
+                <div class="rt-vp-mlabel">VAL</div>
+                <div class="rt-vp-mval teal" id="rtVPVal">--</div>
+                <div class="rt-vp-msub">Value Area Low</div>
+              </div>
+            </div>
+          </div>
+
           <!-- Next-Day Prediction Panel -->
           <div class="rt-pred-panel" id="rtPredPanel" style="display:none">
             <div class="rt-pred-header">

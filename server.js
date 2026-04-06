@@ -7,6 +7,7 @@ const YahooFinance = require('yahoo-finance2').default;
 const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
+const SQLiteStore  = require('connect-sqlite3')(session);
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -38,6 +39,7 @@ db.exec(`
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(session({
+  store:             new SQLiteStore({ db: 'sessions.db', dir: '.' }),
   secret:            process.env.SESSION_SECRET || 'jqf-dev-secret-change-me',
   resave:            false,
   saveUninitialized: false,
@@ -45,7 +47,7 @@ app.use(session({
     httpOnly: true,
     secure:   false,
     sameSite: 'lax',
-    maxAge:   7 * 24 * 60 * 60 * 1000,   // 7 days
+    maxAge:   30 * 24 * 60 * 60 * 1000,  // 30 days
   },
 }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -91,7 +93,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username.trim());
   if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
 
   const ok = await bcrypt.compare(password, user.password_hash);

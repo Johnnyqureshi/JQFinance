@@ -647,11 +647,12 @@ const rtTrader = (() => {
     $('rtUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const msEl = $('rtMarketState');
     if (msEl) {
-      const isPost = ['POST', 'POSTPOST'].includes(marketState);
-      const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
-      const isClosed = marketState === 'CLOSED';
-      msEl.textContent  = isPost ? 'AFTER HOURS' : isPre ? 'PRE-MARKET' : isClosed ? 'MARKET CLOSED' : 'MARKET OPEN';
-      msEl.className    = 'rt-market-state-badge ' + (isPost ? 'post' : isPre ? 'pre' : isClosed ? 'closed' : 'open');
+      const isCrypto = sym.includes('-');
+      const isPost   = !isCrypto && ['POST', 'POSTPOST'].includes(marketState);
+      const isPre    = !isCrypto && ['PRE',  'PREPRE' ].includes(marketState);
+      const isClosed = !isCrypto && marketState === 'CLOSED';
+      msEl.textContent  = isCrypto ? '24/7 CRYPTO' : isPost ? 'AFTER HOURS' : isPre ? 'PRE-MARKET' : isClosed ? 'MARKET CLOSED' : 'MARKET OPEN';
+      msEl.className    = 'rt-market-state-badge ' + (isCrypto ? 'crypto' : isPost ? 'post' : isPre ? 'pre' : isClosed ? 'closed' : 'open');
       msEl.style.display = '';
     }
 

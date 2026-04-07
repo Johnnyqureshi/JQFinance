@@ -185,6 +185,7 @@ async function yfChartQuote(symbol) {
     previousClose:     prev,
     volume:            m.regularMarketVolume ?? vols.at(-1) ?? null,
     avgVolume:         vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null,
+    marketCap:         m.marketCap ?? null,
   };
 }
 
@@ -218,7 +219,7 @@ app.get('/api/search', async (req, res) => {
     const r    = await fetch(url, { headers: YH });
     const data = await r.json();
     const out  = (data?.quotes || [])
-      .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX'].includes(x.quoteType) && x.symbol && !x.symbol.includes('.'))
+      .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX','CRYPTOCURRENCY'].includes(x.quoteType) && x.symbol && !x.symbol.includes('.'))
       .slice(0, 8)
       .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '', quoteType: x.quoteType || '' }));
     res.json(out);
@@ -470,6 +471,85 @@ app.get('/api/wsb', async (req, res) => {
 
     res.json({ tickers, risers, updated: new Date().toISOString() });
   } catch (e) { res.json({ tickers: [], risers: [], error: e.message }); }
+});
+
+// ── Hardcoded 2026 economic calendar (fallback when FMP is unavailable) ────────
+const ECO_CALENDAR_2026 = [
+  { date:'2026-04-10', event:'CPI (March)',                        impact:'High',   estimate:'2.8%',  previous:'2.8%'  },
+  { date:'2026-04-11', event:'Core CPI (March)',                   impact:'High',   estimate:'3.1%',  previous:'3.1%'  },
+  { date:'2026-04-11', event:'PPI (March)',                        impact:'Medium', estimate:'2.5%',  previous:'2.7%'  },
+  { date:'2026-04-15', event:'Retail Sales (March)',               impact:'High',   estimate:'0.5%',  previous:'-0.9%' },
+  { date:'2026-04-16', event:'Initial Jobless Claims',             impact:'Medium', estimate:'225K',  previous:'219K'  },
+  { date:'2026-04-17', event:'Housing Starts (March)',             impact:'Medium', estimate:'1.42M', previous:'1.50M' },
+  { date:'2026-04-17', event:'Michigan Consumer Sentiment (Apr P)',impact:'Medium', estimate:'57.0',  previous:'57.0'  },
+  { date:'2026-04-23', event:'Initial Jobless Claims',             impact:'Medium', estimate:'225K',  previous:null    },
+  { date:'2026-04-25', event:'PCE Price Index (March)',            impact:'High',   estimate:'2.5%',  previous:'2.5%'  },
+  { date:'2026-04-25', event:'GDP (Q1 2026 Advance)',              impact:'High',   estimate:'1.3%',  previous:'2.4%'  },
+  { date:'2026-04-30', event:'FOMC Meeting Begins',                impact:'High',   estimate:null,    previous:'4.25-4.50%' },
+  { date:'2026-04-30', event:'Consumer Confidence (April)',        impact:'Medium', estimate:'95.0',  previous:'92.9'  },
+  { date:'2026-05-01', event:'FOMC Rate Decision',                 impact:'High',   estimate:'4.25-4.50%', previous:'4.25-4.50%' },
+  { date:'2026-05-01', event:'Non-Farm Payrolls (April)',          impact:'High',   estimate:'135K',  previous:'228K'  },
+  { date:'2026-05-01', event:'Unemployment Rate (April)',          impact:'High',   estimate:'4.2%',  previous:'4.2%'  },
+  { date:'2026-05-07', event:'Initial Jobless Claims',             impact:'Medium', estimate:'225K',  previous:null    },
+  { date:'2026-05-13', event:'CPI (April)',                        impact:'High',   estimate:null,    previous:'2.8%'  },
+  { date:'2026-05-14', event:'PPI (April)',                        impact:'Medium', estimate:null,    previous:'2.5%'  },
+  { date:'2026-05-15', event:'Retail Sales (April)',               impact:'High',   estimate:null,    previous:'0.5%'  },
+  { date:'2026-05-28', event:'GDP (Q1 2026 Second)',               impact:'High',   estimate:null,    previous:null    },
+  { date:'2026-06-05', event:'Non-Farm Payrolls (May)',            impact:'High',   estimate:null,    previous:null    },
+  { date:'2026-06-10', event:'CPI (May)',                          impact:'High',   estimate:null,    previous:null    },
+  { date:'2026-06-16', event:'FOMC Meeting Begins',                impact:'High',   estimate:null,    previous:'4.25-4.50%' },
+  { date:'2026-06-17', event:'FOMC Rate Decision',                 impact:'High',   estimate:null,    previous:'4.25-4.50%' },
+];
+
+// ── GET /api/events — Economic calendar + upcoming earnings ───────────────────
+app.get('/api/events', async (req, res) => {
+  const today  = new Date();
+  const from   = today.toISOString().split('T')[0];
+  const toDate = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const to     = toDate.toISOString().split('T')[0];
+  const result = { economic: [], earnings: [] };
+
+  // Try FMP first
+  if (FMP_KEY) {
+    try {
+      const hdr = { headers: { Accept: 'application/json', 'User-Agent': 'JQF/1.0' } };
+      const [ecoRes, earnRes] = await Promise.all([
+        fetch(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${from}&to=${to}&apikey=${FMP_KEY}`, hdr),
+        fetch(`https://financialmodelingprep.com/api/v3/earning_calendar?from=${from}&to=${to}&apikey=${FMP_KEY}`, hdr),
+      ]);
+
+      if (ecoRes.ok) {
+        const eco = await ecoRes.json().catch(() => []);
+        if (Array.isArray(eco) && eco.length) {
+          result.economic = eco
+            .filter(e => e.country === 'US' && ['High', 'Medium'].includes(e.impact))
+            .slice(0, 14)
+            .map(e => ({ date: e.date, event: e.event, impact: e.impact, previous: e.previous, estimate: e.estimate, actual: e.actual }));
+        }
+      }
+
+      if (earnRes.ok) {
+        const earn = await earnRes.json().catch(() => []);
+        if (Array.isArray(earn) && earn.length) {
+          const MAJOR = new Set(['AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','JPM','BAC','GS','V','MA','AMD','NFLX','ADBE','CRM','COIN','WMT','COST','HOOD','UBER','PLTR','ARM']);
+          result.earnings = earn
+            .filter(e => MAJOR.has(e.symbol))
+            .slice(0, 12)
+            .map(e => ({ date: e.date, symbol: e.symbol, time: e.time, epsEstimated: e.epsEstimated, revenueEstimated: e.revenueEstimated }));
+        }
+      }
+    } catch (e) { console.error('Events FMP error:', e.message); }
+  }
+
+  // Fallback to hardcoded calendar if FMP returned nothing
+  if (!result.economic.length) {
+    result.economic = ECO_CALENDAR_2026
+      .filter(e => e.date >= from && e.date <= to)
+      .slice(0, 14)
+      .map(e => ({ ...e, actual: null }));
+  }
+
+  res.json(result);
 });
 
 // ── ElevenLabs Signed URL (voice agent) ───────────────────────────────────────

@@ -551,6 +551,111 @@ function skelRows(n=5) {
   return Array(n).fill(`<div class="skel-row"><div class="skel" style="width:52px;height:13px"></div><div class="skel" style="flex:1;height:10px"></div><div class="skel" style="width:60px;height:13px"></div></div>`).join('');
 }
 
+// ── Crypto Markets ─────────────────────────────────────────────────────────────
+const CRYPTO_TICKERS = ['BTC-USD','ETH-USD','BNB-USD','SOL-USD','XRP-USD','DOGE-USD','ADA-USD','AVAX-USD','LINK-USD','LTC-USD','DOT-USD','SHIB-USD'];
+
+const CRYPTO_ICONS = {
+  'BTC-USD':'#F7931A','ETH-USD':'#627EEA','BNB-USD':'#F3BA2F','SOL-USD':'#9945FF',
+  'XRP-USD':'#00AAE4','DOGE-USD':'#C3A634','ADA-USD':'#0D1E2D','AVAX-USD':'#E84142',
+  'LINK-USD':'#2A5ADA','LTC-USD':'#BFBBBB','DOT-USD':'#E6007A','SHIB-USD':'#FFA409',
+};
+
+async function loadCrypto() {
+  const grid = $('cryptoGrid');
+  if (!grid) return;
+
+  try {
+    const snaps = await api.snapshots(CRYPTO_TICKERS);
+
+    const cards = CRYPTO_TICKERS.map(sym => {
+      const s     = snaps[sym] || {};
+      const px    = s.price || 0;
+      const prev  = s.previousClose || 0;
+      const ch    = px - prev;
+      const pct   = prev ? (ch / prev) * 100 : 0;
+      const mktcap = s.marketCap || 0;
+      const name  = sym.replace('-USD','');
+      const color = CRYPTO_ICONS[sym] || '#888';
+      const eSym  = escapeHtml(sym);
+
+      return `<div class="crypto-card" data-sym="${eSym}">
+        <div class="crypto-card-icon" style="background:${color}22;border:1.5px solid ${color}44;color:${color}">${name.slice(0,3)}</div>
+        <div class="crypto-card-info">
+          <div class="crypto-card-name">${escapeHtml(s.name || name)}</div>
+          <div class="crypto-card-sym">${name} <span class="crypto-24-7">24/7</span></div>
+        </div>
+        <div class="crypto-card-right">
+          <div class="crypto-card-price">$${px >= 1000 ? fmt(px,0) : px >= 1 ? fmt(px,2) : fmt(px,6)}</div>
+          <div class="crypto-card-chg ${cls(ch)}">${ch >= 0 ? '+' : ''}${fmt(pct)}%</div>
+          ${mktcap ? `<div class="crypto-card-mcap">${fmtV(mktcap)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    grid.innerHTML = cards || '<div class="mrow-empty">No data available</div>';
+    grid.querySelectorAll('.crypto-card').forEach(card => {
+      card.addEventListener('click', () => openStock(card.dataset.sym, snaps[card.dataset.sym] || { symbol: card.dataset.sym }));
+    });
+  } catch {
+    if (grid) grid.innerHTML = '<div class="mrow-empty">Crypto data unavailable</div>';
+  }
+}
+
+// ── Market Events ──────────────────────────────────────────────────────────────
+async function loadMarketEvents() {
+  const ecoEl  = $('ecoTable');
+  const earnEl = $('earningsTable');
+
+  try {
+    const r = await fetch('/api/events');
+    if (!r.ok) throw new Error('events unavailable');
+    const { economic, earnings } = await r.json();
+
+    if (ecoEl) {
+      if (economic && economic.length) {
+        ecoEl.innerHTML = economic.map(e => {
+          const d   = e.date ? new Date(e.date).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
+          const hi  = e.impact === 'High';
+          const act = e.actual != null ? `<span class="ev-val actual">${e.actual}</span>` : '';
+          const est = e.estimate != null ? `<span class="ev-val est">est ${e.estimate}</span>` : '';
+          return `<div class="ev-row">
+            <span class="ev-date">${d}</span>
+            <span class="ev-impact ${hi ? 'high' : 'med'}">${e.impact.toUpperCase()}</span>
+            <span class="ev-name">${escapeHtml(e.event || '')}</span>
+            <span class="ev-vals">${act}${est}</span>
+          </div>`;
+        }).join('');
+      } else {
+        ecoEl.innerHTML = '<div class="mrow-empty">No high-impact US events in the next 14 days</div>';
+      }
+    }
+
+    if (earnEl) {
+      if (earnings && earnings.length) {
+        earnEl.innerHTML = earnings.map(e => {
+          const d    = e.date ? new Date(e.date).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
+          const when = e.time === 'bmo' ? 'BMO' : e.time === 'amc' ? 'AMC' : '';
+          const eps  = e.epsEstimated != null ? `EPS est $${fmt(e.epsEstimated)}` : '';
+          return `<div class="ev-row earn-row" data-sym="${escapeHtml(e.symbol)}">
+            <span class="ev-date">${d}</span>
+            <span class="earn-sym">${escapeHtml(e.symbol)}</span>
+            <span class="earn-when ${when.toLowerCase()}">${when}</span>
+            <span class="ev-name ev-eps">${eps}</span>
+          </div>`;
+        }).join('');
+        earnEl.querySelectorAll('.earn-row').forEach(row => {
+          row.addEventListener('click', () => openStock(row.dataset.sym, { symbol: row.dataset.sym }));
+        });
+      } else {
+        earnEl.innerHTML = '<div class="mrow-empty">No major earnings in the next 14 days</div>';
+      }
+    }
+  } catch {
+    if (ecoEl)  ecoEl.innerHTML  = '<div class="mrow-empty">Events data unavailable</div>';
+    if (earnEl) earnEl.innerHTML = '<div class="mrow-empty">Earnings data unavailable</div>';
+  }
+}
+
 async function loadMarkets() {
   const TAPE_SYMS = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA'];
   ['gainersTable','losersTable'].forEach(id => { const el=$(id); if(el) el.innerHTML=skelRows(); });
@@ -586,6 +691,9 @@ async function loadMarkets() {
 
   fill('gainersTable', gainers);
   fill('losersTable',  losers);
+
+  loadCrypto();
+  loadMarketEvents();
 
   initWSBPage();
 

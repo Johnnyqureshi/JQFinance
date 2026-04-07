@@ -37,7 +37,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Pages
 - **Search/Home** (`default`): Compact search bar at top; empty state shown by default. Selecting a stock shows the full analysis workspace (Trader signals + tabs) in-place. No separate stock page — all analysis lives here.
-- **Markets**: 4 sections (Indices, Top Movers, Tech Leaders, Finance) + WSB trending section — loads on tab click
+- **Markets**: Top Gainers/Losers + **Crypto Markets (24/7 live grid)** + **Market Events (economic calendar + earnings)** + WSB Trending — loads on tab click
 - **WSB Trending**: Dedicated page — top 10 r/wallstreetbets tickers by 24h mentions. Shows rank, $TICKER, company name, mention count, upvote sentiment bar, 24h mention change (▲/▼), live price + % change. Auto-refreshes every 5 minutes with countdown timer.
 - **Watchlist**: Personal saved symbols stored in localStorage; click row to view stock detail
 - **Trading Signals panel**: Integrated into the Search/Home workspace (left sidebar) — RSI gauge, volume bars, day range position, day direction, support/resistance levels, 60s auto-refresh. Triggered automatically on stock search. No separate Trader page.

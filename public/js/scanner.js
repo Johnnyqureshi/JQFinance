@@ -153,6 +153,28 @@ const scanner = (() => {
     {sym:'HIBS',  name:'3x High Beta Bear (Direxion)',    sector:'Lev ETF (Bear)', mcap:'Small', float:60},
     {sym:'BERZ',  name:'3x MicroSectors FANG+ Bear',      sector:'Lev ETF (Bear)', mcap:'Small', float:55},
     {sym:'SMCL',  name:'2x Small Cap Bear (ProShares)',   sector:'Lev ETF (Bear)', mcap:'Small', float:40},
+    // ── Crypto Spot (24/7 — Yahoo Finance format) ─────────────────────────────
+    {sym:'BTC-USD',  name:'Bitcoin',       sector:'Crypto', mcap:'Large', float:0},
+    {sym:'ETH-USD',  name:'Ethereum',      sector:'Crypto', mcap:'Large', float:0},
+    {sym:'BNB-USD',  name:'BNB',           sector:'Crypto', mcap:'Large', float:0},
+    {sym:'SOL-USD',  name:'Solana',        sector:'Crypto', mcap:'Large', float:0},
+    {sym:'XRP-USD',  name:'XRP',           sector:'Crypto', mcap:'Large', float:0},
+    {sym:'DOGE-USD', name:'Dogecoin',      sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'ADA-USD',  name:'Cardano',       sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'AVAX-USD', name:'Avalanche',     sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'LINK-USD', name:'Chainlink',     sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'DOT-USD',  name:'Polkadot',      sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'LTC-USD',  name:'Litecoin',      sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'UNI-USD',  name:'Uniswap',       sector:'Crypto', mcap:'Small', float:0},
+    {sym:'ATOM-USD', name:'Cosmos',        sector:'Crypto', mcap:'Small', float:0},
+    {sym:'SHIB-USD', name:'Shiba Inu',     sector:'Crypto', mcap:'Small', float:0},
+    {sym:'PEPE-USD', name:'Pepe',          sector:'Crypto', mcap:'Small', float:0},
+    {sym:'SUI-USD',  name:'Sui',           sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'TON-USD',  name:'Toncoin',       sector:'Crypto', mcap:'Mid',   float:0},
+    {sym:'NEAR-USD', name:'NEAR Protocol', sector:'Crypto', mcap:'Small', float:0},
+    {sym:'APT-USD',  name:'Aptos',         sector:'Crypto', mcap:'Small', float:0},
+    {sym:'ARB-USD',  name:'Arbitrum',      sector:'Crypto', mcap:'Small', float:0},
+    {sym:'OP-USD',   name:'Optimism',      sector:'Crypto', mcap:'Small', float:0},
   ].filter((v, i, a) => a.findIndex(x => x.sym === v.sym) === i); // dedupe
 
   const SECTORS = ['', ...new Set(UNIVERSE.map(u => u.sector))].sort((a, b) => a.localeCompare(b));
@@ -194,6 +216,7 @@ const scanner = (() => {
     levbull:    { mcap:['Large','Mid','Small','Micro'], sector:'Lev ETF (Bull)',minChgPct:-999, minVol:0,   minRSI:0,  maxRSI:100, minRelVol:0 },
     levbear:    { mcap:['Large','Mid','Small','Micro'], sector:'Lev ETF (Bear)',minChgPct:-999, minVol:0,   minRSI:0,  maxRSI:100, minRelVol:0 },
     volatility: { mcap:['Large','Mid','Small','Micro'], sector:'Volatility',    minChgPct:-999, minVol:0,   minRSI:0,  maxRSI:100, minRelVol:0 },
+    crypto:     { mcap:['Large','Mid','Small','Micro'], sector:'Crypto',        minChgPct:-999, minVol:0,   minRSI:0,  maxRSI:100, minRelVol:0 },
   };
 
   // ── RSI (Wilder, 14-period) ─────────────────────────────────────────────────

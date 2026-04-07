@@ -373,6 +373,93 @@ const rtTrader = (() => {
     panel.style.display = '';
   }
 
+  // ── Daily Pivot Points (Floor Pivots from prior session OHLC) ───────────────
+  function calcDailyPivots(dailyBars, price) {
+    // dailyBars are newest-first; [0] = today (partial), [1] = yesterday (complete)
+    if (!dailyBars || dailyBars.length < 2) return null;
+    const yest = dailyBars[1];
+    if (!yest) return null;
+    const H = yest.high, L = yest.low, C = yest.close;
+    if (!H || !L || !C) return null;
+
+    const pp = (H + L + C) / 3;
+    const r1 = 2 * pp - L;
+    const r2 = pp + (H - L);
+    const s1 = 2 * pp - H;
+    const s2 = pp - (H - L);
+
+    const impliedMove    = r1 - s1;
+    const impliedMovePct = price ? (impliedMove / price) * 100 : 0;
+
+    let zone, zoneClass;
+    if      (price >= r2) { zone = 'Above R2';   zoneClass = 'zone-bull'; }
+    else if (price >= r1) { zone = 'R1–R2 Zone'; zoneClass = 'zone-bull'; }
+    else if (price >= pp) { zone = 'PP–R1 Zone'; zoneClass = 'zone-bull'; }
+    else if (price >= s1) { zone = 'S1–PP Zone'; zoneClass = 'zone-bear'; }
+    else if (price >= s2) { zone = 'S2–S1 Zone'; zoneClass = 'zone-bear'; }
+    else                  { zone = 'Below S2';   zoneClass = 'zone-bear'; }
+
+    return { pp, r1, r2, s1, s2, impliedMove, impliedMovePct, zone, zoneClass };
+  }
+
+  // ── Render Daily Pivots Panel (RT console) ───────────────────────────────────
+  function renderDailyPivots(pivots, price) {
+    const panel = $('rtPivotPanel');
+    const body  = $('rtPivotBody');
+    const imp   = $('rtPivotImplied');
+    const zoneEl = $('rtPivotZone');
+    if (!panel || !body) return;
+
+    if (!pivots) { panel.style.display = 'none'; return; }
+
+    if (imp) {
+      imp.textContent = '$' + fmt(pivots.impliedMove) + ' · ' + pivots.impliedMovePct.toFixed(2) + '% implied range';
+    }
+    if (zoneEl) {
+      zoneEl.textContent = pivots.zone;
+      zoneEl.className   = 'rt-pivot-zone ' + pivots.zoneClass;
+    }
+
+    // Build level ladder (high to low), insert price marker between levels
+    const levels = [
+      { lbl: 'R2', val: pivots.r2, type: 'res-2' },
+      { lbl: 'R1', val: pivots.r1, type: 'res-1', key: true },
+      { lbl: 'PP', val: pivots.pp, type: 'pivot'  },
+      { lbl: 'S1', val: pivots.s1, type: 'sup-1', key: true },
+      { lbl: 'S2', val: pivots.s2, type: 'sup-2' },
+    ].sort((a, b) => b.val - a.val);
+
+    let html = '', placed = false;
+    for (const lvl of levels) {
+      if (!placed && price >= lvl.val) {
+        html += `<div class="rt-pivot-row price-mark">
+          <span class="rt-pivot-cur-lbl">▶ PRICE</span>
+          <span class="rt-pivot-cur-val">$${fmt(price)}</span>
+          <span class="rt-pivot-cur-sep"></span>
+        </div>`;
+        placed = true;
+      }
+      const dist    = price ? ((lvl.val - price) / price * 100) : 0;
+      const distStr = (dist >= 0 ? '+' : '') + fmt(Math.abs(dist), 2) + '%';
+      const distCls = dist > 0 ? 'above' : dist < 0 ? 'below' : '';
+      html += `<div class="rt-pivot-row ${lvl.type}${lvl.key ? ' key' : ''}">
+        <span class="rt-pivot-lbl">${lvl.lbl}</span>
+        <span class="rt-pivot-val">$${fmt(lvl.val)}</span>
+        <span class="rt-pivot-pct ${distCls}">${distStr} ${dist > 0 ? '↑' : dist < 0 ? '↓' : ''}</span>
+      </div>`;
+    }
+    if (!placed) {
+      html += `<div class="rt-pivot-row price-mark">
+        <span class="rt-pivot-cur-lbl">▶ PRICE</span>
+        <span class="rt-pivot-cur-val">$${fmt(price)}</span>
+        <span class="rt-pivot-cur-sep"></span>
+      </div>`;
+    }
+
+    body.innerHTML = html;
+    panel.style.display = '';
+  }
+
   // ── ATR (Average True Range, 14-period on daily bars) ───────────────────────
   function calcATR(dailyBars, period = 14) {
     if (!dailyBars || dailyBars.length < period + 1) return null;
@@ -667,6 +754,10 @@ const rtTrader = (() => {
     // Next-day price prediction
     const pred = calcPrediction(price, vwap, rsi, momentum, volData, dailyBars || []);
     renderPrediction(pred, price);
+
+    // Daily pivot levels + implied move
+    const pivots = calcDailyPivots(dailyBars || [], price);
+    renderDailyPivots(pivots, price);
 
     startCountdown(() => analyze(sym));
   }

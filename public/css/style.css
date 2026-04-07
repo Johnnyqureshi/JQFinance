@@ -3042,6 +3042,201 @@ option { background: var(--card); }
   opacity: 0.7;
 }
 
+/* ── Daily Pivot Levels Panel (RT console) ──────────────────────────────────── */
+.rt-pivot-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+.rt-pivot-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.rt-pivot-header svg { color: var(--t3); flex-shrink: 0; }
+.rt-pivot-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t2);
+  flex: 1;
+}
+.rt-pivot-implied {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--gold);
+  font-weight: 500;
+}
+.rt-pivot-zone {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.rt-pivot-zone.zone-bull { background: rgba(29,214,163,0.12); color: var(--teal); border: 1px solid rgba(29,214,163,0.2); }
+.rt-pivot-zone.zone-bear { background: rgba(232,69,69,0.12);  color: var(--red);  border: 1px solid rgba(232,69,69,0.2); }
+
+.rt-pivot-body {
+  padding: 4px 0;
+}
+.rt-pivot-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  padding: 5px 14px;
+  gap: 8px;
+  transition: background 0.15s;
+}
+.rt-pivot-row:hover { background: var(--hover); }
+
+.rt-pivot-lbl {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.rt-pivot-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--t1);
+}
+.rt-pivot-pct {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.67rem;
+  text-align: right;
+  min-width: 70px;
+}
+.rt-pivot-pct.above { color: var(--red); }
+.rt-pivot-pct.below { color: var(--teal); }
+
+/* Level type colors */
+.rt-pivot-row.res-2 .rt-pivot-lbl { color: rgba(232,69,69,0.6); }
+.rt-pivot-row.res-1 .rt-pivot-lbl { color: var(--red); }
+.rt-pivot-row.pivot .rt-pivot-lbl { color: var(--gold); }
+.rt-pivot-row.sup-1 .rt-pivot-lbl { color: var(--teal); }
+.rt-pivot-row.sup-2 .rt-pivot-lbl { color: rgba(29,214,163,0.6); }
+
+/* Key levels (R1, S1) get slightly bolder background */
+.rt-pivot-row.res-1.key { background: rgba(232,69,69,0.04); }
+.rt-pivot-row.sup-1.key { background: rgba(29,214,163,0.04); }
+.rt-pivot-row.pivot     { background: rgba(245,200,66,0.04); }
+
+/* Current price marker row */
+.rt-pivot-row.price-mark {
+  background: rgba(255,255,255,0.05);
+  border-top: 1px dashed rgba(255,255,255,0.12);
+  border-bottom: 1px dashed rgba(255,255,255,0.12);
+  padding: 4px 14px;
+}
+.rt-pivot-cur-lbl {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.rt-pivot-cur-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.rt-pivot-footer {
+  font-size: 0.58rem;
+  color: var(--t3);
+  text-align: center;
+  padding: 5px 14px 8px;
+  opacity: 0.7;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Daily Pivot Card (Home page signals panel) ────────────────────────────── */
+.pivot-implied-inline {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--gold);
+  font-weight: 500;
+  margin-left: 4px;
+}
+.pivot-zone-bar {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin: 0 0 8px;
+  text-align: center;
+}
+.pivot-zone-bar.bull { background: rgba(29,214,163,0.1); color: var(--teal); border: 1px solid rgba(29,214,163,0.2); }
+.pivot-zone-bar.bear { background: rgba(232,69,69,0.1);  color: var(--red);  border: 1px solid rgba(232,69,69,0.2); }
+
+/* Home page pivot rows */
+.pv-row {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  padding: 4px 2px;
+  gap: 6px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.pv-row:hover { background: var(--hover); }
+.pv-lbl {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.pv-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--t1);
+}
+.pv-pct {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.64rem;
+  text-align: right;
+}
+.pv-pct.above { color: var(--red); }
+.pv-pct.below { color: var(--teal); }
+
+.pv-row.res-2 .pv-lbl { color: rgba(232,69,69,0.55); }
+.pv-row.res-1 .pv-lbl { color: var(--red); }
+.pv-row.pivot .pv-lbl { color: var(--gold); }
+.pv-row.sup-1 .pv-lbl { color: var(--teal); }
+.pv-row.sup-2 .pv-lbl { color: rgba(29,214,163,0.55); }
+.pv-row.pivot          { background: rgba(245,200,66,0.04); border-radius: 4px; }
+.pv-row.res-1.key      { background: rgba(232,69,69,0.04); }
+.pv-row.sup-1.key      { background: rgba(29,214,163,0.04); }
+
+.pv-row.pv-price {
+  background: rgba(255,255,255,0.06);
+  border-top: 1px dashed rgba(255,255,255,0.12);
+  border-bottom: 1px dashed rgba(255,255,255,0.12);
+  margin: 1px 0;
+  padding: 3px 2px;
+}
+.pv-cur-lbl {
+  font-size: 0.59rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+.pv-cur-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 /* ── Agent widget — mobile ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .jqf-agent {

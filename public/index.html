@@ -241,6 +241,16 @@
               <div class="m-card-title">Support &amp; Resistance — 14-Day</div>
               <div class="sr-table" id="srTable"></div>
             </div>
+
+            <div class="m-card" id="pivotCard" style="display:none">
+              <div class="m-card-title">
+                Daily Pivots
+                <span class="pivot-implied-inline" id="pivotImpliedInline"></span>
+              </div>
+              <div class="pivot-zone-bar" id="pivotZoneBar"></div>
+              <div id="pivotPanel"></div>
+            </div>
+
           </div>
 
           <div class="cd-row">
@@ -428,6 +438,18 @@
             </div>
             <div class="rt-pred-factors" id="rtPredFactors"></div>
             <div class="rt-pred-disclaimer">Algorithmic estimate based on intraday data · Not financial advice</div>
+          </div>
+
+          <!-- Daily Pivot Levels Panel -->
+          <div class="rt-pivot-panel" id="rtPivotPanel" style="display:none">
+            <div class="rt-pivot-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              <span class="rt-pivot-title">Daily Pivot Levels</span>
+              <span class="rt-pivot-implied" id="rtPivotImplied">--</span>
+              <span class="rt-pivot-zone" id="rtPivotZone"></span>
+            </div>
+            <div class="rt-pivot-body" id="rtPivotBody"></div>
+            <div class="rt-pivot-footer">Standard floor pivots · Based on prior session OHLC · Resets each trading day</div>
           </div>
 
           <!-- Auto-refresh footer -->

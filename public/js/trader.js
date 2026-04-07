@@ -61,6 +61,74 @@ const trader = (() => {
     return { resistance: rs.slice(0,2), support: ss.slice(0,2) };
   }
 
+  // ── Daily Pivot Points (Floor Pivots from prior session OHLC) ──────────────
+  function calcDailyPivots(hist, price) {
+    // hist is newest-first (hist[0]=today partial, hist[1]=yesterday complete)
+    if (!hist || hist.length < 2) return null;
+    const yest = hist[1];
+    if (!yest) return null;
+    const H = yest.high, L = yest.low, C = yest.close;
+    if (!H || !L || !C) return null;
+
+    const pp = (H + L + C) / 3;
+    const r1 = 2 * pp - L;
+    const r2 = pp + (H - L);
+    const s1 = 2 * pp - H;
+    const s2 = pp - (H - L);
+
+    const impliedMove    = r1 - s1;
+    const impliedMovePct = price ? (impliedMove / price) * 100 : 0;
+
+    let zone, zoneClass;
+    if      (price >= r2) { zone = 'Above R2';   zoneClass = 'bull'; }
+    else if (price >= r1) { zone = 'R1–R2 Zone'; zoneClass = 'bull'; }
+    else if (price >= pp) { zone = 'PP–R1 Zone'; zoneClass = 'bull'; }
+    else if (price >= s1) { zone = 'S1–PP Zone'; zoneClass = 'bear'; }
+    else if (price >= s2) { zone = 'S2–S1 Zone'; zoneClass = 'bear'; }
+    else                  { zone = 'Below S2';   zoneClass = 'bear'; }
+
+    return { pp, r1, r2, s1, s2, impliedMove, impliedMovePct, zone, zoneClass };
+  }
+
+  // ── Render pivot panel into home page card ──────────────────────────────────
+  function renderPivots(container, pivots, price) {
+    const levels = [
+      { lbl: 'R2', val: pivots.r2, type: 'res-2' },
+      { lbl: 'R1', val: pivots.r1, type: 'res-1', key: true },
+      { lbl: 'PP', val: pivots.pp, type: 'pivot'  },
+      { lbl: 'S1', val: pivots.s1, type: 'sup-1', key: true },
+      { lbl: 'S2', val: pivots.s2, type: 'sup-2' },
+    ].sort((a, b) => b.val - a.val);
+
+    let html = '', placed = false;
+    for (const lvl of levels) {
+      if (!placed && price >= lvl.val) {
+        html += `<div class="pv-row pv-price">
+          <span class="pv-cur-lbl">▶ PRICE</span>
+          <span class="pv-cur-val">$${fmt(price)}</span>
+          <span></span>
+        </div>`;
+        placed = true;
+      }
+      const dist    = price ? ((lvl.val - price) / price * 100) : 0;
+      const distStr = (dist >= 0 ? '+' : '') + fmt(Math.abs(dist), 2) + '%';
+      const distCls = dist > 0 ? 'above' : dist < 0 ? 'below' : '';
+      html += `<div class="pv-row ${lvl.type}${lvl.key ? ' key' : ''}">
+        <span class="pv-lbl">${lvl.lbl}</span>
+        <span class="pv-val">$${fmt(lvl.val)}</span>
+        <span class="pv-pct ${distCls}">${distStr} ${dist > 0 ? '↑' : dist < 0 ? '↓' : ''}</span>
+      </div>`;
+    }
+    if (!placed) {
+      html += `<div class="pv-row pv-price">
+        <span class="pv-cur-lbl">▶ PRICE</span>
+        <span class="pv-cur-val">$${fmt(price)}</span>
+        <span></span>
+      </div>`;
+    }
+    container.innerHTML = html;
+  }
+
   // ── Signal logic ────────────────────────────────────────────────────────────
   function computeSignal(rsi, price, open, volume, avgVol, sr) {
     const bearishDay  = price < open;
@@ -244,6 +312,26 @@ const trader = (() => {
         p.textContent = 'Insufficient price history for S/R levels.';
         srTbl.appendChild(p);
       }
+    }
+
+    // Daily Pivots
+    const pivots = calcDailyPivots(hist, price);
+    const pivotCard  = $('pivotCard');
+    const pivotPanel = $('pivotPanel');
+    const pivotImp   = $('pivotImpliedInline');
+    const pivotZBar  = $('pivotZoneBar');
+    if (pivots && pivotCard && pivotPanel) {
+      pivotCard.style.display = '';
+      renderPivots(pivotPanel, pivots, price);
+      if (pivotImp) {
+        pivotImp.textContent = '· $' + fmt(pivots.impliedMove) + ' (' + pivots.impliedMovePct.toFixed(2) + '%) implied';
+      }
+      if (pivotZBar) {
+        pivotZBar.textContent  = pivots.zone;
+        pivotZBar.className    = 'pivot-zone-bar ' + pivots.zoneClass;
+      }
+    } else if (pivotCard) {
+      pivotCard.style.display = 'none';
     }
 
     // show results

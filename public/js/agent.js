@@ -19,6 +19,7 @@
     if (appState.symbol) {
       const snap  = appState.snap  || {};
       const fmp   = appState.stockData?.fmp || {};
+      const val   = appState.stockData?.val || {};
       const price = snap.price;
       const prev  = snap.previousClose;
       const chg   = price != null && prev != null ? price - prev : null;
@@ -32,11 +33,11 @@
         trend:       chg != null ? (chg >= 0 ? 'UP' : 'DOWN') : 'N/A',
         dayHigh:     snap.dayHigh   != null ? `$${snap.dayHigh.toFixed(2)}`  : 'N/A',
         dayLow:      snap.dayLow    != null ? `$${snap.dayLow.toFixed(2)}`   : 'N/A',
-        open:        snap.dayOpenPrice != null ? `$${snap.dayOpenPrice.toFixed(2)}` : 'N/A',
+        open:        snap.open      != null ? `$${snap.open.toFixed(2)}`     : 'N/A',
         volume:      _fv(snap.volume),
         avgVolume:   _fv(snap.avgVolume),
-        pe:          snap.pe   != null ? snap.pe.toFixed(2)   : 'N/A',
-        eps:         snap.eps  != null ? `$${snap.eps.toFixed(2)}` : 'N/A',
+        pe:          val.pe  != null ? val.pe.toFixed(2)                                            : 'N/A',
+        eps:         val.eps != null ? `${val.eps >= 0 ? '$' : '-$'}${Math.abs(val.eps).toFixed(2)}` : 'N/A',
         week52High:  snap.yearHigh != null ? `$${snap.yearHigh.toFixed(2)}` : 'N/A',
         week52Low:   snap.yearLow  != null ? `$${snap.yearLow.toFixed(2)}`  : 'N/A',
         marketCap:   snap.marketCap ? _fv(snap.marketCap) : 'N/A',
@@ -99,12 +100,12 @@
 
       // Read price target
       const pt = fmp?.priceTarget;
-      if (pt?.median) {
-        const upside = price ? ((pt.median - price) / price * 100).toFixed(1) : null;
+      if (pt?.targetMedian) {
+        const upside = price ? ((pt.targetMedian - price) / price * 100).toFixed(1) : null;
         ctx.stockAnalysis.priceTarget = {
-          median: `$${pt.median.toFixed(2)}`,
-          high:   pt.high ? `$${pt.high.toFixed(2)}` : 'N/A',
-          low:    pt.low  ? `$${pt.low.toFixed(2)}`  : 'N/A',
+          median: `$${pt.targetMedian.toFixed(2)}`,
+          high:   pt.targetHigh ? `$${pt.targetHigh.toFixed(2)}` : 'N/A',
+          low:    pt.targetLow  ? `$${pt.targetLow.toFixed(2)}`  : 'N/A',
           upside: upside ? `${upside}%` : 'N/A',
         };
       }
@@ -282,8 +283,21 @@
   function buildWidget() {
     const wrap = document.createElement('div');
     wrap.innerHTML = WIDGET_HTML.trim();
-    document.body.appendChild(wrap.firstElementChild);
+    const el = wrap.firstElementChild;
+    el.style.display = 'none';
+    document.body.appendChild(el);
   }
+
+  // ── Visibility API (called from app.js after login/logout) ─────────────────
+  function showWidget() {
+    const el = document.getElementById('jqfAgent');
+    if (el) el.style.display = 'flex';
+  }
+  function hideWidget() {
+    const el = document.getElementById('jqfAgent');
+    if (el) { el.style.display = 'none'; closeAgent(); }
+  }
+  window.jqfAgent = { show: showWidget, hide: hideWidget };
 
   // ── Message Management ─────────────────────────────────────────────────────
   function addMessage(text, role) {
@@ -361,6 +375,12 @@
     text = text.trim();
     if (!text || isThinking) return;
 
+    // Guard: require login (session may have expired)
+    if (!window.state?.currentUser) {
+      addMessage('⚠️ Please sign in to use the AI assistant.', 'ai');
+      return;
+    }
+
     const input = document.getElementById('jqfInput');
     if (input) { input.value = ''; input.disabled = true; }
 
@@ -408,6 +428,12 @@
   // ── Voice Chat via ElevenLabs ──────────────────────────────────────────────
   async function startVoice() {
     if (voiceActive) return;
+
+    // Guard: require login
+    if (!window.state?.currentUser) {
+      addMessage('⚠️ Please sign in to use the voice assistant.', 'ai');
+      return;
+    }
 
     setStatus('Connecting voice…', 'active');
     const micBtn = document.getElementById('jqfMicBtn');

@@ -1043,28 +1043,44 @@ function buildDropItems(results) {
 
 // ── Nav search ─────────────────────────────────────────────────────────────────
 let navTimer=null;
+function _bindDropSearch(input, drop, getTimer, setTimer) {
+  input.addEventListener('input', () => {
+    clearTimeout(getTimer());
+    const q = input.value.trim();
+    if (!q) { drop.classList.remove('open'); return; }
+    setTimer(setTimeout(async () => {
+      const results = await api.search(q);
+      if (!results.length) {
+        const noRes = document.createElement('div');
+        noRes.className = 'drop-item drop-noresults';
+        noRes.textContent = 'No results found';
+        drop.replaceChildren(noRes);
+        drop.classList.add('open');
+        return;
+      }
+      drop.replaceChildren(...buildDropItems(results));
+      drop.classList.add('open');
+      drop.querySelectorAll('.drop-item').forEach(item => {
+        item.addEventListener('click', async () => {
+          drop.classList.remove('open'); input.value = '';
+          const s = await api.snapshots([item.dataset.sym]);
+          openStock(item.dataset.sym, s[item.dataset.sym] || { symbol: item.dataset.sym });
+        });
+      });
+    }, 260));
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { drop.classList.remove('open'); input.blur(); }
+  });
+  document.addEventListener('click', e => {
+    if (!input.contains(e.target) && !drop.contains(e.target)) drop.classList.remove('open');
+  });
+}
+
 function setupNavSearch() {
   const input=$('navInput'), drop=$('navDrop');
   if (!input||!drop) return;
-  input.addEventListener('input',()=>{
-    clearTimeout(navTimer);
-    const q=input.value.trim();
-    if(!q){drop.classList.remove('open');return;}
-    navTimer=setTimeout(async()=>{
-      const results=await api.search(q);
-      if(!results.length){drop.classList.remove('open');return;}
-      drop.replaceChildren(...buildDropItems(results));
-      drop.classList.add('open');
-      drop.querySelectorAll('.drop-item').forEach(item=>{
-        item.addEventListener('click',async()=>{
-          drop.classList.remove('open'); input.value='';
-          const s=await api.snapshots([item.dataset.sym]);
-          openStock(item.dataset.sym, s[item.dataset.sym]||{symbol:item.dataset.sym});
-        });
-      });
-    },260);
-  });
-  document.addEventListener('click',e=>{ if(!input.contains(e.target)&&!drop.contains(e.target)) drop.classList.remove('open'); });
+  _bindDropSearch(input, drop, ()=>navTimer, v=>{ navTimer=v; });
 }
 
 // ── Hero search ────────────────────────────────────────────────────────────────
@@ -1072,25 +1088,7 @@ let heroTimer=null;
 function setupHeroSearch() {
   const input=$('heroInput'), drop=$('homeDrop');
   if(!input||!drop) return;
-  input.addEventListener('input',()=>{
-    clearTimeout(heroTimer);
-    const q=input.value.trim();
-    if(!q){drop.classList.remove('open');return;}
-    heroTimer=setTimeout(async()=>{
-      const results=await api.search(q);
-      if(!results.length){drop.classList.remove('open');return;}
-      drop.replaceChildren(...buildDropItems(results));
-      drop.classList.add('open');
-      drop.querySelectorAll('.drop-item').forEach(item=>{
-        item.addEventListener('click',async()=>{
-          drop.classList.remove('open'); input.value='';
-          const s=await api.snapshots([item.dataset.sym]);
-          openStock(item.dataset.sym, s[item.dataset.sym]||{symbol:item.dataset.sym});
-        });
-      });
-    },260);
-  });
-  document.addEventListener('click',e=>{ if(!input.contains(e.target)&&!drop.contains(e.target)) drop.classList.remove('open'); });
+  _bindDropSearch(input, drop, ()=>heroTimer, v=>{ heroTimer=v; });
 }
 
 // ── Watchlist page setup ───────────────────────────────────────────────────────
@@ -1113,11 +1111,13 @@ function showApp(user) {
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
+  window.jqfAgent?.show();
 }
 
 function showAuthOverlay() {
   $('authOverlay').classList.remove('auth-hidden');
   $('navUser').style.display = 'none';
+  window.jqfAgent?.hide();
   state.currentUser = null;
   state.watchlist   = [];
   // Always land on the Sign In tab — prevents "username already taken" loop

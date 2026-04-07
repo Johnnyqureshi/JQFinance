@@ -124,6 +124,8 @@ input  { font-family:inherit; }
 .drop-item:hover { background:var(--card); }
 .drop-sym { font-size:13px; font-weight:700; color:var(--t1); font-family:'DM Mono',monospace; min-width:56px; }
 .drop-name { font-size:12px; color:var(--t2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.drop-noresults { color:var(--t3); font-size:13px; cursor:default; justify-content:center; font-style:italic; }
+.drop-noresults:hover { background:transparent; }
 
 /* ── Layout ────────────────────────────────────────────────────────────────── */
 .main { margin-top:var(--nav-h); }
@@ -1871,7 +1873,7 @@ option { background: var(--card); }
 .auth-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;

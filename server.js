@@ -36,6 +36,7 @@ db.exec(`
 `);
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
+app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie behaviour
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(session({
@@ -43,11 +44,12 @@ app.use(session({
   secret:            process.env.SESSION_SECRET || 'jqf-dev-secret-change-me',
   resave:            false,
   saveUninitialized: false,
+  rolling:           true,   // Reset cookie expiry on every request (keeps active users logged in)
   cookie: {
     httpOnly: true,
-    secure:   false,
+    secure:   false,          // Works over both HTTP and HTTPS
     sameSite: 'lax',
-    maxAge:   30 * 24 * 60 * 60 * 1000,  // 30 days
+    maxAge:   90 * 24 * 60 * 60 * 1000,  // 90 days
   },
 }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -68,7 +70,7 @@ app.post('/api/auth/register', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
 
-  const u = username.trim();
+  const u = username.trim().toLowerCase();   // Always store as lowercase — prevents case duplicates
   if (!/^[a-zA-Z0-9_]{3,20}$/.test(u))
     return res.status(400).json({ error: 'Username must be 3–20 characters (letters, numbers, _).' });
   if (password.length < 6)
@@ -80,7 +82,7 @@ app.post('/api/auth/register', async (req, res) => {
     const info = stmt.run(u, hash);
     req.session.userId   = info.lastInsertRowid;
     req.session.username = u;
-    res.json({ id: info.lastInsertRowid, username: u });
+    req.session.save(() => res.json({ id: info.lastInsertRowid, username: u }));
   } catch (e) {
     if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken.' });
     res.status(500).json({ error: 'Registration failed.' });
@@ -93,7 +95,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username.trim());
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY id ASC LIMIT 1').get(username.trim());
   if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
 
   const ok = await bcrypt.compare(password, user.password_hash);
@@ -101,7 +103,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   req.session.userId   = user.id;
   req.session.username = user.username;
-  res.json({ id: user.id, username: user.username });
+  req.session.save(() => res.json({ id: user.id, username: user.username }));
 });
 
 // Logout

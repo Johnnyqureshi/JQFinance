@@ -161,10 +161,41 @@ async function openStock(sym, snap) {
 
   $('sTicker').textContent = sym;
   $('sName').textContent   = snap?.name || '';
-  $('sPrice').textContent  = price ? '$'+fmt(price) : '--';
+
+  // Use regular close for the main price display during extended hours
+  const displayPrice = snap?.regularClose ?? price;
+  const displayPrev  = snap?.previousClose || 0;
+  const displayChg   = displayPrice - displayPrev;
+  const displayPct   = displayPrev ? (displayChg / displayPrev) * 100 : 0;
+  const displayUp    = displayChg >= 0;
+
+  $('sPrice').textContent  = displayPrice ? '$'+fmt(displayPrice) : '--';
   const sc = $('sChange');
-  sc.textContent = price && prev ? `${up?'+':''}${fmt(chg)} (${up?'+':''}${fmt(pct)}%)` : '';
-  sc.className   = 's-change ' + (up ? 'up' : 'down');
+  sc.textContent = displayPrice && displayPrev
+    ? `${displayUp?'+':''}${fmt(displayChg)} (${displayUp?'+':''}${fmt(displayPct)}%)`
+    : '';
+  sc.className   = 's-change ' + (displayUp ? 'up' : 'down');
+
+  // Extended hours price row
+  const extRow    = $('sExtRow');
+  const extBadge  = $('sExtBadge');
+  const extPriceEl = $('sExtPrice');
+  const extChgEl  = $('sExtChange');
+  if (extRow && snap?.extendedPrice) {
+    const ep   = snap.extendedPrice;
+    const base = snap.regularClose ?? price;
+    const ec   = base ? ep - base : 0;
+    const epct = base ? (ec / base) * 100 : 0;
+    const eup  = ec >= 0;
+    extBadge.textContent  = snap.extendedType || 'EXT';
+    extBadge.className    = 's-ext-badge ' + (snap.extendedType === 'PRE' ? 'pre' : 'post');
+    extPriceEl.textContent = '$' + fmt(ep);
+    extChgEl.textContent  = `${eup?'+':''}${fmt(ec)} (${eup?'+':''}${fmt(epct)}%)`;
+    extChgEl.className    = 's-ext-change ' + (eup ? 'up' : 'down');
+    extRow.style.display  = '';
+  } else if (extRow) {
+    extRow.style.display = 'none';
+  }
   updateWatchBtn(sym);
 
   document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='overview'));

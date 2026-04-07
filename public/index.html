@@ -138,8 +138,15 @@
       </div>
       <div class="hw-topbar-right">
         <div class="stock-price-block">
-          <span class="s-price" id="sPrice">--</span>
-          <span class="s-change" id="sChange"></span>
+          <div class="s-price-row">
+            <span class="s-price" id="sPrice">--</span>
+            <span class="s-change" id="sChange"></span>
+          </div>
+          <div class="s-ext-row" id="sExtRow" style="display:none">
+            <span class="s-ext-badge" id="sExtBadge">AH</span>
+            <span class="s-ext-price" id="sExtPrice"></span>
+            <span class="s-ext-change" id="sExtChange"></span>
+          </div>
         </div>
         <button class="watch-btn" id="watchBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
@@ -276,6 +283,7 @@
           <span class="rt-icon">⚡</span>
           <span class="rt-title">Realtime Trader</span>
           <span class="rt-intraday-badge">INTRADAY</span>
+          <span class="rt-market-state-badge" id="rtMarketState" style="display:none"></span>
         </div>
         <div class="rt-head-right">
           <div class="rt-search-wrap">

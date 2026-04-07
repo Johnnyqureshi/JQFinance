@@ -560,7 +560,7 @@ const rtTrader = (() => {
   }
 
   // ── Render results ──────────────────────────────────────────────────────────
-  function render(sym, bars, price, dailyBars) {
+  function render(sym, bars, price, dailyBars, marketState) {
     const closes  = bars.map(b => b.c);
     const vwap    = calcVWAP(bars);
     const rsi     = calcRSI(closes);
@@ -643,8 +643,17 @@ const rtTrader = (() => {
       $('rtResistanceSub').className   = 'rt-m-sub';
     }
 
-    // Timestamp
+    // Timestamp + market state badge
     $('rtUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const msEl = $('rtMarketState');
+    if (msEl) {
+      const isPost = ['POST', 'POSTPOST'].includes(marketState);
+      const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
+      const isClosed = marketState === 'CLOSED';
+      msEl.textContent  = isPost ? 'AFTER HOURS' : isPre ? 'PRE-MARKET' : isClosed ? 'MARKET CLOSED' : 'MARKET OPEN';
+      msEl.className    = 'rt-market-state-badge ' + (isPost ? 'post' : isPre ? 'pre' : isClosed ? 'closed' : 'open');
+      msEl.style.display = '';
+    }
 
     $('rtLoading').style.display = 'none';
     $('rtError').style.display   = 'none';
@@ -680,15 +689,16 @@ const rtTrader = (() => {
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
-      const price     = quoteRes?.price ?? intradayRes?.price ?? null;
-      const bars      = intradayRes?.bars || [];
-      const dailyBars = histRes?.historical || [];
+      const price       = quoteRes?.price ?? intradayRes?.price ?? null;
+      const bars        = intradayRes?.bars || [];
+      const dailyBars   = histRes?.historical || [];
+      const marketState = intradayRes?.marketState ?? quoteRes?.marketState ?? 'REGULAR';
 
-      if (!price)       throw new Error('Unable to fetch quote for ' + sym);
-      if (bars.length < 5) throw new Error('Insufficient intraday data for ' + sym + ' (market may be closed)');
+      if (!price) throw new Error('Unable to fetch quote for ' + sym);
+      if (bars.length < 2) throw new Error('No price data available for ' + sym + ' — try again shortly.');
 
       $('rtInput').value = sym;
-      render(sym, bars, price, dailyBars);
+      render(sym, bars, price, dailyBars, marketState);
     } catch (e) {
       $('rtLoading').style.display = 'none';
       $('rtError').style.display   = 'flex';

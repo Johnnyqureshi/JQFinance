@@ -246,11 +246,25 @@ input  { font-family:inherit; }
 .stock-ticker { font-family:'DM Mono',monospace; font-size:26px; font-weight:700; color:var(--t1); letter-spacing:0.04em; }
 .stock-co-name { font-size:13px; color:var(--t2); }
 
-.stock-price-block { display:flex; align-items:baseline; gap:12px; margin-left:auto; }
+.stock-price-block { display:flex; flex-direction:column; align-items:flex-end; gap:4px; margin-left:auto; }
+.s-price-row { display:flex; align-items:baseline; gap:12px; }
 .s-price { font-family:'DM Mono',monospace; font-size:32px; font-weight:700; color:var(--t1); }
 .s-change { font-family:'DM Mono',monospace; font-size:13px; font-weight:700; padding:4px 12px; border-radius:6px; }
 .s-change.up   { color:var(--green); background:var(--green-dim); border:1px solid rgba(29,214,163,0.2); }
 .s-change.down { color:var(--red);   background:var(--red-dim);   border:1px solid rgba(232,69,69,0.2); }
+
+/* Extended hours price row */
+.s-ext-row { display:flex; align-items:center; gap:7px; }
+.s-ext-badge {
+  font-size:0.58rem; font-weight:800; letter-spacing:0.1em;
+  padding:2px 6px; border-radius:4px; font-family:'DM Mono',monospace;
+}
+.s-ext-badge.post { color:var(--gold); background:rgba(245,200,66,0.12); border:1px solid rgba(245,200,66,0.25); }
+.s-ext-badge.pre  { color:var(--blue); background:rgba(99,179,237,0.12); border:1px solid rgba(99,179,237,0.25); }
+.s-ext-price { font-family:'DM Mono',monospace; font-size:13px; font-weight:700; color:var(--t1); }
+.s-ext-change { font-family:'DM Mono',monospace; font-size:11px; font-weight:600; }
+.s-ext-change.up   { color:var(--green); }
+.s-ext-change.down { color:var(--red); }
 
 .watch-btn {
   display:flex; align-items:center; gap:6px;
@@ -1181,6 +1195,14 @@ input  { font-family:inherit; }
   border: 1px solid var(--teal-bdr);
   border-radius: 4px; padding: 2px 7px;
 }
+.rt-market-state-badge {
+  font-size: 9px; font-weight: 800; letter-spacing: .1em;
+  border-radius: 4px; padding: 2px 7px;
+}
+.rt-market-state-badge.open   { color: var(--green); background: var(--green-dim); border: 1px solid rgba(29,214,163,0.2); }
+.rt-market-state-badge.post   { color: var(--gold);  background: var(--gold-dim);  border: 1px solid var(--gold-bdr); }
+.rt-market-state-badge.pre    { color: var(--blue);  background: var(--blue-dim);  border: 1px solid rgba(99,179,237,0.25); }
+.rt-market-state-badge.closed { color: var(--t3);    background: var(--border);    border: 1px solid var(--border2); }
 
 .rt-head-right {
   display: flex; align-items: center; gap: 12px;

@@ -155,13 +155,28 @@ async function yfChartQuote(symbol) {
   const closes = (ohlcv.close  || []).filter(v => v != null);
   const opens  = (ohlcv.open   || []).filter(v => v != null);
   const vols   = (ohlcv.volume || []).filter(v => v != null);
-  const price  = m.regularMarketPrice ?? closes.at(-1) ?? null;
-  const prev   = m.chartPreviousClose ?? closes.at(-2) ?? null;
-  const change = price != null && prev != null ? price - prev : null;
+
+  // Extended hours detection
+  const marketState = m.marketState || 'CLOSED';
+  const isPost = ['POST', 'POSTPOST'].includes(marketState);
+  const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
+  const regPrice      = m.regularMarketPrice ?? closes.at(-1) ?? null;
+  const extendedPrice = isPost ? (m.postMarketPrice  ?? null)
+                      : isPre  ? (m.preMarketPrice   ?? null) : null;
+  const livePrice  = extendedPrice ?? regPrice;
+  const prev       = m.chartPreviousClose ?? closes.at(-2) ?? null;
+  const change     = livePrice != null && prev != null ? livePrice - prev : null;
+
   return {
     symbol:            m.symbol || symbol,
     name:              m.longName || m.shortName || symbol,
-    price,
+    price:             livePrice,
+    regularClose:      regPrice,
+    extendedPrice,
+    extendedType:      isPost ? 'AH' : isPre ? 'PRE' : null,
+    extendedChange:    extendedPrice != null && regPrice != null ? extendedPrice - regPrice : null,
+    extendedChangePct: extendedPrice != null && regPrice != null ? ((extendedPrice - regPrice) / regPrice) * 100 : null,
+    marketState,
     change,
     changesPercentage: change != null && prev ? (change / prev) * 100 : null,
     open:              opens.at(-1) ?? null,
@@ -362,11 +377,12 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
-// ── GET /api/intraday/:symbol (5-min bars for today) ──────────────────────────
+// ── GET /api/intraday/:symbol (5-min bars — includes pre/post market) ──────────
 app.get('/api/intraday/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d`;
+    // includePrePost=true adds pre-market (4am–9:30am) and after-hours (4pm–8pm) bars
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=true`;
     const r   = await fetch(url, { headers: YH });
     if (!r.ok) return res.json({ bars: [], price: null });
     const d   = await r.json();
@@ -381,11 +397,24 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       l: q.low?.[i]    ?? null, c: q.close?.[i]  ?? null,
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null);
+
+    // Live price — use extended hours price when market is not in regular session
+    const marketState   = meta.marketState || 'CLOSED';
+    const isPost = ['POST', 'POSTPOST'].includes(marketState);
+    const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
+    const regPrice      = meta.regularMarketPrice ?? bars.at(-1)?.c ?? null;
+    const extendedPrice = isPost ? (meta.postMarketPrice ?? null)
+                        : isPre  ? (meta.preMarketPrice  ?? null) : null;
+
     res.json({
       bars,
-      price:         meta.regularMarketPrice   ?? bars.at(-1)?.c ?? null,
+      price:         extendedPrice ?? regPrice,
+      regularClose:  regPrice,
+      extendedPrice,
+      extendedType:  isPost ? 'AH' : isPre ? 'PRE' : null,
+      marketState,
       previousClose: meta.chartPreviousClose   ?? null,
-      open:          meta.regularMarketDayOpen ?? bars[0]?.o     ?? null,
+      open:          meta.regularMarketDayOpen ?? bars[0]?.o ?? null,
     });
   } catch (e) { res.json({ bars: [], price: null }); }
 });

@@ -142,34 +142,26 @@ app.delete('/api/watchlist/:symbol', requireAuth, (req, res) => {
   res.json({ watchlist: rows.map(r => r.symbol) });
 });
 
-// ── Yahoo chart → quote object ─────────────────────────────────────────────────
-async function yfChartQuote(symbol) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
-  const r   = await fetch(url, { headers: YH });
-  if (!r.ok) return null;
-  const d  = await r.json();
-  const rs = d?.chart?.result?.[0];
-  if (!rs) return null;
-  const m     = rs.meta || {};
-  const ohlcv = rs.indicators?.quote?.[0] || {};
-  const closes = (ohlcv.close  || []).filter(v => v != null);
-  const opens  = (ohlcv.open   || []).filter(v => v != null);
-  const vols   = (ohlcv.volume || []).filter(v => v != null);
+// ── Yahoo Finance quote → normalised object ────────────────────────────────────
+// Uses the yahoo-finance2 SDK which correctly returns marketState,
+// postMarketPrice, preMarketPrice and all extended-hours fields.
+function _normaliseQuote(q) {
+  if (!q) return null;
 
-  // Extended hours detection
-  const marketState = m.marketState || 'CLOSED';
+  const marketState = q.marketState || 'CLOSED';
   const isPost = ['POST', 'POSTPOST'].includes(marketState);
   const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
-  const regPrice      = m.regularMarketPrice ?? closes.at(-1) ?? null;
-  const extendedPrice = isPost ? (m.postMarketPrice  ?? null)
-                      : isPre  ? (m.preMarketPrice   ?? null) : null;
+
+  const regPrice      = q.regularMarketPrice ?? null;
+  const extendedPrice = isPost ? (q.postMarketPrice  ?? null)
+                      : isPre  ? (q.preMarketPrice   ?? null) : null;
   const livePrice  = extendedPrice ?? regPrice;
-  const prev       = m.chartPreviousClose ?? closes.at(-2) ?? null;
+  const prev       = q.regularMarketPreviousClose ?? null;
   const change     = livePrice != null && prev != null ? livePrice - prev : null;
 
   return {
-    symbol:            m.symbol || symbol,
-    name:              m.longName || m.shortName || symbol,
+    symbol:            q.symbol,
+    name:              q.longName || q.shortName || q.symbol,
     price:             livePrice,
     regularClose:      regPrice,
     extendedPrice,
@@ -179,14 +171,28 @@ async function yfChartQuote(symbol) {
     marketState,
     change,
     changesPercentage: change != null && prev ? (change / prev) * 100 : null,
-    open:              opens.at(-1) ?? null,
-    dayHigh:           m.regularMarketDayHigh ?? null,
-    dayLow:            m.regularMarketDayLow  ?? null,
+    open:              q.regularMarketOpen    ?? null,
+    dayHigh:           q.regularMarketDayHigh ?? null,
+    dayLow:            q.regularMarketDayLow  ?? null,
     previousClose:     prev,
-    volume:            m.regularMarketVolume ?? vols.at(-1) ?? null,
-    avgVolume:         vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null,
-    marketCap:         m.marketCap ?? null,
+    volume:            q.regularMarketVolume  ?? null,
+    avgVolume:         q.averageDailyVolume3Month ?? q.averageDailyVolume10Day ?? null,
+    marketCap:         q.marketCap ?? null,
+    yearHigh:          q.fiftyTwoWeekHigh ?? null,
+    yearLow:           q.fiftyTwoWeekLow  ?? null,
+    pe:                q.trailingPE       ?? null,
+    eps:               q.epsTrailingTwelveMonths ?? null,
   };
+}
+
+async function yfChartQuote(symbol) {
+  try {
+    const q = await yf.quote(symbol, {}, { validateResult: false });
+    return _normaliseQuote(q);
+  } catch (e) {
+    console.error('yfChartQuote error for', symbol, e.message);
+    return null;
+  }
 }
 
 // ── GET /api/quote/:symbol ─────────────────────────────────────────────────────
@@ -203,11 +209,16 @@ app.get('/api/snapshots', async (req, res) => {
   const syms = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   if (!syms.length) return res.json({});
   try {
-    const all = await Promise.all(syms.map(s => yfChartQuote(s).catch(() => null)));
+    // Batch-fetch all symbols in one SDK call — much faster than individual fetches
+    const raw = await yf.quote(syms, {}, { validateResult: false });
+    const quotes = Array.isArray(raw) ? raw : [raw];
     const out = {};
-    all.forEach((q, i) => { if (q) out[syms[i]] = q; });
+    quotes.forEach(q => { if (q?.symbol) out[q.symbol] = _normaliseQuote(q); });
     res.json(out);
-  } catch (e) { res.json({}); }
+  } catch (e) {
+    console.error('Snapshots error:', e.message);
+    res.json({});
+  }
 });
 
 // ── GET /api/search?q= ────────────────────────────────────────────────────────
@@ -382,14 +393,18 @@ app.get('/api/valuation/:symbol', async (req, res) => {
 app.get('/api/intraday/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   try {
-    // includePrePost=true adds pre-market (4am–9:30am) and after-hours (4pm–8pm) bars
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=true`;
-    const r   = await fetch(url, { headers: YH });
-    if (!r.ok) return res.json({ bars: [], price: null });
-    const d   = await r.json();
-    const rs  = d?.chart?.result?.[0];
-    if (!rs)  return res.json({ bars: [], price: null });
-    const meta  = rs.meta || {};
+    // Fetch 5-min bars and live quote in parallel
+    // Chart API provides the intraday bars; yf.quote() provides correct marketState + extended prices
+    const [chartRes, liveQuote] = await Promise.all([
+      fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=true`, { headers: YH }),
+      yf.quote(sym, {}, { validateResult: false }).catch(() => null),
+    ]);
+
+    if (!chartRes.ok) return res.json({ bars: [], price: null });
+    const d  = await chartRes.json();
+    const rs = d?.chart?.result?.[0];
+    if (!rs) return res.json({ bars: [], price: null });
+
     const times = rs.timestamp || [];
     const q     = rs.indicators?.quote?.[0] || {};
     const bars  = times.map((t, i) => ({
@@ -399,13 +414,13 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null);
 
-    // Live price — use extended hours price when market is not in regular session
-    const marketState   = meta.marketState || 'CLOSED';
+    // Use yf.quote() for accurate marketState and extended-hours prices
+    const marketState = liveQuote?.marketState || 'CLOSED';
     const isPost = ['POST', 'POSTPOST'].includes(marketState);
     const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
-    const regPrice      = meta.regularMarketPrice ?? bars.at(-1)?.c ?? null;
-    const extendedPrice = isPost ? (meta.postMarketPrice ?? null)
-                        : isPre  ? (meta.preMarketPrice  ?? null) : null;
+    const regPrice      = liveQuote?.regularMarketPrice ?? bars.at(-1)?.c ?? null;
+    const extendedPrice = isPost ? (liveQuote?.postMarketPrice ?? null)
+                        : isPre  ? (liveQuote?.preMarketPrice  ?? null) : null;
 
     res.json({
       bars,
@@ -414,10 +429,13 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       extendedPrice,
       extendedType:  isPost ? 'AH' : isPre ? 'PRE' : null,
       marketState,
-      previousClose: meta.chartPreviousClose   ?? null,
-      open:          meta.regularMarketDayOpen ?? bars[0]?.o ?? null,
+      previousClose: liveQuote?.regularMarketPreviousClose ?? null,
+      open:          liveQuote?.regularMarketOpen ?? bars[0]?.o ?? null,
     });
-  } catch (e) { res.json({ bars: [], price: null }); }
+  } catch (e) {
+    console.error('Intraday error:', e.message);
+    res.json({ bars: [], price: null });
+  }
 });
 
 // ── GET /api/wsb ───────────────────────────────────────────────────────────────

@@ -152,12 +152,29 @@ function _normaliseQuote(q) {
   const isPost = ['POST', 'POSTPOST'].includes(marketState);
   const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
 
-  const regPrice      = q.regularMarketPrice ?? null;
-  const extendedPrice = isPost ? (q.postMarketPrice  ?? null)
-                      : isPre  ? (q.preMarketPrice   ?? null) : null;
-  const livePrice  = extendedPrice ?? regPrice;
-  const prev       = q.regularMarketPreviousClose ?? null;
-  const change     = livePrice != null && prev != null ? livePrice - prev : null;
+  const regPrice = q.regularMarketPrice ?? null;
+
+  // In PRE/PREPRE sessions try preMarketPrice; if not available yet (PREPRE early morning)
+  // fall back to postMarketPrice (last known AH price from prior session)
+  let extendedPrice = null;
+  let extendedType  = null;
+  if (isPost) {
+    extendedPrice = q.postMarketPrice ?? null;
+    extendedType  = 'AH';
+  } else if (isPre) {
+    if (q.preMarketPrice != null) {
+      extendedPrice = q.preMarketPrice;
+      extendedType  = 'PRE';
+    } else if (q.postMarketPrice != null) {
+      // PREPRE window — no pre-market trading yet; show last AH price
+      extendedPrice = q.postMarketPrice;
+      extendedType  = 'AH';
+    }
+  }
+
+  const livePrice = extendedPrice ?? regPrice;
+  const prev      = q.regularMarketPreviousClose ?? null;
+  const change    = livePrice != null && prev != null ? livePrice - prev : null;
 
   return {
     symbol:            q.symbol,
@@ -165,7 +182,7 @@ function _normaliseQuote(q) {
     price:             livePrice,
     regularClose:      regPrice,
     extendedPrice,
-    extendedType:      isPost ? 'AH' : isPre ? 'PRE' : null,
+    extendedType,
     extendedChange:    extendedPrice != null && regPrice != null ? extendedPrice - regPrice : null,
     extendedChangePct: extendedPrice != null && regPrice != null ? ((extendedPrice - regPrice) / regPrice) * 100 : null,
     marketState,
@@ -418,16 +435,20 @@ app.get('/api/intraday/:symbol', async (req, res) => {
     const marketState = liveQuote?.marketState || 'CLOSED';
     const isPost = ['POST', 'POSTPOST'].includes(marketState);
     const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
-    const regPrice      = liveQuote?.regularMarketPrice ?? bars.at(-1)?.c ?? null;
-    const extendedPrice = isPost ? (liveQuote?.postMarketPrice ?? null)
-                        : isPre  ? (liveQuote?.preMarketPrice  ?? null) : null;
+    const regPrice = liveQuote?.regularMarketPrice ?? bars.at(-1)?.c ?? null;
+    let extendedPrice = null;
+    if (isPost) {
+      extendedPrice = liveQuote?.postMarketPrice ?? null;
+    } else if (isPre) {
+      extendedPrice = liveQuote?.preMarketPrice ?? liveQuote?.postMarketPrice ?? null;
+    }
 
     res.json({
       bars,
       price:         extendedPrice ?? regPrice,
       regularClose:  regPrice,
       extendedPrice,
-      extendedType:  isPost ? 'AH' : isPre ? 'PRE' : null,
+      extendedType:  isPost ? 'AH' : (isPre && liveQuote?.preMarketPrice != null) ? 'PRE' : (isPre && extendedPrice != null) ? 'AH' : null,
       marketState,
       previousClose: liveQuote?.regularMarketPreviousClose ?? null,
       open:          liveQuote?.regularMarketOpen ?? bars[0]?.o ?? null,

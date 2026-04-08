@@ -754,290 +754,148 @@
 
 <!-- TRADING PAGE -->
 <div class="page" id="page-trading">
-  <div class="trd-page">
+  <div class="at-page">
 
-    <!-- Header -->
-    <div class="trd-header">
-      <div class="trd-header-left">
-        <div class="trd-header-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-        </div>
-        <div>
-          <div class="trd-header-title">Trading Desk</div>
-          <div class="trd-header-sub">Powered by Alpaca Markets</div>
-        </div>
+    <!-- Top bar -->
+    <div class="at-topbar">
+      <div class="at-topbar-left">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        <span class="at-topbar-title">Alpaca Auto Trader</span>
+        <span class="at-mode-badge" id="atModeBadge">DISCONNECTED</span>
       </div>
-      <div class="trd-header-right">
-        <div class="trd-mode-badge" id="trdModeBadge">PAPER</div>
-        <div class="trd-conn-status">
-          <span class="trd-conn-dot" id="trdConnDot"></span>
-          <span id="trdConnText">Not connected</span>
+      <div class="at-topbar-right">
+        <div class="at-acct-chips" id="atAcctChips" style="display:none">
+          <div class="at-chip"><span class="at-chip-lbl">Equity</span><span id="atEquity">--</span></div>
+          <div class="at-chip"><span class="at-chip-lbl">Cash</span><span id="atCash">--</span></div>
+          <div class="at-chip"><span class="at-chip-lbl">Buying Power</span><span id="atBP">--</span></div>
+          <div class="at-chip at-chip-pdt" id="atPDTChip" style="display:none"><span class="at-chip-lbl">Day Trades</span><span id="atDayTrades">--</span></div>
         </div>
-        <button class="trd-conn-btn" id="trdConnBtn">Connect Alpaca</button>
+        <div class="at-conn-status">
+          <span class="at-conn-dot dot-red" id="atConnDot"></span>
+          <span id="atConnText">Not connected</span>
+        </div>
+        <button class="at-conn-btn" id="atConnBtn">Connect Alpaca</button>
       </div>
     </div>
 
-    <!-- Main: Analysis + Trade Setup -->
-    <div class="trd-main">
-
-      <!-- LEFT: Compact Analysis -->
-      <div class="trd-analysis-col">
-
-        <div class="trd-sym-bar">
-          <div class="trd-sym-search">
-            <input type="text" id="trdSymInput" placeholder="Symbol e.g. AAPL" maxlength="10" autocomplete="off" spellcheck="false"/>
-            <button class="trd-sym-go" id="trdSymGo">Load</button>
-          </div>
-          <div class="trd-sym-current">
-            <span class="trd-sym-ticker" id="trdTicker">--</span>
-            <span class="trd-sym-price" id="trdPrice">--</span>
-            <span class="trd-sym-chg" id="trdChg"></span>
-            <span class="trd-ext-badge" id="trdExtBadge" style="display:none"></span>
-          </div>
+    <!-- Engine Status Card -->
+    <div class="at-engine-card">
+      <div class="at-engine-left">
+        <div class="at-engine-label">Engine Status</div>
+        <div class="at-engine-status-row">
+          <span class="at-engine-dot dot-grey" id="atEngineDot"></span>
+          <span class="at-engine-text" id="atEngineText">Auto-trader is OFF</span>
+          <svg class="at-spin" id="atScanSpinner" style="display:none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </div>
-
-        <div class="trd-quick-grid" id="trdQuickGrid"></div>
-
-        <div class="trd-analysis-panel">
-          <div class="trd-analysis-loading" id="trdAnalysisLoading" style="display:none">
-            <div class="spinner"></div><span>Analyzing…</span>
-          </div>
-          <div id="trdAnalysisBody">
-            <div class="trd-stat-row">
-              <div class="trd-stat"><div class="trd-stat-lbl">VWAP</div><div class="trd-stat-val" id="trdVwap">--</div></div>
-              <div class="trd-stat"><div class="trd-stat-lbl">RSI (5m)</div><div class="trd-stat-val" id="trdRsi">--</div></div>
-              <div class="trd-stat"><div class="trd-stat-lbl">vs VWAP</div><div class="trd-stat-val" id="trdVwapPos">--</div></div>
-              <div class="trd-stat"><div class="trd-stat-lbl">Volume</div><div class="trd-stat-val" id="trdVol">--</div></div>
-            </div>
-            <div class="trd-signal-row">
-              <div class="trd-sig-badge" id="trdSignal">--</div>
-              <div class="trd-sig-conf" id="trdSignalConf"></div>
-              <div class="trd-bias-badge" id="trdBias"></div>
-            </div>
-            <div class="trd-sr-row">
-              <div class="trd-sr-item trd-sup"><span class="trd-sr-lbl">▲ Support</span><span class="trd-sr-val" id="trdSupport">--</span></div>
-              <div class="trd-sr-item trd-res"><span class="trd-sr-lbl">▼ Resistance</span><span class="trd-sr-val" id="trdResistance">--</span></div>
-            </div>
-            <div class="trd-pivot-strip" id="trdPivotStrip">
-              <div class="trd-pvt"><span class="trd-pvl r">R2</span><span class="trd-pvv" id="trdR2">--</span></div>
-              <div class="trd-pvt"><span class="trd-pvl r">R1</span><span class="trd-pvv" id="trdR1">--</span></div>
-              <div class="trd-pvt trd-pp"><span class="trd-pvl">PP</span><span class="trd-pvv" id="trdPP">--</span></div>
-              <div class="trd-pvt"><span class="trd-pvl s">S1</span><span class="trd-pvv" id="trdS1">--</span></div>
-              <div class="trd-pvt"><span class="trd-pvl s">S2</span><span class="trd-pvv" id="trdS2">--</span></div>
-            </div>
-            <div class="trd-reasons" id="trdReasons"></div>
-            <div class="trd-auto-sig-hint" id="trdAutoSigHint" style="display:none"></div>
-          </div>
-          <div class="trd-refresh-foot">
-            <span id="trdRefreshCd">⟳ 60s</span>
-            <button class="trd-btn-ghost" id="trdRefreshNow">Refresh Now</button>
-          </div>
+        <div class="at-engine-meta">
+          <span class="at-meta-item"><span class="at-meta-lbl">Last Scan</span><span id="atLastScan">--</span></span>
+          <span class="at-meta-item"><span class="at-meta-lbl">Market</span><span class="at-mkt-badge mkt-closed" id="atMktBadge">Checking…</span></span>
+          <span class="at-meta-item"><span class="at-meta-lbl">Positions</span><span id="atPosMeta">0/1</span></span>
+          <span class="at-meta-item"><span class="at-meta-lbl">Rate Limit</span><span id="atRateMeta">--</span></span>
         </div>
-
-      </div><!-- /.trd-analysis-col -->
-
-      <!-- RIGHT: Trade Setup -->
-      <div class="trd-setup-col">
-        <div class="trd-setup-panel">
-
-          <div class="trd-setup-title">Quick Order</div>
-
-          <div class="trd-side-row">
-            <button class="trd-side-btn trd-buy active" id="trdBuyBtn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-              BUY LONG
-            </button>
-            <button class="trd-side-btn trd-sell" id="trdSellBtn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-              SELL SHORT
-            </button>
-          </div>
-
-          <div class="trd-field">
-            <label class="trd-lbl">Trade Amount (USD)</label>
-            <div class="trd-amount-wrap">
-              <span class="trd-dollar-sign">$</span>
-              <input type="number" id="trdAmount" class="trd-amount-input" value="500" min="1" max="999999" step="100"/>
-            </div>
-            <div class="trd-shares-hint" id="trdSharesHint">≈ -- shares @ --</div>
-          </div>
-
-          <div class="trd-field">
-            <label class="trd-lbl">Leverage</label>
-            <div class="trd-lev-row">
-              <button class="trd-lev-btn active" data-lev="1">1x</button>
-              <button class="trd-lev-btn" data-lev="2">2x</button>
-              <button class="trd-lev-btn" data-lev="4">4x</button>
-            </div>
-            <div class="trd-lev-warn" id="trdLevWarn" style="display:none">⚠ Margin — losses may exceed principal</div>
-          </div>
-
-          <div class="trd-field">
-            <label class="trd-lbl">Take Profit</label>
-            <div class="trd-pct-row">
-              <button class="trd-adj-btn" id="trdTpMinus">−</button>
-              <span class="trd-pct-val trd-green" id="trdTpVal">+2%</span>
-              <button class="trd-adj-btn" id="trdTpPlus">+</button>
-              <button class="trd-off-btn" id="trdTpOff">OFF</button>
-            </div>
-            <div class="trd-level-hint green" id="trdTpLevel">→ --</div>
-          </div>
-
-          <div class="trd-field">
-            <label class="trd-lbl">Stop Loss</label>
-            <div class="trd-pct-row">
-              <button class="trd-adj-btn" id="trdSlMinus">−</button>
-              <span class="trd-pct-val trd-red" id="trdSlVal">−1%</span>
-              <button class="trd-adj-btn" id="trdSlPlus">+</button>
-              <button class="trd-off-btn" id="trdSlOff">OFF</button>
-            </div>
-            <div class="trd-level-hint red" id="trdSlLevel">→ --</div>
-          </div>
-
-          <div class="trd-summary-box" id="trdSummaryBox">
-            <div class="trd-sum-row"><span>Symbol</span><span id="trdSumSym">--</span></div>
-            <div class="trd-sum-row"><span>Price</span><span id="trdSumPrice">--</span></div>
-            <div class="trd-sum-row"><span>Shares (est.)</span><span id="trdSumShares">--</span></div>
-            <div class="trd-sum-row"><span>Order Type</span><span id="trdSumType">Market</span></div>
-          </div>
-
-          <button class="trd-execute-btn" id="trdExecuteBtn" disabled>
-            Connect Alpaca to Trade
-          </button>
-          <div class="trd-order-msg" id="trdOrderMsg"></div>
-
+        <div class="at-engine-action" id="atLastAction"></div>
+        <div class="at-engine-error" id="atEngineError" style="display:none"></div>
+        <div class="at-pdt-warn" id="atPDTWarn" style="display:none">
+          ⚠️ PDT Protection — skipping entries (3 day trades used, equity &lt; $25k)
         </div>
-      </div><!-- /.trd-setup-col -->
-
-    </div><!-- /.trd-main -->
-
-    <!-- AI Auto-Trader Panel -->
-    <div class="trd-auto-panel" id="trdAutoPanel">
-
-      <div class="trd-auto-header">
-        <div class="trd-auto-title">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M12 3v5"/><path d="M9 8l3-5 3 5"/></svg>
-          AI Auto-Trader
-        </div>
-        <div class="trd-auto-status-row">
-          <span class="trd-auto-dot dot-grey" id="trdAutoDot"></span>
-          <span id="trdAutoStatusText">Disabled</span>
-          <svg class="trd-spin" id="trdAutoScanIcon" style="display:none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        </div>
-        <button class="trd-auto-toggle" id="trdAutoToggle">▶ Enable Auto-Trader</button>
       </div>
+      <div class="at-engine-right">
+        <button class="at-toggle-btn at-toggle-off" id="atToggleBtn">▶ Enable Auto-Trader</button>
+        <button class="at-scan-now-btn" id="atScanNow" style="display:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Scan Now
+        </button>
+      </div>
+    </div>
 
-      <div class="trd-auto-live" id="trdAutoLive" style="display:none">
-        <div class="trd-auto-live-grid">
-          <div class="trd-auto-live-item"><span class="trd-al-lbl">Last Scan</span><span id="trdLastScan">--</span></div>
-          <div class="trd-auto-live-item"><span class="trd-al-lbl">Candidates</span><span id="trdCandidates">--</span></div>
-          <div class="trd-auto-live-item trd-al-action"><span class="trd-al-lbl">Last Action</span><span id="trdAutoLastAction">--</span></div>
-          <div class="trd-auto-live-item"><span class="trd-al-lbl">Market</span><span class="trd-mkt-badge mkt-closed" id="trdMarketStatus">Checking…</span></div>
-          <div class="trd-auto-live-item"><span class="trd-al-lbl">Positions</span><span id="trdOpenPositions">0/2</span></div>
-          <div class="trd-auto-live-item"><span class="trd-al-lbl">Rate Limit</span><span id="trdRateLimit">--</span></div>
+    <!-- Body: Settings + Live Scan Feed -->
+    <div class="at-body">
+
+      <!-- Settings -->
+      <div class="at-settings-col">
+        <div class="at-col-head">Engine Settings</div>
+        <div class="at-settings-grid">
+          <div class="at-sfield">
+            <label class="at-slbl">Risk per Trade</label>
+            <div class="at-sinp-row"><input type="number" id="atRiskPct" value="1" min="0.5" max="10" step="0.5" class="at-inp"/><span class="at-unit">%</span></div>
+          </div>
+          <div class="at-sfield">
+            <label class="at-slbl">Max Positions</label>
+            <input type="number" id="atMaxPos" value="1" min="1" max="4" class="at-inp"/>
+          </div>
+          <div class="at-sfield">
+            <label class="at-slbl">Min Confidence</label>
+            <div class="at-sinp-row"><input type="number" id="atConf" value="68" min="55" max="95" step="5" class="at-inp"/><span class="at-unit">%</span></div>
+          </div>
+          <div class="at-sfield">
+            <label class="at-slbl">Max Leverage</label>
+            <div class="at-lev-row">
+              <button class="at-lb active" data-lev="1">1x</button>
+              <button class="at-lb" data-lev="2">2x</button>
+              <button class="at-lb" data-lev="4">4x</button>
+            </div>
+            <div class="at-lev-hint">Engine auto-scales: high-conf → more leverage</div>
+          </div>
+          <div class="at-sfield">
+            <label class="at-slbl">Take Profit (ATR)</label>
+            <div class="at-sinp-row"><input type="number" id="atTpPct" value="3" min="0.5" max="20" step="0.5" class="at-inp"/><span class="at-unit">× ATR</span></div>
+          </div>
+          <div class="at-sfield">
+            <label class="at-slbl">Stop Loss (ATR)</label>
+            <div class="at-sinp-row"><input type="number" id="atSlPct" value="1.5" min="0.5" max="10" step="0.5" class="at-inp"/><span class="at-unit">× ATR</span></div>
+          </div>
+          <div class="at-sfield at-sfield-full">
+            <label class="at-slbl">Min Daily Volume</label>
+            <input type="number" id="atMinVol" value="500000" min="100000" max="50000000" step="100000" class="at-inp"/>
+          </div>
         </div>
-        <div class="trd-auto-error" id="trdAutoError" style="display:none"></div>
-        <div class="trd-scan-btns">
-          <button class="trd-scan-now" id="trdScanNow">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Scan Now
-          </button>
-          <button class="trd-sim-btn" id="trdSimulate">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
-            Run Simulation
-          </button>
+        <div class="at-save-row">
+          <button class="at-save-btn" id="atSaveBtn">Save Settings</button>
+          <span class="at-save-msg" id="atSaveMsg"></span>
+        </div>
+        <div class="at-sim-section">
+          <div class="at-col-head">Dry Run</div>
+          <p class="at-sim-desc">Runs the full engine scan with real market data — no orders placed.</p>
+          <button class="at-sim-btn" id="atSimBtn">▷ Run Simulation</button>
         </div>
       </div>
 
-      <!-- Simulation results (hidden until run) -->
-      <div id="trdSimResults" style="display:none" class="trd-sim-results"></div>
-
-      <div class="trd-auto-body">
-
-        <div class="trd-auto-settings-grid">
-
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Risk per Trade</label>
-            <div class="trd-as-inp-row"><input type="number" id="atRiskPct" value="1" min="0.5" max="10" step="0.5" class="trd-as-inp"/><span>%</span></div>
-          </div>
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Max Positions</label>
-            <input type="number" id="atMaxPos" value="1" min="1" max="4" class="trd-as-inp"/>
-          </div>
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Take Profit</label>
-            <div class="trd-as-inp-row"><input type="number" id="atTpPct" value="3" min="0.5" max="20" step="0.5" class="trd-as-inp"/><span>%</span></div>
-          </div>
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Stop Loss</label>
-            <div class="trd-as-inp-row"><input type="number" id="atSlPct" value="1.5" min="0.5" max="10" step="0.5" class="trd-as-inp"/><span>%</span></div>
-          </div>
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Min Volume</label>
-            <input type="number" id="atMinVol" value="500000" min="100000" max="50000000" step="100000" class="trd-as-inp"/>
-          </div>
-          <div class="trd-as-field">
-            <label class="trd-as-lbl">Min Confidence</label>
-            <div class="trd-as-inp-row"><input type="number" id="atConf" value="68" min="60" max="90" step="5" class="trd-as-inp"/><span>%</span></div>
-          </div>
-          <div class="trd-as-field trd-as-lev-field">
-            <label class="trd-as-lbl">Auto-Trade Leverage</label>
-            <div class="trd-lev-row">
-              <button class="at-lev-btn active" data-lev="1">1x</button>
-              <button class="at-lev-btn" data-lev="2">2x</button>
-              <button class="at-lev-btn" data-lev="4">4x</button>
-            </div>
-          </div>
-
+      <!-- Live Scan Feed -->
+      <div class="at-scanfeed-col">
+        <div class="at-col-head">
+          Live Scan Feed
+          <span class="at-badge" id="atScanCount">0 symbols</span>
         </div>
-
-        <div class="trd-auto-save-row">
-          <button class="trd-save-btn" id="trdSaveAutoSettings">Save Settings</button>
-          <div class="trd-save-msg" id="trdSaveMsg"></div>
-        </div>
-
-        <div class="trd-auto-log-section">
-          <div class="trd-auto-log-head">
-            Auto-Trade Log
-            <button class="trd-btn-ghost" id="trdRefreshAutoLog">↻ Refresh</button>
-          </div>
-          <div id="trdAutoLogBody"><div class="trd-bot-empty">No auto-trades yet</div></div>
-        </div>
-
-      </div><!-- /.trd-auto-body -->
-
-    </div><!-- /.trd-auto-panel -->
-
-    <!-- Bottom: Account / Positions / Orders -->
-    <div class="trd-bottom">
-
-      <div class="trd-bot-panel">
-        <div class="trd-bot-head">
-          Account
-          <button class="trd-icon-btn" id="trdRefreshAccount" title="Refresh">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          </button>
-        </div>
-        <div id="trdAccountBody"><div class="trd-bot-empty">Connect Alpaca to view account</div></div>
+        <div id="atScanFeed"><div class="at-empty">Enable auto-trader to see live scan results</div></div>
       </div>
 
-      <div class="trd-bot-panel">
-        <div class="trd-bot-head">
-          Open Positions <span class="trd-badge" id="trdPosCount">0</span>
-        </div>
-        <div id="trdPositionsBody"><div class="trd-bot-empty">No open positions</div></div>
+    </div><!-- /.at-body -->
+
+    <!-- Simulation results -->
+    <div id="atSimResults" style="display:none" class="at-sim-results"></div>
+
+    <!-- Open Positions (from Alpaca) -->
+    <div class="at-panel">
+      <div class="at-panel-head">
+        Open Positions
+        <span class="at-badge" id="atPosCount">0</span>
+        <button class="at-icon-btn" id="atRefreshPos" title="Refresh">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
       </div>
+      <div id="atPositionsBody"><div class="at-empty">Connect Alpaca to view live positions</div></div>
+    </div>
 
-      <div class="trd-bot-panel">
-        <div class="trd-bot-head">
-          Recent Orders <span class="trd-badge" id="trdOrdCount">0</span>
-        </div>
-        <div id="trdOrdersBody"><div class="trd-bot-empty">No recent orders</div></div>
+    <!-- Auto-Trade Log -->
+    <div class="at-panel">
+      <div class="at-panel-head">
+        Auto-Trade Log
+        <button class="at-icon-btn" id="atRefreshLog">↻</button>
       </div>
+      <div id="atLogBody"><div class="at-empty">No auto-trades yet — engine will trade automatically when conditions are met</div></div>
+    </div>
 
-    </div><!-- /.trd-bottom -->
-
-  </div><!-- /.trd-page -->
+  </div><!-- /.at-page -->
 </div><!-- /.page#page-trading -->
 
 <!-- ALPACA CONNECT MODAL -->

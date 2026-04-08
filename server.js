@@ -889,6 +889,7 @@ try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN buying_power REAL'); } catc
 try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN order_placed_at TEXT'); } catch {}
 try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN atr REAL'); } catch {}
 try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN settled_cash REAL'); } catch {}
+try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1'); } catch {}
 
 // ── Per-user in-memory state ──────────────────────────────────────────────────
 const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAction, candidates, error }
@@ -1136,16 +1137,24 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   // Need ATR for position sizing
   if (!atr || atr <= 0) return { skipped: true, reason: 'ATR unavailable' };
 
+  // ── Auto-leverage: engine scales leverage based on signal confidence ─────────
+  // User setting = maximum allowed leverage; engine picks the right level automatically
+  const maxLev  = Math.min(4, Math.max(1, settings.leverage || 1));
+  const conf    = sig.confidence || 0;
+  const autoLev = conf >= 90 ? maxLev
+                : conf >= 80 ? Math.min(maxLev, 2)
+                : 1;
+  const lev     = autoLev;
+
   // ── ATR-based SL / TP ─────────────────────────────────────────────────────
   // SL = 1.5× ATR below entry, TP = minimum 2:1 R:R = 3× ATR above entry
-  const lev      = Math.min(4, Math.max(1, settings.leverage || 1));
   const slDist   = parseFloat((1.5 * atr).toFixed(4));
   const tpDist   = parseFloat((3.0 * atr).toFixed(4));   // 2:1 R:R
   const limitPx  = parseFloat((price * 1.0005).toFixed(4)); // limit 0.05% above
   const slPrice  = parseFloat((limitPx - slDist).toFixed(2));
   const tpPrice  = parseFloat((limitPx + tpDist).toFixed(2));
 
-  // ── Position sizing: risk_pct% of settled cash × leverage / SL distance ───
+  // ── Position sizing: risk_pct% of settled cash × auto-leverage / SL dist ──
   const riskUSD    = settledCash * (settings.risk_pct / 100) * lev;
   const rawShares  = Math.floor(riskUSD / slDist);
   const maxByBP    = Math.floor((buyingPower * 0.95) / limitPx);
@@ -1177,18 +1186,19 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   if (order?.id) {
     const notional = (shares * limitPx).toFixed(2);
     const rr       = (tpDist / slDist).toFixed(2);
-    const action   = 'AUTO BUY ' + shares + 'sh ' + sym + ' LIMIT $' + limitPx.toFixed(2) + ' | SL $' + slPrice + ' | TP $' + tpPrice + ' | R:R ' + rr + ':1 | ATR ' + atr.toFixed(3) + ' | ' + sig.confidence + '% conf';
+    const levStr   = lev > 1 ? ` | ${lev}x leverage` : '';
+    const action   = 'AUTO BUY ' + shares + 'sh ' + sym + ' LIMIT $' + limitPx.toFixed(2) + ' | SL $' + slPrice + ' | TP $' + tpPrice + ' | R:R ' + rr + ':1 | ATR ' + atr.toFixed(3) + ' | ' + sig.confidence + '% conf' + levStr;
     db.prepare(`
       INSERT INTO auto_trade_log
         (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
          alpaca_order_id, signal, confidence, reasons, buying_power,
-         settled_cash, atr, order_placed_at, status)
-      VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_fill')
+         settled_cash, atr, order_placed_at, leverage, status)
+      VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_fill')
     `).run(
       userId, sym, shares, limitPx, tpPrice, slPrice,
       order.id, sig.signal, sig.confidence,
       JSON.stringify(sig.reasons), buyingPower,
-      settledCash, atr, new Date().toISOString()
+      settledCash, atr, new Date().toISOString(), lev
     );
     autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: action });
     console.log('[AutoTrader] user=' + userId + ' ' + action + ' | notional $' + notional);
@@ -1354,8 +1364,19 @@ async function atRunForUser(userId, dryRun = false) {
     const settledCash = parseFloat(acct.cash         || acct.equity || 0); // settled cash only
     if (equity <= 0) { atScanningUsers.delete(userId); return result; }
 
+    // ── PDT protection ───────────────────────────────────────────────────────
+    // Pattern Day Trader rule: if equity < $25k AND daytrade_count >= 3, skip entries
+    const daytradeCount = parseInt(acct.daytrade_count || 0, 10);
+    const isPDT         = acct.pattern_day_trader === true;
+    const pdtBlocked    = equity < 25000 && daytradeCount >= 3;
+    result.pdtBlocked   = pdtBlocked;
+    result.daytradeCount= daytradeCount;
+    if (pdtBlocked && !dryRun) {
+      console.warn('[AT] user=' + userId + ' PDT protection active — daytradeCount=' + daytradeCount + ' equity=$' + equity.toFixed(0));
+    }
+
     // Log session state at the start of each cycle
-    console.log('[AutoTrader] user=' + userId + ' settled=$' + settledCash.toFixed(2) + ' BP=$' + buyingPower.toFixed(2) + ' positions=' + (Array.isArray(positions) ? positions.length : 0));
+    console.log('[AutoTrader] user=' + userId + ' settled=$' + settledCash.toFixed(2) + ' BP=$' + buyingPower.toFixed(2) + ' positions=' + (Array.isArray(positions) ? positions.length : 0) + (pdtBlocked?' [PDT BLOCKED]':''));
 
     const posArr   = Array.isArray(positions) ? positions : [];
     const openSyms = new Set(posArr.map(p => p.symbol));
@@ -1432,21 +1453,38 @@ async function atRunForUser(userId, dryRun = false) {
       .filter(a => a.sig.confidence >= (settings.confidence_threshold || 68))
       .sort((a, b) => b.sig.confidence - a.sig.confidence);
 
-    result.analyses = analyses.map(a => ({
-      symbol:     a.symbol,
-      signal:     a.sig?.signal     || 'HOLD',
-      confidence: a.sig?.confidence || 0,
-      price:      a.sig?.price,
-      rsi:        a.sig?.rsi,
-      atr:        a.sig?.atr,
-      ema9:       a.sig?.ema9,
-      ema21:      a.sig?.ema21,
-      reasons:    a.sig?.reasons    || [],
-      checks:     a.sig?.checks     || {},
-    }));
+    // Compute auto-leverage for each analysis so UI can display it
+    const maxLevSetting = Math.min(4, Math.max(1, settings.leverage || 1));
+    result.analyses = analyses.map(a => {
+      const c   = a.sig?.confidence || 0;
+      const lev = c >= 90 ? maxLevSetting : c >= 80 ? Math.min(maxLevSetting, 2) : 1;
+      return {
+        symbol:      a.symbol,
+        signal:      a.sig?.signal     || 'HOLD',
+        confidence:  a.sig?.confidence || 0,
+        price:       a.sig?.price,
+        rsi:         a.sig?.rsi,
+        atr:         a.sig?.atr,
+        ema9:        a.sig?.ema9,
+        ema21:       a.sig?.ema21,
+        reasons:     a.sig?.reasons    || [],
+        checks:      a.sig?.checks     || {},
+        autoLeverage: lev,
+        sl_price:    a.sig?.atr ? parseFloat(((a.sig.price||0) - 1.5*a.sig.atr).toFixed(2)) : null,
+        tp_price:    a.sig?.atr ? parseFloat(((a.sig.price||0) + 3.0*a.sig.atr).toFixed(2)) : null,
+      };
+    });
+
+    // Persist latest analyses in status so polling can surface them
+    autoTraderStatus.set(userId, {
+      ...(autoTraderStatus.get(userId) || {}),
+      analyses:     result.analyses,
+      pdtBlocked,
+      daytradeCount,
+    });
 
     // ── 5. Place order for best BUY signal ────────────────────────────────────
-    const canEnter = !dryRun && session.isMarketOpen && atmOpen < MAX_POSITIONS && actionable.length > 0;
+    const canEnter = !dryRun && session.isMarketOpen && atmOpen < MAX_POSITIONS && actionable.length > 0 && !pdtBlocked;
     if (canEnter) {
       const best = actionable[0];
       result.entryAttempt = best.symbol;
@@ -1552,9 +1590,9 @@ app.get('/api/alpaca/auto-log', requireAuth, (req, res) => {
 });
 
 app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
-  const st  = autoTraderStatus.get(req.session.userId) || {};
-  const rl  = rateLimitRemaining(req.session.userId);
-  const sess = atSessionInfo();
+  const st       = autoTraderStatus.get(req.session.userId) || {};
+  const rl       = rateLimitRemaining(req.session.userId);
+  const sess     = atSessionInfo();
   const settings2 = db.prepare('SELECT max_positions FROM auto_trade_settings WHERE user_id=?').get(req.session.userId);
   const openCount = db.prepare(
     `SELECT COUNT(*) as cnt FROM auto_trade_log WHERE user_id=? AND status IN ('open','pending_fill')`
@@ -1564,6 +1602,9 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     lastScan:      null,
     lastAction:    null,
     candidates:    [],
+    analyses:      [],
+    pdtBlocked:    false,
+    daytradeCount: 0,
     marketOpen:    sess.isMarketOpen,
     openPositions: openCount,
     maxPositions:  settings2?.max_positions || 1,

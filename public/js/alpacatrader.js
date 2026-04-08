@@ -153,8 +153,7 @@ const alpacaTrader = (() => {
       if ($('atInvestAmt')) $('atInvestAmt').value = s.investment_amount || 1000;
       if ($('atMaxPos'))    $('atMaxPos').value    = s.max_positions     || 1;
       document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', +b.dataset.lev === atLeverage));
-      atOrderType = s.order_type || 'auto';
-      document.querySelectorAll('.at-otb').forEach(b => b.classList.toggle('active', b.dataset.ot === atOrderType));
+      atOrderType = s.order_type || 'auto'; // kept internally; always 'auto' (engine decides per signal)
       // Auto-enable if not already running
       if (!s.enabled) {
         autoEnabled = true;
@@ -699,15 +698,6 @@ const alpacaTrader = (() => {
       btn.addEventListener('click', () => {
         atLeverage = +btn.dataset.lev;
         document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', b===btn));
-        scheduleSave();
-      });
-    });
-
-    // Order type buttons — auto-save on change
-    document.querySelectorAll('.at-otb').forEach(btn => {
-      btn.addEventListener('click', () => {
-        atOrderType = btn.dataset.ot;
-        document.querySelectorAll('.at-otb').forEach(b => b.classList.toggle('active', b===btn));
         scheduleSave();
       });
     });

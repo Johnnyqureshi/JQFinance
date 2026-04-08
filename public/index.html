@@ -800,11 +800,7 @@
         </div>
       </div>
       <div class="at-engine-right">
-        <button class="at-toggle-btn at-toggle-off" id="atToggleBtn">▶ Enable Auto-Trader</button>
-        <button class="at-scan-now-btn" id="atScanNow" style="display:none">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Scan Now
-        </button>
+        <button class="at-pause-btn" id="atToggleBtn" style="display:none">⏸ Pause</button>
       </div>
     </div>
 
@@ -845,29 +841,17 @@
           <input type="number" id="atMaxPos" value="1" min="1" max="4" class="at-inp"/>
         </div>
 
-        <div class="at-save-row">
-          <button class="at-save-btn" id="atSaveBtn">Save</button>
-          <span class="at-save-msg" id="atSaveMsg"></span>
-        </div>
-
         <!-- How it works -->
         <div class="at-how-block">
-          <div class="at-how-title">How the engine works</div>
-          <div class="at-how-step"><span class="at-how-n">1</span> Scans 30+ symbols every 60 s</div>
-          <div class="at-how-step"><span class="at-how-n">2</span> Computes Volume Profile (VAH · POC · VAL)</div>
-          <div class="at-how-step"><span class="at-how-n">3</span> Triggers on VAL bounce or POC breakout</div>
-          <div class="at-how-step"><span class="at-how-n">4</span> RSI / VWAP / EMA score confidence</div>
-          <div class="at-how-step"><span class="at-how-n">5</span> Places bracket order: SL below VAL · TP at VAH</div>
-          <div class="at-how-step"><span class="at-how-n">6</span> Broker auto-closes at TP or SL</div>
+          <div class="at-how-title">What happens automatically</div>
+          <div class="at-how-step"><span class="at-how-n">1</span> Scans 30+ stocks every 60 seconds</div>
+          <div class="at-how-step"><span class="at-how-n">2</span> Finds VAL bounces and POC breakouts using Volume Profile</div>
+          <div class="at-how-step"><span class="at-how-n">3</span> Places bracket order — Stop Loss below VAL, Take Profit at VAH</div>
+          <div class="at-how-step"><span class="at-how-n">4</span> Alpaca closes the trade automatically at TP or SL</div>
         </div>
 
-        <div class="at-sim-section">
-          <div class="at-col-head">Test &amp; Validate</div>
-          <p class="at-sim-desc">Dry run scans the market right now with no orders. Backtest replays 60 days of real data to show the strategy's historical edge.</p>
-          <div class="at-test-btns">
-            <button class="at-sim-btn" id="atSimBtn">▷ Dry Run Now</button>
-            <button class="at-bt-btn" id="atBtBtn">📊 Run Backtest (60 days)</button>
-          </div>
+        <div class="at-save-row" style="display:none">
+          <span class="at-save-msg" id="atSaveMsg"></span>
         </div>
       </div>
 
@@ -877,16 +861,10 @@
           Live Scan Feed
           <span class="at-badge" id="atScanCount">0 symbols</span>
         </div>
-        <div id="atScanFeed"><div class="at-empty">Enable auto-trader to see live scan results</div></div>
+        <div id="atScanFeed"><div class="at-empty">Connecting to market data…</div></div>
       </div>
 
     </div><!-- /.at-body -->
-
-    <!-- Simulation results -->
-    <div id="atSimResults" style="display:none" class="at-sim-results"></div>
-
-    <!-- Backtest results -->
-    <div id="atBtResults" style="display:none" class="at-bt-results"></div>
 
     <!-- Open Positions (from Alpaca) -->
     <div class="at-panel">

@@ -142,71 +142,72 @@ const alpacaTrader = (() => {
   async function loadAutoSettings() {
     try {
       const s = await apiFetch('/api/alpaca/auto-settings');
-      autoEnabled = !!s.enabled;
-      atLeverage  = s.leverage || 1;
+      atLeverage = s.leverage || 1;
       if ($('atInvestAmt')) $('atInvestAmt').value = s.investment_amount || 1000;
       if ($('atMaxPos'))    $('atMaxPos').value    = s.max_positions     || 1;
       document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', +b.dataset.lev === atLeverage));
-      updateToggleUI();
+      // Auto-enable if not already running
+      if (!s.enabled) {
+        autoEnabled = true;
+        await saveSettings();
+      } else {
+        autoEnabled = true;
+      }
+      updateEngineUI();
     } catch(e) {}
   }
 
+  let _saveTimer = null;
   async function saveSettings() {
-    if (!connected) { alert('Connect Alpaca first.'); return; }
-    const btn = $('atSaveBtn'), msg = $('atSaveMsg');
-    if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
+    if (!connected) return;
     try {
       const body = {
-        enabled:           autoEnabled ? 1 : 0,
+        enabled:           1,
         investment_amount: parseFloat($('atInvestAmt')?.value) || 1000,
         max_positions:     parseInt($('atMaxPos')?.value)      || 1,
         leverage:          atLeverage,
         min_volume:        500000,
       };
-      const r = await apiFetch('/api/alpaca/auto-settings', {
+      await apiFetch('/api/alpaca/auto-settings', {
         method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
       });
-      if (r.error) throw new Error(r.error);
-      if (msg) { msg.textContent='✓ Saved'; msg.className='at-save-msg ok'; setTimeout(()=>msg.textContent='', 2500); }
-    } catch(e) {
-      if (msg) { msg.textContent='✗ '+e.message; msg.className='at-save-msg err'; }
-    } finally {
-      if (btn) { btn.disabled=false; btn.textContent='Save'; }
-    }
+    } catch(e) {}
   }
 
-  async function toggleAutoTrader() {
-    if (!connected) { alert('Connect Alpaca first.'); return; }
+  function scheduleSave() {
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(saveSettings, 800);
+  }
+
+  async function togglePause() {
+    if (!connected) return;
     autoEnabled = !autoEnabled;
-    await saveSettings();
-    updateToggleUI();
-    if (autoEnabled) {
-      const scanNow = $('atScanNow');
-      if (scanNow) scanNow.style.display = '';
-      pollStatus();
-    } else {
-      const scanNow = $('atScanNow');
-      if (scanNow) scanNow.style.display = 'none';
-    }
+    try {
+      await apiFetch('/api/alpaca/auto-settings', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          enabled:           autoEnabled ? 1 : 0,
+          investment_amount: parseFloat($('atInvestAmt')?.value) || 1000,
+          max_positions:     parseInt($('atMaxPos')?.value)      || 1,
+          leverage:          atLeverage,
+          min_volume:        500000,
+        }),
+      });
+    } catch(e) {}
+    updateEngineUI();
+    if (autoEnabled) pollStatus();
   }
 
-  function updateToggleUI() {
-    const btn = $('atToggleBtn');
+  function updateEngineUI() {
+    const pauseBtn = $('atToggleBtn');
     const dot = $('atEngineDot');
     const txt = $('atEngineText');
-    if (btn) {
-      if (autoEnabled) {
-        btn.textContent  = '⏸ Disable Auto-Trader';
-        btn.className    = 'at-toggle-btn at-toggle-on';
-      } else {
-        btn.textContent  = '▶ Enable Auto-Trader';
-        btn.className    = 'at-toggle-btn at-toggle-off';
-      }
+    if (pauseBtn) {
+      pauseBtn.style.display  = connected ? '' : 'none';
+      pauseBtn.textContent    = autoEnabled ? '⏸ Pause' : '▶ Resume';
     }
     if (dot) dot.className = 'at-engine-dot ' + (autoEnabled ? 'dot-green' : 'dot-grey');
-    if (txt) txt.textContent = autoEnabled ? 'Auto-trader ACTIVE — scanning every 60s' : 'Auto-trader is OFF';
-    const scanNow = $('atScanNow');
-    if (scanNow) scanNow.style.display = autoEnabled ? '' : 'none';
+    if (txt) txt.textContent = autoEnabled ? 'Trading engine running — scanning every 60s' : 'Engine paused';
   }
 
   // ── Status polling ─────────────────────────────────────────────────────────
@@ -430,7 +431,7 @@ const alpacaTrader = (() => {
       hideModal();
       updateConnStatus();
       loadAccount();
-      loadAutoSettings();
+      await loadAutoSettings();   // auto-enables engine
       startStatusPoll();
       loadAutoLog();
     } catch(e) { if(errEl) errEl.textContent = e.message; }
@@ -442,7 +443,7 @@ const alpacaTrader = (() => {
     connected=false; autoEnabled=false;
     stopStatusPoll();
     updateConnStatus();
-    updateToggleUI();
+    updateEngineUI();
     hideModal();
     const posEl = $('atPositionsBody');
     if (posEl) posEl.innerHTML = '<div class="at-empty">Connect Alpaca to view live positions</div>';
@@ -656,50 +657,33 @@ const alpacaTrader = (() => {
       });
     });
 
-    // Toggle auto-trader
-    $('atToggleBtn')?.addEventListener('click', toggleAutoTrader);
+    // Pause / Resume button
+    $('atToggleBtn')?.addEventListener('click', togglePause);
 
-    // Scan now
-    $('atScanNow')?.addEventListener('click', async () => {
-      const btn = $('atScanNow');
-      if (btn) { btn.disabled=true; btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Scanning…'; }
-      try {
-        await apiFetch('/api/alpaca/auto-scan', { method:'POST' });
-        setTimeout(() => { pollStatus(); loadAutoLog(); loadPositions(); }, 5000);
-      } catch(e) { alert(e.message); }
-      finally {
-        setTimeout(() => {
-          if (btn) { btn.disabled=false; btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Scan Now'; }
-        }, 3000);
-      }
-    });
-
-    // Save settings
-    $('atSaveBtn')?.addEventListener('click', saveSettings);
-
-    // Leverage buttons
+    // Leverage buttons — auto-save on change
     document.querySelectorAll('.at-lb').forEach(btn => {
       btn.addEventListener('click', () => {
         atLeverage = +btn.dataset.lev;
         document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', b===btn));
+        scheduleSave();
       });
     });
+
+    // Investment / max positions — auto-save on change
+    $('atInvestAmt')?.addEventListener('input', scheduleSave);
+    $('atMaxPos')?.addEventListener('input', scheduleSave);
 
     // Refresh positions
     $('atRefreshPos')?.addEventListener('click', () => { loadAccount(); loadPositions(); });
 
     // Refresh log
     $('atRefreshLog')?.addEventListener('click', loadAutoLog);
-
-    // Simulation
-    $('atSimBtn')?.addEventListener('click', runSimulation);
-    $('atBtBtn')?.addEventListener('click', runBacktest);
   }
 
   // ── Page open ──────────────────────────────────────────────────────────────
   function open() {
     checkCredentials().then(() => {
-      if (autoEnabled) pollStatus();
+      startStatusPoll();
     });
     loadAutoLog();
   }

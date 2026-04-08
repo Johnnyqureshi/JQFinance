@@ -1482,7 +1482,13 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 
   let tpPrice, slPrice;
   if (sig.vah && sig.val) {
-    tpPrice = parseFloat(sig.vah.toFixed(2));
+    const isPocBreak = sig.zoneStr?.includes('POC breakout');
+    const vaWidth    = sig.vah - sig.val;
+    // POC breakout: target a full VA-width above VAH (momentum projection)
+    // VAL bounce:   target VAH (price travels floor → ceiling of value area)
+    tpPrice = isPocBreak && vaWidth > 0
+      ? parseFloat((sig.vah + vaWidth).toFixed(2))
+      : parseFloat(sig.vah.toFixed(2));
     slPrice = parseFloat((sig.val - (atr ? 0.5 * atr : sig.val * 0.005)).toFixed(2));
     // Sanity: TP must be above entry, SL must be below entry
     if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
@@ -1845,15 +1851,19 @@ async function atRunForUser(userId, dryRun = false) {
     const actionable = analyses
       .filter(a => {
         if (a.sig?.signal !== 'BUY') return false;
-        const sig  = a.sig;
-        const atr  = sig.atr || (sig.val ? sig.val * 0.005 : 0);
-        const sl   = sig.val - atr * 0.5;
-        const tp   = sig.vah;
-        const px   = sig.price;
-        if (!tp || !sl || !px) return false;
-        const rr   = (tp - px) / Math.max(px - sl, 0.001);
+        const sig          = a.sig;
+        const atr          = sig.atr || (sig.val ? sig.val * 0.005 : 0);
+        const sl           = sig.val - atr * 0.5;
+        const px           = sig.price;
+        if (!sig.vah || !sl || !px) return false;
+        const isPocBreak   = sig.zoneStr?.includes('POC breakout');
+        const vaWidth      = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
+        // POC breakouts extend TP a full VA-width above VAH (momentum projection)
+        // VAL bounces keep TP = VAH (price travels from floor to ceiling of VA)
+        const tp = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
+        const rr = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
-          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR} (VA too tight)`);
+          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR} (VA too tight)${isPocBreak ? ' [extended TP used]' : ''}`);
           return false;
         }
         return true;
@@ -1867,11 +1877,15 @@ async function atRunForUser(userId, dryRun = false) {
       const sig = a.sig || {};
       const c   = sig.confidence || 0;
       const lev = c >= 90 ? maxLevSetting : c >= 80 ? Math.min(maxLevSetting, 2) : 1;
-      // VP-based TP/SL for display
-      const entryPx = sig.price ? parseFloat((sig.price * 1.0005).toFixed(4)) : null;
+      // VP-based TP/SL for display — POC breakouts show extended TP (VAH + VA width)
+      const entryPx      = sig.price ? parseFloat((sig.price * 1.0005).toFixed(4)) : null;
       let tp_price = null, sl_price = null;
       if (sig.vah && sig.val && entryPx) {
-        tp_price = parseFloat(sig.vah.toFixed(2));
+        const isPocBreakDisp = sig.zoneStr?.includes('POC breakout');
+        const vaWidthDisp    = sig.vah - sig.val;
+        tp_price = isPocBreakDisp && vaWidthDisp > 0
+          ? parseFloat((sig.vah + vaWidthDisp).toFixed(2))
+          : parseFloat(sig.vah.toFixed(2));
         sl_price = parseFloat((sig.val - (sig.atr ? 0.5 * sig.atr : sig.val * 0.005)).toFixed(2));
         if (tp_price <= entryPx) tp_price = parseFloat((entryPx * 1.02).toFixed(2));
         if (sl_price >= entryPx) sl_price = parseFloat((entryPx * 0.985).toFixed(2));

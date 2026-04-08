@@ -33,6 +33,13 @@ db.exec(`
     PRIMARY KEY (user_id, symbol),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS alpaca_creds (
+    user_id    INTEGER PRIMARY KEY,
+    api_key    TEXT    NOT NULL,
+    api_secret TEXT    NOT NULL,
+    mode       TEXT    DEFAULT 'paper',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -699,6 +706,142 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'AI service unreachable.' });
   }
+});
+
+// ── Alpaca Markets Integration ─────────────────────────────────────────────────
+
+function getAlpacaCreds(userId) {
+  return db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
+}
+
+async function alpacaFetch(userId, path, opts = {}) {
+  const creds = getAlpacaCreds(userId);
+  if (!creds) throw new Error('Alpaca not connected. Please add your API credentials.');
+  const base = creds.mode === 'live'
+    ? 'https://api.alpaca.markets'
+    : 'https://paper-api.alpaca.markets';
+  const r = await fetch(base + path, {
+    ...opts,
+    headers: {
+      'APCA-API-KEY-ID':     creds.api_key,
+      'APCA-API-SECRET-KEY': creds.api_secret,
+      'Content-Type':        'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  if (r.status === 204) return {};
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.message || `Alpaca error (${r.status})`);
+  return data;
+}
+
+// Save credentials
+app.put('/api/alpaca/credentials', requireAuth, (req, res) => {
+  const { apiKey, apiSecret, mode } = req.body || {};
+  if (!apiKey || !apiSecret) return res.status(400).json({ error: 'API key and secret required.' });
+  const m = mode === 'live' ? 'live' : 'paper';
+  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?, ?, ?, ?)').run(req.session.userId, apiKey.trim(), apiSecret.trim(), m);
+  res.json({ ok: true, mode: m });
+});
+
+// Delete credentials (disconnect)
+app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM alpaca_creds WHERE user_id = ?').run(req.session.userId);
+  res.json({ ok: true });
+});
+
+// Check connection status
+app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
+  const creds = getAlpacaCreds(req.session.userId);
+  res.json({ connected: !!creds, mode: creds?.mode || 'paper' });
+});
+
+// Account info
+app.get('/api/alpaca/account', requireAuth, async (req, res) => {
+  try { res.json(await alpacaFetch(req.session.userId, '/v2/account')); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Open positions
+app.get('/api/alpaca/positions', requireAuth, async (req, res) => {
+  try { res.json(await alpacaFetch(req.session.userId, '/v2/positions')); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Recent orders
+app.get('/api/alpaca/orders', requireAuth, async (req, res) => {
+  try { res.json(await alpacaFetch(req.session.userId, '/v2/orders?limit=20&status=all')); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Place order (market with optional TP/SL bracket)
+app.post('/api/alpaca/order', requireAuth, async (req, res) => {
+  const { symbol, side, amount, tpPct, slPct } = req.body || {};
+  if (!symbol || !side || !amount) return res.status(400).json({ error: 'symbol, side, amount required.' });
+
+  try {
+    // Get live price to calculate shares and TP/SL levels
+    const quote = await yfChartQuote(symbol);
+    if (!quote?.regularClose && !quote?.price) throw new Error('Could not fetch current price for ' + symbol);
+    const price = quote.regularClose ?? quote.price;
+
+    const hasBracket = tpPct > 0 || slPct > 0;
+    const sideL = side.toLowerCase();
+
+    let orderBody;
+
+    if (hasBracket) {
+      // Bracket orders require integer-like qty (Alpaca limitation)
+      const shares = Math.max(1, Math.floor(amount / price));
+      orderBody = {
+        symbol,
+        qty:            String(shares),
+        side:           sideL,
+        type:           'market',
+        time_in_force:  'day',
+        order_class:    'bracket',
+      };
+      if (tpPct > 0) {
+        const tpPrice = sideL === 'buy'
+          ? (price * (1 + tpPct / 100)).toFixed(2)
+          : (price * (1 - tpPct / 100)).toFixed(2);
+        orderBody.take_profit = { limit_price: tpPrice };
+      }
+      if (slPct > 0) {
+        const slPrice = sideL === 'buy'
+          ? (price * (1 - slPct / 100)).toFixed(2)
+          : (price * (1 + slPct / 100)).toFixed(2);
+        orderBody.stop_loss = { stop_price: slPrice };
+      }
+    } else {
+      // Simple notional order (supports fractional shares)
+      orderBody = {
+        symbol,
+        notional:       amount.toFixed(2),
+        side:           sideL,
+        type:           'market',
+        time_in_force:  'day',
+      };
+    }
+
+    const data = await alpacaFetch(req.session.userId, '/v2/orders', {
+      method: 'POST',
+      body:   JSON.stringify(orderBody),
+    });
+    res.json({ ok: true, order: data, shares: orderBody.qty || null, price });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Cancel order
+app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
+  try { await alpacaFetch(req.session.userId, `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Close position (market sell)
+app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
+  try { res.json(await alpacaFetch(req.session.userId, `/v2/positions/${req.params.sym}`, { method: 'DELETE' })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

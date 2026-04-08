@@ -133,6 +133,7 @@ function goPage(page) {
   if (page==='markets')   loadMarkets();
   if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); }
   if (page==='scanner')   scanner.open();
+  if (page==='trading')   alpacaTrader.open();
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────

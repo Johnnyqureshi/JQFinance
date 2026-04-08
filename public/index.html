@@ -77,6 +77,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       Scanner
     </button>
+    <button class="nav-link" data-page="trading">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      Trading
+    </button>
   </div>
 
   <div class="nav-right">
@@ -748,12 +752,230 @@
 
 </div>
 
+<!-- TRADING PAGE -->
+<div class="page" id="page-trading">
+  <div class="trd-page">
+
+    <!-- Header -->
+    <div class="trd-header">
+      <div class="trd-header-left">
+        <div class="trd-header-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        </div>
+        <div>
+          <div class="trd-header-title">Trading Desk</div>
+          <div class="trd-header-sub">Powered by Alpaca Markets</div>
+        </div>
+      </div>
+      <div class="trd-header-right">
+        <div class="trd-mode-badge" id="trdModeBadge">PAPER</div>
+        <div class="trd-conn-status">
+          <span class="trd-conn-dot" id="trdConnDot"></span>
+          <span id="trdConnText">Not connected</span>
+        </div>
+        <button class="trd-conn-btn" id="trdConnBtn">Connect Alpaca</button>
+      </div>
+    </div>
+
+    <!-- Main: Analysis + Trade Setup -->
+    <div class="trd-main">
+
+      <!-- LEFT: Compact Analysis -->
+      <div class="trd-analysis-col">
+
+        <div class="trd-sym-bar">
+          <div class="trd-sym-search">
+            <input type="text" id="trdSymInput" placeholder="Symbol e.g. AAPL" maxlength="10" autocomplete="off" spellcheck="false"/>
+            <button class="trd-sym-go" id="trdSymGo">Load</button>
+          </div>
+          <div class="trd-sym-current">
+            <span class="trd-sym-ticker" id="trdTicker">--</span>
+            <span class="trd-sym-price" id="trdPrice">--</span>
+            <span class="trd-sym-chg" id="trdChg"></span>
+            <span class="trd-ext-badge" id="trdExtBadge" style="display:none"></span>
+          </div>
+        </div>
+
+        <div class="trd-quick-grid" id="trdQuickGrid"></div>
+
+        <div class="trd-analysis-panel">
+          <div class="trd-analysis-loading" id="trdAnalysisLoading" style="display:none">
+            <div class="spinner"></div><span>Analyzing…</span>
+          </div>
+          <div id="trdAnalysisBody">
+            <div class="trd-stat-row">
+              <div class="trd-stat"><div class="trd-stat-lbl">VWAP</div><div class="trd-stat-val" id="trdVwap">--</div></div>
+              <div class="trd-stat"><div class="trd-stat-lbl">RSI (5m)</div><div class="trd-stat-val" id="trdRsi">--</div></div>
+              <div class="trd-stat"><div class="trd-stat-lbl">vs VWAP</div><div class="trd-stat-val" id="trdVwapPos">--</div></div>
+              <div class="trd-stat"><div class="trd-stat-lbl">Volume</div><div class="trd-stat-val" id="trdVol">--</div></div>
+            </div>
+            <div class="trd-signal-row">
+              <div class="trd-sig-badge" id="trdSignal">--</div>
+              <div class="trd-sig-conf" id="trdSignalConf"></div>
+              <div class="trd-bias-badge" id="trdBias"></div>
+            </div>
+            <div class="trd-sr-row">
+              <div class="trd-sr-item trd-sup"><span class="trd-sr-lbl">▲ Support</span><span class="trd-sr-val" id="trdSupport">--</span></div>
+              <div class="trd-sr-item trd-res"><span class="trd-sr-lbl">▼ Resistance</span><span class="trd-sr-val" id="trdResistance">--</span></div>
+            </div>
+            <div class="trd-pivot-strip" id="trdPivotStrip">
+              <div class="trd-pvt"><span class="trd-pvl r">R2</span><span class="trd-pvv" id="trdR2">--</span></div>
+              <div class="trd-pvt"><span class="trd-pvl r">R1</span><span class="trd-pvv" id="trdR1">--</span></div>
+              <div class="trd-pvt trd-pp"><span class="trd-pvl">PP</span><span class="trd-pvv" id="trdPP">--</span></div>
+              <div class="trd-pvt"><span class="trd-pvl s">S1</span><span class="trd-pvv" id="trdS1">--</span></div>
+              <div class="trd-pvt"><span class="trd-pvl s">S2</span><span class="trd-pvv" id="trdS2">--</span></div>
+            </div>
+            <div class="trd-reasons" id="trdReasons"></div>
+          </div>
+          <div class="trd-refresh-foot">
+            <span id="trdRefreshCd">⟳ 60s</span>
+            <button class="trd-btn-ghost" id="trdRefreshNow">Refresh Now</button>
+          </div>
+        </div>
+
+      </div><!-- /.trd-analysis-col -->
+
+      <!-- RIGHT: Trade Setup -->
+      <div class="trd-setup-col">
+        <div class="trd-setup-panel">
+
+          <div class="trd-setup-title">Quick Order</div>
+
+          <div class="trd-side-row">
+            <button class="trd-side-btn trd-buy active" id="trdBuyBtn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+              BUY LONG
+            </button>
+            <button class="trd-side-btn trd-sell" id="trdSellBtn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              SELL SHORT
+            </button>
+          </div>
+
+          <div class="trd-field">
+            <label class="trd-lbl">Trade Amount (USD)</label>
+            <div class="trd-amount-wrap">
+              <span class="trd-dollar-sign">$</span>
+              <input type="number" id="trdAmount" class="trd-amount-input" value="500" min="1" max="999999" step="100"/>
+            </div>
+            <div class="trd-shares-hint" id="trdSharesHint">≈ -- shares @ --</div>
+          </div>
+
+          <div class="trd-field">
+            <label class="trd-lbl">Take Profit</label>
+            <div class="trd-pct-row">
+              <button class="trd-adj-btn" id="trdTpMinus">−</button>
+              <span class="trd-pct-val trd-green" id="trdTpVal">+2%</span>
+              <button class="trd-adj-btn" id="trdTpPlus">+</button>
+              <button class="trd-off-btn" id="trdTpOff">OFF</button>
+            </div>
+            <div class="trd-level-hint green" id="trdTpLevel">→ --</div>
+          </div>
+
+          <div class="trd-field">
+            <label class="trd-lbl">Stop Loss</label>
+            <div class="trd-pct-row">
+              <button class="trd-adj-btn" id="trdSlMinus">−</button>
+              <span class="trd-pct-val trd-red" id="trdSlVal">−1%</span>
+              <button class="trd-adj-btn" id="trdSlPlus">+</button>
+              <button class="trd-off-btn" id="trdSlOff">OFF</button>
+            </div>
+            <div class="trd-level-hint red" id="trdSlLevel">→ --</div>
+          </div>
+
+          <div class="trd-summary-box" id="trdSummaryBox">
+            <div class="trd-sum-row"><span>Symbol</span><span id="trdSumSym">--</span></div>
+            <div class="trd-sum-row"><span>Price</span><span id="trdSumPrice">--</span></div>
+            <div class="trd-sum-row"><span>Shares (est.)</span><span id="trdSumShares">--</span></div>
+            <div class="trd-sum-row"><span>Order Type</span><span id="trdSumType">Market</span></div>
+          </div>
+
+          <button class="trd-execute-btn" id="trdExecuteBtn" disabled>
+            Connect Alpaca to Trade
+          </button>
+          <div class="trd-order-msg" id="trdOrderMsg"></div>
+
+        </div>
+      </div><!-- /.trd-setup-col -->
+
+    </div><!-- /.trd-main -->
+
+    <!-- Bottom: Account / Positions / Orders -->
+    <div class="trd-bottom">
+
+      <div class="trd-bot-panel">
+        <div class="trd-bot-head">
+          Account
+          <button class="trd-icon-btn" id="trdRefreshAccount" title="Refresh">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        </div>
+        <div id="trdAccountBody"><div class="trd-bot-empty">Connect Alpaca to view account</div></div>
+      </div>
+
+      <div class="trd-bot-panel">
+        <div class="trd-bot-head">
+          Open Positions <span class="trd-badge" id="trdPosCount">0</span>
+        </div>
+        <div id="trdPositionsBody"><div class="trd-bot-empty">No open positions</div></div>
+      </div>
+
+      <div class="trd-bot-panel">
+        <div class="trd-bot-head">
+          Recent Orders <span class="trd-badge" id="trdOrdCount">0</span>
+        </div>
+        <div id="trdOrdersBody"><div class="trd-bot-empty">No recent orders</div></div>
+      </div>
+
+    </div><!-- /.trd-bottom -->
+
+  </div><!-- /.trd-page -->
+</div><!-- /.page#page-trading -->
+
+<!-- ALPACA CONNECT MODAL -->
+<div class="trd-modal-bg" id="trdModal" style="display:none" role="dialog" aria-modal="true">
+  <div class="trd-modal-card">
+    <button class="trd-modal-x" id="trdModalClose">✕</button>
+    <div class="trd-modal-head">
+      <div class="trd-modal-logo">
+        <svg width="26" height="26" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="6" fill="#FFDB58"/><path d="M8 22L14 10L20 16L26 10" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <div class="trd-modal-title">Connect Alpaca Markets</div>
+        <div class="trd-modal-sub">API keys stored securely per user</div>
+      </div>
+    </div>
+    <div class="trd-mode-tabs">
+      <button class="trd-mode-tab active" data-mode="paper" id="trdTabPaper">📋 Paper Trading</button>
+      <button class="trd-mode-tab" data-mode="live" id="trdTabLive">💵 Live Trading</button>
+    </div>
+    <div class="trd-live-warn" id="trdLiveWarn" style="display:none">⚠️ Live mode trades real money. Double-check your keys before connecting.</div>
+    <div class="trd-modal-field">
+      <label class="trd-modal-lbl">API Key ID</label>
+      <input class="trd-modal-inp" id="trdApiKey" type="text" placeholder="PKXXXXXXXXXXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false"/>
+    </div>
+    <div class="trd-modal-field">
+      <label class="trd-modal-lbl">API Secret Key</label>
+      <input class="trd-modal-inp" id="trdApiSecret" type="password" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="off"/>
+    </div>
+    <div class="trd-modal-err" id="trdModalErr"></div>
+    <div class="trd-modal-btns">
+      <button class="trd-modal-save" id="trdModalSave">Connect</button>
+      <button class="trd-modal-disc" id="trdModalDisc" style="display:none">Disconnect</button>
+    </div>
+    <div class="trd-modal-hint">
+      Get free API keys at <a href="https://app.alpaca.markets" target="_blank" rel="noopener">app.alpaca.markets</a> → API Keys. Paper trading is risk-free.
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script src="/js/app.js"></script>
 <script src="/js/trader.js"></script>
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/scanner.js"></script>
+<script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
 
 <!-- MOBILE BOTTOM NAV -->
@@ -773,6 +995,10 @@
   <button class="mobile-nav-btn nav-link" data-page="scanner" aria-label="Scanner">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
+  </button>
+  <button class="mobile-nav-btn nav-link" data-page="trading" aria-label="Trading">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+    <span>Trading</span>
   </button>
 </nav>
 

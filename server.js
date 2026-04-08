@@ -1040,10 +1040,10 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr) {
 
   // Build per-condition check map for transparency
   const checks = {
-    price_above_5:    { pass: price > 5,                    detail: '$' + price.toFixed(2) },
+    price_above_2:    { pass: price > 2,                    detail: '$' + price.toFixed(2) },
     above_ema9:       { pass: ema9 != null && price > ema9,  detail: ema9  ? 'EMA9='  + ema9.toFixed(2)  : 'insufficient data' },
     above_ema21:      { pass: ema21 != null && price > ema21,detail: ema21 ? 'EMA21=' + ema21.toFixed(2) : 'insufficient data' },
-    rsi_in_range:     { pass: rsi != null && rsi >= 40 && rsi <= 65, detail: 'RSI=' + (rsi?.toFixed(0) ?? 'n/a') },
+    rsi_in_range:     { pass: rsi != null && rsi >= 30 && rsi <= 75, detail: 'RSI=' + (rsi?.toFixed(0) ?? 'n/a') },
     volume_ok:        { pass: volData.avgV > 0 && volData.lastV >= volData.avgV,
                         detail: 'vol ' + (volData.avgV > 0 ? (volData.lastV / volData.avgV).toFixed(1) + '× avg' : 'n/a') },
     hhhl_structure:   { pass: hhhl, detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
@@ -1127,25 +1127,26 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const price = sig.price;
   const atr   = sig.atr;
 
-  // Cash account — no shorting, BUY only
-  if (sig.signal !== 'BUY') return { skipped: true, reason: 'cash account: BUY only' };
+  // BUY only
+  if (sig.signal !== 'BUY') return { skipped: true, reason: 'BUY only mode' };
 
-  // Price must be > $5 (already enforced in signal, double-check here)
-  if (price <= 5) return { skipped: true, reason: 'penny stock (price ≤ $5)' };
+  // Price must be > $2
+  if (price <= 2) return { skipped: true, reason: 'price ≤ $2' };
 
   // Need ATR for position sizing
   if (!atr || atr <= 0) return { skipped: true, reason: 'ATR unavailable' };
 
   // ── ATR-based SL / TP ─────────────────────────────────────────────────────
   // SL = 1.5× ATR below entry, TP = minimum 2:1 R:R = 3× ATR above entry
+  const lev      = Math.min(4, Math.max(1, settings.leverage || 1));
   const slDist   = parseFloat((1.5 * atr).toFixed(4));
   const tpDist   = parseFloat((3.0 * atr).toFixed(4));   // 2:1 R:R
   const limitPx  = parseFloat((price * 1.0005).toFixed(4)); // limit 0.05% above
   const slPrice  = parseFloat((limitPx - slDist).toFixed(2));
   const tpPrice  = parseFloat((limitPx + tpDist).toFixed(2));
 
-  // ── Position sizing: 1% of settled cash / SL distance ─────────────────────
-  const riskUSD    = settledCash * (settings.risk_pct / 100); // max 1% by default
+  // ── Position sizing: risk_pct% of settled cash × leverage / SL distance ───
+  const riskUSD    = settledCash * (settings.risk_pct / 100) * lev;
   const rawShares  = Math.floor(riskUSD / slDist);
   const maxByBP    = Math.floor((buyingPower * 0.95) / limitPx);
   const shares     = Math.max(1, Math.min(rawShares, maxByBP));
@@ -1262,14 +1263,7 @@ async function atCheckExits(userId, positions, settings, session) {
       const closes = bars ? bars.map(b => b.c) : [];
       const ema9   = closes.length >= 9 ? atEMA(closes, 9) : null;
 
-      // ── Exit Rule 1: Force close at 3:45 PM ET (15 min before close) ─────────
-      if (session?.isNearClose) {
-        await atClosePosition(userId, log, pnl, 'time_based_close_345pm');
-        exitCount++;
-        continue;
-      }
-
-      // ── Exit Rule 2: Hard exit if price closes below 9 EMA ───────────────────
+      // ── Hard exit if price closes below 9 EMA ────────────────────────────────
       if (ema9 != null && curPrice < ema9) {
         await atClosePosition(userId, log, pnl, 'price_below_ema9');
         exitCount++;
@@ -1393,7 +1387,7 @@ async function atRunForUser(userId, dryRun = false) {
       const arr  = Array.isArray(rawQ) ? rawQ : (rawQ ? [rawQ] : []);
       candidates = arr
         .filter(q => q?.symbol
-          && (q.regularMarketPrice || 0) > 5          // no penny stocks
+          && (q.regularMarketPrice || 0) > 2          // price > $2
           && (q.regularMarketVolume || 0) >= MIN_DAILY_VOL)
         .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0))
         .slice(0, 12)
@@ -1413,7 +1407,7 @@ async function atRunForUser(userId, dryRun = false) {
     });
 
     // ── 4. Analyze candidates — find highest-confidence BUY signal ────────────
-    const MAX_POSITIONS = 2; // hard limit per document
+    const MAX_POSITIONS = Math.min(settings.max_positions || 1, 4); // user-configurable, max 4
     const atmOpen = db.prepare(
       `SELECT COUNT(*) as cnt FROM auto_trade_log WHERE user_id=? AND status IN ('open','pending_fill')`
     ).get(userId)?.cnt || 0;
@@ -1452,7 +1446,7 @@ async function atRunForUser(userId, dryRun = false) {
     }));
 
     // ── 5. Place order for best BUY signal ────────────────────────────────────
-    const canEnter = !dryRun && session.isMarketOpen && !session.isEarlyWindow && !session.isNearClose && atmOpen < MAX_POSITIONS && actionable.length > 0;
+    const canEnter = !dryRun && session.isMarketOpen && atmOpen < MAX_POSITIONS && actionable.length > 0;
     if (canEnter) {
       const best = actionable[0];
       result.entryAttempt = best.symbol;
@@ -1465,16 +1459,6 @@ async function atRunForUser(userId, dryRun = false) {
           lastAction: 'Rate limit reached (' + rateLimitRemaining(userId) + ' left this hour)',
         });
       }
-    } else if (!dryRun && session.isEarlyWindow) {
-      autoTraderStatus.set(userId, {
-        ...(autoTraderStatus.get(userId) || {}),
-        lastAction: 'Early session blackout (9:30–9:45 ET) — monitoring only',
-      });
-    } else if (!dryRun && session.isNearClose) {
-      autoTraderStatus.set(userId, {
-        ...(autoTraderStatus.get(userId) || {}),
-        lastAction: 'Near close (3:45 PM ET) — no new entries, force-closing positions',
-      });
     } else if (!dryRun && !session.isMarketOpen) {
       autoTraderStatus.set(userId, {
         ...(autoTraderStatus.get(userId) || {}),
@@ -1524,9 +1508,8 @@ console.log('[AutoTrader] Engine started — scanning every 60 s');
 
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 
-// Document rules: max 2 positions, 1% risk, no leverage, 500k min vol, 68% conf
 const AT_DEFAULTS = {
-  enabled: 0, max_positions: 2, risk_pct: 1.0, leverage: 1.0,
+  enabled: 0, max_positions: 1, risk_pct: 1.0, leverage: 1.0,
   tp_pct: 3.0, sl_pct: 1.5, min_volume: 500_000, confidence_threshold: 68,
 };
 
@@ -1546,9 +1529,9 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
-    clamp(b.max_positions,        1,   2,           2),    // hard max 2 (cash account rule)
-    clamp(b.risk_pct,             0.5, 5,           1),    // document: 1% max
-    clamp(b.leverage,             1,   1,           1),    // cash account: no leverage
+    clamp(b.max_positions,        1,   4,           1),
+    clamp(b.risk_pct,             0.5, 10,          1),
+    clamp(b.leverage,             1,   4,           1),
     clamp(b.tp_pct,               0.5, 20,          3),
     clamp(b.sl_pct,               0.5, 10,          1.5),
     clamp(b.min_volume,           500_000, 100_000_000, 500_000), // min 500k
@@ -1572,20 +1555,19 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
   const st  = autoTraderStatus.get(req.session.userId) || {};
   const rl  = rateLimitRemaining(req.session.userId);
   const sess = atSessionInfo();
+  const settings2 = db.prepare('SELECT max_positions FROM auto_trade_settings WHERE user_id=?').get(req.session.userId);
   const openCount = db.prepare(
     `SELECT COUNT(*) as cnt FROM auto_trade_log WHERE user_id=? AND status IN ('open','pending_fill')`
   ).get(req.session.userId)?.cnt || 0;
   res.json({
-    scanning:    false,
-    lastScan:    null,
-    lastAction:  null,
-    candidates:  [],
-    marketOpen:  sess.isMarketOpen,
-    earlyWindow: sess.isEarlyWindow,
-    nearClose:   sess.isNearClose,
+    scanning:      false,
+    lastScan:      null,
+    lastAction:    null,
+    candidates:    [],
+    marketOpen:    sess.isMarketOpen,
     openPositions: openCount,
-    maxPositions:  2,
-    rateLimit:   rl,
+    maxPositions:  settings2?.max_positions || 1,
+    rateLimit:     rl,
     ...st,
   });
 });

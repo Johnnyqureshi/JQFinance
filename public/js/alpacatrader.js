@@ -458,20 +458,15 @@ const alpacaTrader = (() => {
       const scanIconEl=$('trdAutoScanIcon');
       if(scanIconEl) scanIconEl.style.display=st.scanning?'':'none';
 
-      // Market open badge + session guard labels
+      // Market open badge
       const mktEl=$('trdMarketStatus');
       if(mktEl){
-        let mktLabel,mktCls;
-        if(!st.marketOpen){mktLabel='Market Closed';mktCls='mkt-closed';}
-        else if(st.nearClose){mktLabel='Near Close (3:45 ET)';mktCls='mkt-warn';}
-        else if(st.earlyWindow){mktLabel='Early Blackout (9:30–9:45)';mktCls='mkt-warn';}
-        else{mktLabel='Market Open';mktCls='mkt-open';}
-        mktEl.textContent=mktLabel;
-        mktEl.className='trd-mkt-badge '+mktCls;
+        mktEl.textContent=st.marketOpen?'Market Open':'Market Closed';
+        mktEl.className='trd-mkt-badge '+(st.marketOpen?'mkt-open':'mkt-closed');
       }
       // Open positions counter
       const posEl=$('trdOpenPositions');
-      if(posEl) posEl.textContent=(st.openPositions||0)+'/2 positions';
+      if(posEl) posEl.textContent=(st.openPositions||0)+'/'+(st.maxPositions||1)+' positions';
       // Rate limit remaining
       const rlEl=$('trdRateLimit');
       if(rlEl&&st.rateLimit!=null) rlEl.textContent='Orders left: '+st.rateLimit+'/10';

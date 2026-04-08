@@ -912,7 +912,8 @@ try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1'); 
 // ── Per-user in-memory state ──────────────────────────────────────────────────
 const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAction, candidates, error }
 // orderRateLimiter removed — Alpaca enforces its own rate limits
-const atScanningUsers   = new Set(); // userId → prevents concurrent scans
+const atLastTradeTs     = new Map(); // userId -> last placed-order timestamp (cooldown gate)
+const atScanningUsers   = new Set(); // userId -> prevents concurrent scans
 
 // ── Sector ETFs — used for rotation detection each scan cycle ────────────────
 const SECTOR_ETFS = ['XLK','XLF','XLE','XLV','XLI','XLC','XLY','XLP','XLB','XLRE','XLU'];
@@ -1282,9 +1283,10 @@ function atSessionInfo() {
   const mins  = et.getHours() * 60 + et.getMinutes();
   const isWeekend     = day === 0 || day === 6;
   const isMarketOpen  = !isWeekend && mins >= 570 && mins < 960; // 9:30–16:00
-  const isEarlyWindow = !isWeekend && mins >= 570 && mins < 585; // 9:30–9:45 blackout
-  const isNearClose   = !isWeekend && mins >= 945;               // ≥ 15:45 → force close
-  return { isMarketOpen, isEarlyWindow, isNearClose, mins };
+  const isEarlyWindow   = !isWeekend && mins >= 570 && mins < 585; // 9:30–9:45 initial volatility blackout
+  const isMorningWindow = !isWeekend && mins >= 585 && mins < 690; // 9:45–11:30 high-volume entry window
+  const isNearClose     = !isWeekend && mins >= 945;               // ≥ 15:45 force close
+  return { isMarketOpen, isEarlyWindow, isMorningWindow, isNearClose, mins };
 }
 
 // ── Signal engine — Volume Profile first, RSI/VWAP/EMA as secondary ──────────
@@ -1333,7 +1335,7 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
   //                (mid-day bars always read low volume vs open — volOk would kill every setup)
   //  poc_breakout: price above POC with any above-average volume conviction
   const val_bounce   = nearVAL  && belowVAH && price > 2;
-  const poc_breakout = abovePOC && belowVAH && price > 2 && volRatio >= 1.2;
+  const poc_breakout = abovePOC && belowVAH && price > 2 && volRatio >= 1.5; // require surge (1.5×) for breakout conviction
   const primaryFires = val_bounce || poc_breakout;
 
   // ── Zone description for UI ────────────────────────────────────────────────
@@ -1832,18 +1834,22 @@ async function atRunForUser(userId, dryRun = false) {
       console.log(`[AT] ${a.symbol}: ${s.signal} conf=${s.confidence}% price=$${s.price?.toFixed(2)} zone="${zone}" ${vpStr}`);
     }
 
-    // BUY only (cash account) — VP trigger fires + minimum R:R of 1.0
-    const MIN_RR = 1.0;
+    // BUY only (cash account) — VP trigger fires + minimum R:R + minimum confidence
+    const MIN_RR         = 1.0;
+    const MIN_CONFIDENCE = 75; // only high-quality setups — reduces overtrading
     const actionable = analyses
       .filter(a => {
         if (a.sig?.signal !== 'BUY') return false;
-        const sig          = a.sig;
-        const px           = sig.price;
+        const sig = a.sig;
+        const px  = sig.price;
         if (!sig.vah || !px) return false;
-        const isPocBreak   = sig.zoneStr?.includes('POC breakout');
-        const vaWidth      = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
+        if ((sig.confidence || 0) < MIN_CONFIDENCE) {
+          console.log(`[AT] ${a.symbol}: BUY skipped — confidence ${sig.confidence}% < ${MIN_CONFIDENCE}%`);
+          return false;
+        }
+        const isPocBreak = sig.zoneStr?.includes('POC breakout');
+        const vaWidth    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
         const tp  = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
-        // SL = 0.5% below entry (matches atPlaceOrder)
         const sl  = px * 0.995;
         const rr  = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
@@ -1909,7 +1915,21 @@ async function atRunForUser(userId, dryRun = false) {
     });
 
     // ── 5. Place order — walk all actionable signals until one fills ──────────
-    const canEnter = !dryRun && session.isMarketOpen && atmOpen < MAX_POSITIONS && actionable.length > 0 && !pdtBlocked;
+    // Entry gates: market open + morning window + cooldown + daily trade cap + PDT
+    const COOLDOWN_MS   = 90 * 60 * 1000;                              // 90 min between entries
+    const MAX_DAILY     = equity < 25000 ? 2 : 3;                      // PDT-safe daily cap
+    const lastTs        = atLastTradeTs.get(userId);
+    const cooldownOk    = !lastTs || (Date.now() - lastTs) >= COOLDOWN_MS;
+    const cooldownLeft  = lastTs ? Math.ceil((COOLDOWN_MS - (Date.now() - lastTs)) / 60000) : 0;
+    const todayStr      = new Date().toISOString().slice(0, 10);
+    const todayTrades   = db.prepare(
+      `SELECT COUNT(*) as cnt FROM auto_trade_log WHERE user_id=? AND date(created_at)=? AND status NOT IN ('cancelled')`
+    ).get(userId, todayStr)?.cnt || 0;
+    const dailyOk       = todayTrades < MAX_DAILY;
+
+    const canEnter = !dryRun && session.isMarketOpen && session.isMorningWindow
+                     && atmOpen < MAX_POSITIONS && actionable.length > 0
+                     && !pdtBlocked && cooldownOk && dailyOk;
     if (canEnter) {
       let placed = false;
       for (const candidate of actionable) {
@@ -1919,6 +1939,7 @@ async function atRunForUser(userId, dryRun = false) {
 
         if (orderResult.placed) {
           placed = true;
+          atLastTradeTs.set(userId, Date.now()); // start 90-min cooldown
           break; // success — stop trying further signals this cycle
         }
         if (orderResult.insufficientBP) {
@@ -1938,21 +1959,17 @@ async function atRunForUser(userId, dryRun = false) {
           lastAction: `${actionable.length} signal(s) found — all skipped (BP/price check failed)`,
         });
       }
-    } else if (!dryRun && !session.isMarketOpen) {
-      autoTraderStatus.set(userId, {
-        ...(autoTraderStatus.get(userId) || {}),
-        lastAction: 'Market closed — monitoring exits only',
-      });
-    } else if (!dryRun && atmOpen >= MAX_POSITIONS) {
-      autoTraderStatus.set(userId, {
-        ...(autoTraderStatus.get(userId) || {}),
-        lastAction: 'At max positions (' + atmOpen + '/' + MAX_POSITIONS + ') — monitoring only',
-      });
-    } else if (!dryRun && actionable.length === 0) {
-      autoTraderStatus.set(userId, {
-        ...(autoTraderStatus.get(userId) || {}),
-        lastAction: `Scan complete — no VP entry signals found (${candidates.length} scanned)`,
-      });
+    } else if (!dryRun) {
+      let idleReason;
+      if (!session.isMarketOpen)         idleReason = 'Market closed — monitoring exits only';
+      else if (!session.isMorningWindow) idleReason = 'Outside entry window (9:45–11:30 AM ET) — monitoring exits only';
+      else if (!dailyOk)                 idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
+      else if (!cooldownOk)              idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
+      else if (pdtBlocked)               idleReason = `PDT protection — ${daytradeCount} day trades used`;
+      else if (atmOpen >= MAX_POSITIONS) idleReason = `At max positions (${atmOpen}/${MAX_POSITIONS}) — monitoring only`;
+      else if (actionable.length === 0)  idleReason = `Scan complete — no high-quality VP signals (${candidates.length} scanned, min 75% conf)`;
+      else                               idleReason = 'Scan complete — no actionable signals';
+      if (idleReason) autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: idleReason });
     }
 
   } catch(e) {

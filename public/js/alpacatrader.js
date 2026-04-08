@@ -7,6 +7,7 @@ const alpacaTrader = (() => {
   let alpacaMode  = 'live';
   let autoEnabled = false;
   let atLeverage  = 1;
+  let atOrderType = 'auto';
   let statusPoll  = null;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -146,6 +147,8 @@ const alpacaTrader = (() => {
       if ($('atInvestAmt')) $('atInvestAmt').value = s.investment_amount || 1000;
       if ($('atMaxPos'))    $('atMaxPos').value    = s.max_positions     || 1;
       document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', +b.dataset.lev === atLeverage));
+      atOrderType = s.order_type || 'auto';
+      document.querySelectorAll('.at-otb').forEach(b => b.classList.toggle('active', b.dataset.ot === atOrderType));
       // Auto-enable if not already running
       if (!s.enabled) {
         autoEnabled = true;
@@ -166,6 +169,7 @@ const alpacaTrader = (() => {
         investment_amount: parseFloat($('atInvestAmt')?.value) || 1000,
         max_positions:     parseInt($('atMaxPos')?.value)      || 1,
         leverage:          atLeverage,
+        order_type:        atOrderType,
         min_volume:        500000,
       };
       await apiFetch('/api/alpaca/auto-settings', {
@@ -190,6 +194,7 @@ const alpacaTrader = (() => {
           investment_amount: parseFloat($('atInvestAmt')?.value) || 1000,
           max_positions:     parseInt($('atMaxPos')?.value)      || 1,
           leverage:          atLeverage,
+          order_type:        atOrderType,
           min_volume:        500000,
         }),
       });
@@ -688,6 +693,15 @@ const alpacaTrader = (() => {
       btn.addEventListener('click', () => {
         atLeverage = +btn.dataset.lev;
         document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', b===btn));
+        scheduleSave();
+      });
+    });
+
+    // Order type buttons — auto-save on change
+    document.querySelectorAll('.at-otb').forEach(btn => {
+      btn.addEventListener('click', () => {
+        atOrderType = btn.dataset.ot;
+        document.querySelectorAll('.at-otb').forEach(b => b.classList.toggle('active', b===btn));
         scheduleSave();
       });
     });

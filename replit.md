@@ -5,13 +5,15 @@
 Johnny Qureshi Finance is a real-time stock market dashboard with a fully automated Alpaca trading engine. Built with Node.js/Express backend and vanilla HTML/CSS/JS frontend.
 
 ### Auto-Trader Engine (key facts)
-- Universe: 77 symbols (mega-cap, tech, high-beta, ETFs)
+- Universe: dynamic (Yahoo most-active top 100 + sector rotation via 11 sector ETFs + leveraged ETF universe)
 - Bar data: 5-day fixed-range VP using 5m bars (~390 bars/symbol) — stable all day
 - Primary triggers: VAL bounce (price at 5-day VAL) OR POC breakout (above POC + 1.2× vol)
 - volOk NOT required for val_bounce — pure price-position signal
 - Scans all qualifying symbols (price>$2, vol>500k) — no hard cap
 - Interval: 60 seconds
-- TP = VAH, SL = VAL − 0.5×ATR
+- TP = VAH, SL = VAL − 0.5×ATR; minimum R:R ≥ 1.0 enforced before order placement
+- Order type: configurable — Auto (limit on VAL bounce, market on POC breakout), Limit always, Market always
+- Limit price uses .toFixed(2) (Alpaca rejects sub-penny prices)
 
 ## User Preferences
 

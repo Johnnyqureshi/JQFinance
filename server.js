@@ -73,6 +73,7 @@ db.exec(`
 [
   `ALTER TABLE auto_trade_settings ADD COLUMN investment_amount REAL DEFAULT 1000.0`,
   `ALTER TABLE auto_trade_settings ADD COLUMN min_volume INTEGER DEFAULT 500000`,
+  `ALTER TABLE auto_trade_settings ADD COLUMN order_type TEXT DEFAULT 'auto'`,
   `ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1`,
   `ALTER TABLE auto_trade_log ADD COLUMN exit_reason TEXT`,
   `ALTER TABLE auto_trade_log ADD COLUMN order_placed_at TEXT`,
@@ -1493,22 +1494,35 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     return { insufficientBP: true };
   }
 
-  const slDist   = parseFloat((limitPx - slPrice).toFixed(4));
-  const tpDist   = parseFloat((tpPrice  - limitPx).toFixed(4));
+  // ── Determine order type ──────────────────────────────────────────────────
+  //   auto   → market for poc_breakout (speed matters), limit for val_bounce (precise entry)
+  //   limit  → always limit (current price + 0.05% buffer)
+  //   market → always market (fills immediately at best available price)
+  const orderTypeSetting = settings.order_type || 'auto';
+  const signalType       = sig.zoneStr || '';
+  const useMarket = orderTypeSetting === 'market'
+    || (orderTypeSetting === 'auto' && signalType.includes('POC breakout'));
+  const entryPx  = useMarket ? price : limitPx; // for sizing when market
+
+  const slDist   = parseFloat((entryPx - slPrice).toFixed(4));
+  const tpDist   = parseFloat((tpPrice  - entryPx).toFixed(4));
   const rr       = slDist > 0 ? (tpDist / slDist).toFixed(2) : '?';
 
-  // ── Limit bracket order ────────────────────────────────────────────────────
+  // ── Build order body — limit or market bracket ────────────────────────────
   const orderBody = {
     symbol:        sym,
     qty:           String(shares),
     side:          'buy',
-    type:          'limit',
-    limit_price:   String(limitPx),
+    type:          useMarket ? 'market' : 'limit',
     time_in_force: 'day',
     order_class:   'bracket',
     take_profit:   { limit_price: String(tpPrice) },
     stop_loss:     { stop_price:  String(slPrice)  },
   };
+  // Limit orders need an explicit limit_price; market orders must NOT include it
+  if (!useMarket) orderBody.limit_price = String(limitPx);
+
+  console.log(`[AT] ${sym}: ${useMarket ? 'MARKET' : 'LIMIT'} order (${orderTypeSetting}) qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} R:R=${rr}`);
 
   const order = await alpacaFetch(userId, '/v2/orders', {
     method: 'POST',
@@ -1933,7 +1947,7 @@ console.log('[AutoTrader] Engine started — scanning every 60 s');
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 
 const AT_DEFAULTS = {
-  enabled: 0, max_positions: 1, investment_amount: 1000, leverage: 1.0, min_volume: 500_000,
+  enabled: 0, max_positions: 1, investment_amount: 1000, leverage: 1.0, min_volume: 500_000, order_type: 'auto',
 };
 
 app.get('/api/alpaca/auto-settings', requireAuth, (req, res) => {
@@ -1945,10 +1959,11 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
   const b     = req.body || {};
   const clamp = (v, mn, mx, def) => Math.min(mx, Math.max(mn, isFinite(+v) ? +v : def));
+  const orderType = ['limit','market','auto'].includes(b.order_type) ? b.order_type : 'auto';
   db.prepare(`
     INSERT OR REPLACE INTO auto_trade_settings
-      (user_id, enabled, max_positions, investment_amount, leverage, min_volume)
-    VALUES (?, ?, ?, ?, ?, ?)
+      (user_id, enabled, max_positions, investment_amount, leverage, min_volume, order_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
@@ -1956,6 +1971,7 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
     clamp(b.investment_amount,50, 500_000, 1000),
     clamp(b.leverage,         1,   4,           1),
     clamp(b.min_volume,  500_000, 100_000_000, 500_000),
+    orderType,
   );
   res.json({ ok: true });
 });

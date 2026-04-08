@@ -4416,6 +4416,22 @@ option { background: var(--card); }
 .at-inp:focus { outline: none; border-color: var(--accent); }
 
 .at-lev-row  { display: flex; gap: 4px; }
+.at-ot-row   { display: flex; gap: 4px; }
+.at-otb {
+  flex: 1;
+  padding: 6px 0;
+  background: #1e2636;
+  border: 1px solid #2a3448;
+  border-radius: 6px;
+  color: #8fa0b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  text-align: center;
+}
+.at-otb:hover   { background: #263044; color: #c8d8f0; }
+.at-otb.active  { background: #2563eb; border-color: #3b82f6; color: #fff; }
 .at-lb {
   padding: 4px 9px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;
   border: 1px solid var(--border); background: var(--bg); color: var(--text-secondary);

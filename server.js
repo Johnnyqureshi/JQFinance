@@ -906,22 +906,94 @@ const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAct
 const orderRateLimiter  = new Map(); // userId → { count, resetAt }
 const atScanningUsers   = new Set(); // userId → prevents concurrent scans
 
-// ── Scan universe — 50 most-liquid US equities + volatility plays ─────────────
-const AT_UNIVERSE = [
-  // Mega-cap & index — always highly liquid
-  'SPY','QQQ','IWM','DIA','TQQQ','SQQQ','SOXL','SOXS','UVXY','VXX',
-  // Big tech
-  'AAPL','NVDA','TSLA','AMD','META','AMZN','MSFT','GOOGL','NFLX','AVGO',
-  'INTC','MU','ARM','SMCI','ORCL','CRM','ADBE','QCOM','TXN','AMAT',
-  // High-beta growth / meme
-  'PLTR','COIN','MSTR','HOOD','MARA','RIOT','CLSK','SOFI','GME','AMC',
-  'RIVN','LCID','NIO','XPEV','BABA','JD','PDD','SNAP','RBLX','UBER',
-  'LYFT','DKNG','PENN','SHOP','SQ','PYPL','ROKU','PINS','TWLO','ABNB',
-  // Biotech & speculative
-  'SOUN','IONQ','BBAI','ACHR','JOBY','RKLB','HIMS','LUNR','RDDT','KVYO',
-  // ETF leveraged plays
-  'TSLL','NVDL','FNGU','LABU','TECL','BULZ','CURE',
+// ── Sector ETFs — used for rotation detection each scan cycle ────────────────
+const SECTOR_ETFS = ['XLK','XLF','XLE','XLV','XLI','XLC','XLY','XLP','XLB','XLRE','XLU'];
+
+// ── Per-sector pools — all stocks typically under $50 ────────────────────────
+const SECTOR_POOLS = {
+  XLK: ['PLTR','SOFI','SOUN','IONQ','BBAI','SNAP','RDDT','HOOD','TWLO','PINS',
+        'OPEN','AI','KVYO','SMCI','INTC','MU','AEHR','WOLF','POWI','AMBA'],
+  XLF: ['SOFI','HOOD','AFRM','UPST','COOP','RKT','PFSI','NYCB','PRAA','ENVA'],
+  XLE: ['SLB','HAL','DVN','OVV','CRC','PBR','CLNE','TELL','GEVO','REI'],
+  XLV: ['NVAX','HIMS','ACCD','TDOC','AMWL','DOCS','RXRX','ACMR','FULC','VERA'],
+  XLC: ['SNAP','RBLX','PINS','MTCH','BMBL','GROV','DUOL','SMAR','WDAY','SEAT'],
+  XLY: ['GME','AMC','RIVN','LCID','NIO','XPEV','WKHS','BLNK','CHPT','GOEV',
+        'DKNG','PENN','RDFN','OPEN','ABNB','LYFT','UBER'],
+  XLI: ['JOBY','ACHR','RKLB','LUNR','SPCE','BWXT','KTOS','AVAV','SWBI','RGR'],
+  XLB: ['CLF','X','MT','VALE','CSTM','ATI','CMC','WOR','STLD','NUE'],
+  XLRE: ['OPEN','RDFN','Z','UWMC','GHLD','PFSI','RKT','COOP','EXPI','HOUS'],
+  XLU: ['MARA','RIOT','CLSK','HUT','CIFR','IREN','BTDR','WGMI','SDIG','BTBT'],
+  XLP: ['PRPL','VRA','XRAY','CENT','EDUC','USFD','SFM','GO','CASY','CHEF'],
+};
+
+// ── Baseline anchor list — always scanned, all under $50, proven liquid ───────
+const AT_BASE = [
+  // Leveraged ETFs & volatility
+  'TQQQ','SQQQ','SOXL','SOXS','UVXY','VXX','LABU','TECL','BULZ','TNA',
+  // High-beta under $50
+  'PLTR','SOFI','HOOD','SNAP','RBLX','GME','AMC','RIVN','LCID','NIO',
+  'XPEV','MARA','RIOT','CLSK','SOUN','IONQ','BBAI','ACHR','JOBY','RKLB',
+  'HIMS','LUNR','RDDT','KVYO','AFRM','UPST','DKNG','PENN','SQ','PYPL',
+  'PINS','TWLO','MTCH','BMBL','ROKU','OPEN','AI','BLNK','CHPT','WKHS',
+  'BABA','NIO','JD','PDD','LI','XPEV','BIDU','MNSO','VIPS','TIGR',
+  'NVAX','MRNA','HIMS','ACCD','TDOC','AMWL','DOCS','RXRX','ACMR','VERA',
+  'INTC','MU','WOLF','POWI','AMBA','SMCI','CEVA','FORM','RMBS','SLAB',
 ];
+
+// ── Dynamic universe builder — called each scan cycle ─────────────────────────
+// Runs most-active screener + sector rotation in parallel, returns symbol list + metadata
+async function atBuildUniverse() {
+  const symbolSet = new Set(AT_BASE);
+  let hotSectors  = [];
+
+  const [activeResult, sectorResult] = await Promise.allSettled([
+    // 1. Yahoo Finance most-active — top 100 stocks by today's volume
+    fetch(
+      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=100&start=0',
+      { headers: YH }
+    ).then(r => r.ok ? r.json() : null).catch(() => null),
+
+    // 2. Sector ETF quotes for rotation ranking
+    yf.quote(SECTOR_ETFS, {}, { validateResult: false }).catch(() => null),
+  ]);
+
+  // Process most-active screener
+  if (activeResult.status === 'fulfilled' && activeResult.value) {
+    const quotes = activeResult.value?.finance?.result?.[0]?.quotes || [];
+    let added = 0;
+    for (const q of quotes) {
+      if (q.symbol && (q.regularMarketPrice || 0) > 2 && (q.regularMarketPrice || 0) <= 50) {
+        symbolSet.add(q.symbol); added++;
+      }
+    }
+    console.log(`[AT Universe] most-active screener: ${added} under-$50 symbols added`);
+  } else {
+    console.warn('[AT Universe] most-active screener unavailable — using base list');
+  }
+
+  // Process sector rotation
+  if (sectorResult.status === 'fulfilled' && sectorResult.value) {
+    const sArr = Array.isArray(sectorResult.value) ? sectorResult.value : [sectorResult.value];
+    const ranked = sArr
+      .filter(q => q?.regularMarketVolume > 0)
+      .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
+
+    hotSectors = ranked.slice(0, 4).map(q => ({
+      etf:    q.symbol,
+      vol:    q.regularMarketVolume,
+      chg:    q.regularMarketChangePercent,
+    }));
+
+    const hotNames = hotSectors.map(s => `${s.etf}(${s.chg >= 0 ? '+' : ''}${(s.chg||0).toFixed(2)}%)`).join(', ');
+    console.log('[AT Universe] hot sectors: ' + hotNames);
+
+    for (const { etf } of hotSectors) {
+      for (const sym of (SECTOR_POOLS[etf] || [])) symbolSet.add(sym);
+    }
+  }
+
+  return { symbols: [...symbolSet], hotSectors };
+}
 
 // ── Market hours guard (US Eastern) ──────────────────────────────────────────
 function isUSMarketOpen() {
@@ -1482,7 +1554,7 @@ async function atRunForUser(userId, dryRun = false) {
     nearClose:   session.isNearClose,
   });
 
-  let result = { exitCount: 0, entryAttempt: null, candidates: [], marketOpen, dryRun };
+  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], marketOpen, dryRun };
 
   try {
     // ── 1. Fetch account state from Alpaca ────────────────────────────────────
@@ -1548,21 +1620,31 @@ async function atRunForUser(userId, dryRun = false) {
       }
     }
 
-    // ── 3. Scan universe for volume leaders ───────────────────────────────────
+    // ── 3. Build dynamic universe + quote all symbols ─────────────────────────
     let candidates = [];
-    // Min 500k avg daily volume — non-negotiable rule (no trading illiquid stocks)
-    const MIN_DAILY_VOL = 500_000;
+    const MIN_DAILY_VOL = 1_000_000;   // 1M minimum — ensures real liquidity
+    const MAX_PRICE     = 50;          // hard cap — under-$50 only for better VP spread
     try {
-      const rawQ = await yf.quote(AT_UNIVERSE, {}, { validateResult: false });
+      const { symbols: universe, hotSectors } = await atBuildUniverse();
+      result.hotSectors = hotSectors;
+
+      const rawQ = await yf.quote(universe, {}, { validateResult: false });
       const arr  = Array.isArray(rawQ) ? rawQ : (rawQ ? [rawQ] : []);
       candidates = arr
         .filter(q => q?.symbol
-          && (q.regularMarketPrice || 0) > 2          // price > $2
-          && (q.regularMarketVolume || 0) >= MIN_DAILY_VOL)
-        .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0))
-        // Scan ALL qualifying symbols — VP signal is the filter, not a hard cap
-        .map(q => ({ symbol: q.symbol, volume: q.regularMarketVolume, price: q.regularMarketPrice }));
-      console.log('[AutoTrader] universe scan: ' + candidates.length + ' symbols qualify (price>$2, vol>500k)');
+          && (q.regularMarketPrice || 0) >  2           // no penny stocks
+          && (q.regularMarketPrice || 0) <= MAX_PRICE   // hard cap $50
+          && (q.regularMarketVolume || 0) >= MIN_DAILY_VOL) // min 1M vol today
+        .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
+
+      const syms = candidates.map(c => c.symbol);
+      console.log(`[AutoTrader] ${candidates.length} qualify ($2-$50, vol≥1M) from ${universe.length} universe: ${syms.slice(0,20).join(',')}`);
+
+      candidates = candidates.map(q => ({
+        symbol: q.symbol,
+        volume: q.regularMarketVolume,
+        price:  q.regularMarketPrice,
+      }));
     } catch(e) {
       console.error('[AT] Universe scan error:', e.message);
     }
@@ -1652,10 +1734,11 @@ async function atRunForUser(userId, dryRun = false) {
       };
     });
 
-    // Persist latest analyses in status so polling can surface them
+    // Persist latest analyses + sector rotation in status so polling can surface them
     autoTraderStatus.set(userId, {
       ...(autoTraderStatus.get(userId) || {}),
       analyses:     result.analyses,
+      hotSectors:   result.hotSectors,
       pdtBlocked,
       daytradeCount,
     });
@@ -1776,6 +1859,7 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     lastAction:    null,
     candidates:    [],
     analyses:      [],
+    hotSectors:    [],
     pdtBlocked:    false,
     daytradeCount: 0,
     marketOpen:    sess.isMarketOpen,

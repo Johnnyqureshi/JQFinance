@@ -254,6 +254,11 @@ const alpacaTrader = (() => {
       const pdtWarn = $('atPDTWarn');
       if (pdtWarn && st.pdtBlocked) pdtWarn.style.display = '';
 
+      // Sector heatmap
+      if (Array.isArray(st.hotSectors) && st.hotSectors.length) {
+        renderHotSectors(st.hotSectors);
+      }
+
       // Live scan feed
       if (Array.isArray(st.analyses) && st.analyses.length) {
         renderScanFeed(st.analyses);
@@ -269,6 +274,24 @@ const alpacaTrader = (() => {
   }
 
   function stopStatusPoll() { clearInterval(statusPoll); statusPoll = null; }
+
+  // ── Sector heatmap strip ────────────────────────────────────────────────────
+  function renderHotSectors(hotSectors) {
+    const el = $('atSectorHeatmap');
+    if (!el) return;
+    const NAMES = {
+      XLK:'Tech', XLF:'Finance', XLE:'Energy', XLV:'Health',
+      XLI:'Industrial', XLC:'Comm', XLY:'ConsDisc', XLP:'Staples',
+      XLB:'Materials', XLRE:'Real Estate', XLU:'Utilities',
+    };
+    el.innerHTML = hotSectors.map(s => {
+      const chg  = s.chg || 0;
+      const sign = chg >= 0 ? '+' : '';
+      const cls  = chg >= 0.5 ? 'sector-hot' : chg <= -0.5 ? 'sector-cold' : 'sector-flat';
+      const name = NAMES[s.etf] || s.etf;
+      return `<span class="at-sector-chip ${cls}">${name} <b>${sign}${chg.toFixed(2)}%</b></span>`;
+    }).join('');
+  }
 
   // ── Live scan feed ─────────────────────────────────────────────────────────
   function renderScanFeed(analyses) {

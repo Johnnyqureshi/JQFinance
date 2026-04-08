@@ -879,24 +879,42 @@ app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AUTO-TRADER ENGINE
+// AUTO-TRADER ENGINE  (production-quality, no mock data)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Per-user in-memory state (never persisted — reset on restart) ─────────────
+// Migrate schema: add reasons column if missing (safe on re-run)
+try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN reasons TEXT'); } catch {}
+try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN exit_reason TEXT'); } catch {}
+try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN buying_power REAL'); } catch {}
+
+// ── Per-user in-memory state ──────────────────────────────────────────────────
 const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAction, candidates, error }
 const orderRateLimiter  = new Map(); // userId → { count, resetAt }
+const atScanningUsers   = new Set(); // userId → prevents concurrent scans
 
-// Universe for auto-scanning — most liquid US equities
+// ── Scan universe — 50 most-liquid US equities + volatility plays ─────────────
 const AT_UNIVERSE = [
   'SPY','QQQ','IWM','AAPL','NVDA','TSLA','AMD','META','AMZN','MSFT',
   'GOOGL','PLTR','COIN','MSTR','HOOD','SOXL','TQQQ','SQQQ','MARA','RIOT',
   'SMCI','ARM','CRWD','NFLX','AVGO','INTC','MU','BA','SOFI','NIO',
   'BABA','DKNG','IONQ','BBAI','SOUN','UBER','SNAP','RBLX','GME','RIVN',
-  'LCID','TSLL','NVDL','FNGU','LABU','TMDX','ACHR','JOBY','RKLB','SPCE',
+  'LCID','TSLL','NVDL','FNGU','LABU','ACHR','JOBY','RKLB','CLSK','HIMS',
 ];
 
-// ── Rate limiter: max 10 auto-orders per hour per user ────────────────────────
-function checkOrderRateLimit(userId) {
+// ── Market hours guard (US Eastern) ──────────────────────────────────────────
+function isUSMarketOpen() {
+  try {
+    const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+    const et    = new Date(etStr);
+    const day   = et.getDay();   // 0=Sun, 6=Sat
+    if (day === 0 || day === 6) return false;
+    const mins  = et.getHours() * 60 + et.getMinutes();
+    return mins >= 570 && mins < 960; // 9:30 – 16:00 ET
+  } catch { return false; }
+}
+
+// ── Rate limiter — max 10 auto-orders / hour / user ───────────────────────────
+function consumeRateLimit(userId) {
   const now = Date.now();
   let rl = orderRateLimiter.get(userId) || { count: 0, resetAt: now + 3_600_000 };
   if (now > rl.resetAt) rl = { count: 0, resetAt: now + 3_600_000 };
@@ -905,12 +923,19 @@ function checkOrderRateLimit(userId) {
   orderRateLimiter.set(userId, rl);
   return true;
 }
+function rateLimitRemaining(userId) {
+  const rl = orderRateLimiter.get(userId);
+  if (!rl) return 10;
+  const now = Date.now();
+  if (now > rl.resetAt) return 10;
+  return Math.max(0, 10 - rl.count);
+}
 
-// ── Server-side analysis math ─────────────────────────────────────────────────
+// ── Analysis math (100% real bars from Yahoo Finance) ────────────────────────
 function atVWAP(bars) {
   let st = 0, sv = 0;
   for (const b of bars) {
-    if (!b.v || b.v <= 0 || b.h == null) continue;
+    if (!b.v || b.v <= 0 || b.h == null || b.l == null) continue;
     st += ((b.h + b.l + b.c) / 3) * b.v; sv += b.v;
   }
   return sv > 0 ? st / sv : null;
@@ -919,22 +944,26 @@ function atVWAP(bars) {
 function atRSI(closes, p = 14) {
   if (closes.length < p + 1) return null;
   let g = 0, l = 0;
-  for (let i = 1; i <= p; i++) { const d = closes[i] - closes[i-1]; d >= 0 ? g += d : l -= d; }
-  let ag = g/p, al = l/p;
+  for (let i = 1; i <= p; i++) {
+    const d = closes[i] - closes[i-1];
+    d >= 0 ? (g += d) : (l -= d);
+  }
+  let ag = g / p, al = l / p;
   for (let i = p + 1; i < closes.length; i++) {
     const d = closes[i] - closes[i-1];
-    ag = (ag * (p-1) + Math.max(d, 0)) / p;
-    al = (al * (p-1) + Math.max(-d, 0)) / p;
+    ag = (ag * (p - 1) + Math.max(d, 0)) / p;
+    al = (al * (p - 1) + Math.max(-d, 0)) / p;
   }
   return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
 }
 
 function atSR(bars, price) {
-  if (bars.length < 3 || !price) return { support: null, resistance: null };
+  if (bars.length < 5 || !price) return { support: null, resistance: null };
   const sup = [], res = [];
-  for (let i = 1; i < bars.length - 1; i++) {
-    if (bars[i].h > bars[i-1].h && bars[i].h > bars[i+1].h) res.push(bars[i].h);
-    if (bars[i].l < bars[i-1].l && bars[i].l < bars[i+1].l) sup.push(bars[i].l);
+  for (let i = 2; i < bars.length - 2; i++) {
+    const h = bars[i].h, l = bars[i].l;
+    if (h != null && h > bars[i-1].h && h > bars[i-2].h && h > bars[i+1].h && h > bars[i+2].h) res.push(h);
+    if (l != null && l < bars[i-1].l && l < bars[i-2].l && l < bars[i+1].l && l < bars[i+2].l) sup.push(l);
   }
   const nearest = (arr, above) => {
     const f = above ? arr.filter(v => v > price) : arr.filter(v => v < price);
@@ -944,243 +973,486 @@ function atSR(bars, price) {
 }
 
 function atMomentum(bars) {
-  const last = bars.slice(-Math.min(5, bars.length));
-  return last.filter(b => b.c > b.o).length - last.filter(b => b.c < b.o).length;
+  const last = bars.slice(-Math.min(6, bars.length));
+  let score = 0;
+  for (const b of last) {
+    if (b.c > b.o) score++;
+    else if (b.c < b.o) score--;
+  }
+  return score;
 }
 
-function atSignal(rsi, price, vwap, volData, momentum, sr) {
+function atEMA(values, period) {
+  if (values.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < values.length; i++) ema = values[i] * k + ema * (1 - k);
+  return ema;
+}
+
+// ── Signal engine — multi-factor scoring ──────────────────────────────────────
+function atSignal(rsi, price, vwap, volData, momentum, sr, closes) {
   const above = vwap != null && price > vwap;
   const below = vwap != null && price < vwap;
+  const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
+
+  // EMA trend filter (9 & 20 period)
+  const ema9  = atEMA(closes, 9);
+  const ema20 = atEMA(closes, 20);
+  const emaUp = ema9 != null && ema20 != null && ema9 > ema20;
+
+  // Volume confirmation
+  const volOk = volData.lastV > volData.avgV * 0.8; // at least 80% of average
+
   let signal = 'HOLD', confidence = 50, reasons = [];
-  if      (rsi < 40 && above && momentum >= 2)                               { signal = 'BUY';  confidence = 80; reasons = ['RSI deeply oversold', 'Above VWAP', 'Bullish bars']; }
-  else if (rsi < 45 && above && volData.surge)                               { signal = 'BUY';  confidence = 72; reasons = ['RSI recovery', 'Above VWAP', 'Volume surge']; }
-  else if (sr.support && price <= sr.support * 1.005 && above && momentum >= 1) { signal = 'BUY'; confidence = 65; reasons = ['Support bounce', 'Above VWAP', 'Bullish momentum']; }
-  else if (rsi > 70 && below)                                                 { signal = 'SELL'; confidence = 78; reasons = ['RSI overbought', 'Below VWAP']; }
-  else if (rsi > 65 && momentum <= -2)                                        { signal = 'SELL'; confidence = 72; reasons = ['RSI elevated', 'Bearish bars']; }
-  else if (sr.resistance && price >= sr.resistance * 0.995 && below)          { signal = 'SELL'; confidence = 64; reasons = ['Resistance wall', 'Below VWAP']; }
-  else {
-    confidence = above && momentum > 0 ? 57 : (below && momentum < 0 ? 52 : 50);
+
+  // ── BUY conditions ────────────────────────────────────────────────────────
+  if (rsi < 38 && above && momentum >= 2 && emaUp && volOk) {
+    signal = 'BUY'; confidence = 84;
+    reasons = ['RSI deeply oversold (' + rsi.toFixed(0) + ')', 'Above VWAP', 'Bullish bars', 'EMA uptrend', 'Volume confirms'];
+  } else if (rsi < 45 && above && volData.surge && emaUp) {
+    signal = 'BUY'; confidence = 76;
+    reasons = ['RSI recovery zone (' + rsi.toFixed(0) + ')', 'Above VWAP', 'Volume surge ×' + (volData.lastV/volData.avgV).toFixed(1)];
+  } else if (rsi < 45 && above && momentum >= 2) {
+    signal = 'BUY'; confidence = 70;
+    reasons = ['RSI recovery (' + rsi.toFixed(0) + ')', 'Above VWAP', 'Strong momentum'];
+  } else if (sr.support && price <= sr.support * 1.006 && above && momentum >= 1 && rsi < 55) {
+    signal = 'BUY'; confidence = 66;
+    reasons = ['Bouncing off S1 $' + sr.support.toFixed(2), 'Above VWAP', 'Momentum up'];
+
+  // ── SELL (short) conditions ───────────────────────────────────────────────
+  } else if (rsi > 72 && below && momentum <= -2 && !emaUp && volOk) {
+    signal = 'SELL'; confidence = 82;
+    reasons = ['RSI overbought (' + rsi.toFixed(0) + ')', 'Below VWAP', 'Bearish bars', 'EMA downtrend', 'Volume confirms'];
+  } else if (rsi > 68 && below && volData.surge) {
+    signal = 'SELL'; confidence = 75;
+    reasons = ['RSI extended (' + rsi.toFixed(0) + ')', 'Below VWAP', 'Volume surge'];
+  } else if (rsi > 65 && momentum <= -2 && below) {
+    signal = 'SELL'; confidence = 70;
+    reasons = ['RSI elevated (' + rsi.toFixed(0) + ')', 'Below VWAP', 'Bearish momentum'];
+  } else if (sr.resistance && price >= sr.resistance * 0.994 && below && rsi > 55) {
+    signal = 'SELL'; confidence = 65;
+    reasons = ['Pressing R1 $' + sr.resistance.toFixed(2), 'Below VWAP', 'Overbought zone'];
+
+  // ── Neutral ───────────────────────────────────────────────────────────────
+  } else {
+    if (above && momentum > 0 && emaUp) { confidence = 58; reasons = ['Mild bullish bias']; }
+    else if (below && momentum < 0 && !emaUp) { confidence = 52; reasons = ['Mild bearish bias']; }
+    else { confidence = 50; reasons = ['No clear edge — hold']; }
   }
-  return { signal, confidence, reasons, price };
+
+  return { signal, confidence, reasons, price, rsi, vwap, vwapPct, momentum, emaUp };
 }
 
-// ── Fetch 5-min bars server-side ──────────────────────────────────────────────
+// ── Fetch real 5-min bars from Yahoo Finance ──────────────────────────────────
 async function atFetchBars(sym) {
   try {
     const r = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=false`,
       { headers: YH }
     );
-    if (!r.ok) return null;
+    if (!r.ok) { console.warn(`[AT bars] ${sym} HTTP ${r.status}`); return null; }
     const d  = await r.json();
     const rs = d?.chart?.result?.[0];
     if (!rs) return null;
     const times = rs.timestamp || [];
     const q = rs.indicators?.quote?.[0] || {};
-    return times.map((t, i) => ({
-      t: new Date(t*1000).toISOString(),
-      o: q.open?.[i]??null, h: q.high?.[i]??null,
-      l: q.low?.[i]??null,  c: q.close?.[i]??null, v: q.volume?.[i]??null,
-    })).filter(b => b.c != null);
-  } catch { return null; }
+    const bars = times.map((t, i) => ({
+      t: new Date(t * 1000).toISOString(),
+      o: q.open?.[i]  ?? null,
+      h: q.high?.[i]  ?? null,
+      l: q.low?.[i]   ?? null,
+      c: q.close?.[i] ?? null,
+      v: q.volume?.[i]?? null,
+    })).filter(b => b.c != null && b.h != null && b.l != null);
+    return bars.length >= 10 ? bars : null;
+  } catch(e) { console.warn(`[AT bars] ${sym} error:`, e.message); return null; }
 }
 
+// ── Full analysis for one symbol — returns signal or null ─────────────────────
 async function atAnalyze(sym) {
   const bars = await atFetchBars(sym);
-  if (!bars || bars.length < 12) return null;
-  const price = bars[bars.length-1].c;
-  const vwap  = atVWAP(bars);
-  const rsi   = atRSI(bars.map(b => b.c)) ?? 50;
-  const sr    = atSR(bars, price);
-  const mom   = atMomentum(bars);
-  const vols  = bars.map(b => b.v||0).filter(v => v > 0);
-  const avgV  = vols.length ? vols.reduce((a,b) => a+b, 0) / vols.length : 0;
-  const lastV = bars[bars.length-1].v || 0;
-  return atSignal(rsi, price, vwap, { surge: avgV > 0 && lastV / avgV > 1.5, lastV, avgV }, mom, sr);
+  if (!bars) return null;
+
+  const price  = bars[bars.length - 1].c;
+  const closes = bars.map(b => b.c);
+  const vwap   = atVWAP(bars);
+  const rsi    = atRSI(closes) ?? 50;
+  const sr     = atSR(bars, price);
+  const mom    = atMomentum(bars);
+
+  const vols  = bars.map(b => b.v ?? 0).filter(v => v > 0);
+  const avgV  = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
+  const lastV = bars[bars.length - 1].v ?? 0;
+  const volData = { lastV, avgV, surge: avgV > 0 && lastV / avgV > 1.8 };
+
+  return atSignal(rsi, price, vwap, volData, mom, sr, closes);
 }
 
-// ── Auto-trade: place order for one user ──────────────────────────────────────
-async function atPlaceOrder(userId, sym, signal, equity, settings) {
-  const price  = signal.price;
-  const side   = signal.signal === 'BUY' ? 'buy' : 'sell';
-  const lev    = Math.min(4, Math.max(1, settings.leverage || 1));
+// ── Place bracket order — real money, no mocks ────────────────────────────────
+async function atPlaceOrder(userId, sym, sig, equity, buyingPower, settings) {
+  if (!consumeRateLimit(userId)) {
+    console.warn(`[AT] user=${userId} rate limit reached`);
+    return { rateLimited: true };
+  }
+
+  const price   = sig.price;
+  const side    = sig.signal === 'BUY' ? 'buy' : 'sell';
+  const lev     = Math.min(4, Math.max(1, settings.leverage || 1));
+
+  // Risk-based position sizing
   const riskUSD = equity * (settings.risk_pct / 100) * lev;
   const slFrac  = settings.sl_pct / 100;
-  const shares  = Math.max(1, Math.floor(riskUSD / (price * slFrac)));
-  const tpPrice = (side === 'buy' ? price * (1 + settings.tp_pct/100) : price * (1 - settings.tp_pct/100)).toFixed(2);
-  const slPrice = (side === 'buy' ? price * (1 - settings.sl_pct/100) : price * (1 + settings.sl_pct/100)).toFixed(2);
+  const rawShares = riskUSD / (price * slFrac);
+
+  // Cap by buying power — never exceed what the account can afford
+  const maxByBP   = Math.floor((buyingPower * 0.95) / price);  // use 95% of BP as headroom
+  const shares    = Math.max(1, Math.min(Math.floor(rawShares), maxByBP));
+
+  if (shares < 1) {
+    console.warn(`[AT] user=${userId} ${sym}: insufficient buying power ($${buyingPower.toFixed(0)})`);
+    return { insufficientBP: true };
+  }
+
+  // TP/SL prices — correct direction for each side
+  const tpPrice = parseFloat(
+    (side === 'buy' ? price * (1 + settings.tp_pct / 100) : price * (1 - settings.tp_pct / 100)).toFixed(2)
+  );
+  const slPrice = parseFloat(
+    (side === 'buy' ? price * (1 - settings.sl_pct / 100) : price * (1 + settings.sl_pct / 100)).toFixed(2)
+  );
+
+  const orderBody = {
+    symbol:        sym,
+    qty:           String(shares),
+    side,
+    type:          'market',
+    time_in_force: 'day',
+    order_class:   'bracket',
+    take_profit:   { limit_price: String(tpPrice) },
+    stop_loss:     { stop_price:  String(slPrice)  },
+  };
 
   const order = await alpacaFetch(userId, '/v2/orders', {
     method: 'POST',
-    body:   JSON.stringify({
-      symbol:        sym,
-      qty:           String(shares),
-      side,
-      type:          'market',
-      time_in_force: 'day',
-      order_class:   'bracket',
-      take_profit:   { limit_price: tpPrice },
-      stop_loss:     { stop_price:  slPrice },
-    }),
+    body:   JSON.stringify(orderBody),
   });
 
   if (order?.id) {
+    const notional = (shares * price).toFixed(2);
+    const action   = `AUTO ${side.toUpperCase()} ${shares}sh ${sym} @ $${price.toFixed(2)} | TP $${tpPrice} | SL $${slPrice} | ${sig.confidence}% conf`;
     db.prepare(`
       INSERT INTO auto_trade_log
-        (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, sym, side, shares, price, tpPrice, slPrice, order.id, signal.signal, signal.confidence);
-
-    const action = `AUTO ${side.toUpperCase()} ${shares}sh ${sym} @ $${price.toFixed(2)} | conf ${signal.confidence}%`;
-    autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId)||{}), lastAction: action });
-    console.log(`[AutoTrader] user=${userId} ${action}`);
+        (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
+         alpaca_order_id, signal, confidence, reasons, buying_power)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId, sym, side, shares, price, tpPrice, slPrice,
+      order.id, sig.signal, sig.confidence,
+      JSON.stringify(sig.reasons), buyingPower
+    );
+    autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: action });
+    console.log(`[AutoTrader] user=${userId} ${action} | notional $${notional}`);
+    return { placed: true, order };
   }
+
+  // Order rejected by Alpaca
+  const errMsg = order?.message || order?.code || 'order rejected';
+  console.error(`[AT] user=${userId} ${sym} order failed: ${errMsg}`);
+  return { failed: true, error: errMsg };
 }
 
-// ── Auto-trade: check open positions for exits ────────────────────────────────
+// ── Exit monitor — runs every cycle before new entries ────────────────────────
 async function atCheckExits(userId, positions, settings) {
   const openLogs = db.prepare(
-    'SELECT * FROM auto_trade_log WHERE user_id = ? AND status = ?'
-  ).all(userId, 'open');
+    `SELECT * FROM auto_trade_log WHERE user_id = ? AND status = 'open'`
+  ).all(userId);
+
+  let exitCount = 0;
 
   for (const log of openLogs) {
-    const pos = (Array.isArray(positions) ? positions : []).find(p => p.symbol === log.symbol);
+    const pos = Array.isArray(positions)
+      ? positions.find(p => p.symbol === log.symbol)
+      : null;
 
-    // Position closed by broker (TP or SL hit)
+    // ── Position gone — broker closed it (TP or SL bracket filled) ───────────
     if (!pos) {
-      db.prepare(`UPDATE auto_trade_log SET status='closed', closed_at=datetime('now') WHERE id=?`).run(log.id);
-      console.log(`[AutoTrader] user=${userId} ${log.symbol} closed by broker (TP/SL)`);
+      // Try to look up the final closed order to get actual P&L
+      let realPnl = null;
+      try {
+        const orders = await alpacaFetch(userId, `/v2/orders?status=closed&symbols=${log.symbol}&limit=5`);
+        const closed = Array.isArray(orders)
+          ? orders.find(o => o.legs?.length || o.type === 'limit' || o.type === 'stop')
+          : null;
+        if (closed?.filled_avg_price && log.entry_price) {
+          const fillPx = parseFloat(closed.filled_avg_price);
+          realPnl = log.side === 'buy'
+            ? (fillPx - log.entry_price) * log.shares
+            : (log.entry_price - fillPx) * log.shares;
+        }
+      } catch {}
+
+      const pnlStr = realPnl != null ? `$${realPnl.toFixed(2)}` : 'unknown';
+      db.prepare(`
+        UPDATE auto_trade_log
+        SET status='closed', closed_at=datetime('now'), pnl=?, exit_reason='broker_close'
+        WHERE id=?
+      `).run(realPnl, log.id);
+      console.log(`[AT] user=${userId} ${log.symbol} closed by broker bracket | P&L ${pnlStr}`);
+      exitCount++;
       continue;
     }
 
+    // ── Active position — check for signal reversal or manual TP/SL ──────────
     try {
       const sig = await atAnalyze(log.symbol);
       if (!sig) continue;
-      const unrealPct   = parseFloat(pos.unrealized_plpc || 0) * 100;
-      const reversal    = (log.side === 'buy' && sig.signal === 'SELL' && sig.confidence >= 68) ||
-                          (log.side === 'sell' && sig.signal === 'BUY'  && sig.confidence >= 68);
-      const manualTP    = unrealPct >= settings.tp_pct;
-      const manualSL    = unrealPct <= -(settings.sl_pct);
 
-      if (reversal || manualTP || manualSL) {
+      // unrealized_plpc from Alpaca is a decimal (e.g. 0.031 = 3.1%)
+      const unrealPct = parseFloat(pos.unrealized_plpc || 0) * 100;
+      const pnl       = parseFloat(pos.unrealized_pl || 0);
+
+      const signalFlipped =
+        (log.side === 'buy'  && sig.signal === 'SELL' && sig.confidence >= 68) ||
+        (log.side === 'sell' && sig.signal === 'BUY'  && sig.confidence >= 68);
+
+      const tpHit = unrealPct >=  settings.tp_pct;
+      const slHit = unrealPct <= -(settings.sl_pct);
+
+      const exitReason = signalFlipped ? 'signal_reversal' : (tpHit ? 'tp_hit' : (slHit ? 'sl_hit' : null));
+
+      if (exitReason) {
+        // Cancel any remaining bracket legs before closing
+        try {
+          // Cancel open child orders for this symbol (stop/limit legs)
+          const openOrds = await alpacaFetch(userId, `/v2/orders?status=open&symbols=${log.symbol}&limit=10`);
+          if (Array.isArray(openOrds)) {
+            for (const o of openOrds) {
+              if (o.id && o.id !== log.alpaca_order_id) {
+                await alpacaFetch(userId, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {});
+              }
+            }
+          }
+        } catch {}
+
+        // Close position at market
         await alpacaFetch(userId, `/v2/positions/${log.symbol}`, { method: 'DELETE' });
-        const pnl    = parseFloat(pos.unrealized_pl || 0);
-        const reason = reversal ? 'signal reversal' : (manualTP ? 'TP hit' : 'SL hit');
-        db.prepare(`UPDATE auto_trade_log SET status='closed', closed_at=datetime('now'), pnl=? WHERE id=?`)
-          .run(pnl, log.id);
-        const action = `EXIT ${log.symbol} (${reason}) P&L $${pnl.toFixed(2)}`;
-        autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId)||{}), lastAction: action });
+
+        db.prepare(`
+          UPDATE auto_trade_log
+          SET status='closed', closed_at=datetime('now'), pnl=?, exit_reason=?
+          WHERE id=?
+        `).run(pnl, exitReason, log.id);
+
+        const label = exitReason.replace('_', ' ');
+        const action = `EXIT ${log.symbol} (${label}) | P&L ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+        autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: action });
         console.log(`[AutoTrader] user=${userId} ${action}`);
+        exitCount++;
       }
     } catch(e) {
-      console.error(`[AutoTrader] Exit check error ${log.symbol}:`, e.message);
+      console.error(`[AT] Exit check error ${log.symbol}:`, e.message);
     }
   }
+  return exitCount;
 }
 
-// ── Main engine: run for one user ─────────────────────────────────────────────
-async function atRunForUser(userId) {
-  const settings = db.prepare('SELECT * FROM auto_trade_settings WHERE user_id = ?').get(userId);
-  if (!settings?.enabled) return;
-
-  autoTraderStatus.set(userId, {
-    scanning: true, lastScan: new Date().toISOString(),
-    lastAction: autoTraderStatus.get(userId)?.lastAction || null,
-    candidates: [], error: null,
-  });
-
-  let acct, positions;
-  try {
-    acct      = await alpacaFetch(userId, '/v2/account');
-    positions = await alpacaFetch(userId, '/v2/positions');
-  } catch(e) {
-    autoTraderStatus.set(userId, { scanning: false, lastScan: new Date().toISOString(), error: e.message });
+// ── Main engine for one user ──────────────────────────────────────────────────
+async function atRunForUser(userId, dryRun = false) {
+  // Prevent concurrent scans for the same user
+  if (atScanningUsers.has(userId)) {
+    console.log(`[AT] user=${userId} scan already in progress — skipping`);
     return;
   }
+  atScanningUsers.add(userId);
 
-  const equity  = parseFloat(acct.equity || 0);
-  if (equity <= 0) return;
-  const openSyms = new Set(Array.isArray(positions) ? positions.map(p => p.symbol) : []);
+  const settings = db.prepare('SELECT * FROM auto_trade_settings WHERE user_id = ?').get(userId);
+  if (!settings?.enabled && !dryRun) { atScanningUsers.delete(userId); return; }
 
-  // 1. Check exits on open auto-trades first
-  await atCheckExits(userId, positions, settings);
+  const marketOpen = isUSMarketOpen();
 
-  if (openSyms.size >= settings.max_positions) {
+  autoTraderStatus.set(userId, {
+    scanning:   true,
+    lastScan:   new Date().toISOString(),
+    lastAction: autoTraderStatus.get(userId)?.lastAction || null,
+    candidates: [],
+    error:      null,
+    marketOpen,
+  });
+
+  let result = { exitCount: 0, entryAttempt: null, candidates: [], marketOpen, dryRun };
+
+  try {
+    // ── 1. Fetch account state from Alpaca ────────────────────────────────────
+    let acct, positions;
+    try {
+      [acct, positions] = await Promise.all([
+        alpacaFetch(userId, '/v2/account'),
+        alpacaFetch(userId, '/v2/positions'),
+      ]);
+    } catch(e) {
+      autoTraderStatus.set(userId, {
+        scanning: false, lastScan: new Date().toISOString(),
+        marketOpen, error: 'Alpaca unreachable: ' + e.message,
+      });
+      atScanningUsers.delete(userId);
+      return result;
+    }
+
+    if (acct.error || acct.account_blocked) {
+      const errMsg = acct.message || acct.error || 'Account error';
+      autoTraderStatus.set(userId, { scanning: false, lastScan: new Date().toISOString(), error: errMsg });
+      atScanningUsers.delete(userId);
+      return result;
+    }
+
+    const equity      = parseFloat(acct.equity      || 0);
+    const buyingPower = parseFloat(acct.buying_power || 0);
+    if (equity <= 0) { atScanningUsers.delete(userId); return result; }
+
+    const posArr   = Array.isArray(positions) ? positions : [];
+    const openSyms = new Set(posArr.map(p => p.symbol));
+
+    // ── 2. Check exits on all open auto-trade positions ───────────────────────
+    if (marketOpen && !dryRun) {
+      result.exitCount = await atCheckExits(userId, posArr, settings);
+
+      // Re-fetch positions after exits so position count is accurate
+      if (result.exitCount > 0) {
+        try {
+          const freshPos = await alpacaFetch(userId, '/v2/positions');
+          if (Array.isArray(freshPos)) {
+            posArr.length = 0;
+            freshPos.forEach(p => posArr.push(p));
+            openSyms.clear();
+            posArr.forEach(p => openSyms.add(p.symbol));
+          }
+        } catch {}
+      }
+    }
+
+    // ── 3. Scan universe for volume leaders ───────────────────────────────────
+    let candidates = [];
+    try {
+      const rawQ = await yf.quote(AT_UNIVERSE, {}, { validateResult: false });
+      const arr  = Array.isArray(rawQ) ? rawQ : (rawQ ? [rawQ] : []);
+      candidates = arr
+        .filter(q => q?.symbol && (q.regularMarketVolume || 0) > (settings.min_volume || 1_000_000))
+        .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0))
+        .slice(0, 10)
+        .map(q => ({ symbol: q.symbol, volume: q.regularMarketVolume, price: q.regularMarketPrice }));
+    } catch(e) {
+      console.error('[AT] Universe scan error:', e.message);
+    }
+
+    result.candidates = candidates.map(c => c.symbol);
+
+    autoTraderStatus.set(userId, {
+      scanning: true, lastScan: new Date().toISOString(), marketOpen,
+      lastAction: autoTraderStatus.get(userId)?.lastAction,
+      candidates: result.candidates,
+    });
+
+    // ── 4. Analyze candidates — find highest-confidence signal ────────────────
+    const atMax = settings.max_positions || 3;
+    const atmOpen = openSyms.size;
+
+    // Analyze all candidates in parallel (no order placement yet)
+    const analyses = await Promise.all(
+      candidates
+        .filter(c => !openSyms.has(c.symbol))                // skip already held
+        .filter(c => !db.prepare(                            // skip open auto-trades
+            `SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND status='open'`
+          ).get(userId, c.symbol))
+        .map(async c => ({
+          symbol:   c.symbol,
+          volume:   c.volume,
+          sig:      await atAnalyze(c.symbol).catch(() => null),
+        }))
+    );
+
+    // Sort by confidence desc — act on best opportunity only
+    const actionable = analyses
+      .filter(a => a.sig && (a.sig.signal === 'BUY' || a.sig.signal === 'SELL'))
+      .filter(a => a.sig.confidence >= (settings.confidence_threshold || 70))
+      .sort((a, b) => b.sig.confidence - a.sig.confidence);
+
+    result.analyses = analyses.map(a => ({
+      symbol:     a.symbol,
+      signal:     a.sig?.signal     || 'HOLD',
+      confidence: a.sig?.confidence || 50,
+      price:      a.sig?.price,
+      rsi:        a.sig?.rsi,
+      reasons:    a.sig?.reasons    || [],
+    }));
+
+    // ── 5. Place order for best signal (if market open and under position limit)
+    if (!dryRun && marketOpen && atmOpen < atMax && actionable.length > 0) {
+      const best = actionable[0];
+      result.entryAttempt = best.symbol;
+
+      const orderResult = await atPlaceOrder(userId, best.symbol, best.sig, equity, buyingPower, settings);
+      result.orderResult = orderResult;
+
+      if (orderResult.rateLimited) {
+        autoTraderStatus.set(userId, {
+          ...(autoTraderStatus.get(userId) || {}),
+          lastAction: `Rate limit reached (${rateLimitRemaining(userId)} left this hour)`,
+        });
+      }
+    } else if (!dryRun && !marketOpen) {
+      autoTraderStatus.set(userId, {
+        ...(autoTraderStatus.get(userId) || {}),
+        lastAction: 'Market closed — monitoring exits only',
+      });
+    } else if (!dryRun && atmOpen >= atMax) {
+      autoTraderStatus.set(userId, {
+        ...(autoTraderStatus.get(userId) || {}),
+        lastAction: `At max positions (${atmOpen}/${atMax}) — monitoring only`,
+      });
+    } else if (!dryRun && actionable.length === 0) {
+      autoTraderStatus.set(userId, {
+        ...(autoTraderStatus.get(userId) || {}),
+        lastAction: `Scan complete — no signal ≥${settings.confidence_threshold || 70}% found (${candidates.length} scanned)`,
+      });
+    }
+
+  } catch(e) {
+    console.error(`[AutoTrader] user=${userId} fatal:`, e.message);
     autoTraderStatus.set(userId, {
       scanning: false, lastScan: new Date().toISOString(),
-      lastAction: autoTraderStatus.get(userId)?.lastAction,
-      candidates: [], error: null,
+      error: e.message, marketOpen,
     });
-    return;
+  } finally {
+    autoTraderStatus.set(userId, {
+      ...(autoTraderStatus.get(userId) || {}),
+      scanning: false,
+      lastScan: new Date().toISOString(),
+    });
+    atScanningUsers.delete(userId);
   }
 
-  // 2. Scan universe for high-volume candidates
-  let candidates = [];
-  try {
-    const rawQ = await yf.quote(AT_UNIVERSE, {}, { validateResult: false });
-    const arr   = Array.isArray(rawQ) ? rawQ : [rawQ];
-    candidates  = arr
-      .filter(q => q && (q.regularMarketVolume||0) > settings.min_volume && !openSyms.has(q.symbol))
-      .sort((a, b) => (b.regularMarketVolume||0) - (a.regularMarketVolume||0))
-      .slice(0, 8)
-      .map(q => q.symbol);
-  } catch(e) {
-    console.error('[AutoTrader] Quote scan error:', e.message);
-  }
-
-  autoTraderStatus.set(userId, {
-    scanning: true, lastScan: new Date().toISOString(),
-    lastAction: autoTraderStatus.get(userId)?.lastAction,
-    candidates,
-  });
-
-  // 3. Analyze top candidates and act on the strongest signal
-  let traded = false;
-  for (const sym of candidates) {
-    if (traded) break;
-    if (!checkOrderRateLimit(userId)) {
-      autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId)||{}), lastAction: 'Rate limit reached — pausing' });
-      break;
-    }
-
-    // No repeat entry for symbols already in auto-log as open
-    const existing = db.prepare(
-      `SELECT id FROM auto_trade_log WHERE user_id = ? AND symbol = ? AND status = 'open'`
-    ).get(userId, sym);
-    if (existing) continue;
-
-    try {
-      const sig = await atAnalyze(sym);
-      if (!sig) continue;
-      const thresh = settings.confidence_threshold || 70;
-      if ((sig.signal === 'BUY' || sig.signal === 'SELL') && sig.confidence >= thresh) {
-        await atPlaceOrder(userId, sym, sig, equity, settings);
-        traded = true;
-      }
-    } catch(e) {
-      console.error(`[AutoTrader] Analyze error ${sym}:`, e.message);
-    }
-  }
-
-  autoTraderStatus.set(userId, {
-    scanning: false, lastScan: new Date().toISOString(),
-    lastAction: autoTraderStatus.get(userId)?.lastAction || (traded ? null : 'Scan complete — no signal met threshold'),
-    candidates,
-  });
+  return result;
 }
 
-// ── Engine loop ───────────────────────────────────────────────────────────────
+// ── Engine loop — fires every 60 seconds ──────────────────────────────────────
 async function atRunAll() {
   const enabled = db.prepare('SELECT user_id FROM auto_trade_settings WHERE enabled = 1').all();
   for (const { user_id } of enabled) {
-    atRunForUser(user_id).catch(e => console.error(`[AutoTrader] user=${user_id}`, e.message));
+    atRunForUser(user_id, false).catch(e =>
+      console.error(`[AutoTrader] user=${user_id} unhandled:`, e.message)
+    );
   }
 }
-setInterval(atRunAll, 60_000);
+const atInterval = setInterval(atRunAll, 60_000);
+console.log('[AutoTrader] Engine started — scanning every 60 s');
 
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 
-const AT_DEFAULTS = { enabled: 0, max_positions: 3, risk_pct: 2.0, leverage: 1.0, tp_pct: 3.0, sl_pct: 1.5, min_volume: 1000000, confidence_threshold: 70 };
+const AT_DEFAULTS = {
+  enabled: 0, max_positions: 3, risk_pct: 2.0, leverage: 1.0,
+  tp_pct: 3.0, sl_pct: 1.5, min_volume: 1_000_000, confidence_threshold: 70,
+};
 
 app.get('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   const s = db.prepare('SELECT * FROM auto_trade_settings WHERE user_id = ?').get(req.session.userId);
@@ -1189,7 +1461,7 @@ app.get('/api/alpaca/auto-settings', requireAuth, (req, res) => {
 
 app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
-  const b = req.body || {};
+  const b     = req.body || {};
   const clamp = (v, mn, mx, def) => Math.min(mx, Math.max(mn, isFinite(+v) ? +v : def));
   db.prepare(`
     INSERT OR REPLACE INTO auto_trade_settings
@@ -1198,13 +1470,13 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
-    clamp(b.max_positions, 1, 10, 3),
-    clamp(b.risk_pct,       0.5, 10, 2),
-    clamp(b.leverage,       1,  4,  1),
-    clamp(b.tp_pct,         0.5, 20, 3),
-    clamp(b.sl_pct,         0.5, 10, 1.5),
-    clamp(b.min_volume,     100000, 100_000_000, 1_000_000),
-    clamp(b.confidence_threshold, 60, 90, 70),
+    clamp(b.max_positions,        1,   10,          3),
+    clamp(b.risk_pct,             0.5, 10,          2),
+    clamp(b.leverage,             1,   4,           1),
+    clamp(b.tp_pct,               0.5, 20,          3),
+    clamp(b.sl_pct,               0.5, 10,          1.5),
+    clamp(b.min_volume,           100_000, 100_000_000, 1_000_000),
+    clamp(b.confidence_threshold, 60,  90,          70),
   );
   res.json({ ok: true });
 });
@@ -1213,19 +1485,45 @@ app.get('/api/alpaca/auto-log', requireAuth, (req, res) => {
   const logs = db.prepare(
     'SELECT * FROM auto_trade_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 50'
   ).all(req.session.userId);
-  res.json(logs);
+  // Parse stored JSON reasons field
+  res.json(logs.map(l => ({
+    ...l,
+    reasons: l.reasons ? JSON.parse(l.reasons).join(', ') : '',
+  })));
 });
 
 app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
-  const st = autoTraderStatus.get(req.session.userId) || { scanning: false, lastScan: null, lastAction: null, candidates: [] };
-  res.json(st);
+  const st  = autoTraderStatus.get(req.session.userId) || {};
+  const rl  = rateLimitRemaining(req.session.userId);
+  res.json({
+    scanning:    false,
+    lastScan:    null,
+    lastAction:  null,
+    candidates:  [],
+    marketOpen:  isUSMarketOpen(),
+    rateLimit:   rl,
+    ...st,
+  });
 });
 
-// Manually trigger one scan cycle for the current user (for testing)
+// Trigger one real scan cycle immediately
 app.post('/api/alpaca/auto-scan', requireAuth, async (req, res) => {
   if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
-  atRunForUser(req.session.userId).catch(e => console.error('[AutoTrader] manual scan:', e.message));
-  res.json({ ok: true, message: 'Scan triggered — check status in a few seconds.' });
+  atRunForUser(req.session.userId, false).catch(e =>
+    console.error('[AT] manual scan:', e.message)
+  );
+  res.json({ ok: true, message: 'Scan triggered — results in ~10 s.' });
+});
+
+// ── Simulation endpoint — dry run with real data, NO orders placed ────────────
+app.post('/api/alpaca/simulate', requireAuth, async (req, res) => {
+  if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
+  try {
+    const result = await atRunForUser(req.session.userId, true /* dryRun */);
+    res.json({ ok: true, simulation: result });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

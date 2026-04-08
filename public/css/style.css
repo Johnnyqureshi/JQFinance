@@ -4156,17 +4156,55 @@ option { background: var(--card); }
   display: flex; align-items: center; justify-content: space-between;
   font-size: 0.8rem; font-weight: 600; color: var(--text); margin-bottom: 8px;
 }
+/* ── Market status badge ─────────────────────────────────────── */
+.trd-mkt-badge {
+  font-size: 0.68rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; letter-spacing: .04em;
+}
+.mkt-open   { background: rgba(29,214,163,.15); color: #1dd6a3; border: 1px solid rgba(29,214,163,.3); }
+.mkt-closed { background: rgba(117,117,117,.12); color: #888; border: 1px solid rgba(117,117,117,.2); }
+
+/* ── Scan + simulation buttons row ──────────────────────────── */
+.trd-scan-btns { display: flex; gap: 6px; align-items: center; }
+.trd-sim-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px;
+  border: 1px solid #7c4dff; background: rgba(124,77,255,.08);
+  color: #9c6fff; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  transition: all .15s; white-space: nowrap;
+}
+.trd-sim-btn:hover { background: rgba(124,77,255,.18); }
+
+/* ── Simulation results ──────────────────────────────────────── */
+.trd-sim-results {
+  margin: 0 16px 12px; padding: 12px;
+  background: rgba(124,77,255,.06); border: 1px solid rgba(124,77,255,.2);
+  border-radius: 8px; font-size: 0.78rem;
+}
+.sim-header { font-weight: 600; margin-bottom: 8px; color: var(--text); font-size: 0.8rem; }
+.sim-open   { color: #1dd6a3; font-weight: 700; }
+.sim-closed { color: #888; font-weight: 600; }
+.sim-row {
+  display: grid; grid-template-columns: 46px 55px 50px 65px 60px 1fr;
+  align-items: center; padding: 5px 4px; border-radius: 5px; gap: 6px;
+}
+.sim-row:hover { background: rgba(255,255,255,.03); }
+.sim-reasons { color: var(--text-dim); font-size: 0.7rem; }
+.sim-empty   { color: var(--text-dim); font-style: italic; padding: 6px 0; }
+.sim-error   { color: #ef5350; }
+.text-dim    { color: var(--text-dim); }
+
+/* ── Auto-trade log ──────────────────────────────────────────── */
 .trd-alog-header {
   display: grid;
-  grid-template-columns: 45px 55px 50px 60px 65px 65px 85px 70px 60px 1fr;
-  font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase;
-  padding: 4px 8px; letter-spacing: .04em;
+  grid-template-columns: 42px 52px 35px 58px 62px 62px 42px 68px 68px 50px 1fr;
+  font-size: 0.62rem; color: var(--text-dim); text-transform: uppercase;
+  padding: 4px 8px; letter-spacing: .04em; gap: 4px;
 }
 .trd-alog-row {
   display: grid;
-  grid-template-columns: 45px 55px 50px 60px 65px 65px 85px 70px 60px 1fr;
+  grid-template-columns: 42px 52px 35px 58px 62px 62px 42px 68px 68px 50px 1fr;
   align-items: center; padding: 6px 8px; border-radius: 6px;
-  font-size: 0.75rem; margin-bottom: 2px; transition: background .12s;
+  font-size: 0.73rem; margin-bottom: 2px; transition: background .12s; gap: 4px;
 }
 .trd-alog-row:hover  { background: rgba(255,255,255,.03); }
 .alog-open  { border-left: 2px solid #00bcd4; }

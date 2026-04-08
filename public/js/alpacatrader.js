@@ -436,19 +436,43 @@ const alpacaTrader = (() => {
     if(!connected) return;
     try {
       const st=await apiFetch('/api/alpaca/auto-status');
+
+      // Last scan time
       const scanEl=$('trdLastScan');
       if(scanEl&&st.lastScan){
         const ago=Math.round((Date.now()-new Date(st.lastScan).getTime())/1000);
         scanEl.textContent=ago<60?ago+'s ago':Math.round(ago/60)+'m ago';
-      }
+      } else if(scanEl) scanEl.textContent='--';
+
+      // Candidates
       const candEl=$('trdCandidates');
       if(candEl) candEl.textContent=Array.isArray(st.candidates)&&st.candidates.length?st.candidates.slice(0,6).join(', '):'--';
+
+      // Last action
       const actEl=$('trdAutoLastAction');
       if(actEl&&st.lastAction) actEl.textContent=st.lastAction;
+
+      // Scanning spinner
       const scanIconEl=$('trdAutoScanIcon');
       if(scanIconEl) scanIconEl.style.display=st.scanning?'':'none';
-      if(st.error){const errEl=$('trdAutoError');if(errEl){errEl.textContent=st.error;errEl.style.display='';}}
-      else {const errEl=$('trdAutoError');if(errEl) errEl.style.display='none';}
+
+      // Market open badge
+      const mktEl=$('trdMarketStatus');
+      if(mktEl){
+        mktEl.textContent=st.marketOpen?'Market Open':'Market Closed';
+        mktEl.className='trd-mkt-badge '+(st.marketOpen?'mkt-open':'mkt-closed');
+      }
+
+      // Rate limit remaining
+      const rlEl=$('trdRateLimit');
+      if(rlEl&&st.rateLimit!=null) rlEl.textContent='Orders left: '+st.rateLimit+'/10';
+
+      // Error
+      const errEl=$('trdAutoError');
+      if(errEl){
+        if(st.error){errEl.textContent='⚠ '+st.error;errEl.style.display='';}
+        else errEl.style.display='none';
+      }
     } catch(e){}
   }
 
@@ -465,24 +489,38 @@ const alpacaTrader = (() => {
     const el=$('trdAutoLogBody'); if(!el) return;
     try {
       const logs=await apiFetch('/api/alpaca/auto-log');
-      if(!Array.isArray(logs)||!logs.length){el.innerHTML='<div class="trd-bot-empty">No auto-trades yet</div>';return;}
+      if(!Array.isArray(logs)||!logs.length){
+        el.innerHTML='<div class="trd-bot-empty">No auto-trades yet — enable the engine and it will trade automatically</div>';
+        return;
+      }
+      const EXIT_LABELS={
+        broker_close:'Broker TP/SL',
+        signal_reversal:'Signal flip',
+        tp_hit:'TP hit',
+        sl_hit:'SL hit',
+      };
       el.innerHTML=`
         <div class="trd-alog-header">
-          <span>Side</span><span>Symbol</span><span>Shares</span><span>Entry</span><span>TP</span><span>SL</span><span>Signal</span><span>P&amp;L</span><span>Status</span><span>Time</span>
+          <span>Side</span><span>Symbol</span><span>Sh</span><span>Entry</span><span>TP→</span><span>SL→</span>
+          <span>Conf</span><span>P&amp;L</span><span>Exit</span><span>Status</span><span>Time</span>
         </div>
-        ${logs.slice(0,20).map(l=>{
-          const up=(l.pnl||0)>=0;
-          const sc=l.status==='open'?'alog-open':l.pnl>0?'alog-win':'alog-loss';
-          return `<div class="trd-alog-row ${sc}">
+        ${logs.slice(0,25).map(l=>{
+          const pnl=l.pnl!=null?parseFloat(l.pnl):null;
+          const up=pnl!=null&&pnl>=0;
+          const sc=l.status==='open'?'alog-open':pnl!=null&&pnl>0?'alog-win':'alog-loss';
+          const statusCls=l.status==='open'?'ord-pending':pnl!=null&&pnl>0?'ord-filled':'ord-done';
+          const exitLabel=EXIT_LABELS[l.exit_reason]||'--';
+          return `<div class="trd-alog-row ${sc}" title="${l.reasons||''}">
             <span class="${l.side==='buy'?'ord-buy':'ord-sell'}">${(l.side||'').toUpperCase()}</span>
             <span class="trd-ord-sym">${l.symbol}</span>
             <span>${l.shares||'--'}</span>
             <span>$${fmt(l.entry_price)}</span>
             <span class="up">$${fmt(l.tp_price)}</span>
             <span class="dn">$${fmt(l.sl_price)}</span>
-            <span class="sig-${(l.signal||'hold').toLowerCase()}">${l.signal||'--'} ${l.confidence||''}%</span>
-            <span class="${l.pnl!=null?(up?'up':'dn'):''}">${l.pnl!=null?(up?'+':'−')+'$'+fmt(Math.abs(l.pnl)):'--'}</span>
-            <span class="${sc==='alog-open'?'ord-pending':sc==='alog-win'?'ord-filled':'ord-done'}">${l.status||'--'}</span>
+            <span class="sig-${(l.signal||'hold').toLowerCase()}">${l.confidence||'--'}%</span>
+            <span class="${pnl!=null?(up?'up':'dn'):''}">${pnl!=null?(up?'+':'−')+'$'+fmt(Math.abs(pnl)):'--'}</span>
+            <span class="text-dim" style="font-size:0.7rem">${l.status==='open'?'Active':exitLabel}</span>
+            <span class="${statusCls}">${l.status==='open'?'Open':'Closed'}</span>
             <span>${fmtDateTime(l.created_at)}</span>
           </div>`;
         }).join('')}
@@ -642,6 +680,41 @@ const alpacaTrader = (() => {
       finally{if(btn){btn.disabled=false;btn.textContent='▶ Scan Now';}}
     });
     $('trdRefreshAutoLog')?.addEventListener('click',loadAutoLog);
+
+    // Simulation
+    $('trdSimulate')?.addEventListener('click',async()=>{
+      const btn=$('trdSimulate');
+      const resEl=$('trdSimResults');
+      if(!connected){alert('Connect Alpaca first.');return;}
+      btn.disabled=true;btn.textContent='Running…';
+      try{
+        const r=await apiFetch('/api/alpaca/simulate',{method:'POST'});
+        if(r.error) throw new Error(r.error);
+        const sim=r.simulation||{};
+        const analyses=(sim.analyses||[]);
+        const mkt=sim.marketOpen?'<span class="sim-open">Market OPEN</span>':'<span class="sim-closed">Market CLOSED</span>';
+        const header=`<div class="sim-header">Simulation Results ${mkt} — ${new Date().toLocaleTimeString()} (no real orders placed)</div>`;
+        const rows=analyses.length?analyses.map(a=>{
+          const sc=a.signal==='BUY'?'ord-buy':a.signal==='SELL'?'ord-sell':'';
+          return `<div class="sim-row">
+            <span class="${sc}">${a.signal}</span>
+            <span class="trd-ord-sym">${a.symbol}</span>
+            <span>${a.confidence}%</span>
+            <span class="text-dim">$${a.price?a.price.toFixed(2):'--'}</span>
+            <span class="text-dim">RSI ${a.rsi?a.rsi.toFixed(0):'--'}</span>
+            <span class="sim-reasons">${(a.reasons||[]).join(' · ')}</span>
+          </div>`;
+        }).join(''):'<div class="sim-empty">No candidates above volume threshold</div>';
+        resEl.innerHTML=header+rows;
+        resEl.style.display='';
+      }catch(e){
+        const resEl2=$('trdSimResults');
+        if(resEl2){resEl2.innerHTML=`<div class="sim-error">Simulation error: ${e.message}</div>`;resEl2.style.display='';}
+      }finally{
+        btn.disabled=false;
+        btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg> Run Simulation';
+      }
+    });
   }
 
   // ── Page open ─────────────────────────────────────────────────────────────

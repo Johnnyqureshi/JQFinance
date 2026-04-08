@@ -1084,11 +1084,11 @@ async function atBuildUniverse() {
     const quotes = activeResult.value?.finance?.result?.[0]?.quotes || [];
     let added = 0;
     for (const q of quotes) {
-      if (q.symbol && (q.regularMarketPrice || 0) > 2 && (q.regularMarketPrice || 0) <= 50) {
+      if (q.symbol && (q.regularMarketPrice || 0) > 2 && (q.regularMarketPrice || 0) <= 30) {
         symbolSet.add(q.symbol); added++;
       }
     }
-    console.log(`[AT Universe] most-active screener: ${added} under-$50 symbols added`);
+    console.log(`[AT Universe] most-active screener: ${added} under-$30 symbols added`);
   } else {
     console.warn('[AT Universe] most-active screener unavailable — using base list');
   }
@@ -1758,7 +1758,7 @@ async function atRunForUser(userId, dryRun = false) {
     // ── 3. Build dynamic universe + quote all symbols ─────────────────────────
     let candidates = [];
     const MIN_DAILY_VOL = 1_000_000;   // 1M minimum — ensures real liquidity
-    const MAX_PRICE     = 50;          // hard cap — under-$50 only for better VP spread
+    const MAX_PRICE     = 30;          // hard cap — under-$30 only for better VP spread
     try {
       let universeData;
       try {
@@ -1785,7 +1785,7 @@ async function atRunForUser(userId, dryRun = false) {
         .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
 
       const syms = candidates.map(c => c.symbol);
-      console.log(`[AutoTrader] ${candidates.length} qualify ($2-$50, vol≥1M) from ${universe.length} universe: ${syms.slice(0,20).join(',')}`);
+      console.log(`[AutoTrader] ${candidates.length} qualify ($2-$30, vol≥1M) from ${universe.length} universe: ${syms.slice(0,20).join(',')}`);
 
       candidates = candidates.map(q => ({
         symbol: q.symbol,

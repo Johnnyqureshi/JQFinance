@@ -74,6 +74,7 @@ db.exec(`
   `ALTER TABLE auto_trade_settings ADD COLUMN investment_amount REAL DEFAULT 1000.0`,
   `ALTER TABLE auto_trade_settings ADD COLUMN min_volume INTEGER DEFAULT 500000`,
   `ALTER TABLE auto_trade_settings ADD COLUMN order_type TEXT DEFAULT 'auto'`,
+  `ALTER TABLE auto_trade_settings ADD COLUMN trade_duration TEXT DEFAULT 'swing'`,
   `ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1`,
   `ALTER TABLE auto_trade_log ADD COLUMN exit_reason TEXT`,
   `ALTER TABLE auto_trade_log ADD COLUMN order_placed_at TEXT`,
@@ -1506,13 +1507,20 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const tpDist   = parseFloat((tpPrice  - entryPx).toFixed(4));
   const rr       = slDist > 0 ? (tpDist / slDist).toFixed(2) : '?';
 
+  // ── Determine time-in-force (day vs GTC for swing trades) ────────────────
+  // Market orders MUST be 'day' (Alpaca rejects GTC market orders).
+  // Limit orders in swing mode use 'gtc' so the entry stays open overnight
+  // and the bracket legs (TP + SL) persist until actually hit.
+  const isSwing = (settings.trade_duration || 'swing') === 'swing';
+  const tif = (isSwing && !useMarket) ? 'gtc' : 'day';
+
   // ── Build order body — limit or market bracket ────────────────────────────
   const orderBody = {
     symbol:        sym,
     qty:           String(shares),
     side:          'buy',
     type:          useMarket ? 'market' : 'limit',
-    time_in_force: 'day',
+    time_in_force: tif,
     order_class:   'bracket',
     take_profit:   { limit_price: String(tpPrice) },
     stop_loss:     { stop_price:  String(slPrice)  },
@@ -1520,7 +1528,8 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   // Limit orders need an explicit limit_price; market orders must NOT include it
   if (!useMarket) orderBody.limit_price = String(limitPx);
 
-  console.log(`[AT] ${sym}: ${useMarket ? 'MARKET' : 'LIMIT'} order (${orderTypeSetting}) qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} R:R=${rr}`);
+  const durLabel = isSwing ? 'SWING/GTC' : 'DAY';
+  console.log(`[AT] ${sym}: ${useMarket ? 'MARKET' : 'LIMIT'} ${durLabel} order qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} R:R=${rr}`);
 
   const order = await alpacaFetch(userId, '/v2/orders', {
     method: 'POST',
@@ -1531,7 +1540,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     const notional = (shares * limitPx).toFixed(2);
     const levStr   = lev > 1 ? ` | ${lev}x` : '';
     const vpStr    = sig.vah ? ` | VAL $${sig.val} → VAH $${sig.vah}` : '';
-    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} | TP $${tpPrice} (VAH) | R:R ${rr}:1 | ${sig.confidence}% conf${levStr}${vpStr}`;
+    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} | TP $${tpPrice} (VAH) | R:R ${rr}:1 | ${sig.confidence}% conf | ${durLabel}${levStr}${vpStr}`;
     db.prepare(`
       INSERT INTO auto_trade_log
         (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
@@ -1998,7 +2007,7 @@ setInterval(() => {
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 
 const AT_DEFAULTS = {
-  enabled: 0, max_positions: 1, investment_amount: 1000, leverage: 1.0, min_volume: 500_000, order_type: 'auto',
+  enabled: 0, max_positions: 1, investment_amount: 1000, leverage: 1.0, min_volume: 500_000, order_type: 'auto', trade_duration: 'swing',
 };
 
 app.get('/api/alpaca/auto-settings', requireAuth, (req, res) => {
@@ -2010,11 +2019,12 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
   const b     = req.body || {};
   const clamp = (v, mn, mx, def) => Math.min(mx, Math.max(mn, isFinite(+v) ? +v : def));
-  const orderType = ['limit','market','auto'].includes(b.order_type) ? b.order_type : 'auto';
+  const orderType    = ['limit','market','auto'].includes(b.order_type)    ? b.order_type    : 'auto';
+  const tradeDur     = ['day','swing'].includes(b.trade_duration)          ? b.trade_duration : 'swing';
   db.prepare(`
     INSERT OR REPLACE INTO auto_trade_settings
-      (user_id, enabled, max_positions, investment_amount, leverage, min_volume, order_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+      (user_id, enabled, max_positions, investment_amount, leverage, min_volume, order_type, trade_duration)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
@@ -2023,6 +2033,7 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
     clamp(b.leverage,         1,   4,           1),
     clamp(b.min_volume,  500_000, 100_000_000, 500_000),
     orderType,
+    tradeDur,
   );
   res.json({ ok: true });
 });

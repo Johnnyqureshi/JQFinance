@@ -991,6 +991,55 @@ const AT_BASE = [
   'UVXY',  // 1.5x VIX Short-Term Futures
   'VXX',   // 1x VIX Short-Term Futures
   'SVXY',  // -0.5x VIX (inverse volatility)
+  // ── Single-stock 2× Bull leveraged ETFs ───────────────────────────────────
+  'TSLL',  // 2x Tesla (Direxion)
+  'NVDX',  // 2x NVIDIA (T-Rex)
+  'NVDG',  // 2x NVIDIA (Themes)
+  'NVDL',  // 2x NVIDIA (GraniteShares)
+  'AMDL',  // 2x AMD (GraniteShares)
+  'HOOG',  // 2x Alphabet/Google (Leverage Shares)
+  'PLTG',  // 2x Palantir (Leverage Shares)
+  'PMAX',  // Powell Max
+  'SMCL',  // Single-stock leveraged
+  // ── Single-stock 2× Inverse leveraged ETFs ────────────────────────────────
+  'NVDQ',  // 2x inverse NVIDIA (T-Rex)
+  'NVD',   // 2x inverse NVIDIA (T-Rex)
+  'MSTZ',  // 2x inverse MicroStrategy (T-Rex)
+  'TSLZ',  // 2x inverse Tesla (T-Rex)
+  'TSDD',  // 2x inverse Tesla
+  'PLTD',  // 2x inverse Palantir (Leverage Shares)
+  'CORD',  // 2x inverse Coinbase (T-Rex)
+  'AAPD',  // 2x inverse Apple (Direxion)
+  'AMDD',  // 2x inverse AMD (Direxion)
+  'GGLS',  // 2x inverse Alphabet (Direxion)
+  'QQQD',  // 2x inverse QQQ (Direxion)
+  'SBIT',  // 2x inverse Bitcoin (ProShares)
+  'RGTZ',  // 2x inverse Mag-7 (Defiance)
+  // ── Mining & critical metals ───────────────────────────────────────────────
+  'USAS',  // Americas Gold & Silver
+  'ASM',   // Avino Silver & Gold
+  'CRML',  // Critical Metals
+  'DNN',   // Denison Mines
+  'NVA',   // Nova Minerals
+  'TMQ',   // Trilogy Metals
+  'TGB',   // Taseko Mines
+  'NAK',   // Northern Dynasty Minerals
+  'PLG',   // Platinum Group Metals
+  // ── Energy — oil, gas, uranium ────────────────────────────────────────────
+  'RIG',   // Transocean
+  'EGY',   // Vaalco Energy
+  'BTE',   // Baytex Energy
+  'ANNA',  // AleAnna
+  'NEXT',  // NextDecade
+  'URG',   // Ur-Energy
+  'TALO',  // Talos Energy
+  'SOC',   // Sable Offshore
+  'SSL',   // Sasol
+  // ── Robotics & AI hardware ────────────────────────────────────────────────
+  'RCAT',  // Red Cat (drone defence)
+  'UMAC',  // Unusual Machines
+  'RR',    // Richtech Robotics
+  'SERV',  // Serve Robotics
   // High-beta under $50
   'PLTR','SOFI','HOOD','SNAP','RBLX','GME','AMC','RIVN','LCID','NIO',
   'XPEV','MARA','RIOT','CLSK','SOUN','IONQ','BBAI','ACHR','JOBY','RKLB',

@@ -928,8 +928,69 @@ const SECTOR_POOLS = {
 
 // ── Baseline anchor list — always scanned, all under $50, proven liquid ───────
 const AT_BASE = [
-  // Leveraged ETFs & volatility
-  'TQQQ','SQQQ','SOXL','SOXS','UVXY','VXX','LABU','TECL','BULZ','TNA',
+  // ── 3× Bull ETFs ──────────────────────────────────────────────────────────
+  'TQQQ',  // 3x Nasdaq-100
+  'SOXL',  // 3x Semiconductors
+  'SPXL',  // 3x S&P 500
+  'UPRO',  // 3x S&P 500 (ProShares)
+  'TECL',  // 3x Technology
+  'LABU',  // 3x Biotech
+  'BULZ',  // 3x Mega-cap Tech
+  'TNA',   // 3x Russell 2000
+  'FAS',   // 3x Financials
+  'FNGU',  // 3x FANG+
+  'DFEN',  // 3x Aerospace & Defense
+  'DPST',  // 3x Regional Banks
+  'RETL',  // 3x Retail
+  'PILL',  // 3x Pharma
+  'HIBL',  // 3x S&P High Beta
+  'MIDU',  // 3x S&P 400 Midcap
+  'UTSL',  // 3x Utilities
+  'NAIL',  // 3x Homebuilders
+  'CURE',  // 3x Healthcare
+  'WANT',  // 3x Consumer Discretionary
+  'WEBL',  // 3x Dow Jones Internet
+  // ── 2× Bull ETFs ──────────────────────────────────────────────────────────
+  'ROM',   // 2x Technology
+  'UWM',   // 2x Russell 2000
+  'UCO',   // 2x Bloomberg Crude Oil
+  'ERX',   // 2x Energy (Direxion)
+  'NUGT',  // 2x Gold Miners
+  'BOIL',  // 2x Bloomberg Natural Gas
+  'DIG',   // 2x Oil & Gas
+  'AGQ',   // 2x Silver
+  'BITX',  // 2x Bitcoin Strategy
+  'USD',   // 3x Regional Banks (ProShares)
+  // ── 3× Inverse (Bear) ETFs ────────────────────────────────────────────────
+  'SQQQ',  // 3x inverse Nasdaq-100
+  'SOXS',  // 3x inverse Semiconductors
+  'SPXS',  // 3x inverse S&P 500
+  'SDOW',  // 3x inverse Dow Jones
+  'TECS',  // 3x inverse Technology
+  'LABD',  // 3x inverse Biotech
+  'BERZ',  // 3x inverse Mega-cap Tech
+  'FAZ',   // 3x inverse Financials
+  'DRV',   // 3x inverse Real Estate
+  'SRTY',  // 3x inverse Russell 2000
+  'HIBS',  // 3x inverse S&P High Beta
+  'TZA',   // 3x inverse Russell 2000 (Direxion)
+  'WEBS',  // 3x inverse China
+  'MIDZ',  // 3x inverse S&P 400 Midcap
+  // ── 2× Inverse (Bear) ETFs ────────────────────────────────────────────────
+  'DRIP',  // 2x inverse Energy
+  'DUST',  // 2x inverse Gold Miners
+  'SCO',   // 2x inverse Crude Oil
+  'KOLD',  // 2x inverse Natural Gas
+  'SDS',   // 2x inverse S&P 500
+  'QID',   // 2x inverse Nasdaq-100
+  'TWM',   // 2x inverse Russell 2000
+  'DUG',   // 2x inverse Oil & Gas
+  'GLL',   // 2x inverse Gold
+  'ZSL',   // 2x inverse Silver
+  // ── Volatility products ───────────────────────────────────────────────────
+  'UVXY',  // 1.5x VIX Short-Term Futures
+  'VXX',   // 1x VIX Short-Term Futures
+  'SVXY',  // -0.5x VIX (inverse volatility)
   // High-beta under $50
   'PLTR','SOFI','HOOD','SNAP','RBLX','GME','AMC','RIVN','LCID','NIO',
   'XPEV','MARA','RIOT','CLSK','SOUN','IONQ','BBAI','ACHR','JOBY','RKLB',

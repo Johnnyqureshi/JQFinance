@@ -710,10 +710,18 @@ const alpacaTrader = (() => {
     $('atRefreshLog')?.addEventListener('click', loadAutoLog);
   }
 
+  // ── Reset — called on logout to stop polling and clear connection state ────
+  function reset() {
+    stopStatusPoll();
+    connected    = false;
+    autoEnabled  = false;
+    updateConnStatus();
+  }
+
   // ── Page open ──────────────────────────────────────────────────────────────
   function open() {
     checkCredentials().then(() => {
-      startStatusPoll();
+      if (connected) startStatusPoll();
     });
     loadAutoLog();
   }
@@ -722,7 +730,7 @@ const alpacaTrader = (() => {
     bindEvents();
   }
 
-  return { init, open };
+  return { init, open, checkCredentials, reset };
 
 })();
 

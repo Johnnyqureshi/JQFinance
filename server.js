@@ -2003,7 +2003,8 @@ async function atRunAll() {
   }
 }
 let atInterval = setInterval(atRunAll, 60_000);
-console.log('[AutoTrader] Engine started — scanning every 60 s');
+atRunAll(); // run immediately on startup — re-connects all enabled users after any restart
+console.log('[AutoTrader] Engine started — scanning every 60 s, initial run dispatched');
 
 // ── Watchdog — restarts the interval if the engine goes silent for >2 minutes ─
 setInterval(() => {

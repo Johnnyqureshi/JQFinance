@@ -1113,12 +1113,17 @@ function showApp(user) {
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
   window.jqfAgent?.show();
+  // Silently restore Alpaca connection state on every login/page-load —
+  // credentials live in the DB and must not require a manual tab click to reconnect.
+  alpacaTrader.checkCredentials();
 }
 
 function showAuthOverlay() {
   $('authOverlay').classList.remove('auth-hidden');
   $('navUser').style.display = 'none';
   window.jqfAgent?.hide();
+  // Stop the trading desk poll and clear connection state cleanly on logout
+  alpacaTrader.reset();
   state.currentUser = null;
   state.watchlist   = [];
   // Always land on the Sign In tab — prevents "username already taken" loop

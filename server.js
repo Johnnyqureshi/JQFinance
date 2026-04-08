@@ -1799,11 +1799,26 @@ async function atRunForUser(userId, dryRun = false) {
       console.log(`[AT] ${a.symbol}: ${s.signal} conf=${s.confidence}% price=$${s.price?.toFixed(2)} zone="${zone}" ${vpStr}`);
     }
 
-    // BUY only (cash account) — any VP-triggered BUY qualifies, sort by confidence desc
+    // BUY only (cash account) — VP trigger fires + minimum R:R of 1.0
+    const MIN_RR = 1.0;
     const actionable = analyses
-      .filter(a => a.sig?.signal === 'BUY')
+      .filter(a => {
+        if (a.sig?.signal !== 'BUY') return false;
+        const sig  = a.sig;
+        const atr  = sig.atr || (sig.val ? sig.val * 0.005 : 0);
+        const sl   = sig.val - atr * 0.5;
+        const tp   = sig.vah;
+        const px   = sig.price;
+        if (!tp || !sl || !px) return false;
+        const rr   = (tp - px) / Math.max(px - sl, 0.001);
+        if (rr < MIN_RR) {
+          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR} (VA too tight)`);
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => b.sig.confidence - a.sig.confidence);
-    console.log('[AutoTrader] BUY signals: ' + actionable.length + ' of ' + analyses.length + ' analyzed');
+    console.log('[AutoTrader] BUY signals: ' + actionable.length + ' of ' + analyses.length + ' analyzed (R:R≥' + MIN_RR + ')');
 
     // Build analyses for UI — include VP levels and zone context
     const maxLevSetting = Math.min(4, Math.max(1, settings.leverage || 1));

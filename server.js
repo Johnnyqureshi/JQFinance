@@ -989,6 +989,7 @@ const AT_BASE = [
   'ZSL',   // 2x inverse Silver
   // ── Volatility products ───────────────────────────────────────────────────
   'UVXY',  // 1.5x VIX Short-Term Futures
+  'UVIX',  // 2x VIX Short-Term Futures
   'VXX',   // 1x VIX Short-Term Futures
   'SVXY',  // -0.5x VIX (inverse volatility)
   // ── Single-stock 2× Bull leveraged ETFs ───────────────────────────────────

@@ -910,7 +910,7 @@ try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1'); 
 
 // ── Per-user in-memory state ──────────────────────────────────────────────────
 const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAction, candidates, error }
-const orderRateLimiter  = new Map(); // userId → { count, resetAt }
+// orderRateLimiter removed — Alpaca enforces its own rate limits
 const atScanningUsers   = new Set(); // userId → prevents concurrent scans
 
 // ── Sector ETFs — used for rotation detection each scan cycle ────────────────
@@ -1131,23 +1131,8 @@ function isUSMarketOpen() {
   } catch { return false; }
 }
 
-// ── Rate limiter — max 10 auto-orders / hour / user ───────────────────────────
-function consumeRateLimit(userId) {
-  const now = Date.now();
-  let rl = orderRateLimiter.get(userId) || { count: 0, resetAt: now + 3_600_000 };
-  if (now > rl.resetAt) rl = { count: 0, resetAt: now + 3_600_000 };
-  if (rl.count >= 10) return false;
-  rl.count++;
-  orderRateLimiter.set(userId, rl);
-  return true;
-}
-function rateLimitRemaining(userId) {
-  const rl = orderRateLimiter.get(userId);
-  if (!rl) return 10;
-  const now = Date.now();
-  if (now > rl.resetAt) return 10;
-  return Math.max(0, 10 - rl.count);
-}
+// Rate limiter removed — Alpaca enforces its own API limits on their side.
+// Internal throttling was blocking valid trades after 10 scan attempts/hr.
 
 // ── Analysis math (100% real bars from Yahoo Finance) ────────────────────────
 function atVWAP(bars) {
@@ -1458,11 +1443,6 @@ async function atAnalyze(sym) {
 
 // ── Place bracket order — VP-first sizing, VAH as TP, VAL as SL ──────────────
 async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings) {
-  if (!consumeRateLimit(userId)) {
-    console.warn('[AT] user=' + userId + ' rate limit reached');
-    return { rateLimited: true };
-  }
-
   const price = sig.price;
   const atr   = sig.atr;
 
@@ -1924,18 +1904,34 @@ async function atRunForUser(userId, dryRun = false) {
       daytradeCount,
     });
 
-    // ── 5. Place order for best BUY signal ────────────────────────────────────
+    // ── 5. Place order — walk all actionable signals until one fills ──────────
     const canEnter = !dryRun && session.isMarketOpen && atmOpen < MAX_POSITIONS && actionable.length > 0 && !pdtBlocked;
     if (canEnter) {
-      const best = actionable[0];
-      result.entryAttempt = best.symbol;
-      const orderResult = await atPlaceOrder(userId, best.symbol, best.sig, settledCash, buyingPower, settings);
-      result.orderResult = orderResult;
+      let placed = false;
+      for (const candidate of actionable) {
+        result.entryAttempt = candidate.symbol;
+        const orderResult = await atPlaceOrder(userId, candidate.symbol, candidate.sig, settledCash, buyingPower, settings);
+        result.orderResult = orderResult;
 
-      if (orderResult.rateLimited) {
+        if (orderResult.placed) {
+          placed = true;
+          break; // success — stop trying further signals this cycle
+        }
+        if (orderResult.insufficientBP) {
+          console.log(`[AT] ${candidate.symbol}: insufficient buying power — trying next signal`);
+          continue;
+        }
+        if (orderResult.failed) {
+          console.log(`[AT] ${candidate.symbol}: order failed (${orderResult.error}) — trying next signal`);
+          continue;
+        }
+        // skipped (e.g. HOLD signal) — move on
+        continue;
+      }
+      if (!placed) {
         autoTraderStatus.set(userId, {
           ...(autoTraderStatus.get(userId) || {}),
-          lastAction: 'Rate limit reached (' + rateLimitRemaining(userId) + ' left this hour)',
+          lastAction: `${actionable.length} signal(s) found — all skipped (BP/price check failed)`,
         });
       }
     } else if (!dryRun && !session.isMarketOpen) {
@@ -2044,7 +2040,6 @@ app.get('/api/alpaca/auto-log', requireAuth, (req, res) => {
 
 app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
   const st       = autoTraderStatus.get(req.session.userId) || {};
-  const rl       = rateLimitRemaining(req.session.userId);
   const sess     = atSessionInfo();
   const settings2 = db.prepare('SELECT max_positions FROM auto_trade_settings WHERE user_id=?').get(req.session.userId);
   const openCount = db.prepare(
@@ -2062,7 +2057,6 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     marketOpen:    sess.isMarketOpen,
     openPositions: openCount,
     maxPositions:  settings2?.max_positions || 1,
-    rateLimit:     rl,
     ...st,
   });
 });

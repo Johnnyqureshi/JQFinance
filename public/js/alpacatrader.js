@@ -245,9 +245,6 @@ const alpacaTrader = (() => {
       const pm = $('atPosMeta');
       if (pm) pm.textContent = (st.openPositions||0) + '/' + (st.maxPositions||1) + ' positions';
 
-      // Rate limit
-      const rl = $('atRateMeta');
-      if (rl && st.rateLimit != null) rl.textContent = st.rateLimit + ' orders/hr left';
 
       // Last action
       const act = $('atLastAction');

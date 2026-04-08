@@ -8,7 +8,6 @@ const alpacaTrader = (() => {
   let autoEnabled = false;
   let atLeverage     = 1;
   let atOrderType    = 'auto';
-  let atTradeDur     = 'swing';
   let statusPoll  = null;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -154,9 +153,7 @@ const alpacaTrader = (() => {
       if ($('atInvestAmt')) $('atInvestAmt').value = s.investment_amount || 1000;
       if ($('atMaxPos'))    $('atMaxPos').value    = s.max_positions     || 1;
       document.querySelectorAll('.at-lb[data-lev]').forEach(b => b.classList.toggle('active', +b.dataset.lev === atLeverage));
-      atOrderType = s.order_type    || 'auto';
-      atTradeDur  = s.trade_duration || 'swing';
-      document.querySelectorAll('.at-lb[data-dur]').forEach(b => b.classList.toggle('active', b.dataset.dur === atTradeDur));
+      atOrderType = s.order_type || 'auto';
       // Auto-enable if not already running
       if (!s.enabled) {
         autoEnabled = true;
@@ -178,7 +175,6 @@ const alpacaTrader = (() => {
         max_positions:     parseInt($('atMaxPos')?.value)      || 1,
         leverage:          atLeverage,
         order_type:        atOrderType,
-        trade_duration:    atTradeDur,
         min_volume:        500000,
       };
       await apiFetch('/api/alpaca/auto-settings', {
@@ -204,7 +200,6 @@ const alpacaTrader = (() => {
           max_positions:     parseInt($('atMaxPos')?.value)      || 1,
           leverage:          atLeverage,
           order_type:        atOrderType,
-          trade_duration:    atTradeDur,
           min_volume:        500000,
         }),
       });
@@ -700,15 +695,6 @@ const alpacaTrader = (() => {
       btn.addEventListener('click', () => {
         atLeverage = +btn.dataset.lev;
         document.querySelectorAll('.at-lb[data-lev]').forEach(b => b.classList.toggle('active', b===btn));
-        scheduleSave();
-      });
-    });
-
-    // Trade duration buttons — auto-save on change
-    document.querySelectorAll('.at-lb[data-dur]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        atTradeDur = btn.dataset.dur;
-        document.querySelectorAll('.at-lb[data-dur]').forEach(b => b.classList.toggle('active', b===btn));
         scheduleSave();
       });
     });

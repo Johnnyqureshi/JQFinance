@@ -840,23 +840,13 @@
           <input type="number" id="atMaxPos" value="1" min="1" max="4" class="at-inp"/>
         </div>
 
-        <!-- Trade Duration -->
-        <div class="at-sfield">
-          <label class="at-slbl">Trade duration</label>
-          <div class="at-lev-row">
-            <button class="at-lb" data-dur="day">Day</button>
-            <button class="at-lb active" data-dur="swing">Swing</button>
-          </div>
-          <div class="at-lev-hint">Swing: bracket stays open past close until VAH or SL is hit · Day: expires at 4 PM</div>
-        </div>
-
         <!-- How it works -->
         <div class="at-how-block">
           <div class="at-how-title">What happens automatically</div>
           <div class="at-how-step"><span class="at-how-n">1</span> Scans 30+ stocks every 60 seconds</div>
           <div class="at-how-step"><span class="at-how-n">2</span> Finds VAL bounces and POC breakouts using Volume Profile</div>
-          <div class="at-how-step"><span class="at-how-n">3</span> Places bracket order — Stop Loss below VAL, Take Profit at VAH (or VAH + VA width for breakouts)</div>
-          <div class="at-how-step"><span class="at-how-n">4</span> In Swing mode the bracket stays open overnight until TP or SL is hit — no manual action needed</div>
+          <div class="at-how-step"><span class="at-how-n">3</span> Places bracket order — Stop Loss 0.5% below entry, Take Profit at VAH (or VAH + VA width for breakouts)</div>
+          <div class="at-how-step"><span class="at-how-n">4</span> Bracket stays open (GTC) until TP or SL is hit — automatically a day or swing trade</div>
         </div>
 
         <div class="at-save-row" style="display:none">

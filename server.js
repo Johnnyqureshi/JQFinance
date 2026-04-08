@@ -1455,28 +1455,25 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const conf    = sig.confidence || 0;
   const lev     = conf >= 90 ? maxLev : conf >= 80 ? Math.min(maxLev, 2) : 1;
 
-  // ── TP / SL anchored to Value Area ─────────────────────────────────────────
-  //   TP = VAH  — where volume thins out above; natural profit magnet
-  //   SL = VAL  - 0.5× ATR  — just below support, exit if thesis is wrong
-  //   Fallback to ATR multiples when VP unavailable (shouldn't happen often)
-  const limitPx  = parseFloat((price * 1.0005).toFixed(2)); // limit 0.05% above last — rounded to cent (Alpaca requires ≥$0.01 increment)
+  // ── TP / SL ──────────────────────────────────────────────────────────────
+  //   TP = VAH  (VAL bounce) or VAH + VA width (POC breakout momentum projection)
+  //   SL = 0.5% below entry price — hard capital-protection stop, fully automated
+  const limitPx  = parseFloat((price * 1.0005).toFixed(2)); // limit 0.05% above last
 
   let tpPrice, slPrice;
   if (sig.vah && sig.val) {
     const isPocBreak = sig.zoneStr?.includes('POC breakout');
     const vaWidth    = sig.vah - sig.val;
-    // POC breakout: target a full VA-width above VAH (momentum projection)
-    // VAL bounce:   target VAH (price travels floor → ceiling of value area)
     tpPrice = isPocBreak && vaWidth > 0
       ? parseFloat((sig.vah + vaWidth).toFixed(2))
       : parseFloat(sig.vah.toFixed(2));
-    slPrice = parseFloat((sig.val - (atr ? 0.5 * atr : sig.val * 0.005)).toFixed(2));
-    // Sanity: TP must be above entry, SL must be below entry
+    // SL = 0.5% below the actual entry price — tight, consistent, always below entry
+    slPrice = parseFloat((limitPx * 0.995).toFixed(2));
+    // Sanity: TP must be above entry
     if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
-    if (slPrice >= limitPx) slPrice = parseFloat((limitPx * 0.985).toFixed(2));
   } else if (atr && atr > 0) {
-    slPrice = parseFloat((limitPx - 1.5 * atr).toFixed(2));
     tpPrice = parseFloat((limitPx + 3.0 * atr).toFixed(2));
+    slPrice = parseFloat((limitPx * 0.995).toFixed(2));
   } else {
     return { skipped: true, reason: 'No VAH/VAL or ATR for order levels' };
   }
@@ -1507,12 +1504,11 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const tpDist   = parseFloat((tpPrice  - entryPx).toFixed(4));
   const rr       = slDist > 0 ? (tpDist / slDist).toFixed(2) : '?';
 
-  // ── Determine time-in-force (day vs GTC for swing trades) ────────────────
-  // Market orders MUST be 'day' (Alpaca rejects GTC market orders).
-  // Limit orders in swing mode use 'gtc' so the entry stays open overnight
-  // and the bracket legs (TP + SL) persist until actually hit.
-  const isSwing = (settings.trade_duration || 'swing') === 'swing';
-  const tif = (isSwing && !useMarket) ? 'gtc' : 'day';
+  // ── Time-in-force — always GTC for limit entries, day for market ─────────
+  // Engine automatically becomes a day trade if TP/SL fires that session,
+  // or a swing trade if the bracket carries overnight — no manual choice needed.
+  // Market orders must always be 'day' (Alpaca requirement).
+  const tif = useMarket ? 'day' : 'gtc';
 
   // ── Build order body — limit or market bracket ────────────────────────────
   const orderBody = {
@@ -1528,8 +1524,8 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   // Limit orders need an explicit limit_price; market orders must NOT include it
   if (!useMarket) orderBody.limit_price = String(limitPx);
 
-  const durLabel = isSwing ? 'SWING/GTC' : 'DAY';
-  console.log(`[AT] ${sym}: ${useMarket ? 'MARKET' : 'LIMIT'} ${durLabel} order qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} R:R=${rr}`);
+  const durLabel = useMarket ? 'MARKET/DAY' : 'LIMIT/GTC';
+  console.log(`[AT] ${sym}: ${durLabel} qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} (0.5%) R:R=${rr}`);
 
   const order = await alpacaFetch(userId, '/v2/orders', {
     method: 'POST',
@@ -1540,7 +1536,8 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     const notional = (shares * limitPx).toFixed(2);
     const levStr   = lev > 1 ? ` | ${lev}x` : '';
     const vpStr    = sig.vah ? ` | VAL $${sig.val} → VAH $${sig.vah}` : '';
-    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} | TP $${tpPrice} (VAH) | R:R ${rr}:1 | ${sig.confidence}% conf | ${durLabel}${levStr}${vpStr}`;
+    const durStr   = useMarket ? 'MARKET' : 'GTC';
+    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} (0.5%) | TP $${tpPrice} | R:R ${rr}:1 | ${sig.confidence}% conf | ${durStr}${levStr}${vpStr}`;
     db.prepare(`
       INSERT INTO auto_trade_log
         (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
@@ -1841,18 +1838,16 @@ async function atRunForUser(userId, dryRun = false) {
       .filter(a => {
         if (a.sig?.signal !== 'BUY') return false;
         const sig          = a.sig;
-        const atr          = sig.atr || (sig.val ? sig.val * 0.005 : 0);
-        const sl           = sig.val - atr * 0.5;
         const px           = sig.price;
-        if (!sig.vah || !sl || !px) return false;
+        if (!sig.vah || !px) return false;
         const isPocBreak   = sig.zoneStr?.includes('POC breakout');
         const vaWidth      = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
-        // POC breakouts extend TP a full VA-width above VAH (momentum projection)
-        // VAL bounces keep TP = VAH (price travels from floor to ceiling of VA)
-        const tp = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
-        const rr = (tp - px) / Math.max(px - sl, 0.001);
+        const tp  = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
+        // SL = 0.5% below entry (matches atPlaceOrder)
+        const sl  = px * 0.995;
+        const rr  = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
-          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR} (VA too tight)${isPocBreak ? ' [extended TP used]' : ''}`);
+          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR}`);
           return false;
         }
         return true;
@@ -1869,15 +1864,15 @@ async function atRunForUser(userId, dryRun = false) {
       // VP-based TP/SL for display — POC breakouts show extended TP (VAH + VA width)
       const entryPx      = sig.price ? parseFloat((sig.price * 1.0005).toFixed(4)) : null;
       let tp_price = null, sl_price = null;
-      if (sig.vah && sig.val && entryPx) {
+      if (sig.vah && entryPx) {
         const isPocBreakDisp = sig.zoneStr?.includes('POC breakout');
-        const vaWidthDisp    = sig.vah - sig.val;
+        const vaWidthDisp    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
         tp_price = isPocBreakDisp && vaWidthDisp > 0
           ? parseFloat((sig.vah + vaWidthDisp).toFixed(2))
           : parseFloat(sig.vah.toFixed(2));
-        sl_price = parseFloat((sig.val - (sig.atr ? 0.5 * sig.atr : sig.val * 0.005)).toFixed(2));
         if (tp_price <= entryPx) tp_price = parseFloat((entryPx * 1.02).toFixed(2));
-        if (sl_price >= entryPx) sl_price = parseFloat((entryPx * 0.985).toFixed(2));
+        // SL displayed = 0.5% below entry (matches order placement)
+        sl_price = parseFloat((entryPx * 0.995).toFixed(2));
       }
       return {
         symbol:       a.symbol,
@@ -2019,12 +2014,11 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   if (!getAlpacaCreds(req.session.userId)) return res.status(400).json({ error: 'Connect Alpaca first.' });
   const b     = req.body || {};
   const clamp = (v, mn, mx, def) => Math.min(mx, Math.max(mn, isFinite(+v) ? +v : def));
-  const orderType    = ['limit','market','auto'].includes(b.order_type)    ? b.order_type    : 'auto';
-  const tradeDur     = ['day','swing'].includes(b.trade_duration)          ? b.trade_duration : 'swing';
+  const orderType = ['limit','market','auto'].includes(b.order_type) ? b.order_type : 'auto';
   db.prepare(`
     INSERT OR REPLACE INTO auto_trade_settings
       (user_id, enabled, max_positions, investment_amount, leverage, min_volume, order_type, trade_duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'swing')
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
@@ -2033,7 +2027,6 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
     clamp(b.leverage,         1,   4,           1),
     clamp(b.min_volume,  500_000, 100_000_000, 500_000),
     orderType,
-    tradeDur,
   );
   res.json({ ok: true });
 });

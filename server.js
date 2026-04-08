@@ -908,11 +908,19 @@ const atScanningUsers   = new Set(); // userId → prevents concurrent scans
 
 // ── Scan universe — 50 most-liquid US equities + volatility plays ─────────────
 const AT_UNIVERSE = [
-  'SPY','QQQ','IWM','AAPL','NVDA','TSLA','AMD','META','AMZN','MSFT',
-  'GOOGL','PLTR','COIN','MSTR','HOOD','SOXL','TQQQ','SQQQ','MARA','RIOT',
-  'SMCI','ARM','CRWD','NFLX','AVGO','INTC','MU','BA','SOFI','NIO',
-  'BABA','DKNG','IONQ','BBAI','SOUN','UBER','SNAP','RBLX','GME','RIVN',
-  'LCID','TSLL','NVDL','FNGU','LABU','ACHR','JOBY','RKLB','CLSK','HIMS',
+  // Mega-cap & index — always highly liquid
+  'SPY','QQQ','IWM','DIA','TQQQ','SQQQ','SOXL','SOXS','UVXY','VXX',
+  // Big tech
+  'AAPL','NVDA','TSLA','AMD','META','AMZN','MSFT','GOOGL','NFLX','AVGO',
+  'INTC','MU','ARM','SMCI','ORCL','CRM','ADBE','QCOM','TXN','AMAT',
+  // High-beta growth / meme
+  'PLTR','COIN','MSTR','HOOD','MARA','RIOT','CLSK','SOFI','GME','AMC',
+  'RIVN','LCID','NIO','XPEV','BABA','JD','PDD','SNAP','RBLX','UBER',
+  'LYFT','DKNG','PENN','SHOP','SQ','PYPL','ROKU','PINS','TWLO','ABNB',
+  // Biotech & speculative
+  'SOUN','IONQ','BBAI','ACHR','JOBY','RKLB','HIMS','LUNR','RDDT','KVYO',
+  // ETF leveraged plays
+  'TSLL','NVDL','FNGU','LABU','TECL','BULZ','CURE',
 ];
 
 // ── Market hours guard (US Eastern) ──────────────────────────────────────────
@@ -1139,10 +1147,11 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
   const volOk    = volRatio >= 1.0;   // at least average
 
   // ── PRIMARY TRIGGERS (Volume Profile-based) ───────────────────────────────
-  //  val_bounce:   price on VAL support with at least average volume
-  //  poc_breakout: price above POC (bullish volume control) with volume surge
-  const val_bounce   = nearVAL  && belowVAH && price > 2 && volOk;
-  const poc_breakout = abovePOC && belowVAH && price > 2 && volSurge;
+  //  val_bounce:   price on VAL support — pure price location, no volume requirement
+  //                (mid-day bars always read low volume vs open — volOk would kill every setup)
+  //  poc_breakout: price above POC with any above-average volume conviction
+  const val_bounce   = nearVAL  && belowVAH && price > 2;
+  const poc_breakout = abovePOC && belowVAH && price > 2 && volRatio >= 1.2;
   const primaryFires = val_bounce || poc_breakout;
 
   // ── Zone description for UI ────────────────────────────────────────────────
@@ -1207,8 +1216,10 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
 // ── Fetch real 5-min bars from Yahoo Finance ──────────────────────────────────
 async function atFetchBars(sym) {
   try {
+    // 5-day fixed-range VP gives a statistically meaningful distribution.
+    // Session-only (1d) has <24 bars in the first 2 hours — not enough for reliable VAH/VAL/POC.
     const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=false`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=5d&includePrePost=false`,
       { headers: YH }
     );
     if (!r.ok) { console.warn(`[AT bars] ${sym} HTTP ${r.status}`); return null; }
@@ -1224,8 +1235,8 @@ async function atFetchBars(sym) {
       l: q.low?.[i]   ?? null,
       c: q.close?.[i] ?? null,
       v: q.volume?.[i]?? null,
-    })).filter(b => b.c != null && b.h != null && b.l != null);
-    return bars.length >= 10 ? bars : null;
+    })).filter(b => b.c != null && b.h != null && b.l != null && b.v > 0);
+    return bars.length >= 15 ? bars : null;
   } catch(e) { console.warn(`[AT bars] ${sym} error:`, e.message); return null; }
 }
 
@@ -1549,8 +1560,9 @@ async function atRunForUser(userId, dryRun = false) {
           && (q.regularMarketPrice || 0) > 2          // price > $2
           && (q.regularMarketVolume || 0) >= MIN_DAILY_VOL)
         .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0))
-        .slice(0, 12)
+        // Scan ALL qualifying symbols — VP signal is the filter, not a hard cap
         .map(q => ({ symbol: q.symbol, volume: q.regularMarketVolume, price: q.regularMarketPrice }));
+      console.log('[AutoTrader] universe scan: ' + candidates.length + ' symbols qualify (price>$2, vol>500k)');
     } catch(e) {
       console.error('[AT] Universe scan error:', e.message);
     }
@@ -1585,10 +1597,20 @@ async function atRunForUser(userId, dryRun = false) {
         }))
     );
 
+    // Log each symbol's result for full transparency
+    for (const a of analyses) {
+      const s = a.sig;
+      if (!s) { console.log(`[AT] ${a.symbol}: no data`); continue; }
+      const zone  = s.zoneStr  || '--';
+      const vpStr = s.vah ? `VAL $${s.val} POC $${s.poc} VAH $${s.vah}` : 'no VP';
+      console.log(`[AT] ${a.symbol}: ${s.signal} conf=${s.confidence}% price=$${s.price?.toFixed(2)} zone="${zone}" ${vpStr}`);
+    }
+
     // BUY only (cash account) — any VP-triggered BUY qualifies, sort by confidence desc
     const actionable = analyses
       .filter(a => a.sig?.signal === 'BUY')
       .sort((a, b) => b.sig.confidence - a.sig.confidence);
+    console.log('[AutoTrader] BUY signals: ' + actionable.length + ' of ' + analyses.length + ' analyzed');
 
     // Build analyses for UI — include VP levels and zone context
     const maxLevSetting = Math.min(4, Math.max(1, settings.leverage || 1));

@@ -862,9 +862,12 @@
         </div>
 
         <div class="at-sim-section">
-          <div class="at-col-head">Dry Run</div>
-          <p class="at-sim-desc">Runs the full scan with real market data — no orders placed.</p>
-          <button class="at-sim-btn" id="atSimBtn">▷ Run Simulation</button>
+          <div class="at-col-head">Test &amp; Validate</div>
+          <p class="at-sim-desc">Dry run scans the market right now with no orders. Backtest replays 60 days of real data to show the strategy's historical edge.</p>
+          <div class="at-test-btns">
+            <button class="at-sim-btn" id="atSimBtn">▷ Dry Run Now</button>
+            <button class="at-bt-btn" id="atBtBtn">📊 Run Backtest (60 days)</button>
+          </div>
         </div>
       </div>
 
@@ -881,6 +884,9 @@
 
     <!-- Simulation results -->
     <div id="atSimResults" style="display:none" class="at-sim-results"></div>
+
+    <!-- Backtest results -->
+    <div id="atBtResults" style="display:none" class="at-bt-results"></div>
 
     <!-- Open Positions (from Alpaca) -->
     <div class="at-panel">

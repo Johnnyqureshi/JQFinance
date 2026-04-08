@@ -473,47 +473,55 @@ const alpacaTrader = (() => {
       const buys  = analyses.filter(a => a.signal === 'BUY');
       const holds = analyses.filter(a => a.signal !== 'BUY');
 
-      const renderRow = a => {
+      // Reuse same VP row renderer as the live feed
+      const renderSimRow = a => {
         const isBuy  = a.signal === 'BUY';
         const checks = a.checks || {};
-        const checkStr = Object.entries(checks).map(([k,v]) =>
+        let vpBar = '';
+        if (a.vah && a.val && a.poc && a.price) {
+          const rangeW = a.vah - a.val;
+          const pocPct = rangeW > 0 ? Math.max(0, Math.min(100, ((a.poc - a.val) / rangeW) * 100)) : 50;
+          const pxPct  = rangeW > 0 ? Math.max(0, Math.min(100, ((a.price - a.val) / rangeW) * 100)) : 50;
+          const zoneCls = a.tightVAL ? 'at-vp-val' : a.nearVAL ? 'at-vp-poc' : a.abovePOC ? 'at-vp-va' : a.price > a.vah ? 'at-vp-vah' : 'at-vp-out';
+          vpBar = `<div class="at-vp-hero">
+            <div class="at-vp-labels">
+              <span class="at-vp-label-val">VAL <b>$${parseFloat(a.val).toFixed(2)}</b></span>
+              <span class="at-vp-label-poc">POC <b>$${parseFloat(a.poc).toFixed(2)}</b></span>
+              <span class="at-vp-label-vah">VAH <b>$${parseFloat(a.vah).toFixed(2)}</b></span>
+            </div>
+            <div class="at-vp-track">
+              <div class="at-vp-fill" style="width:${pocPct}%"></div>
+              <div class="at-vp-poc-line" style="left:${pocPct}%"></div>
+              <div class="at-vp-price-tick" style="left:${Math.min(98,pxPct)}%"></div>
+            </div>
+            ${a.zoneStr ? `<div class="at-vp-zone-lbl ${zoneCls}">${a.zoneStr}</div>` : ''}
+            ${isBuy && a.tp_price ? `<div class="at-vp-trade">SL $${parseFloat(a.sl_price).toFixed(2)} → Entry $${parseFloat(a.price).toFixed(2)} → TP (VAH) $${parseFloat(a.tp_price).toFixed(2)}</div>` : ''}
+          </div>`;
+        }
+        const condStr = Object.entries(checks).map(([k,v]) =>
           `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}" title="${v.detail||''}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
         ).join('');
-        const atr = a.atr ? parseFloat(a.atr).toFixed(3) : 'n/a';
-        const sl  = a.sl_price ? parseFloat(a.sl_price).toFixed(2) : (a.atr?(parseFloat(a.price||0)-1.5*parseFloat(a.atr)).toFixed(2):'n/a');
-        const tp  = a.tp_price ? parseFloat(a.tp_price).toFixed(2) : (a.atr?(parseFloat(a.price||0)+3*parseFloat(a.atr)).toFixed(2):'n/a');
-        const lev = a.autoLeverage && a.autoLeverage>1 ? `<span class="at-feed-lev">${a.autoLeverage}x auto</span>` : '';
-        const vpRow = a.vah ? `<div class="at-feed-vp">
-          <span class="at-vp-lbl">VAL</span><span class="at-vp-val-num">$${parseFloat(a.val).toFixed(2)}</span>
-          <span class="at-vp-sep">·</span>
-          <span class="at-vp-lbl">POC</span><span class="at-vp-poc-num">$${parseFloat(a.poc).toFixed(2)}</span>
-          <span class="at-vp-sep">·</span>
-          <span class="at-vp-lbl">VAH</span><span class="at-vp-vah-num">$${parseFloat(a.vah).toFixed(2)}</span>
-          ${a.nearVAL?'<span class="at-vp-zone at-vp-val">@ VAL</span>':a.abovePOC?'<span class="at-vp-zone at-vp-poc">> POC</span>':''}
-        </div>` : '';
         return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
           <div class="at-feed-top">
             <span class="at-feed-sym">${a.symbol}</span>
             <span class="at-feed-sig at-sig-${(a.signal||'hold').toLowerCase()}">${a.signal||'HOLD'}</span>
             <span class="at-feed-conf">${a.confidence||0}%</span>
-            ${lev}
             <span class="at-feed-px">$${a.price?parseFloat(a.price).toFixed(2):'--'}</span>
+            <span class="at-feed-rsi">RSI ${a.rsi?parseFloat(a.rsi).toFixed(0):'--'}</span>
           </div>
-          ${vpRow}
-          <div class="at-feed-conds">${checkStr}</div>
-          <div class="at-feed-meta">SL $${sl} · TP $${tp} · ATR ${atr} (2:1 R:R)</div>
+          ${vpBar}
+          <div class="at-feed-conds">${condStr}</div>
         </div>`;
       };
 
       const buySection  = buys.length
-        ? `<div class="at-feed-hdr at-feed-hdr-buy">✅ BUY Signals (${buys.length})</div>` + buys.map(renderRow).join('')
-        : '<div class="at-empty at-empty-sm">No BUY signals — all conditions must pass simultaneously</div>';
+        ? `<div class="at-feed-hdr at-feed-hdr-buy">✅ VP Entry Signals Now (${buys.length})</div>` + buys.map(renderSimRow).join('')
+        : '<div class="at-empty at-empty-sm">No current VP entry signals — watching for VAL bounces and POC breakouts</div>';
       const holdSection = holds.length
-        ? `<div class="at-feed-hdr at-feed-hdr-hold">Scanned — Not Actionable (${holds.length})</div>` + holds.map(renderRow).join('')
+        ? `<div class="at-feed-hdr at-feed-hdr-hold">Monitoring (${holds.length})</div>` + holds.map(renderSimRow).join('')
         : '';
 
       if (resEl) { resEl.innerHTML = header + buySection + holdSection; resEl.style.display=''; }
-      // Also push into scan feed
       if (analyses.length) renderScanFeed(analyses);
 
     } catch(e) {
@@ -523,7 +531,111 @@ const alpacaTrader = (() => {
     }
   }
 
-  // ── Events ─────────────────────────────────────────────────────────────────
+  // ── Backtest ────────────────────────────────────────────────────────────────
+  async function runBacktest() {
+    const btn   = $('atBtBtn');
+    const resEl = $('atBtResults');
+    if (btn) { btn.disabled=true; btn.textContent='Running backtest…'; }
+    if (resEl) { resEl.style.display=''; resEl.innerHTML='<div class="at-bt-loading"><div class="at-bt-spinner"></div> Fetching 60 days of data for 20 symbols… (~15s)</div>'; }
+    try {
+      const r = await apiFetch('/api/alpaca/backtest');
+      if (r.error) throw new Error(r.error);
+      const s = r.stats || {};
+      const trades = r.trades || [];
+
+      const kellyColor  = s.kelly > 0 ? '#4ade80' : '#f87171';
+      const winColor    = s.winRate >= 55 ? '#4ade80' : s.winRate >= 45 ? '#facc15' : '#f87171';
+      const pnlColor    = s.totalPnl >= 0 ? '#4ade80' : '#f87171';
+      const pnlSign     = s.totalPnl >= 0 ? '+' : '';
+
+      const verdict = s.kelly > 10 ? '🟢 Statistically profitable — Kelly is positive, deploy capital'
+                    : s.kelly >  0 ? '🟡 Marginal edge — profitable but small, consider paper trading first'
+                    : '🔴 Negative edge in this period — do not trade live until conditions improve';
+
+      const summary = `<div class="at-bt-summary">
+        <div class="at-bt-title">Volume Profile Strategy — 60-Day Backtest</div>
+        <div class="at-bt-subtitle">${trades.length} trades across 20 liquid symbols</div>
+        <div class="at-bt-stats">
+          <div class="at-bt-stat">
+            <div class="at-bt-stat-val" style="color:${winColor}">${s.winRate}%</div>
+            <div class="at-bt-stat-lbl">Win Rate</div>
+            <div class="at-bt-stat-sub">${s.wins}W / ${s.losses}L / ${s.expired} exp</div>
+          </div>
+          <div class="at-bt-stat">
+            <div class="at-bt-stat-val">${s.avgRR}:1</div>
+            <div class="at-bt-stat-lbl">Avg Risk:Reward</div>
+            <div class="at-bt-stat-sub">TP=VAH / SL=VAL−0.5%</div>
+          </div>
+          <div class="at-bt-stat">
+            <div class="at-bt-stat-val" style="color:${pnlColor}">${pnlSign}${s.totalPnl}%</div>
+            <div class="at-bt-stat-lbl">Cumulative P&amp;L</div>
+            <div class="at-bt-stat-sub">Avg win ${s.avgWin}% / Avg loss ${s.avgLoss}%</div>
+          </div>
+          <div class="at-bt-stat">
+            <div class="at-bt-stat-val" style="color:${kellyColor}">${s.kelly}%</div>
+            <div class="at-bt-stat-lbl">Kelly Criterion</div>
+            <div class="at-bt-stat-sub">Optimal position size</div>
+          </div>
+        </div>
+        <div class="at-bt-verdict">${verdict}</div>
+      </div>`;
+
+      const valBounceRows = trades.filter(t => t.trigger === 'val_bounce');
+      const pocRows       = trades.filter(t => t.trigger === 'poc_breakout');
+      const vbWinRate = valBounceRows.length > 0
+        ? Math.round(valBounceRows.filter(t=>t.hit==='tp').length/valBounceRows.length*100) : 0;
+      const pbWinRate = pocRows.length > 0
+        ? Math.round(pocRows.filter(t=>t.hit==='tp').length/pocRows.length*100) : 0;
+
+      const breakdown = `<div class="at-bt-breakdown">
+        <div class="at-bt-trigger">
+          <div class="at-bt-trig-name">VAL Bounce</div>
+          <div class="at-bt-trig-n">${valBounceRows.length} trades</div>
+          <div class="at-bt-trig-wr" style="color:${vbWinRate>=55?'#4ade80':vbWinRate>=45?'#facc15':'#f87171'}">${vbWinRate}% win</div>
+        </div>
+        <div class="at-bt-trigger">
+          <div class="at-bt-trig-name">POC Breakout</div>
+          <div class="at-bt-trig-n">${pocRows.length} trades</div>
+          <div class="at-bt-trig-wr" style="color:${pbWinRate>=55?'#4ade80':pbWinRate>=45?'#facc15':'#f87171'}">${pbWinRate}% win</div>
+        </div>
+      </div>`;
+
+      const tradeRows = trades.slice(0, 60).map(t => {
+        const hitCls  = t.hit==='tp' ? 'at-bt-tp' : t.hit==='sl' ? 'at-bt-sl' : 'at-bt-exp';
+        const hitLbl  = t.hit==='tp' ? '✅ TP' : t.hit==='sl' ? '❌ SL' : '⏸ Exp';
+        const pnlCls  = t.pnlPct >= 0 ? 'at-bt-pnl-pos' : 'at-bt-pnl-neg';
+        const pnlSign = t.pnlPct >= 0 ? '+' : '';
+        const trigLbl = t.trigger==='val_bounce' ? 'VAL' : 'POC';
+        return `<div class="at-bt-row ${hitCls}">
+          <span class="at-bt-row-sym">${t.symbol}</span>
+          <span class="at-bt-row-date">${t.date}</span>
+          <span class="at-bt-row-trig at-trig-${t.trigger}">${trigLbl}</span>
+          <span class="at-bt-row-px">$${t.openPrice}</span>
+          <span class="at-bt-row-tp">TP $${t.tpLevel}</span>
+          <span class="at-bt-row-sl">SL $${t.slLevel}</span>
+          <span class="at-bt-row-hit">${hitLbl}</span>
+          <span class="at-bt-row-pnl ${pnlCls}">${pnlSign}${t.pnlPct}%</span>
+          <span class="at-bt-row-rr">${t.rr}:1</span>
+        </div>`;
+      }).join('');
+
+      const tradeList = `<div class="at-bt-trades">
+        <div class="at-bt-trades-hdr">Trade Log (most recent ${Math.min(60,trades.length)} of ${trades.length})</div>
+        <div class="at-bt-trades-cols">
+          <span>Symbol</span><span>Date</span><span>Trigger</span><span>Entry</span>
+          <span>TP Target</span><span>SL Level</span><span>Result</span><span>P&amp;L %</span><span>R:R</span>
+        </div>
+        ${tradeRows}
+      </div>`;
+
+      if (resEl) resEl.innerHTML = summary + breakdown + tradeList;
+    } catch(e) {
+      if (resEl) resEl.innerHTML=`<div class="at-empty at-err">Backtest error: ${e.message}</div>`;
+    } finally {
+      if (btn) { btn.disabled=false; btn.textContent='📊 Run Backtest (60 days)'; }
+    }
+  }
+
   function bindEvents() {
     // Connect button & modal
     $('atConnBtn')?.addEventListener('click', showModal);
@@ -581,6 +693,7 @@ const alpacaTrader = (() => {
 
     // Simulation
     $('atSimBtn')?.addEventListener('click', runSimulation);
+    $('atBtBtn')?.addEventListener('click', runBacktest);
   }
 
   // ── Page open ──────────────────────────────────────────────────────────────

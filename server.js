@@ -1784,4 +1784,113 @@ app.post('/api/alpaca/simulate', requireAuth, async (req, res) => {
   }
 });
 
+// ── Backtest endpoint — 60 days of 1h bars, VP strategy simulated ─────────────
+app.get('/api/alpaca/backtest', requireAuth, async (req, res) => {
+  const BT_SYMBOLS = [
+    'AAPL','TSLA','NVDA','AMD','META','AMZN','MSFT','GOOGL','NFLX','COIN',
+    'SPY','QQQ','BABA','SHOP','SNAP','UBER','LYFT','PLTR','RBLX','SOFI'
+  ];
+  const trades  = [];
+  const errors  = [];
+
+  for (const sym of BT_SYMBOLS) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1h&range=60d&includePrePost=false`;
+      const r   = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!r.ok) { errors.push(sym); continue; }
+      const d   = await r.json();
+      const rs  = d?.chart?.result?.[0];
+      if (!rs)  { errors.push(sym); continue; }
+
+      const times = rs.timestamp || [];
+      const q     = rs.indicators?.quote?.[0] || {};
+      const allBars = times.map((t, i) => ({
+        t: new Date(t * 1000),
+        o: q.open?.[i]   ?? null,
+        h: q.high?.[i]   ?? null,
+        l: q.low?.[i]    ?? null,
+        c: q.close?.[i]  ?? null,
+        v: q.volume?.[i] ?? 0,
+      })).filter(b => b.h != null && b.l != null && b.c != null && b.v > 0);
+
+      // Group by NY trading day
+      const days = {};
+      for (const bar of allBars) {
+        const key = bar.t.toLocaleDateString('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit' });
+        if (!days[key]) days[key] = [];
+        days[key].push(bar);
+      }
+
+      for (const [date, bars] of Object.entries(days)) {
+        if (bars.length < 5) continue;
+        bars.sort((a, b) => a.t - b.t);
+
+        const vp = atVolumeProfile(bars);
+        if (!vp || vp.vah <= vp.val) continue;
+
+        const vaWidth   = vp.vah - vp.val;
+        const openBar   = bars[0];
+        const openPrice = openBar.o ?? openBar.c;
+        if (!openPrice || openPrice <= 2) continue;
+
+        // ── Check if open is in VAL bounce zone OR first bar breaks above POC ──
+        const avgVol  = bars.reduce((s, b) => s + b.v, 0) / bars.length;
+        const inValZone    = openPrice >= vp.val && openPrice <= vp.val + vaWidth * 0.12 && openBar.v >= avgVol * 0.7;
+        const pocBreakout  = openPrice > vp.poc && openBar.v >= avgVol * 1.5;
+        if (!inValZone && !pocBreakout) continue;
+
+        const trigger  = inValZone ? 'val_bounce' : 'poc_breakout';
+        const slLevel  = vp.val * 0.995;           // 0.5% below VAL
+        const tpLevel  = vp.vah;
+
+        if (tpLevel <= openPrice) continue;        // sanity: must have upside
+        if (slLevel >= openPrice) continue;        // sanity: must have downside
+
+        // Simulate: scan remaining bars for TP or SL hit
+        let hit = 'expired';
+        let exitPrice = bars[bars.length - 1].c;
+        for (let i = 1; i < bars.length; i++) {
+          const bar    = bars[i];
+          const tpHit  = bar.h >= tpLevel;
+          const slHit  = bar.l <= slLevel;
+          if (tpHit && slHit) { hit = 'tp'; exitPrice = tpLevel; break; } // gap up counts as win
+          if (tpHit)          { hit = 'tp'; exitPrice = tpLevel; break; }
+          if (slHit)          { hit = 'sl'; exitPrice = slLevel; break; }
+        }
+
+        const tpDist  = tpLevel - openPrice;
+        const slDist  = openPrice - slLevel;
+        const rr      = slDist > 0 ? parseFloat((tpDist / slDist).toFixed(2)) : 0;
+        const pnlPct  = parseFloat((((exitPrice - openPrice) / openPrice) * 100).toFixed(3));
+
+        trades.push({ symbol: sym, date, trigger, hit, openPrice: parseFloat(openPrice.toFixed(2)),
+          tpLevel: parseFloat(tpLevel.toFixed(2)), slLevel: parseFloat(slLevel.toFixed(2)),
+          vah: vp.vah, val: vp.val, poc: vp.poc, rr, pnlPct });
+      }
+    } catch (e) { errors.push(sym); }
+  }
+
+  trades.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const wins    = trades.filter(t => t.hit === 'tp');
+  const losses  = trades.filter(t => t.hit === 'sl');
+  const expired = trades.filter(t => t.hit === 'expired');
+  const winRate = trades.length > 0 ? parseFloat((wins.length / trades.length * 100).toFixed(1)) : 0;
+  const avgRR   = trades.length > 0 ? parseFloat((trades.reduce((s, t) => s + t.rr, 0) / trades.length).toFixed(2)) : 0;
+  const totalPnl = parseFloat(trades.reduce((s, t) => s + t.pnlPct, 0).toFixed(2));
+  const avgWin  = wins.length   > 0 ? parseFloat((wins.reduce((s,t)=>s+t.pnlPct,0)/wins.length).toFixed(2))     : 0;
+  const avgLoss = losses.length > 0 ? parseFloat((losses.reduce((s,t)=>s+t.pnlPct,0)/losses.length).toFixed(2)) : 0;
+  // Kelly criterion for expected value
+  const w = winRate / 100;
+  const b = avgRR;
+  const kelly = b > 0 ? parseFloat(((w - (1 - w) / b) * 100).toFixed(1)) : 0;
+
+  res.json({
+    ok: true,
+    stats: { total: trades.length, wins: wins.length, losses: losses.length,
+             expired: expired.length, winRate, avgRR, totalPnl, avgWin, avgLoss, kelly, errors },
+    trades: trades.slice(0, 200),
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

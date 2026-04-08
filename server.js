@@ -1007,6 +1007,61 @@ function atATR(bars, period = 14) {
   return atr;
 }
 
+// ── Volume Profile — VAH / VAL / POC ─────────────────────────────────────────
+// Divides the session range into price buckets, distributes volume proportionally,
+// then expands from the Point of Control until 70% of total volume is captured.
+function atVolumeProfile(bars, numBuckets = 24) {
+  if (!bars || bars.length < 5) return null;
+  const validBars = bars.filter(b => b.h != null && b.l != null && b.v > 0);
+  if (validBars.length < 3) return null;
+  const hi = Math.max(...validBars.map(b => b.h));
+  const lo = Math.min(...validBars.map(b => b.l));
+  if (hi - lo < 0.01) return null;
+  const bucketSize = (hi - lo) / numBuckets;
+  const buckets = Array.from({ length: numBuckets }, (_, i) => ({
+    low:    lo + i * bucketSize,
+    high:   lo + (i + 1) * bucketSize,
+    center: lo + (i + 0.5) * bucketSize,
+    volume: 0,
+  }));
+  for (const b of validBars) {
+    const bRange = b.h - b.l;
+    if (bRange < 0.001) {
+      const idx = Math.max(0, Math.min(numBuckets - 1, Math.floor((b.c - lo) / bucketSize)));
+      buckets[idx].volume += b.v;
+    } else {
+      for (let bi = 0; bi < numBuckets; bi++) {
+        const overlap = Math.min(b.h, buckets[bi].high) - Math.max(b.l, buckets[bi].low);
+        if (overlap > 0) buckets[bi].volume += b.v * (overlap / bRange);
+      }
+    }
+  }
+  // Point of Control — highest-volume bucket
+  let pocIdx = 0;
+  for (let i = 1; i < numBuckets; i++) {
+    if (buckets[i].volume > buckets[pocIdx].volume) pocIdx = i;
+  }
+  // Value Area — expand from POC until 70% of session volume is captured
+  const totalVol = buckets.reduce((s, b) => s + b.volume, 0);
+  let vaVol = buckets[pocIdx].volume;
+  let vaLo = pocIdx, vaHi = pocIdx;
+  while (vaVol < totalVol * 0.70) {
+    const canUp   = vaHi < numBuckets - 1;
+    const canDown = vaLo > 0;
+    if (!canUp && !canDown) break;
+    const upVol   = canUp   ? buckets[vaHi + 1].volume : -1;
+    const downVol = canDown ? buckets[vaLo - 1].volume : -1;
+    if (upVol >= downVol) { vaHi++; vaVol += buckets[vaHi].volume; }
+    else                  { vaLo--; vaVol += buckets[vaLo].volume; }
+  }
+  return {
+    poc: parseFloat(buckets[pocIdx].center.toFixed(2)),
+    vah: parseFloat(buckets[vaHi].high.toFixed(2)),
+    val: parseFloat(buckets[vaLo].low.toFixed(2)),
+    totalVol,
+  };
+}
+
 // ── Higher High / Higher Low structure (last 5 bars) ─────────────────────────
 function atHHHL(bars) {
   if (bars.length < 4) return false;
@@ -1033,11 +1088,25 @@ function atSessionInfo() {
 }
 
 // ── Signal engine — cash-account rules (BUY only, no shorting) ───────────────
-function atSignal(bars, closes, price, rsi, vwap, volData, atr) {
+function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
   const ema9  = atEMA(closes, 9);
   const ema21 = atEMA(closes, 21);
   const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
   const hhhl  = atHHHL(bars);
+
+  // ── Volume Profile zone analysis ──────────────────────────────────────────
+  // VAL bounce: price just above VAL (within 1.5%) — prime buy zone
+  // POC: price above POC → bullish side of fairness
+  // VAH: price below VAH → room left in value area
+  const nearVAL  = vp && price >= vp.val && price <= vp.val * 1.015;
+  const abovePOC = vp && price > vp.poc;
+  const belowVAH = vp && price < vp.vah;
+  const inVA     = vp && price >= vp.val && price <= vp.vah;
+
+  // Volume profile position detail string
+  const vpDetail = vp
+    ? `VAL $${vp.val} | POC $${vp.poc} | VAH $${vp.vah} — ${nearVAL ? 'at VAL support' : inVA ? 'inside VA' : price > vp.vah ? 'above VAH' : 'below VAL'}`
+    : 'n/a';
 
   // Build per-condition check map for transparency
   const checks = {
@@ -1049,18 +1118,28 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr) {
                         detail: 'vol ' + (volData.avgV > 0 ? (volData.lastV / volData.avgV).toFixed(1) + '× avg' : 'n/a') },
     hhhl_structure:   { pass: hhhl, detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
     atr_available:    { pass: atr != null && atr > 0, detail: atr ? 'ATR=' + atr.toFixed(3) : 'insufficient data' },
+    volume_profile:   { pass: vp ? (abovePOC && belowVAH) : true,  detail: vpDetail },
   };
 
   const allPass = Object.values(checks).every(c => c.pass);
   const reasons = Object.entries(checks).map(([k, v]) => (v.pass ? '✓ ' : '✗ ') + k.replace(/_/g,' ') + ': ' + v.detail);
 
-  // Confidence is proportional to how many conditions pass
+  // Confidence: base from pass ratio, then layered bonuses
   const passCount = Object.values(checks).filter(c => c.pass).length;
-  const confidence = allPass ? Math.round(68 + Math.min((volData.lastV/Math.max(volData.avgV,1) - 1) * 10, 22)) : Math.round((passCount / Object.keys(checks).length) * 60);
+  let confidence;
+  if (allPass) {
+    // Base 68 + volume surge bonus + VAL bounce bonus + POC hold bonus
+    const surgePct  = volData.avgV > 0 ? (volData.lastV / volData.avgV - 1) * 10 : 0;
+    const valBonus  = nearVAL  ? 6  : 0;  // in prime buy zone
+    const pocBonus  = abovePOC ? 3  : 0;  // bullish volume control
+    confidence = Math.round(68 + Math.min(surgePct, 18) + valBonus + pocBonus);
+  } else {
+    confidence = Math.round((passCount / Object.keys(checks).length) * 60);
+  }
 
   return {
-    signal:     allPass ? 'BUY' : 'HOLD',
-    confidence,
+    signal: allPass ? 'BUY' : 'HOLD',
+    confidence: Math.min(confidence, 97),
     reasons,
     checks,
     price,
@@ -1071,6 +1150,12 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr) {
     ema21,
     atr,
     hhhl,
+    vah: vp?.vah ?? null,
+    val: vp?.val ?? null,
+    poc: vp?.poc ?? null,
+    nearVAL,
+    abovePOC,
+    inVA,
   };
 }
 
@@ -1109,13 +1194,14 @@ async function atAnalyze(sym) {
   const vwap   = atVWAP(bars);
   const rsi    = atRSI(closes) ?? 50;
   const atr    = atATR(bars);
+  const vp     = atVolumeProfile(bars);   // VAH / VAL / POC
 
   const vols  = bars.map(b => b.v ?? 0).filter(v => v > 0);
   const avgV  = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
   const lastV = bars[bars.length - 1].v ?? 0;
   const volData = { lastV, avgV, surge: avgV > 0 && lastV / avgV > 1.8 };
 
-  return atSignal(bars, closes, price, rsi, vwap, volData, atr);
+  return atSignal(bars, closes, price, rsi, vwap, volData, atr, vp);
 }
 
 // ── Place bracket order — real money, no mocks ────────────────────────────────
@@ -1467,6 +1553,12 @@ async function atRunForUser(userId, dryRun = false) {
         atr:         a.sig?.atr,
         ema9:        a.sig?.ema9,
         ema21:       a.sig?.ema21,
+        vah:         a.sig?.vah,
+        val:         a.sig?.val,
+        poc:         a.sig?.poc,
+        nearVAL:     a.sig?.nearVAL,
+        abovePOC:    a.sig?.abovePOC,
+        inVA:        a.sig?.inVA,
         reasons:     a.sig?.reasons    || [],
         checks:      a.sig?.checks     || {},
         autoLeverage: lev,

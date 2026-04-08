@@ -278,22 +278,40 @@ const alpacaTrader = (() => {
 
   // ── Live scan feed ─────────────────────────────────────────────────────────
   function renderScanFeed(analyses) {
-    const el    = $('atScanFeed');
-    const cnt   = $('atScanCount');
+    const el  = $('atScanFeed');
+    const cnt = $('atScanCount');
     if (!el) return;
     if (cnt) cnt.textContent = analyses.length + ' symbols';
 
     const buys  = analyses.filter(a => a.signal === 'BUY');
     const holds = analyses.filter(a => a.signal !== 'BUY');
 
+    const vpZoneLabel = a => {
+      if (!a.vah) return null;
+      if (a.nearVAL)  return { txt:'@ VAL', cls:'at-vp-val' };
+      if (a.abovePOC) return { txt:'> POC', cls:'at-vp-poc' };
+      if (a.inVA)     return { txt:'in VA',  cls:'at-vp-va'  };
+      if (a.price > a.vah) return { txt:'> VAH', cls:'at-vp-vah' };
+      return { txt:'< VAL', cls:'at-vp-out' };
+    };
+
     const renderRow = a => {
-      const isBuy   = a.signal === 'BUY';
-      const checks  = a.checks || {};
-      const checkItems = Object.entries(checks).map(([k, v]) =>
-        `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
+      const isBuy  = a.signal === 'BUY';
+      const checks = a.checks || {};
+      const condStr = Object.entries(checks).map(([k, v]) =>
+        `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}" title="${v.detail||''}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
       ).join('');
-      const atrStr = a.atr ? `<span class="at-feed-atr">ATR ${parseFloat(a.atr).toFixed(3)} | SL $${a.sl_price?parseFloat(a.sl_price).toFixed(2):'--'} | TP $${a.tp_price?parseFloat(a.tp_price).toFixed(2):'--'}</span>` : '';
-      const levStr = a.autoLeverage && a.autoLeverage > 1 ? `<span class="at-feed-lev">${a.autoLeverage}x leverage</span>` : '';
+      const vpZone = vpZoneLabel(a);
+      const vpRow  = a.vah ? `<div class="at-feed-vp">
+        <span class="at-vp-lbl">VAL</span><span class="at-vp-val-num">$${parseFloat(a.val).toFixed(2)}</span>
+        <span class="at-vp-sep">·</span>
+        <span class="at-vp-lbl">POC</span><span class="at-vp-poc-num">$${parseFloat(a.poc).toFixed(2)}</span>
+        <span class="at-vp-sep">·</span>
+        <span class="at-vp-lbl">VAH</span><span class="at-vp-vah-num">$${parseFloat(a.vah).toFixed(2)}</span>
+        ${vpZone ? `<span class="at-vp-zone ${vpZone.cls}">${vpZone.txt}</span>` : ''}
+      </div>` : '';
+      const levStr = a.autoLeverage && a.autoLeverage > 1 ? `<span class="at-feed-lev">${a.autoLeverage}x</span>` : '';
+      const atrStr = a.atr ? `SL $${a.sl_price?parseFloat(a.sl_price).toFixed(2):'--'} TP $${a.tp_price?parseFloat(a.tp_price).toFixed(2):'--'} ATR ${parseFloat(a.atr).toFixed(3)}` : '';
       return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
         <div class="at-feed-top">
           <span class="at-feed-sym">${a.symbol}</span>
@@ -301,19 +319,20 @@ const alpacaTrader = (() => {
           <span class="at-feed-conf">${a.confidence||0}%</span>
           ${levStr}
           <span class="at-feed-px">$${a.price?parseFloat(a.price).toFixed(2):'--'}</span>
+          <span class="at-feed-rsi">RSI ${a.rsi?parseFloat(a.rsi).toFixed(0):'--'}</span>
         </div>
-        <div class="at-feed-conds">${checkItems}</div>
-        ${atrStr?`<div class="at-feed-meta">${atrStr}</div>`:''}
-        ${a.reasons?.length?`<div class="at-feed-reasons">${a.reasons.map(r=>`<span>${r}</span>`).join('')}</div>`:''}
+        ${vpRow}
+        <div class="at-feed-conds">${condStr}</div>
+        ${atrStr ? `<div class="at-feed-meta">${atrStr}</div>` : ''}
       </div>`;
     };
 
     const buySection  = buys.length
       ? `<div class="at-feed-hdr at-feed-hdr-buy">✅ BUY Signals (${buys.length})</div>` + buys.map(renderRow).join('')
-      : '<div class="at-empty at-empty-sm">No BUY signals — all conditions must pass simultaneously</div>';
+      : '<div class="at-empty at-empty-sm">No BUY signals — all 8 conditions including volume profile must pass</div>';
 
     const holdSection = holds.length
-      ? `<div class="at-feed-hdr at-feed-hdr-hold">Scanned — Conditions Not Met (${holds.length})</div>` + holds.map(renderRow).join('')
+      ? `<div class="at-feed-hdr at-feed-hdr-hold">Monitoring — Conditions Not Met (${holds.length})</div>` + holds.map(renderRow).join('')
       : '';
 
     el.innerHTML = buySection + holdSection;
@@ -343,13 +362,7 @@ const alpacaTrader = (() => {
         const pnl = l.pnl!=null ? parseFloat(l.pnl) : null;
         return { cls: pnl!=null&&pnl>0 ? 'alog-win' : 'alog-loss', label:'Closed' };
       };
-      el.innerHTML =
-        `<div class="at-log-header">
-          <span>Side</span><span>Symbol</span><span>Sh</span><span>Entry</span>
-          <span>TP</span><span>SL</span><span>Conf</span><span>Lev</span>
-          <span>P&L</span><span>Exit</span><span>Status</span><span>Time</span>
-        </div>` +
-        logs.slice(0,40).map(l => {
+      const rows = logs.slice(0,40).map(l => {
           const pnl  = l.pnl!=null ? parseFloat(l.pnl) : null;
           const up   = pnl!=null && pnl>=0;
           const si   = statusInfo(l);
@@ -364,11 +377,17 @@ const alpacaTrader = (() => {
             <span>${l.confidence||'--'}%</span>
             <span>${l.leverage||1}x</span>
             <span class="${pnl!=null?(up?'up':'dn'):''}">${pnl!=null?(up?'+':'−')+'$'+fmt(Math.abs(pnl)):'--'}</span>
-            <span class="text-dim" style="font-size:0.7rem">${exit}</span>
+            <span class="text-dim">${exit}</span>
             <span class="at-log-status ${si.cls}">${si.label}</span>
             <span>${fmtDateTime(l.created_at)}</span>
           </div>`;
         }).join('');
+      el.innerHTML = `<div class="at-log-scroll">
+        <div class="at-log-header">
+          <span>Side</span><span>Symbol</span><span>Sh</span><span>Entry</span>
+          <span>TP</span><span>SL</span><span>Conf</span><span>Lev</span>
+          <span>P&L</span><span>Exit</span><span>Status</span><span>Time</span>
+        </div>${rows}</div>`;
     } catch(e) {
       el.innerHTML = '<div class="at-empty at-err">Failed to load log</div>';
     }
@@ -452,12 +471,20 @@ const alpacaTrader = (() => {
         const isBuy  = a.signal === 'BUY';
         const checks = a.checks || {};
         const checkStr = Object.entries(checks).map(([k,v]) =>
-          `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}: ${v.detail||''}</span>`
+          `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}" title="${v.detail||''}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
         ).join('');
-        const atr  = a.atr ? parseFloat(a.atr).toFixed(3) : 'n/a';
-        const sl   = a.atr ? (parseFloat(a.price||0)-1.5*parseFloat(a.atr)).toFixed(2) : 'n/a';
-        const tp   = a.atr ? (parseFloat(a.price||0)+3*parseFloat(a.atr)).toFixed(2) : 'n/a';
-        const lev  = a.autoLeverage && a.autoLeverage>1 ? `<span class="at-feed-lev">${a.autoLeverage}x auto</span>` : '';
+        const atr = a.atr ? parseFloat(a.atr).toFixed(3) : 'n/a';
+        const sl  = a.sl_price ? parseFloat(a.sl_price).toFixed(2) : (a.atr?(parseFloat(a.price||0)-1.5*parseFloat(a.atr)).toFixed(2):'n/a');
+        const tp  = a.tp_price ? parseFloat(a.tp_price).toFixed(2) : (a.atr?(parseFloat(a.price||0)+3*parseFloat(a.atr)).toFixed(2):'n/a');
+        const lev = a.autoLeverage && a.autoLeverage>1 ? `<span class="at-feed-lev">${a.autoLeverage}x auto</span>` : '';
+        const vpRow = a.vah ? `<div class="at-feed-vp">
+          <span class="at-vp-lbl">VAL</span><span class="at-vp-val-num">$${parseFloat(a.val).toFixed(2)}</span>
+          <span class="at-vp-sep">·</span>
+          <span class="at-vp-lbl">POC</span><span class="at-vp-poc-num">$${parseFloat(a.poc).toFixed(2)}</span>
+          <span class="at-vp-sep">·</span>
+          <span class="at-vp-lbl">VAH</span><span class="at-vp-vah-num">$${parseFloat(a.vah).toFixed(2)}</span>
+          ${a.nearVAL?'<span class="at-vp-zone at-vp-val">@ VAL</span>':a.abovePOC?'<span class="at-vp-zone at-vp-poc">> POC</span>':''}
+        </div>` : '';
         return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
           <div class="at-feed-top">
             <span class="at-feed-sym">${a.symbol}</span>
@@ -466,8 +493,9 @@ const alpacaTrader = (() => {
             ${lev}
             <span class="at-feed-px">$${a.price?parseFloat(a.price).toFixed(2):'--'}</span>
           </div>
+          ${vpRow}
           <div class="at-feed-conds">${checkStr}</div>
-          <div class="at-feed-meta">ATR ${atr} | SL $${sl} | TP $${tp} (2:1 R:R)</div>
+          <div class="at-feed-meta">SL $${sl} · TP $${tp} · ATR ${atr} (2:1 R:R)</div>
         </div>`;
       };
 

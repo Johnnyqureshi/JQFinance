@@ -4162,6 +4162,7 @@ option { background: var(--card); }
 }
 .mkt-open   { background: rgba(29,214,163,.15); color: #1dd6a3; border: 1px solid rgba(29,214,163,.3); }
 .mkt-closed { background: rgba(117,117,117,.12); color: #888; border: 1px solid rgba(117,117,117,.2); }
+.mkt-warn   { background: rgba(255,167,38,.12); color: #ffa726; border: 1px solid rgba(255,167,38,.3); }
 
 /* ── Scan + simulation buttons row ──────────────────────────── */
 .trd-scan-btns { display: flex; gap: 6px; align-items: center; }
@@ -4184,13 +4185,26 @@ option { background: var(--card); }
 .sim-open   { color: #1dd6a3; font-weight: 700; }
 .sim-closed { color: #888; font-weight: 600; }
 .sim-row {
-  display: grid; grid-template-columns: 46px 55px 50px 65px 60px 1fr;
-  align-items: center; padding: 5px 4px; border-radius: 5px; gap: 6px;
+  display: grid;
+  grid-template-columns: 46px 70px 46px 80px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  padding: 6px 6px;
+  border-radius: 6px;
+  gap: 4px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
 }
 .sim-row:hover { background: rgba(255,255,255,.03); }
+.sim-checks { grid-column: 1 / -1; }
 .sim-reasons { color: var(--text-dim); font-size: 0.7rem; }
 .sim-empty   { color: var(--text-dim); font-style: italic; padding: 6px 0; }
 .sim-error   { color: #ef5350; }
+.sim-warn    { color: #ffa726; font-weight: 600; }
+.sim-section-hdr  { font-size: 0.72rem; font-weight: 700; color: #1dd6a3; padding: 6px 0 3px; border-bottom: 1px solid rgba(29,214,163,.15); margin: 6px 0 4px; letter-spacing: .04em; }
+.sim-hdr-hold     { color: var(--text-dim); border-bottom-color: rgba(255,255,255,.07); }
+.sim-row-buy  { background: rgba(29,214,163,.04); border-left: 2px solid rgba(29,214,163,.4) !important; }
+.sim-row-hold { opacity: 0.7; }
+.sim-checks   { font-size: 0.65rem; color: var(--text-dim); margin-top: 3px; line-height: 1.6; word-break: break-word; }
 .text-dim    { color: var(--text-dim); }
 
 /* ── Auto-trade log ──────────────────────────────────────────── */
@@ -4207,9 +4221,10 @@ option { background: var(--card); }
   font-size: 0.73rem; margin-bottom: 2px; transition: background .12s; gap: 4px;
 }
 .trd-alog-row:hover  { background: rgba(255,255,255,.03); }
-.alog-open  { border-left: 2px solid #00bcd4; }
-.alog-win   { border-left: 2px solid #1dd6a3; }
-.alog-loss  { border-left: 2px solid #ef5350; }
+.alog-open    { border-left: 2px solid #00bcd4; }
+.alog-pending { border-left: 2px solid #ffa726; opacity: 0.9; }
+.alog-win     { border-left: 2px solid #1dd6a3; }
+.alog-loss    { border-left: 2px solid #ef5350; }
 
 /* ── Spin animation ──────────────────────────────────────────── */
 @keyframes trdSpin { to { transform: rotate(360deg); } }

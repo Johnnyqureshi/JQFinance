@@ -458,13 +458,20 @@ const alpacaTrader = (() => {
       const scanIconEl=$('trdAutoScanIcon');
       if(scanIconEl) scanIconEl.style.display=st.scanning?'':'none';
 
-      // Market open badge
+      // Market open badge + session guard labels
       const mktEl=$('trdMarketStatus');
       if(mktEl){
-        mktEl.textContent=st.marketOpen?'Market Open':'Market Closed';
-        mktEl.className='trd-mkt-badge '+(st.marketOpen?'mkt-open':'mkt-closed');
+        let mktLabel,mktCls;
+        if(!st.marketOpen){mktLabel='Market Closed';mktCls='mkt-closed';}
+        else if(st.nearClose){mktLabel='Near Close (3:45 ET)';mktCls='mkt-warn';}
+        else if(st.earlyWindow){mktLabel='Early Blackout (9:30–9:45)';mktCls='mkt-warn';}
+        else{mktLabel='Market Open';mktCls='mkt-open';}
+        mktEl.textContent=mktLabel;
+        mktEl.className='trd-mkt-badge '+mktCls;
       }
-
+      // Open positions counter
+      const posEl=$('trdOpenPositions');
+      if(posEl) posEl.textContent=(st.openPositions||0)+'/2 positions';
       // Rate limit remaining
       const rlEl=$('trdRateLimit');
       if(rlEl&&st.rateLimit!=null) rlEl.textContent='Orders left: '+st.rateLimit+'/10';
@@ -500,33 +507,43 @@ const alpacaTrader = (() => {
         signal_reversal:'Signal flip',
         tp_hit:'TP hit',
         sl_hit:'SL hit',
+        price_below_ema9:'Below EMA9',
+        time_based_close_345pm:'3:45 PM close',
+        unfilled_timeout:'Unfilled (2m)',
       };
-      el.innerHTML=`
-        <div class="trd-alog-header">
-          <span>Side</span><span>Symbol</span><span>Sh</span><span>Entry</span><span>TP→</span><span>SL→</span>
-          <span>Conf</span><span>P&amp;L</span><span>Exit</span><span>Status</span><span>Time</span>
-        </div>
-        ${logs.slice(0,25).map(l=>{
+      const statusInfo=(l)=>{
+        if(l.status==='pending_fill') return {cls:'alog-pending',badge:'ord-pending',label:'Pending Fill',exit:'Awaiting fill'};
+        if(l.status==='cancelled')   return {cls:'alog-loss',badge:'ord-done',label:'Cancelled',exit:EXIT_LABELS[l.exit_reason]||'Cancelled'};
+        if(l.status==='open')        return {cls:'alog-open',badge:'ord-pending',label:'Open',exit:'Active'};
+        const pnl=l.pnl!=null?parseFloat(l.pnl):null;
+        const win=pnl!=null&&pnl>0;
+        return {cls:win?'alog-win':'alog-loss',badge:win?'ord-filled':'ord-done',label:'Closed',exit:EXIT_LABELS[l.exit_reason]||'--'};
+      };
+      el.innerHTML=
+        '<div class="trd-alog-header">'+
+          '<span>Side</span><span>Symbol</span><span>Sh</span><span>Entry</span><span>TP→</span><span>SL→</span>'+
+          '<span>Conf</span><span>P&L</span><span>Exit</span><span>Status</span><span>Time</span>'+
+        '</div>'+
+        logs.slice(0,30).map(l=>{
           const pnl=l.pnl!=null?parseFloat(l.pnl):null;
           const up=pnl!=null&&pnl>=0;
-          const sc=l.status==='open'?'alog-open':pnl!=null&&pnl>0?'alog-win':'alog-loss';
-          const statusCls=l.status==='open'?'ord-pending':pnl!=null&&pnl>0?'ord-filled':'ord-done';
-          const exitLabel=EXIT_LABELS[l.exit_reason]||'--';
-          return `<div class="trd-alog-row ${sc}" title="${l.reasons||''}">
-            <span class="${l.side==='buy'?'ord-buy':'ord-sell'}">${(l.side||'').toUpperCase()}</span>
-            <span class="trd-ord-sym">${l.symbol}</span>
-            <span>${l.shares||'--'}</span>
-            <span>$${fmt(l.entry_price)}</span>
-            <span class="up">$${fmt(l.tp_price)}</span>
-            <span class="dn">$${fmt(l.sl_price)}</span>
-            <span class="sig-${(l.signal||'hold').toLowerCase()}">${l.confidence||'--'}%</span>
-            <span class="${pnl!=null?(up?'up':'dn'):''}">${pnl!=null?(up?'+':'−')+'$'+fmt(Math.abs(pnl)):'--'}</span>
-            <span class="text-dim" style="font-size:0.7rem">${l.status==='open'?'Active':exitLabel}</span>
-            <span class="${statusCls}">${l.status==='open'?'Open':'Closed'}</span>
-            <span>${fmtDateTime(l.created_at)}</span>
-          </div>`;
-        }).join('')}
-      `;
+          const si=statusInfo(l);
+          const atrStr=l.atr?' | ATR '+parseFloat(l.atr).toFixed(3):'';
+          const title=(l.reasons||'')+(atrStr);
+          return '<div class="trd-alog-row '+si.cls+'" title="'+title+'">'+
+            '<span class="'+(l.side==='buy'?'ord-buy':'ord-sell')+'">'+(l.side||'--').toUpperCase()+'</span>'+
+            '<span class="trd-ord-sym">'+l.symbol+'</span>'+
+            '<span>'+(l.shares||'--')+'</span>'+
+            '<span>$'+fmt(l.entry_price)+'</span>'+
+            '<span class="up">$'+fmt(l.tp_price)+'</span>'+
+            '<span class="dn">$'+fmt(l.sl_price)+'</span>'+
+            '<span class="sig-'+((l.signal||'hold').toLowerCase())+'">'+(l.confidence||'--')+'%</span>'+
+            '<span class="'+(pnl!=null?(up?'up':'dn'):'')+'">'+(pnl!=null?(up?'+':'−')+'$'+fmt(Math.abs(pnl)):'--')+'</span>'+
+            '<span class="text-dim" style="font-size:0.7rem">'+si.exit+'</span>'+
+            '<span class="'+si.badge+'">'+si.label+'</span>'+
+            '<span>'+fmtDateTime(l.created_at)+'</span>'+
+          '</div>';
+        }).join('');
     } catch(e){el.innerHTML='<div class="trd-bot-empty trd-error">Failed to load log</div>';}
   }
 
@@ -697,20 +714,33 @@ const alpacaTrader = (() => {
         if(r.error) throw new Error(r.error);
         const sim=r.simulation||{};
         const analyses=(sim.analyses||[]);
-        const mkt=sim.marketOpen?'<span class="sim-open">Market OPEN</span>':'<span class="sim-closed">Market CLOSED</span>';
-        const header=`<div class="sim-header">Simulation Results ${mkt} — ${new Date().toLocaleTimeString()} (no real orders placed)</div>`;
-        const rows=analyses.length?analyses.map(a=>{
-          const sc=a.signal==='BUY'?'ord-buy':a.signal==='SELL'?'ord-sell':'';
-          return `<div class="sim-row">
-            <span class="${sc}">${a.signal}</span>
-            <span class="trd-ord-sym">${a.symbol}</span>
-            <span>${a.confidence}%</span>
-            <span class="text-dim">$${a.price?a.price.toFixed(2):'--'}</span>
-            <span class="text-dim">RSI ${a.rsi?a.rsi.toFixed(0):'--'}</span>
-            <span class="sim-reasons">${(a.reasons||[]).join(' · ')}</span>
-          </div>`;
-        }).join(''):'<div class="sim-empty">No candidates above volume threshold</div>';
-        resEl.innerHTML=header+rows;
+        let mktLabel='Market CLOSED',mktCls='sim-closed';
+        if(sim.marketOpen&&sim.nearClose){mktLabel='Near Close (3:45 ET)';mktCls='sim-warn';}
+        else if(sim.marketOpen&&sim.earlyWindow){mktLabel='Early Blackout (9:30–9:45)';mktCls='sim-warn';}
+        else if(sim.marketOpen){mktLabel='Market OPEN';mktCls='sim-open';}
+        const mkt='<span class="'+mktCls+'">'+mktLabel+'</span>';
+        const header='<div class="sim-header">Simulation — '+mkt+' — '+new Date().toLocaleTimeString()+' (no real orders placed, cash account rules)</div>';
+        const buys=analyses.filter(a=>a.signal==='BUY');
+        const holds=analyses.filter(a=>a.signal!=='BUY');
+        const renderRow=a=>{
+          const isBuy=a.signal==='BUY';
+          const atr=a.atr?a.atr.toFixed(3):'n/a';
+          const sl=a.atr?(a.price-1.5*a.atr).toFixed(2):'n/a';
+          const tp=a.atr?(a.price+3*a.atr).toFixed(2):'n/a';
+          const checks=a.checks||{};
+          const checkStr=Object.entries(checks).map(([k,v])=>(v.pass?'✓ ':'✗ ')+k.replace(/_/g,' ')+': '+v.detail).join(' | ');
+          return '<div class="sim-row '+(isBuy?'sim-row-buy':'sim-row-hold')+'">'+
+            '<span class="'+(isBuy?'ord-buy':'')+'">'+a.signal+'</span>'+
+            '<span class="trd-ord-sym">'+a.symbol+'</span>'+
+            '<span>'+a.confidence+'%</span>'+
+            '<span class="text-dim">$'+( a.price?a.price.toFixed(2):'--')+'</span>'+
+            '<span class="text-dim">ATR '+atr+' | SL $'+sl+' | TP $'+tp+' (2:1)</span>'+
+            '<div class="sim-checks">'+checkStr+'</div>'+
+          '</div>';
+        };
+        const buySection=buys.length?('<div class="sim-section-hdr">✅ BUY Signals ('+buys.length+')</div>'+buys.map(renderRow).join('')):'<div class="sim-empty">No BUY signals found — all conditions must pass simultaneously</div>';
+        const holdSection=holds.length?('<div class="sim-section-hdr sim-hdr-hold">HOLD — conditions not met ('+holds.length+')</div>'+holds.map(renderRow).join('')):'';
+        resEl.innerHTML=header+buySection+holdSection;
         resEl.style.display='';
       }catch(e){
         const resEl2=$('trdSimResults');

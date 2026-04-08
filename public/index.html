@@ -826,6 +826,7 @@
               <div class="trd-pvt"><span class="trd-pvl s">S2</span><span class="trd-pvv" id="trdS2">--</span></div>
             </div>
             <div class="trd-reasons" id="trdReasons"></div>
+            <div class="trd-auto-sig-hint" id="trdAutoSigHint" style="display:none"></div>
           </div>
           <div class="trd-refresh-foot">
             <span id="trdRefreshCd">⟳ 60s</span>
@@ -859,6 +860,16 @@
               <input type="number" id="trdAmount" class="trd-amount-input" value="500" min="1" max="999999" step="100"/>
             </div>
             <div class="trd-shares-hint" id="trdSharesHint">≈ -- shares @ --</div>
+          </div>
+
+          <div class="trd-field">
+            <label class="trd-lbl">Leverage</label>
+            <div class="trd-lev-row">
+              <button class="trd-lev-btn active" data-lev="1">1x</button>
+              <button class="trd-lev-btn" data-lev="2">2x</button>
+              <button class="trd-lev-btn" data-lev="4">4x</button>
+            </div>
+            <div class="trd-lev-warn" id="trdLevWarn" style="display:none">⚠ Margin — losses may exceed principal</div>
           </div>
 
           <div class="trd-field">
@@ -899,6 +910,91 @@
       </div><!-- /.trd-setup-col -->
 
     </div><!-- /.trd-main -->
+
+    <!-- AI Auto-Trader Panel -->
+    <div class="trd-auto-panel" id="trdAutoPanel">
+
+      <div class="trd-auto-header">
+        <div class="trd-auto-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M12 3v5"/><path d="M9 8l3-5 3 5"/></svg>
+          AI Auto-Trader
+        </div>
+        <div class="trd-auto-status-row">
+          <span class="trd-auto-dot dot-grey" id="trdAutoDot"></span>
+          <span id="trdAutoStatusText">Disabled</span>
+          <svg class="trd-spin" id="trdAutoScanIcon" style="display:none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </div>
+        <button class="trd-auto-toggle" id="trdAutoToggle">▶ Enable Auto-Trader</button>
+      </div>
+
+      <div class="trd-auto-live" id="trdAutoLive" style="display:none">
+        <div class="trd-auto-live-grid">
+          <div class="trd-auto-live-item"><span class="trd-al-lbl">Last Scan</span><span id="trdLastScan">--</span></div>
+          <div class="trd-auto-live-item"><span class="trd-al-lbl">Candidates</span><span id="trdCandidates">--</span></div>
+          <div class="trd-auto-live-item trd-al-action"><span class="trd-al-lbl">Last Action</span><span id="trdAutoLastAction">--</span></div>
+        </div>
+        <div class="trd-auto-error" id="trdAutoError" style="display:none"></div>
+        <button class="trd-scan-now" id="trdScanNow">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Scan Now
+        </button>
+      </div>
+
+      <div class="trd-auto-body">
+
+        <div class="trd-auto-settings-grid">
+
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Risk per Trade</label>
+            <div class="trd-as-inp-row"><input type="number" id="atRiskPct" value="2" min="0.5" max="10" step="0.5" class="trd-as-inp"/><span>%</span></div>
+          </div>
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Max Positions</label>
+            <input type="number" id="atMaxPos" value="3" min="1" max="10" class="trd-as-inp"/>
+          </div>
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Take Profit</label>
+            <div class="trd-as-inp-row"><input type="number" id="atTpPct" value="3" min="0.5" max="20" step="0.5" class="trd-as-inp"/><span>%</span></div>
+          </div>
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Stop Loss</label>
+            <div class="trd-as-inp-row"><input type="number" id="atSlPct" value="1.5" min="0.5" max="10" step="0.5" class="trd-as-inp"/><span>%</span></div>
+          </div>
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Min Volume</label>
+            <input type="number" id="atMinVol" value="1000000" min="100000" max="50000000" step="100000" class="trd-as-inp"/>
+          </div>
+          <div class="trd-as-field">
+            <label class="trd-as-lbl">Min Confidence</label>
+            <div class="trd-as-inp-row"><input type="number" id="atConf" value="70" min="60" max="90" step="5" class="trd-as-inp"/><span>%</span></div>
+          </div>
+          <div class="trd-as-field trd-as-lev-field">
+            <label class="trd-as-lbl">Auto-Trade Leverage</label>
+            <div class="trd-lev-row">
+              <button class="at-lev-btn active" data-lev="1">1x</button>
+              <button class="at-lev-btn" data-lev="2">2x</button>
+              <button class="at-lev-btn" data-lev="4">4x</button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="trd-auto-save-row">
+          <button class="trd-save-btn" id="trdSaveAutoSettings">Save Settings</button>
+          <div class="trd-save-msg" id="trdSaveMsg"></div>
+        </div>
+
+        <div class="trd-auto-log-section">
+          <div class="trd-auto-log-head">
+            Auto-Trade Log
+            <button class="trd-btn-ghost" id="trdRefreshAutoLog">↻ Refresh</button>
+          </div>
+          <div id="trdAutoLogBody"><div class="trd-bot-empty">No auto-trades yet</div></div>
+        </div>
+
+      </div><!-- /.trd-auto-body -->
+
+    </div><!-- /.trd-auto-panel -->
 
     <!-- Bottom: Account / Positions / Orders -->
     <div class="trd-bottom">

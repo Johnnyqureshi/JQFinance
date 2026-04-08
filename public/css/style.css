@@ -4034,6 +4034,149 @@ option { background: var(--card); }
 }
 .trd-modal-hint a { color: #1dd6a3; }
 
+/* ── Leverage selector ───────────────────────────────────────── */
+.trd-lev-row { display: flex; gap: 6px; margin-top: 4px; }
+.trd-lev-btn, .at-lev-btn {
+  flex: 1; padding: 5px 0; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-dim); font-size: 0.78rem;
+  font-weight: 600; cursor: pointer; transition: all .15s;
+}
+.trd-lev-btn:hover, .at-lev-btn:hover { border-color: #00bcd4; color: #00bcd4; }
+.trd-lev-btn.active, .at-lev-btn.active {
+  background: rgba(0,188,212,.12); border-color: #00bcd4; color: #00bcd4;
+}
+.trd-lev-warn {
+  font-size: 0.7rem; color: #ff9800; margin-top: 4px;
+  padding: 4px 6px; background: rgba(255,152,0,.08); border-radius: 5px;
+}
+
+/* ── Auto-signal hint ────────────────────────────────────────── */
+.trd-auto-sig-hint {
+  margin-top: 8px; padding: 6px 10px; border-radius: 6px;
+  background: rgba(29,214,163,.07); border: 1px solid rgba(29,214,163,.25);
+  color: #1dd6a3; font-size: 0.75rem; line-height: 1.4;
+}
+
+/* ── Auto-Trader Panel ───────────────────────────────────────── */
+.trd-auto-panel {
+  margin: 14px 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.trd-auto-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+}
+.trd-auto-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.88rem; font-weight: 600; color: var(--text);
+  flex: 1;
+}
+.trd-auto-status-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.75rem; color: var(--text-dim);
+}
+.trd-auto-dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+}
+.dot-green  { background: #1dd6a3; box-shadow: 0 0 5px #1dd6a3; }
+.dot-grey   { background: #555; }
+.dot-red    { background: #ef5350; }
+.trd-auto-toggle {
+  padding: 5px 12px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-dim);
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all .15s;
+  white-space: nowrap;
+}
+.trd-auto-toggle:hover { border-color: #1dd6a3; color: #1dd6a3; }
+.trd-auto-toggle.enabled { background: rgba(29,214,163,.1); border-color: #1dd6a3; color: #1dd6a3; }
+
+/* ── Auto live status bar ────────────────────────────────────── */
+.trd-auto-live {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 16px; background: rgba(29,214,163,.04);
+  border-bottom: 1px solid var(--border); font-size: 0.75rem;
+}
+.trd-auto-live-grid {
+  display: flex; gap: 16px; flex: 1; flex-wrap: wrap;
+}
+.trd-auto-live-item { display: flex; flex-direction: column; gap: 1px; }
+.trd-al-lbl { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.trd-al-action { flex: 2; }
+.trd-auto-error {
+  color: #ef5350; font-size: 0.74rem; padding: 3px 8px;
+  background: rgba(239,83,80,.07); border-radius: 5px; border: 1px solid rgba(239,83,80,.2);
+}
+.trd-scan-now {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-dim); font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  transition: all .15s; white-space: nowrap;
+}
+.trd-scan-now:hover { border-color: #00bcd4; color: #00bcd4; }
+
+/* ── Auto-trader settings ────────────────────────────────────── */
+.trd-auto-body { padding: 14px 16px; }
+.trd-auto-settings-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(155px,1fr));
+  gap: 10px; margin-bottom: 12px;
+}
+.trd-as-field { display: flex; flex-direction: column; gap: 4px; }
+.trd-as-lev-field { grid-column: span 2; }
+.trd-as-lbl { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.trd-as-inp {
+  width: 100%; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font-size: 0.8rem;
+}
+.trd-as-inp:focus { outline: none; border-color: #00bcd4; }
+.trd-as-inp-row { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--text-dim); }
+.trd-as-inp-row .trd-as-inp { flex: 1; }
+
+.trd-auto-save-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.trd-save-btn {
+  padding: 6px 16px; border-radius: 7px; font-size: 0.8rem; font-weight: 600;
+  border: 1px solid #1dd6a3; background: rgba(29,214,163,.1); color: #1dd6a3; cursor: pointer;
+  transition: all .15s;
+}
+.trd-save-btn:hover { background: rgba(29,214,163,.18); }
+.trd-save-msg { font-size: 0.78rem; }
+.trd-save-msg.ok  { color: #1dd6a3; }
+.trd-save-msg.err { color: #ef5350; }
+
+/* ── Auto-trade log ──────────────────────────────────────────── */
+.trd-auto-log-section { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 12px; }
+.trd-auto-log-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.8rem; font-weight: 600; color: var(--text); margin-bottom: 8px;
+}
+.trd-alog-header {
+  display: grid;
+  grid-template-columns: 45px 55px 50px 60px 65px 65px 85px 70px 60px 1fr;
+  font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase;
+  padding: 4px 8px; letter-spacing: .04em;
+}
+.trd-alog-row {
+  display: grid;
+  grid-template-columns: 45px 55px 50px 60px 65px 65px 85px 70px 60px 1fr;
+  align-items: center; padding: 6px 8px; border-radius: 6px;
+  font-size: 0.75rem; margin-bottom: 2px; transition: background .12s;
+}
+.trd-alog-row:hover  { background: rgba(255,255,255,.03); }
+.alog-open  { border-left: 2px solid #00bcd4; }
+.alog-win   { border-left: 2px solid #1dd6a3; }
+.alog-loss  { border-left: 2px solid #ef5350; }
+
+/* ── Spin animation ──────────────────────────────────────────── */
+@keyframes trdSpin { to { transform: rotate(360deg); } }
+.trd-spin { animation: trdSpin 1.2s linear infinite; }
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .trd-main   { grid-template-columns: 1fr; }

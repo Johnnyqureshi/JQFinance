@@ -1465,7 +1465,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   //   TP = VAH  — where volume thins out above; natural profit magnet
   //   SL = VAL  - 0.5× ATR  — just below support, exit if thesis is wrong
   //   Fallback to ATR multiples when VP unavailable (shouldn't happen often)
-  const limitPx  = parseFloat((price * 1.0005).toFixed(4)); // limit 0.05% above last
+  const limitPx  = parseFloat((price * 1.0005).toFixed(2)); // limit 0.05% above last — rounded to cent (Alpaca requires ≥$0.01 increment)
 
   let tpPrice, slPrice;
   if (sig.vah && sig.val) {

@@ -144,12 +144,8 @@ const alpacaTrader = (() => {
       const s = await apiFetch('/api/alpaca/auto-settings');
       autoEnabled = !!s.enabled;
       atLeverage  = s.leverage || 1;
-      if ($('atRiskPct')) $('atRiskPct').value = s.risk_pct     || 1;
-      if ($('atMaxPos'))  $('atMaxPos').value  = s.max_positions || 1;
-      if ($('atConf'))    $('atConf').value    = s.confidence_threshold || 68;
-      if ($('atTpPct'))   $('atTpPct').value   = s.tp_pct        || 3;
-      if ($('atSlPct'))   $('atSlPct').value   = s.sl_pct        || 1.5;
-      if ($('atMinVol'))  $('atMinVol').value  = s.min_volume    || 500000;
+      if ($('atInvestAmt')) $('atInvestAmt').value = s.investment_amount || 1000;
+      if ($('atMaxPos'))    $('atMaxPos').value    = s.max_positions     || 1;
       document.querySelectorAll('.at-lb').forEach(b => b.classList.toggle('active', +b.dataset.lev === atLeverage));
       updateToggleUI();
     } catch(e) {}
@@ -161,14 +157,11 @@ const alpacaTrader = (() => {
     if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
     try {
       const body = {
-        enabled:              autoEnabled ? 1 : 0,
-        risk_pct:             parseFloat($('atRiskPct')?.value) || 1,
-        max_positions:        parseInt($('atMaxPos')?.value)    || 1,
-        confidence_threshold: parseInt($('atConf')?.value)      || 68,
-        tp_pct:               parseFloat($('atTpPct')?.value)   || 3,
-        sl_pct:               parseFloat($('atSlPct')?.value)   || 1.5,
-        min_volume:           parseInt($('atMinVol')?.value)    || 500000,
-        leverage:             atLeverage,
+        enabled:           autoEnabled ? 1 : 0,
+        investment_amount: parseFloat($('atInvestAmt')?.value) || 1000,
+        max_positions:     parseInt($('atMaxPos')?.value)      || 1,
+        leverage:          atLeverage,
+        min_volume:        500000,
       };
       const r = await apiFetch('/api/alpaca/auto-settings', {
         method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
@@ -178,7 +171,7 @@ const alpacaTrader = (() => {
     } catch(e) {
       if (msg) { msg.textContent='✗ '+e.message; msg.className='at-save-msg err'; }
     } finally {
-      if (btn) { btn.disabled=false; btn.textContent='Save Settings'; }
+      if (btn) { btn.disabled=false; btn.textContent='Save'; }
     }
   }
 
@@ -298,20 +291,34 @@ const alpacaTrader = (() => {
     const renderRow = a => {
       const isBuy  = a.signal === 'BUY';
       const checks = a.checks || {};
+
+      // VP bar — visual range showing VAL / POC / VAH with price position
+      let vpBar = '';
+      if (a.vah && a.val && a.poc && a.price) {
+        const rangeW = a.vah - a.val;
+        const pocPct  = rangeW > 0 ? Math.max(0, Math.min(100, ((a.poc - a.val) / rangeW) * 100)) : 50;
+        const pxPct   = rangeW > 0 ? Math.max(0, Math.min(100, ((a.price - a.val) / rangeW) * 100)) : 50;
+        const zoneCls = a.tightVAL ? 'at-vp-val' : a.nearVAL ? 'at-vp-poc' : a.abovePOC ? 'at-vp-va' : a.price > a.vah ? 'at-vp-vah' : 'at-vp-out';
+        vpBar = `<div class="at-vp-hero">
+          <div class="at-vp-labels">
+            <span class="at-vp-label-val">VAL <b>$${parseFloat(a.val).toFixed(2)}</b></span>
+            <span class="at-vp-label-poc">POC <b>$${parseFloat(a.poc).toFixed(2)}</b></span>
+            <span class="at-vp-label-vah">VAH <b>$${parseFloat(a.vah).toFixed(2)}</b></span>
+          </div>
+          <div class="at-vp-track">
+            <div class="at-vp-fill" style="width:${pocPct}%"></div>
+            <div class="at-vp-poc-line" style="left:${pocPct}%"></div>
+            <div class="at-vp-price-tick" style="left:${Math.min(98,pxPct)}%"></div>
+          </div>
+          ${a.zoneStr ? `<div class="at-vp-zone-lbl ${zoneCls}">${a.zoneStr}</div>` : ''}
+          ${isBuy && a.tp_price ? `<div class="at-vp-trade">SL $${parseFloat(a.sl_price).toFixed(2)} → Entry $${parseFloat(a.price).toFixed(2)} → TP (VAH) $${parseFloat(a.tp_price).toFixed(2)}</div>` : ''}
+        </div>`;
+      }
+
       const condStr = Object.entries(checks).map(([k, v]) =>
         `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}" title="${v.detail||''}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
       ).join('');
-      const vpZone = vpZoneLabel(a);
-      const vpRow  = a.vah ? `<div class="at-feed-vp">
-        <span class="at-vp-lbl">VAL</span><span class="at-vp-val-num">$${parseFloat(a.val).toFixed(2)}</span>
-        <span class="at-vp-sep">·</span>
-        <span class="at-vp-lbl">POC</span><span class="at-vp-poc-num">$${parseFloat(a.poc).toFixed(2)}</span>
-        <span class="at-vp-sep">·</span>
-        <span class="at-vp-lbl">VAH</span><span class="at-vp-vah-num">$${parseFloat(a.vah).toFixed(2)}</span>
-        ${vpZone ? `<span class="at-vp-zone ${vpZone.cls}">${vpZone.txt}</span>` : ''}
-      </div>` : '';
-      const levStr = a.autoLeverage && a.autoLeverage > 1 ? `<span class="at-feed-lev">${a.autoLeverage}x</span>` : '';
-      const atrStr = a.atr ? `SL $${a.sl_price?parseFloat(a.sl_price).toFixed(2):'--'} TP $${a.tp_price?parseFloat(a.tp_price).toFixed(2):'--'} ATR ${parseFloat(a.atr).toFixed(3)}` : '';
+      const levStr = a.autoLeverage && a.autoLeverage > 1 ? `<span class="at-feed-lev">${a.autoLeverage}×</span>` : '';
       return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
         <div class="at-feed-top">
           <span class="at-feed-sym">${a.symbol}</span>
@@ -321,18 +328,17 @@ const alpacaTrader = (() => {
           <span class="at-feed-px">$${a.price?parseFloat(a.price).toFixed(2):'--'}</span>
           <span class="at-feed-rsi">RSI ${a.rsi?parseFloat(a.rsi).toFixed(0):'--'}</span>
         </div>
-        ${vpRow}
+        ${vpBar}
         <div class="at-feed-conds">${condStr}</div>
-        ${atrStr ? `<div class="at-feed-meta">${atrStr}</div>` : ''}
       </div>`;
     };
 
     const buySection  = buys.length
-      ? `<div class="at-feed-hdr at-feed-hdr-buy">✅ BUY Signals (${buys.length})</div>` + buys.map(renderRow).join('')
-      : '<div class="at-empty at-empty-sm">No BUY signals — all 8 conditions including volume profile must pass</div>';
+      ? `<div class="at-feed-hdr at-feed-hdr-buy">✅ VP Entry Signals (${buys.length})</div>` + buys.map(renderRow).join('')
+      : '<div class="at-empty at-empty-sm">No VP entry signals — engine watching for VAL bounces and POC breakouts</div>';
 
     const holdSection = holds.length
-      ? `<div class="at-feed-hdr at-feed-hdr-hold">Monitoring — Conditions Not Met (${holds.length})</div>` + holds.map(renderRow).join('')
+      ? `<div class="at-feed-hdr at-feed-hdr-hold">Monitoring (${holds.length})</div>` + holds.map(renderRow).join('')
       : '';
 
     el.innerHTML = buySection + holdSection;

@@ -43,13 +43,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS auto_trade_settings (
     user_id              INTEGER PRIMARY KEY,
     enabled              INTEGER DEFAULT 0,
-    max_positions        INTEGER DEFAULT 3,
-    risk_pct             REAL    DEFAULT 2.0,
+    max_positions        INTEGER DEFAULT 1,
+    investment_amount    REAL    DEFAULT 1000.0,
     leverage             REAL    DEFAULT 1.0,
-    tp_pct               REAL    DEFAULT 3.0,
-    sl_pct               REAL    DEFAULT 1.5,
-    min_volume           INTEGER DEFAULT 1000000,
-    confidence_threshold INTEGER DEFAULT 70,
+    min_volume           INTEGER DEFAULT 500000,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS auto_trade_log (
@@ -71,6 +68,19 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+
+// ── DB migrations — add columns that didn't exist in older schema ─────────────
+[
+  `ALTER TABLE auto_trade_settings ADD COLUMN investment_amount REAL DEFAULT 1000.0`,
+  `ALTER TABLE auto_trade_settings ADD COLUMN min_volume INTEGER DEFAULT 500000`,
+  `ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1`,
+  `ALTER TABLE auto_trade_log ADD COLUMN exit_reason TEXT`,
+  `ALTER TABLE auto_trade_log ADD COLUMN order_placed_at TEXT`,
+  `ALTER TABLE auto_trade_log ADD COLUMN reasons TEXT`,
+  `ALTER TABLE auto_trade_log ADD COLUMN buying_power REAL`,
+  `ALTER TABLE auto_trade_log ADD COLUMN settled_cash REAL`,
+  `ALTER TABLE auto_trade_log ADD COLUMN atr REAL`,
+].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie behaviour
@@ -1087,75 +1097,110 @@ function atSessionInfo() {
   return { isMarketOpen, isEarlyWindow, isNearClose, mins };
 }
 
-// ── Signal engine — cash-account rules (BUY only, no shorting) ───────────────
+// ── Signal engine — Volume Profile first, RSI/VWAP/EMA as secondary ──────────
+//
+//  PHILOSOPHY:
+//    Volume Profile defines WHERE price is relative to where the most volume
+//    was traded (the Value Area). The engine uses two primary triggers:
+//      1. VAL Bounce  — price sitting on Value Area Low support → buy the bounce
+//      2. POC Breakout — price breaks above Point of Control with volume surge
+//    These two triggers determine ENTRY. RSI, VWAP, and EMAs score confidence
+//    but never block a trade on their own.
+//    Take Profit = VAH (Value Area High — where volume thins out above)
+//    Stop Loss   = just below VAL (invalidation of the support thesis)
+//
 function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
-  const ema9  = atEMA(closes, 9);
-  const ema21 = atEMA(closes, 21);
-  const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
-  const hhhl  = atHHHL(bars);
-
-  // ── Volume Profile zone analysis ──────────────────────────────────────────
-  // VAL bounce: price just above VAL (within 1.5%) — prime buy zone
-  // POC: price above POC → bullish side of fairness
-  // VAH: price below VAH → room left in value area
-  const nearVAL  = vp && price >= vp.val && price <= vp.val * 1.015;
-  const abovePOC = vp && price > vp.poc;
-  const belowVAH = vp && price < vp.vah;
-  const inVA     = vp && price >= vp.val && price <= vp.vah;
-
-  // Volume profile position detail string
-  const vpDetail = vp
-    ? `VAL $${vp.val} | POC $${vp.poc} | VAH $${vp.vah} — ${nearVAL ? 'at VAL support' : inVA ? 'inside VA' : price > vp.vah ? 'above VAH' : 'below VAL'}`
-    : 'n/a';
-
-  // Build per-condition check map for transparency
-  const checks = {
-    price_above_2:    { pass: price > 2,                    detail: '$' + price.toFixed(2) },
-    above_ema9:       { pass: ema9 != null && price > ema9,  detail: ema9  ? 'EMA9='  + ema9.toFixed(2)  : 'insufficient data' },
-    above_ema21:      { pass: ema21 != null && price > ema21,detail: ema21 ? 'EMA21=' + ema21.toFixed(2) : 'insufficient data' },
-    rsi_in_range:     { pass: rsi != null && rsi >= 30 && rsi <= 75, detail: 'RSI=' + (rsi?.toFixed(0) ?? 'n/a') },
-    volume_ok:        { pass: volData.avgV > 0 && volData.lastV >= volData.avgV,
-                        detail: 'vol ' + (volData.avgV > 0 ? (volData.lastV / volData.avgV).toFixed(1) + '× avg' : 'n/a') },
-    hhhl_structure:   { pass: hhhl, detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
-    atr_available:    { pass: atr != null && atr > 0, detail: atr ? 'ATR=' + atr.toFixed(3) : 'insufficient data' },
-    volume_profile:   { pass: vp ? (abovePOC && belowVAH) : true,  detail: vpDetail },
-  };
-
-  const allPass = Object.values(checks).every(c => c.pass);
-  const reasons = Object.entries(checks).map(([k, v]) => (v.pass ? '✓ ' : '✗ ') + k.replace(/_/g,' ') + ': ' + v.detail);
-
-  // Confidence: base from pass ratio, then layered bonuses
-  const passCount = Object.values(checks).filter(c => c.pass).length;
-  let confidence;
-  if (allPass) {
-    // Base 68 + volume surge bonus + VAL bounce bonus + POC hold bonus
-    const surgePct  = volData.avgV > 0 ? (volData.lastV / volData.avgV - 1) * 10 : 0;
-    const valBonus  = nearVAL  ? 6  : 0;  // in prime buy zone
-    const pocBonus  = abovePOC ? 3  : 0;  // bullish volume control
-    confidence = Math.round(68 + Math.min(surgePct, 18) + valBonus + pocBonus);
-  } else {
-    confidence = Math.round((passCount / Object.keys(checks).length) * 60);
+  // No Volume Profile = no signal. VP is the foundation.
+  if (!vp) {
+    return {
+      signal: 'HOLD', confidence: 0, price, rsi, vwap,
+      reasons: ['✗ volume profile: insufficient bar data to compute VAH/VAL/POC'],
+      checks: { volume_profile: { pass: false, detail: 'need ≥5 bars with volume' } },
+      vah: null, val: null, poc: null,
+    };
   }
 
+  const ema9   = atEMA(closes, 9);
+  const ema21  = atEMA(closes, 21);
+  const hhhl   = atHHHL(bars);
+  const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
+
+  // ── VP zone calculations ───────────────────────────────────────────────────
+  const vaWidth    = vp.vah - vp.val;                          // value area spread
+  const nearVAL    = price >= vp.val && price <= vp.val + vaWidth * 0.12; // within 12% of VA width above VAL
+  const tightVAL   = price >= vp.val && price <= vp.val + vaWidth * 0.05; // within 5% — prime entry
+  const abovePOC   = price > vp.poc;
+  const belowVAH   = price < vp.vah;
+  const inVA       = price >= vp.val && price <= vp.vah;
+
+  // ── Volume data ────────────────────────────────────────────────────────────
+  const volRatio = volData.avgV > 0 ? volData.lastV / volData.avgV : 0;
+  const volSurge = volRatio >= 1.5;   // 50% above average = surge
+  const volOk    = volRatio >= 1.0;   // at least average
+
+  // ── PRIMARY TRIGGERS (Volume Profile-based) ───────────────────────────────
+  //  val_bounce:   price on VAL support with at least average volume
+  //  poc_breakout: price above POC (bullish volume control) with volume surge
+  const val_bounce   = nearVAL  && belowVAH && price > 2 && volOk;
+  const poc_breakout = abovePOC && belowVAH && price > 2 && volSurge;
+  const primaryFires = val_bounce || poc_breakout;
+
+  // ── Zone description for UI ────────────────────────────────────────────────
+  const zoneStr = tightVAL  ? '🎯 Tight VAL entry'
+    : val_bounce             ? '📍 VAL bounce zone'
+    : poc_breakout           ? '🔼 POC breakout'
+    : price < vp.val         ? '⬇ Below VAL — bearish'
+    : price > vp.vah         ? '⬆ Extended above VAH'
+    : inVA                   ? '↔ Inside value area'
+    : '–';
+
+  // ── SECONDARY: Confidence scoring (not blockers) ───────────────────────────
+  const rsiOk     = rsi != null && rsi >= 30 && rsi <= 70;
+  const aboveVWAP = vwap && price > vwap;
+  const trendOk   = ema9 != null && ema21 != null && price > ema9 && price > ema21;
+
+  const vpDetail = `VAL $${vp.val} · POC $${vp.poc} · VAH $${vp.vah}`;
+  const checks = {
+    vp_primary:      { pass: primaryFires,  detail: primaryFires ? `${val_bounce?'VAL bounce':'POC breakout'} — ${vpDetail}` : `no VP trigger (${zoneStr}) — ${vpDetail}` },
+    price_above_2:   { pass: price > 2,     detail: '$' + price.toFixed(2) },
+    rsi_healthy:     { pass: rsiOk,         detail: rsi != null ? `RSI=${rsi.toFixed(0)}` : 'n/a' },
+    above_vwap:      { pass: !!aboveVWAP,   detail: vwap ? `VWAP=$${vwap.toFixed(2)} (${vwapPct.toFixed(1)}%)` : 'n/a' },
+    ema_trend:       { pass: trendOk,       detail: ema9 && ema21 ? `EMA9=$${ema9.toFixed(2)} EMA21=$${ema21.toFixed(2)}` : 'n/a' },
+    hhhl_structure:  { pass: hhhl,          detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
+    volume_surge:    { pass: volSurge,      detail: volData.avgV > 0 ? volRatio.toFixed(1) + '× avg' : 'n/a' },
+  };
+
+  // ── Confidence calculation ─────────────────────────────────────────────────
+  let confidence;
+  if (primaryFires) {
+    // Base 65 when VP trigger fires. Secondary indicators add points.
+    confidence = 65;
+    if (rsiOk)      confidence += 8;   // momentum not extreme
+    if (aboveVWAP)  confidence += 5;   // above intraday fair value
+    if (trendOk)    confidence += 5;   // EMA stack confirms direction
+    if (hhhl)       confidence += 4;   // structure trending up
+    if (volSurge)   confidence += 6;   // above-average conviction
+    if (tightVAL)   confidence += 8;   // tight VAL = prime bounce spot
+  } else {
+    // No VP trigger — score secondaries only (won't reach trade threshold)
+    const secPass = [rsiOk, !!aboveVWAP, trendOk, hhhl, volSurge].filter(Boolean).length;
+    confidence = secPass * 7;   // max 35 — below 65 threshold
+  }
+
+  const reasons = Object.entries(checks).map(([k, v]) =>
+    (v.pass ? '✓ ' : '✗ ') + k.replace(/_/g, ' ') + ': ' + v.detail
+  );
+
   return {
-    signal: allPass ? 'BUY' : 'HOLD',
+    signal:     primaryFires ? 'BUY' : 'HOLD',
     confidence: Math.min(confidence, 97),
-    reasons,
-    checks,
-    price,
-    rsi,
-    vwap,
-    vwapPct,
-    ema9,
-    ema21,
-    atr,
-    hhhl,
-    vah: vp?.vah ?? null,
-    val: vp?.val ?? null,
-    poc: vp?.poc ?? null,
-    nearVAL,
-    abovePOC,
-    inVA,
+    reasons, checks, price, rsi, vwap, vwapPct,
+    ema9, ema21, atr, hhhl,
+    vah:      vp.vah,
+    val:      vp.val,
+    poc:      vp.poc,
+    nearVAL, tightVAL, abovePOC, inVA,
+    zoneStr,
   };
 }
 
@@ -1204,7 +1249,7 @@ async function atAnalyze(sym) {
   return atSignal(bars, closes, price, rsi, vwap, volData, atr, vp);
 }
 
-// ── Place bracket order — real money, no mocks ────────────────────────────────
+// ── Place bracket order — VP-first sizing, VAH as TP, VAL as SL ──────────────
 async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings) {
   if (!consumeRateLimit(userId)) {
     console.warn('[AT] user=' + userId + ' rate limit reached');
@@ -1214,42 +1259,49 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const price = sig.price;
   const atr   = sig.atr;
 
-  // BUY only
   if (sig.signal !== 'BUY') return { skipped: true, reason: 'BUY only mode' };
+  if (price <= 2)            return { skipped: true, reason: 'price ≤ $2' };
 
-  // Price must be > $2
-  if (price <= 2) return { skipped: true, reason: 'price ≤ $2' };
-
-  // Need ATR for position sizing
-  if (!atr || atr <= 0) return { skipped: true, reason: 'ATR unavailable' };
-
-  // ── Auto-leverage: engine scales leverage based on signal confidence ─────────
-  // User setting = maximum allowed leverage; engine picks the right level automatically
+  // ── Auto-leverage: confidence-scaled, capped at user's max setting ───────
   const maxLev  = Math.min(4, Math.max(1, settings.leverage || 1));
   const conf    = sig.confidence || 0;
-  const autoLev = conf >= 90 ? maxLev
-                : conf >= 80 ? Math.min(maxLev, 2)
-                : 1;
-  const lev     = autoLev;
+  const lev     = conf >= 90 ? maxLev : conf >= 80 ? Math.min(maxLev, 2) : 1;
 
-  // ── ATR-based SL / TP ─────────────────────────────────────────────────────
-  // SL = 1.5× ATR below entry, TP = minimum 2:1 R:R = 3× ATR above entry
-  const slDist   = parseFloat((1.5 * atr).toFixed(4));
-  const tpDist   = parseFloat((3.0 * atr).toFixed(4));   // 2:1 R:R
-  const limitPx  = parseFloat((price * 1.0005).toFixed(4)); // limit 0.05% above
-  const slPrice  = parseFloat((limitPx - slDist).toFixed(2));
-  const tpPrice  = parseFloat((limitPx + tpDist).toFixed(2));
+  // ── TP / SL anchored to Value Area ─────────────────────────────────────────
+  //   TP = VAH  — where volume thins out above; natural profit magnet
+  //   SL = VAL  - 0.5× ATR  — just below support, exit if thesis is wrong
+  //   Fallback to ATR multiples when VP unavailable (shouldn't happen often)
+  const limitPx  = parseFloat((price * 1.0005).toFixed(4)); // limit 0.05% above last
 
-  // ── Position sizing: risk_pct% of settled cash × auto-leverage / SL dist ──
-  const riskUSD    = settledCash * (settings.risk_pct / 100) * lev;
-  const rawShares  = Math.floor(riskUSD / slDist);
+  let tpPrice, slPrice;
+  if (sig.vah && sig.val) {
+    tpPrice = parseFloat(sig.vah.toFixed(2));
+    slPrice = parseFloat((sig.val - (atr ? 0.5 * atr : sig.val * 0.005)).toFixed(2));
+    // Sanity: TP must be above entry, SL must be below entry
+    if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
+    if (slPrice >= limitPx) slPrice = parseFloat((limitPx * 0.985).toFixed(2));
+  } else if (atr && atr > 0) {
+    slPrice = parseFloat((limitPx - 1.5 * atr).toFixed(2));
+    tpPrice = parseFloat((limitPx + 3.0 * atr).toFixed(2));
+  } else {
+    return { skipped: true, reason: 'No VAH/VAL or ATR for order levels' };
+  }
+
+  // ── Position sizing: user's dollar allocation × leverage / share price ────
+  const investUSD  = settings.investment_amount || 1000;
+  const allocUSD   = investUSD * lev;
+  const rawShares  = Math.floor(allocUSD / limitPx);
   const maxByBP    = Math.floor((buyingPower * 0.95) / limitPx);
   const shares     = Math.max(1, Math.min(rawShares, maxByBP));
 
-  if (shares < 1 || rawShares < 1) {
-    console.warn('[AT] user=' + userId + ' ' + sym + ': insufficient settled cash ($' + settledCash.toFixed(0) + ')');
+  if (rawShares < 1) {
+    console.warn('[AT] user=' + userId + ' ' + sym + ': investment $' + investUSD.toFixed(0) + ' too small for price $' + price.toFixed(2));
     return { insufficientBP: true };
   }
+
+  const slDist   = parseFloat((limitPx - slPrice).toFixed(4));
+  const tpDist   = parseFloat((tpPrice  - limitPx).toFixed(4));
+  const rr       = slDist > 0 ? (tpDist / slDist).toFixed(2) : '?';
 
   // ── Limit bracket order ────────────────────────────────────────────────────
   const orderBody = {
@@ -1271,9 +1323,9 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 
   if (order?.id) {
     const notional = (shares * limitPx).toFixed(2);
-    const rr       = (tpDist / slDist).toFixed(2);
-    const levStr   = lev > 1 ? ` | ${lev}x leverage` : '';
-    const action   = 'AUTO BUY ' + shares + 'sh ' + sym + ' LIMIT $' + limitPx.toFixed(2) + ' | SL $' + slPrice + ' | TP $' + tpPrice + ' | R:R ' + rr + ':1 | ATR ' + atr.toFixed(3) + ' | ' + sig.confidence + '% conf' + levStr;
+    const levStr   = lev > 1 ? ` | ${lev}x` : '';
+    const vpStr    = sig.vah ? ` | VAL $${sig.val} → VAH $${sig.vah}` : '';
+    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} | TP $${tpPrice} (VAH) | R:R ${rr}:1 | ${sig.confidence}% conf${levStr}${vpStr}`;
     db.prepare(`
       INSERT INTO auto_trade_log
         (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
@@ -1533,37 +1585,48 @@ async function atRunForUser(userId, dryRun = false) {
         }))
     );
 
-    // BUY only (cash account) — sort by confidence desc
+    // BUY only (cash account) — any VP-triggered BUY qualifies, sort by confidence desc
     const actionable = analyses
       .filter(a => a.sig?.signal === 'BUY')
-      .filter(a => a.sig.confidence >= (settings.confidence_threshold || 68))
       .sort((a, b) => b.sig.confidence - a.sig.confidence);
 
-    // Compute auto-leverage for each analysis so UI can display it
+    // Build analyses for UI — include VP levels and zone context
     const maxLevSetting = Math.min(4, Math.max(1, settings.leverage || 1));
     result.analyses = analyses.map(a => {
-      const c   = a.sig?.confidence || 0;
+      const sig = a.sig || {};
+      const c   = sig.confidence || 0;
       const lev = c >= 90 ? maxLevSetting : c >= 80 ? Math.min(maxLevSetting, 2) : 1;
+      // VP-based TP/SL for display
+      const entryPx = sig.price ? parseFloat((sig.price * 1.0005).toFixed(4)) : null;
+      let tp_price = null, sl_price = null;
+      if (sig.vah && sig.val && entryPx) {
+        tp_price = parseFloat(sig.vah.toFixed(2));
+        sl_price = parseFloat((sig.val - (sig.atr ? 0.5 * sig.atr : sig.val * 0.005)).toFixed(2));
+        if (tp_price <= entryPx) tp_price = parseFloat((entryPx * 1.02).toFixed(2));
+        if (sl_price >= entryPx) sl_price = parseFloat((entryPx * 0.985).toFixed(2));
+      }
       return {
-        symbol:      a.symbol,
-        signal:      a.sig?.signal     || 'HOLD',
-        confidence:  a.sig?.confidence || 0,
-        price:       a.sig?.price,
-        rsi:         a.sig?.rsi,
-        atr:         a.sig?.atr,
-        ema9:        a.sig?.ema9,
-        ema21:       a.sig?.ema21,
-        vah:         a.sig?.vah,
-        val:         a.sig?.val,
-        poc:         a.sig?.poc,
-        nearVAL:     a.sig?.nearVAL,
-        abovePOC:    a.sig?.abovePOC,
-        inVA:        a.sig?.inVA,
-        reasons:     a.sig?.reasons    || [],
-        checks:      a.sig?.checks     || {},
+        symbol:       a.symbol,
+        signal:       sig.signal     || 'HOLD',
+        confidence:   sig.confidence || 0,
+        price:        sig.price,
+        rsi:          sig.rsi,
+        atr:          sig.atr,
+        ema9:         sig.ema9,
+        ema21:        sig.ema21,
+        vah:          sig.vah,
+        val:          sig.val,
+        poc:          sig.poc,
+        nearVAL:      sig.nearVAL,
+        tightVAL:     sig.tightVAL,
+        abovePOC:     sig.abovePOC,
+        inVA:         sig.inVA,
+        zoneStr:      sig.zoneStr,
+        reasons:      sig.reasons    || [],
+        checks:       sig.checks     || {},
         autoLeverage: lev,
-        sl_price:    a.sig?.atr ? parseFloat(((a.sig.price||0) - 1.5*a.sig.atr).toFixed(2)) : null,
-        tp_price:    a.sig?.atr ? parseFloat(((a.sig.price||0) + 3.0*a.sig.atr).toFixed(2)) : null,
+        sl_price,
+        tp_price,
       };
     });
 
@@ -1602,7 +1665,7 @@ async function atRunForUser(userId, dryRun = false) {
     } else if (!dryRun && actionable.length === 0) {
       autoTraderStatus.set(userId, {
         ...(autoTraderStatus.get(userId) || {}),
-        lastAction: `Scan complete — no signal ≥${settings.confidence_threshold || 70}% found (${candidates.length} scanned)`,
+        lastAction: `Scan complete — no VP entry signals found (${candidates.length} scanned)`,
       });
     }
 
@@ -1639,8 +1702,7 @@ console.log('[AutoTrader] Engine started — scanning every 60 s');
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 
 const AT_DEFAULTS = {
-  enabled: 0, max_positions: 1, risk_pct: 1.0, leverage: 1.0,
-  tp_pct: 3.0, sl_pct: 1.5, min_volume: 500_000, confidence_threshold: 68,
+  enabled: 0, max_positions: 1, investment_amount: 1000, leverage: 1.0, min_volume: 500_000,
 };
 
 app.get('/api/alpaca/auto-settings', requireAuth, (req, res) => {
@@ -1654,18 +1716,15 @@ app.put('/api/alpaca/auto-settings', requireAuth, (req, res) => {
   const clamp = (v, mn, mx, def) => Math.min(mx, Math.max(mn, isFinite(+v) ? +v : def));
   db.prepare(`
     INSERT OR REPLACE INTO auto_trade_settings
-      (user_id, enabled, max_positions, risk_pct, leverage, tp_pct, sl_pct, min_volume, confidence_threshold)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (user_id, enabled, max_positions, investment_amount, leverage, min_volume)
+    VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     req.session.userId,
     b.enabled ? 1 : 0,
-    clamp(b.max_positions,        1,   4,           1),
-    clamp(b.risk_pct,             0.5, 10,          1),
-    clamp(b.leverage,             1,   4,           1),
-    clamp(b.tp_pct,               0.5, 20,          3),
-    clamp(b.sl_pct,               0.5, 10,          1.5),
-    clamp(b.min_volume,           500_000, 100_000_000, 500_000), // min 500k
-    clamp(b.confidence_threshold, 60,  90,          68),
+    clamp(b.max_positions,    1,   4,           1),
+    clamp(b.investment_amount,50, 500_000, 1000),
+    clamp(b.leverage,         1,   4,           1),
+    clamp(b.min_volume,  500_000, 100_000_000, 500_000),
   );
   res.json({ ok: true });
 });

@@ -4367,9 +4367,53 @@ option { background: var(--card); }
   color: var(--text-secondary); display: flex; align-items: center; gap: 6px;
 }
 
-/* 2-column settings grid */
-.at-settings-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+/* Settings: simple vertical stack (no grid needed with 3 fields) */
+.at-settings-grid { display: flex; flex-direction: column; gap: 8px; }
+
+/* Investment amount — hero field */
+.at-invest-block {
+  display: flex; flex-direction: column; gap: 4px;
+  background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 8px; padding: 10px 12px;
+}
+.at-invest-row {
+  display: flex; align-items: center; gap: 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+  overflow: hidden;
+}
+.at-invest-dollar {
+  padding: 0 8px; font-size: 0.85rem; font-weight: 600; color: #818cf8;
+  background: rgba(99,102,241,0.1); border-right: 1px solid var(--border);
+  line-height: 34px;
+}
+.at-invest-inp {
+  border: none !important; border-radius: 0 !important; flex: 1;
+  font-size: 1rem !important; font-weight: 700 !important; padding: 6px 10px !important;
+  color: var(--text) !important;
+}
+.at-invest-hint {
+  font-size: 0.6rem; color: var(--text-secondary); line-height: 1.4;
+}
+
+/* How-it-works mini guide */
+.at-how-block {
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.at-how-title {
+  font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-secondary); margin-bottom: 3px;
+}
+.at-how-step {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 0.65rem; color: var(--text-secondary); line-height: 1.4;
+}
+.at-how-n {
+  flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(99,102,241,0.15); color: #818cf8;
+  font-size: 0.58rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
 }
 .at-sfield { display: flex; flex-direction: column; gap: 3px; }
 .at-sfield-full { grid-column: 1 / -1; }
@@ -4452,26 +4496,57 @@ option { background: var(--card); }
 .at-feed-px   { font-size: 0.7rem; color: var(--text); font-weight: 600; margin-left: auto; }
 .at-feed-rsi  { font-size: 0.65rem; color: var(--text-secondary); }
 
-/* ── Volume Profile row ──────────────────────────────────────── */
-.at-feed-vp {
-  display: flex; align-items: center; gap: 5px;
-  background: rgba(255,255,255,0.025); border-radius: 5px;
-  padding: 3px 7px; font-size: 0.63rem;
+/* ── Volume Profile hero bar — the primary display in each scan card ────────── */
+.at-vp-hero {
+  background: rgba(255,255,255,0.025); border-radius: 6px;
+  padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
 }
-.at-vp-lbl     { color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.58rem; }
-.at-vp-sep     { color: var(--border); }
-.at-vp-val-num { color: #34d399; font-weight: 600; }  /* VAL — support (green) */
-.at-vp-poc-num { color: #a78bfa; font-weight: 600; }  /* POC — purple */
-.at-vp-vah-num { color: #fb923c; font-weight: 600; }  /* VAH — resistance (orange) */
-.at-vp-zone {
-  margin-left: auto; font-size: 0.58rem; font-weight: 700; padding: 1px 6px;
-  border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+.at-vp-labels {
+  display: flex; justify-content: space-between; font-size: 0.62rem;
 }
-.at-vp-val  { background: rgba(52,211,153,0.15); color: #34d399; }  /* @ VAL — prime zone */
-.at-vp-poc  { background: rgba(167,139,250,0.15); color: #a78bfa; } /* > POC — bullish */
+.at-vp-label-val { color: #34d399; }
+.at-vp-label-poc { color: #a78bfa; text-align: center; }
+.at-vp-label-vah { color: #fb923c; text-align: right; }
+.at-vp-labels b  { font-weight: 700; }
+
+/* Track bar: shows value area (VAL→VAH) with POC marker and current price tick */
+.at-vp-track {
+  position: relative; height: 8px;
+  background: rgba(255,255,255,0.06); border-radius: 4px; overflow: visible;
+}
+.at-vp-fill {       /* value area left portion: VAL to POC */
+  position: absolute; top:0; left:0; height:100%;
+  background: linear-gradient(to right, rgba(52,211,153,0.3), rgba(167,139,250,0.4));
+  border-radius: 4px 0 0 4px;
+}
+.at-vp-poc-line {   /* POC vertical line */
+  position: absolute; top: -2px; height: 12px; width: 2px;
+  background: #a78bfa; border-radius: 1px;
+}
+.at-vp-price-tick { /* current price indicator */
+  position: absolute; top: -3px; width: 3px; height: 14px;
+  background: #fff; border-radius: 2px; opacity: 0.85;
+  box-shadow: 0 0 4px rgba(255,255,255,0.5);
+}
+
+.at-vp-zone-lbl {
+  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em;
+  align-self: flex-start; padding: 1px 6px; border-radius: 4px;
+}
+.at-vp-trade {
+  font-size: 0.62rem; color: #4ade80; font-weight: 600;
+  border-top: 1px solid rgba(74,222,128,0.15); padding-top: 3px; margin-top: 1px;
+}
+
+/* Zone label colours */
+.at-vp-val  { background: rgba(52,211,153,0.15); color: #34d399; }
+.at-vp-poc  { background: rgba(167,139,250,0.15); color: #a78bfa; }
 .at-vp-va   { background: rgba(255,255,255,0.07); color: var(--text-secondary); }
-.at-vp-vah  { background: rgba(251,146,60,0.12);  color: #fb923c; } /* > VAH — extended */
-.at-vp-out  { background: rgba(239,68,68,0.1);    color: #f87171; } /* < VAL — bearish */
+.at-vp-vah  { background: rgba(251,146,60,0.12);  color: #fb923c; }
+.at-vp-out  { background: rgba(239,68,68,0.1);    color: #f87171; }
+
+/* Legacy inline VP row (kept for compat) */
+.at-feed-vp { display:none; }
 
 .at-feed-conds { display: flex; gap: 3px; flex-wrap: wrap; }
 .at-cond       { font-size: 0.58rem; padding: 2px 5px; border-radius: 3px; font-weight: 500; cursor: default; }

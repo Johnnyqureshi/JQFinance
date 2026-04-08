@@ -755,7 +755,7 @@ function getAlpacaCreds(userId) {
   return db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
 }
 
-async function alpacaFetch(userId, path, opts = {}) {
+async function alpacaFetch(userId, path, opts = {}, _retry = true) {
   const creds = getAlpacaCreds(userId);
   if (!creds) throw new Error('Alpaca not connected. Please add your API credentials.');
   const base = creds.mode === 'live'
@@ -770,6 +770,12 @@ async function alpacaFetch(userId, path, opts = {}) {
       ...(opts.headers || {}),
     },
   });
+  // Auto-retry once on 429 after 1 second back-off
+  if (r.status === 429 && _retry) {
+    console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in 1 s`);
+    await new Promise(res => setTimeout(res, 1000));
+    return alpacaFetch(userId, path, opts, false);
+  }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.message || `Alpaca error (${r.status})`);
@@ -1054,6 +1060,9 @@ const AT_BASE = [
 
 // ── Dynamic universe builder — called each scan cycle ─────────────────────────
 // Runs most-active screener + sector rotation in parallel, returns symbol list + metadata
+// Cache last successful universe so a transient Yahoo failure never leaves us with nothing
+let _universeCache = null;
+
 async function atBuildUniverse() {
   const symbolSet = new Set(AT_BASE);
   let hotSectors  = [];
@@ -1104,7 +1113,10 @@ async function atBuildUniverse() {
     }
   }
 
-  return { symbols: [...symbolSet], hotSectors };
+  const result = { symbols: [...symbolSet], hotSectors };
+  // Save successful build to cache — used as fallback if Yahoo is rate-limited next cycle
+  _universeCache = result;
+  return result;
 }
 
 // ── Market hours guard (US Eastern) ──────────────────────────────────────────
@@ -1609,7 +1621,8 @@ async function atCheckExits(userId, positions, settings, session) {
       continue;
     }
 
-    // Active position — check exit conditions
+    // Active position — check exit conditions (only during market hours)
+    if (!session.isMarketOpen) continue;
     try {
       const pnl       = parseFloat(pos.unrealized_pl  || 0);
       const curPrice  = parseFloat(pos.current_price  || 0);
@@ -1728,7 +1741,9 @@ async function atRunForUser(userId, dryRun = false) {
     const openSyms = new Set(posArr.map(p => p.symbol));
 
     // ── 2. Check exits on all open/pending auto-trade positions ──────────────
-    if (session.isMarketOpen && !dryRun) {
+    // Runs every cycle regardless of market hours — broker_close/pending reconciliation
+    // is always needed; active EMA exits are gated inside atCheckExits by session.isMarketOpen
+    if (!dryRun) {
       result.exitCount = await atCheckExits(userId, posArr, settings, session);
 
       // Re-fetch positions after exits so position count is accurate
@@ -1750,7 +1765,19 @@ async function atRunForUser(userId, dryRun = false) {
     const MIN_DAILY_VOL = 1_000_000;   // 1M minimum — ensures real liquidity
     const MAX_PRICE     = 50;          // hard cap — under-$50 only for better VP spread
     try {
-      const { symbols: universe, hotSectors } = await atBuildUniverse();
+      let universeData;
+      try {
+        universeData = await atBuildUniverse();
+      } catch (universeErr) {
+        // Yahoo Finance / network failure — fall back to the last known-good universe
+        if (_universeCache) {
+          console.warn('[AT Universe] build failed, using cached universe from last cycle:', universeErr.message);
+          universeData = _universeCache;
+        } else {
+          throw universeErr; // no cache yet — propagate so error shows in UI
+        }
+      }
+      const { symbols: universe, hotSectors } = universeData;
       result.hotSectors = hotSectors;
 
       const rawQ = await yf.quote(universe, {}, { validateResult: false });
@@ -1933,7 +1960,10 @@ async function atRunForUser(userId, dryRun = false) {
 }
 
 // ── Engine loop — fires every 60 seconds ──────────────────────────────────────
+let _lastEngineTick = Date.now();
+
 async function atRunAll() {
+  _lastEngineTick = Date.now();
   const enabled = db.prepare('SELECT user_id FROM auto_trade_settings WHERE enabled = 1').all();
   for (const { user_id } of enabled) {
     atRunForUser(user_id, false).catch(e =>
@@ -1941,8 +1971,19 @@ async function atRunAll() {
     );
   }
 }
-const atInterval = setInterval(atRunAll, 60_000);
+let atInterval = setInterval(atRunAll, 60_000);
 console.log('[AutoTrader] Engine started — scanning every 60 s');
+
+// ── Watchdog — restarts the interval if the engine goes silent for >2 minutes ─
+setInterval(() => {
+  const gap = Date.now() - _lastEngineTick;
+  if (gap > 120_000) {
+    console.warn(`[AutoTrader] Watchdog: engine silent for ${Math.round(gap / 1000)}s — restarting interval`);
+    clearInterval(atInterval);
+    atInterval = setInterval(atRunAll, 60_000);
+    atRunAll();
+  }
+}, 30_000);
 
 // ── Auto-trade API routes ─────────────────────────────────────────────────────
 

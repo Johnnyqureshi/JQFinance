@@ -13,7 +13,7 @@ const alpacaTrader = (() => {
   let leverage     = 1;          // manual trade leverage
   let atLeverage   = 1;          // auto-trade leverage setting
   let connected    = false;
-  let alpacaMode   = 'paper';
+  let alpacaMode   = 'live';
   let cdInterval   = null;
   let cdSecs       = 60;
   let analysisBusy = false;
@@ -225,7 +225,9 @@ const alpacaTrader = (() => {
     if (currentPrice&&amount>0) {
       const hasBracket=tpOn||slOn;
       const shares=hasBracket?Math.max(1,Math.floor(levAmount/currentPrice)):(levAmount/currentPrice).toFixed(2);
-      hint.textContent=`≈ ${shares} shares @ $${fmt(currentPrice)}${leverage>1?` (${leverage}x leverage = $${fmt(levAmount)})':''}${hasBracket?' — bracket order':''}`;
+      const levStr=leverage>1?' ('+leverage+'x leverage = $'+fmt(levAmount)+')':'';
+      const brkStr=hasBracket?' — bracket order':'';
+      hint.textContent='≈ '+shares+' shares @ $'+fmt(currentPrice)+levStr+brkStr;
       $('trdSumSym').textContent    = currentSym||'--';
       $('trdSumPrice').textContent  = '$'+fmt(currentPrice);
       $('trdSumShares').textContent = shares;
@@ -533,6 +535,9 @@ const alpacaTrader = (() => {
     const m=$('trdModal'); if(m) m.style.display='flex';
     $('trdModalErr').textContent='';
     $('trdModalDisc').style.display=connected?'':'none';
+    // Default to live mode tab
+    document.querySelectorAll('.trd-mode-tab').forEach(t=>t.classList.toggle('active',t.dataset.mode===alpacaMode));
+    const w=$('trdLiveWarn');if(w) w.style.display=alpacaMode==='live'?'':'none';
   }
   function hideModal() { const m=$('trdModal');if(m) m.style.display='none'; }
 

@@ -24,10 +24,17 @@ const alpacaTrader = (() => {
 
   async function apiFetch(url, opts={}) {
     const r = await fetch(url, { credentials:'include', ...opts });
-    // Session expired — redirect to login so the engine stays visible
+    // Session expired — show auth overlay in-place (no redirect to a missing route)
     if (r.status === 401) {
       stopStatusPoll();
-      window.location.href = '/login';
+      connected   = false;
+      autoEnabled = false;
+      // Use the global SPA overlay if available, else fall back to root redirect
+      if (typeof showAuthOverlay === 'function') {
+        showAuthOverlay();
+      } else {
+        window.location.href = '/';
+      }
       throw new Error('session_expired');
     }
     return r.json();

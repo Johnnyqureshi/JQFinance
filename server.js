@@ -1341,6 +1341,17 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
     };
   }
 
+  // ── Staleness guard: if the 5-day VAH is >15% above current price the VP is from
+  //    a different price regime (e.g. a spike 3 days ago). TP would be unreachable. ──
+  if (vp.vah > price * 1.15) {
+    return {
+      signal: 'HOLD', confidence: 0, price, rsi, vwap,
+      reasons: [`✗ VP stale: VAH $${vp.vah.toFixed(2)} is >${((vp.vah/price-1)*100).toFixed(0)}% above price — from a different price regime`],
+      checks: { vp_staleness: { pass: false, detail: `VAH $${vp.vah.toFixed(2)} vs price $${price.toFixed(2)}` } },
+      vah: vp.vah, val: vp.val, poc: vp.poc,
+    };
+  }
+
   const ema9   = atEMA(closes, 9);
   const ema21  = atEMA(closes, 21);
   const hhhl   = atHHHL(bars);
@@ -1488,8 +1499,14 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 
   // ── TP / SL ──────────────────────────────────────────────────────────────
   //   TP = VAH  (VAL bounce) or VAH + VA width (POC breakout momentum projection)
-  //   SL = 0.5% below entry price — hard capital-protection stop, fully automated
-  const limitPx  = parseFloat((price * 1.0005).toFixed(2)); // limit 0.05% above last
+  //   SL = 1% below entry price — matches the trailing stop's starting level
+  // Limit buffer 0.5% above last close — ensures the order actually fills when
+  // market has ticked up slightly between the last bar and order submission.
+  const limitPx  = parseFloat((price * 1.005).toFixed(2)); // 0.5% above last close
+
+  // Hard TP ceiling: VP-based targets can reach old spike highs that are no longer
+  // reachable. Cap TP at 8% above entry to keep targets realistic.
+  const MAX_TP_PCT = 1.08;
 
   let tpPrice, slPrice;
   if (sig.vah && sig.val) {
@@ -1502,6 +1519,8 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     slPrice = parseFloat((limitPx * 0.990).toFixed(2));
     // Sanity: TP must be above entry
     if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
+    // Hard cap: TP must never exceed 8% above entry (prevents phantom targets from stale VP spikes)
+    if (tpPrice > limitPx * MAX_TP_PCT) tpPrice = parseFloat((limitPx * MAX_TP_PCT).toFixed(2));
   } else if (atr && atr > 0) {
     tpPrice = parseFloat((limitPx + 3.0 * atr).toFixed(2));
     slPrice = parseFloat((limitPx * 0.990).toFixed(2));
@@ -1599,6 +1618,29 @@ async function atCheckExits(userId, positions, settings, session) {
 
   let exitCount = 0;
 
+  // ── Near-close sweep: cancel all pending + close all open positions by 3:50 PM ─
+  if (session.isNearClose) {
+    for (const log of allTracked) {
+      try {
+        if (log.status === 'pending_fill') {
+          await alpacaFetch(userId, '/v2/orders/' + log.alpaca_order_id, { method: 'DELETE' }).catch(() => {});
+          db.prepare(`UPDATE auto_trade_log SET status='cancelled', closed_at=datetime('now'), exit_reason='eod_cancel' WHERE id=?`).run(log.id);
+          console.log(`[AT] EOD: cancelled pending order ${log.symbol}`);
+        } else if (log.status === 'open') {
+          const pos = Array.isArray(positions) ? positions.find(p => p.symbol === log.symbol) : null;
+          if (pos) {
+            const pnl = parseFloat(pos.unrealized_pl || 0);
+            await atClosePosition(userId, log, pnl, 'eod_force_close');
+            atHighWater.delete(`${userId}:${log.id}`);
+            atBelowEMA.delete(`${userId}:${log.id}`);
+            exitCount++;
+          }
+        }
+      } catch(e) { console.warn(`[AT] EOD sweep error ${log.symbol}:`, e.message); }
+    }
+    return exitCount;
+  }
+
   for (const log of allTracked) {
 
     // ── PENDING orders: promote to open or cancel after 120 s ─────────────────
@@ -1610,11 +1652,17 @@ async function atCheckExits(userId, positions, settings, session) {
           const fillPx = parseFloat(ord.filled_avg_price || log.entry_price);
           db.prepare(`UPDATE auto_trade_log SET status='open', entry_price=? WHERE id=?`).run(fillPx, log.id);
           console.log('[AT] user=' + userId + ' ' + log.symbol + ' limit order filled @ $' + fillPx);
-        } else if (ageMs >= 120_000 || ord?.status === 'expired' || ord?.status === 'canceled') {
-          // Cancel unfilled limit order after 2 minutes
+        } else if (ord?.status === 'expired' || ord?.status === 'canceled') {
+          // Alpaca already cancelled it — reconcile our log
+          db.prepare(`UPDATE auto_trade_log SET status='cancelled', closed_at=datetime('now'), exit_reason='broker_cancelled' WHERE id=?`).run(log.id);
+          console.log('[AT] user=' + userId + ' ' + log.symbol + ' order cancelled by broker');
+          exitCount++;
+        } else if (ageMs >= 30 * 60 * 1000) {
+          // 30-min self-cancel: unfilled GTC limit that never attracted a fill is a
+          // stale signal — cancel it so buying power is freed and symbol unblocked.
           await alpacaFetch(userId, '/v2/orders/' + log.alpaca_order_id, { method: 'DELETE' }).catch(() => {});
-          db.prepare(`UPDATE auto_trade_log SET status='cancelled', closed_at=datetime('now'), exit_reason='unfilled_timeout' WHERE id=?`).run(log.id);
-          console.log('[AT] user=' + userId + ' ' + log.symbol + ' unfilled limit order cancelled (' + Math.round(ageMs / 1000) + 's)');
+          db.prepare(`UPDATE auto_trade_log SET status='cancelled', closed_at=datetime('now'), exit_reason='unfilled_30min' WHERE id=?`).run(log.id);
+          console.log('[AT] user=' + userId + ' ' + log.symbol + ' unfilled GTC order cancelled after 30 min');
           exitCount++;
         }
       } catch(e) { console.warn('[AT] pending check error ' + log.symbol + ':', e.message); }
@@ -1983,6 +2031,7 @@ async function atRunForUser(userId, dryRun = false) {
     const dailyOk       = todayTrades < MAX_DAILY;
 
     const canEnter = !dryRun && session.isMarketOpen && !session.isEarlyWindow
+                     && !session.isNearClose                        // no new entries after 3:50 PM
                      && atmOpen < MAX_POSITIONS && actionable.length > 0
                      && !pdtBlocked && cooldownOk && dailyOk;
     if (canEnter) {

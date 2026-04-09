@@ -4722,6 +4722,7 @@ option { background: var(--card); }
 .at-sector-chip.sector-hot  { border-color: rgba(52,211,153,0.5); color: #34d399; background: rgba(52,211,153,0.08); }
 .at-sector-chip.sector-cold { border-color: rgba(248,113,113,0.5); color: #f87171; background: rgba(248,113,113,0.08); }
 .at-sector-chip.sector-flat { border-color: rgba(148,163,184,0.3); color: #94a3b8; }
+.at-inverse-tag { font-size: 0.72em; font-weight: 600; opacity: 0.85; margin-left: 3px; letter-spacing: 0.02em; }
 
 @media (max-width: 900px) {
   .at-body { grid-template-columns: 1fr; }

@@ -269,8 +269,8 @@ const alpacaTrader = (() => {
       if (pdtWarn && st.pdtBlocked) pdtWarn.style.display = '';
 
       // Sector heatmap
-      if (Array.isArray(st.hotSectors) && st.hotSectors.length) {
-        renderHotSectors(st.hotSectors);
+      if (Array.isArray(st.hotSectors) || Array.isArray(st.coldSectors)) {
+        renderHotSectors(st.hotSectors || [], st.coldSectors || []);
       }
 
       // Live scan feed
@@ -290,7 +290,13 @@ const alpacaTrader = (() => {
   function stopStatusPoll() { clearInterval(statusPoll); statusPoll = null; }
 
   // ── Sector heatmap strip ────────────────────────────────────────────────────
-  function renderHotSectors(hotSectors) {
+  const SECTOR_INVERSE_LABELS = {
+    XLK:['TECS','SQQQ'], XLF:['FAZ','SDS'], XLE:['DRIP','SCO'],
+    XLV:['LABD','SDS'],  XLC:['SQQQ'],      XLY:['SDS','SPXS'],
+    XLI:['TZA','SDS'],   XLB:['SDS'],       XLRE:['DRV'],
+    XLU:['SDS'],         XLP:['SDS'],
+  };
+  function renderHotSectors(hotSectors, coldSectors) {
     const el = $('atSectorHeatmap');
     if (!el) return;
     const NAMES = {
@@ -298,12 +304,17 @@ const alpacaTrader = (() => {
       XLI:'Industrial', XLC:'Comm', XLY:'ConsDisc', XLP:'Staples',
       XLB:'Materials', XLRE:'Real Estate', XLU:'Utilities',
     };
-    el.innerHTML = hotSectors.map(s => {
+    const coldSet = new Set((coldSectors || []).map(s => s.etf));
+    const all = [...(hotSectors || []), ...(coldSectors || [])];
+    el.innerHTML = all.map(s => {
       const chg  = s.chg || 0;
       const sign = chg >= 0 ? '+' : '';
-      const cls  = chg >= 0.5 ? 'sector-hot' : chg <= -0.5 ? 'sector-cold' : 'sector-flat';
+      const cls  = chg >= 0.5 ? 'sector-hot' : chg <= -0.3 ? 'sector-cold' : 'sector-flat';
       const name = NAMES[s.etf] || s.etf;
-      return `<span class="at-sector-chip ${cls}">${name} <b>${sign}${chg.toFixed(2)}%</b></span>`;
+      const inverseTag = coldSet.has(s.etf)
+        ? ` <span class="at-inverse-tag">↓ ${(SECTOR_INVERSE_LABELS[s.etf] || []).join('/')}</span>`
+        : '';
+      return `<span class="at-sector-chip ${cls}">${name} <b>${sign}${chg.toFixed(2)}%</b>${inverseTag}</span>`;
     }).join('');
   }
 

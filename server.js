@@ -937,6 +937,21 @@ const SECTOR_POOLS = {
   XLP: ['PRPL','VRA','XRAY','CENT','EDUC','USFD','SFM','GO','CASY','CHEF'],
 };
 
+// ── Inverse plays per sector — activated when that sector is falling ──────────
+const SECTOR_INVERSE_POOLS = {
+  XLK:  ['TECS','SQQQ','BERZ','QID'],       // tech falling
+  XLF:  ['FAZ','SDS','SPXS'],               // financials falling
+  XLE:  ['DRIP','DUG','SCO'],               // energy falling
+  XLV:  ['LABD','RXD','SDS'],               // health/biotech falling
+  XLC:  ['SQQQ','BERZ','SDS'],              // comms falling
+  XLY:  ['SDS','SPXS','SDOW'],              // consumer discretionary falling
+  XLI:  ['TZA','SDS','SRTY'],               // industrials falling
+  XLB:  ['SDS','SPXS'],                     // materials falling
+  XLRE: ['DRV','SDS'],                      // real estate falling
+  XLU:  ['SDS','SPXS'],                     // utilities falling
+  XLP:  ['SDS','SPXS'],                     // staples falling
+};
+
 // ── Baseline anchor list — always scanned, all under $50, proven liquid ───────
 const AT_BASE = [
   // ── 3× Bull ETFs ──────────────────────────────────────────────────────────
@@ -1097,27 +1112,41 @@ async function atBuildUniverse() {
   }
 
   // Process sector rotation
+  let coldSectors = [];
   if (sectorResult.status === 'fulfilled' && sectorResult.value) {
     const sArr = Array.isArray(sectorResult.value) ? sectorResult.value : [sectorResult.value];
     const ranked = sArr
       .filter(q => q?.regularMarketVolume > 0)
       .sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
 
-    hotSectors = ranked.slice(0, 4).map(q => ({
-      etf:    q.symbol,
-      vol:    q.regularMarketVolume,
-      chg:    q.regularMarketChangePercent,
+    // All 11 sectors — sorted by volume for heatmap display
+    const allSectors = ranked.map(q => ({
+      etf: q.symbol,
+      vol: q.regularMarketVolume,
+      chg: q.regularMarketChangePercent || 0,
     }));
 
-    const hotNames = hotSectors.map(s => `${s.etf}(${s.chg >= 0 ? '+' : ''}${(s.chg||0).toFixed(2)}%)`).join(', ');
-    console.log('[AT Universe] hot sectors: ' + hotNames);
-
+    // HOT: rising sectors (chg > 0) — load bull stock pools
+    hotSectors = allSectors.filter(s => s.chg >= 0);
     for (const { etf } of hotSectors) {
       for (const sym of (SECTOR_POOLS[etf] || [])) symbolSet.add(sym);
     }
+    const hotNames = hotSectors.map(s => `${s.etf}(+${s.chg.toFixed(2)}%)`).join(', ') || 'none';
+    console.log('[AT Universe] rising sectors: ' + hotNames);
+
+    // COLD: falling sectors (chg < -0.3%) — load inverse ETF pools
+    const COLD_THRESHOLD = -0.3;
+    coldSectors = allSectors.filter(s => s.chg < COLD_THRESHOLD);
+    for (const { etf } of coldSectors) {
+      for (const sym of (SECTOR_INVERSE_POOLS[etf] || [])) symbolSet.add(sym);
+    }
+    if (coldSectors.length) {
+      const coldNames = coldSectors.map(s => `${s.etf}(${s.chg.toFixed(2)}%) → ${(SECTOR_INVERSE_POOLS[s.etf] || []).join(',')}`).join(' | ');
+      console.log('[AT Universe] falling sectors — inverse plays activated: ' + coldNames);
+    }
   }
 
-  const result = { symbols: [...symbolSet], hotSectors };
+  const result = { symbols: [...symbolSet], hotSectors, coldSectors };
   // Save successful build to cache — used as fallback if Yahoo is rate-limited next cycle
   _universeCache = result;
   return result;
@@ -1710,7 +1739,7 @@ async function atRunForUser(userId, dryRun = false) {
     nearClose:   session.isNearClose,
   });
 
-  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], marketOpen, dryRun };
+  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], coldSectors: [], marketOpen, dryRun };
 
   try {
     // ── 1. Fetch account state from Alpaca ────────────────────────────────────
@@ -1795,8 +1824,9 @@ async function atRunForUser(userId, dryRun = false) {
           throw universeErr; // no cache yet — propagate so error shows in UI
         }
       }
-      const { symbols: universe, hotSectors } = universeData;
-      result.hotSectors = hotSectors;
+      const { symbols: universe, hotSectors, coldSectors } = universeData;
+      result.hotSectors  = hotSectors;
+      result.coldSectors = coldSectors;
 
       const rawQ = await yf.quote(universe, {}, { validateResult: false });
       const arr  = Array.isArray(rawQ) ? rawQ : (rawQ ? [rawQ] : []);
@@ -1934,6 +1964,7 @@ async function atRunForUser(userId, dryRun = false) {
       ...(autoTraderStatus.get(userId) || {}),
       analyses:     result.analyses,
       hotSectors:   result.hotSectors,
+      coldSectors:  result.coldSectors,
       pdtBlocked,
       daytradeCount,
     });
@@ -2097,6 +2128,7 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     candidates:    [],
     analyses:      [],
     hotSectors:    [],
+    coldSectors:   [],
     pdtBlocked:    false,
     daytradeCount: 0,
     marketOpen:    sess.isMarketOpen,

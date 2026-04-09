@@ -1654,7 +1654,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   const lev     = conf >= 90 ? maxLev : conf >= 80 ? Math.min(maxLev, 2) : 1;
 
   // ── TP / SL ──────────────────────────────────────────────────────────────
-  //   TP = VAH  (VAL bounce) or VAH + VA width (POC breakout momentum projection)
+  //   TP = VAH for both triggers — backtest confirmed VAH+vaWidth is unreachable intraday
   //   SL = 1% below entry price — matches the trailing stop's starting level
   // Limit buffer 0.5% above last close — ensures the order actually fills when
   // market has ticked up slightly between the last bar and order submission.
@@ -1668,9 +1668,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   if (sig.vah && sig.val) {
     const isPocBreak = sig.zoneStr?.includes('POC breakout');
     const vaWidth    = sig.vah - sig.val;
-    tpPrice = isPocBreak && vaWidth > 0
-      ? parseFloat((sig.vah + vaWidth).toFixed(2))
-      : parseFloat(sig.vah.toFixed(2));
+    tpPrice = parseFloat(sig.vah.toFixed(2));  // VAH for both triggers (backtest-validated)
     // Initial SL = 1% below entry — matches the trailing stop's starting level
     slPrice = parseFloat((limitPx * 0.990).toFixed(2));
     // Sanity: TP must be above entry
@@ -2138,7 +2136,7 @@ async function atRunForUser(userId, dryRun = false) {
         }
         const isPocBreak = sig.zoneStr?.includes('POC breakout');
         const vaWidth    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
-        const tp  = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
+        const tp  = sig.vah;   // VAH for both triggers (backtest-validated)
         const sl  = px * 0.990; // 1% initial trailing stop level
         const rr  = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
@@ -2162,9 +2160,7 @@ async function atRunForUser(userId, dryRun = false) {
       if (sig.vah && entryPx) {
         const isPocBreakDisp = sig.zoneStr?.includes('POC breakout');
         const vaWidthDisp    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
-        tp_price = isPocBreakDisp && vaWidthDisp > 0
-          ? parseFloat((sig.vah + vaWidthDisp).toFixed(2))
-          : parseFloat(sig.vah.toFixed(2));
+        tp_price = parseFloat(sig.vah.toFixed(2));  // VAH for both triggers (backtest-validated)
         if (tp_price <= entryPx) tp_price = parseFloat((entryPx * 1.02).toFixed(2));
         // SL displayed = 1% below entry (initial trailing stop level)
         sl_price = parseFloat((entryPx * 0.990).toFixed(2));

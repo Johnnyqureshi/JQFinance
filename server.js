@@ -1450,6 +1450,12 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
 
   const ema9   = atEMA(closes, 9);
   const ema21  = atEMA(closes, 21);
+  const ema50  = atEMA(closes, 50);
+  // ── EMA-9/21 crossover — compute on slightly older bars to detect a recent cross ─
+  const ema9Prev  = closes.length >= 12 ? atEMA(closes.slice(0, -3), 9)  : null;
+  const ema21Prev = closes.length >= 24 ? atEMA(closes.slice(0, -3), 21) : null;
+  const maCrossover = ema9Prev != null && ema21Prev != null && ema9 != null && ema21 != null
+    && ema9Prev < ema21Prev && ema9 > ema21;  // EMA-9 just crossed above EMA-21
   const hhhl   = atHHHL(bars);
   const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
 
@@ -1484,19 +1490,34 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
     : '–';
 
   // ── SECONDARY: Confidence scoring (not blockers) ───────────────────────────
-  const rsiOk     = rsi != null && rsi >= 30 && rsi <= 70;
-  const aboveVWAP = vwap && price > vwap;
-  const trendOk   = ema9 != null && ema21 != null && price > ema9 && price > ema21;
+  const rsiOk      = rsi != null && rsi >= 30 && rsi <= 70;
+  const aboveVWAP  = vwap && price > vwap;
+  const aboveEMA9  = ema9  != null && price > ema9;
+  const aboveEMA21 = ema21 != null && price > ema21;
+  const aboveEMA50 = ema50 != null && price > ema50;
+  const trendOk    = aboveEMA9 && aboveEMA21;
+  // MA Ribbon: full bull stack EMA-9 > EMA-21 > EMA-50 (strongest alignment signal)
+  const maRibbon   = ema9 != null && ema21 != null && ema50 != null
+                     && ema9 > ema21 && ema21 > ema50 && aboveEMA9;
 
   const vpDetail = `VAL $${vp.val} · POC $${vp.poc} · VAH $${vp.vah}`;
+  const maDetail = [
+    ema9  ? `EMA9=$${ema9.toFixed(2)}`   : null,
+    ema21 ? `EMA21=$${ema21.toFixed(2)}` : null,
+    ema50 ? `EMA50=$${ema50.toFixed(2)}` : null,
+  ].filter(Boolean).join(' · ');
+
   const checks = {
-    vp_primary:      { pass: primaryFires,  detail: primaryFires ? `${val_bounce?'VAL bounce':'POC breakout'} — ${vpDetail}` : `no VP trigger (${zoneStr}) — ${vpDetail}` },
-    price_above_2:   { pass: price > 2,     detail: '$' + price.toFixed(2) },
-    rsi_healthy:     { pass: rsiOk,         detail: rsi != null ? `RSI=${rsi.toFixed(0)}` : 'n/a' },
-    above_vwap:      { pass: !!aboveVWAP,   detail: vwap ? `VWAP=$${vwap.toFixed(2)} (${vwapPct.toFixed(1)}%)` : 'n/a' },
-    ema_trend:       { pass: trendOk,       detail: ema9 && ema21 ? `EMA9=$${ema9.toFixed(2)} EMA21=$${ema21.toFixed(2)}` : 'n/a' },
-    hhhl_structure:  { pass: hhhl,          detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
-    volume_surge:    { pass: volSurge,      detail: volData.avgV > 0 ? volRatio.toFixed(1) + '× avg' : 'n/a' },
+    vp_primary:         { pass: primaryFires,  detail: primaryFires ? `${val_bounce?'VAL bounce':'POC breakout'} — ${vpDetail}` : `no VP trigger (${zoneStr}) — ${vpDetail}` },
+    price_above_2:      { pass: price > 2,     detail: '$' + price.toFixed(2) },
+    rsi_healthy:        { pass: rsiOk,         detail: rsi != null ? `RSI=${rsi.toFixed(0)}` : 'n/a' },
+    above_vwap:         { pass: !!aboveVWAP,   detail: vwap ? `VWAP=$${vwap.toFixed(2)} (${vwapPct.toFixed(1)}%)` : 'n/a' },
+    ema_trend:          { pass: trendOk,       detail: maDetail || 'n/a' },
+    above_ema50:        { pass: !!aboveEMA50,  detail: ema50 ? `EMA50=$${ema50.toFixed(2)} — ${aboveEMA50 ? 'above (uptrend)' : 'BELOW (bearish structure)'}` : 'n/a (need 50 bars)' },
+    ma_ribbon_bullish:  { pass: maRibbon,      detail: maRibbon ? 'EMA9>EMA21>EMA50 — full bull stack' : 'ribbon not aligned' },
+    ma_crossover:       { pass: maCrossover,   detail: maCrossover ? 'EMA-9 just crossed above EMA-21 — fresh momentum' : 'no recent crossover' },
+    hhhl_structure:     { pass: hhhl,          detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
+    volume_surge:       { pass: volSurge,      detail: volData.avgV > 0 ? volRatio.toFixed(1) + '× avg' : 'n/a' },
   };
 
   // ── Confidence calculation ─────────────────────────────────────────────────
@@ -1504,16 +1525,20 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   if (primaryFires) {
     // Base 65 when VP trigger fires. Secondary indicators add points.
     confidence = 65;
-    if (rsiOk)      confidence += 8;   // momentum not extreme
-    if (aboveVWAP)  confidence += 5;   // above intraday fair value
-    if (trendOk)    confidence += 5;   // EMA stack confirms direction
-    if (hhhl)       confidence += 4;   // structure trending up
-    if (volSurge)   confidence += 6;   // above-average conviction
-    if (tightVAL)   confidence += 8;   // tight VAL = prime bounce spot
+    if (rsiOk)        confidence += 8;   // momentum not extreme
+    if (aboveVWAP)    confidence += 5;   // above intraday fair value
+    if (trendOk)      confidence += 5;   // price above EMA-9 + EMA-21
+    if (aboveEMA50)   confidence += 7;   // above medium-term MA — structural uptrend
+    if (maRibbon)     confidence += 5;   // full bull stack EMA-9>21>50
+    if (maCrossover)  confidence += 10;  // fresh EMA-9/21 crossover — strong momentum signal
+    if (!aboveEMA50)  confidence -= 10;  // below EMA-50 = bearish structure — penalise
+    if (hhhl)         confidence += 4;   // structure trending up
+    if (volSurge)     confidence += 6;   // above-average conviction
+    if (tightVAL)     confidence += 8;   // tight VAL = prime bounce spot
   } else {
     // No VP trigger — score secondaries only (won't reach trade threshold)
-    const secPass = [rsiOk, !!aboveVWAP, trendOk, hhhl, volSurge].filter(Boolean).length;
-    confidence = secPass * 7;   // max 35 — below 65 threshold
+    const secPass = [rsiOk, !!aboveVWAP, trendOk, aboveEMA50, hhhl, volSurge].filter(Boolean).length;
+    confidence = secPass * 6;   // max 36 — below 65 threshold
   }
 
   // ── EXTRA SIGNALS — applied after primary VP scoring ──────────────────────
@@ -1563,7 +1588,9 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
     signal:     primaryFires ? 'BUY' : 'HOLD',
     confidence: Math.min(Math.max(confidence, 0), 97),
     reasons, checks, price, rsi, vwap, vwapPct,
-    ema9, ema21, atr, hhhl,
+    ema9, ema21, ema50, atr, hhhl,
+    aboveEMA9, aboveEMA21, aboveEMA50,
+    maRibbon, maCrossover,
     vah:      vp.vah,
     val:      vp.val,
     poc:      vp.poc,
@@ -1867,18 +1894,56 @@ async function atCheckExits(userId, positions, settings, session) {
         continue;
       }
 
-      // Fetch current bars for EMA check
-      const bars = await atFetchBars(log.symbol);
+      // Fetch current bars for EMA checks
+      const bars   = await atFetchBars(log.symbol);
       const closes = bars ? bars.map(b => b.c) : [];
       const ema21  = closes.length >= 21 ? atEMA(closes, 21) : null;
+      const ema50  = closes.length >= 50 ? atEMA(closes, 50) : null;
 
-      // ── Exit if price is below EMA-21 for 2 consecutive cycles (trend reversal) ─
+      // ── Dynamic EMA-21 stop — raise SL floor as EMA-21 rises with price ──────
+      // Only kicks in when the position is profitable (entry + 0.5%) to avoid
+      // stopping out immediately on a flat open. When EMA-21 floor > trail stop,
+      // the EMA-21 floor takes precedence.
+      if (ema21 != null && log.entry_price) {
+        const inProfit = curPrice > log.entry_price * 1.005;
+        const emaStop  = parseFloat((ema21 * 0.995).toFixed(2)); // 0.5% below EMA-21
+        if (inProfit && curPrice <= emaStop) {
+          console.log(`[AT] ${log.symbol}: dynamic EMA-21 stop hit — EMA21=$${ema21.toFixed(2)} floor=$${emaStop} current=$${curPrice.toFixed(2)}`);
+          await atClosePosition(userId, log, pnl, 'dynamic_ema21_stop');
+          atHighWater.delete(hwKey);
+          atBelowEMA.delete(`${userId}:${log.id}`);
+          exitCount++;
+          continue;
+        }
+      }
+
+      // ── EMA-50 structural breakdown — immediate exit (no streak required) ────
+      // If price drops below EMA-50 on an open position, the medium-term uptrend
+      // is invalidated. Exit immediately rather than waiting for the EMA-21 streak.
+      if (ema50 != null && curPrice < ema50 && log.entry_price) {
+        const lossFromEntry = (curPrice - log.entry_price) / log.entry_price;
+        // Only trigger if at least flat from entry — avoid exiting on a pullback that
+        // started before our entry (stale EMA-50 being below price from an old run)
+        if (lossFromEntry < 0.02) {   // less than +2% gain from entry = concern
+          console.log(`[AT] ${log.symbol}: below EMA-50 structural breakdown — EMA50=$${ema50.toFixed(2)} price=$${curPrice.toFixed(2)}`);
+          await atClosePosition(userId, log, pnl, 'below_ema50_breakdown');
+          atHighWater.delete(hwKey);
+          atBelowEMA.delete(`${userId}:${log.id}`);
+          exitCount++;
+          continue;
+        }
+      }
+
+      // ── EMA-21 exit: 2 cycles normally; 1 cycle if also below EMA-50 ─────────
       const emaBelowKey = `${userId}:${log.id}`;
       if (ema21 != null && curPrice < ema21) {
         const streak = (atBelowEMA.get(emaBelowKey) || 0) + 1;
         atBelowEMA.set(emaBelowKey, streak);
-        if (streak >= 2) {
-          await atClosePosition(userId, log, pnl, 'price_below_ema21_x2');
+        // Accelerate exit to 1 cycle if also below EMA-50 (double bearish confirmation)
+        const exitThreshold = (ema50 != null && curPrice < ema50) ? 1 : 2;
+        if (streak >= exitThreshold) {
+          const reason = exitThreshold === 1 ? 'below_ema21_and_ema50' : 'price_below_ema21_x2';
+          await atClosePosition(userId, log, pnl, reason);
           atHighWater.delete(hwKey);
           atBelowEMA.delete(emaBelowKey);
           exitCount++;
@@ -2174,6 +2239,12 @@ async function atRunForUser(userId, dryRun = false) {
         atr:          sig.atr,
         ema9:         sig.ema9,
         ema21:        sig.ema21,
+        ema50:        sig.ema50,
+        aboveEMA9:    sig.aboveEMA9,
+        aboveEMA21:   sig.aboveEMA21,
+        aboveEMA50:   sig.aboveEMA50,
+        maRibbon:     sig.maRibbon,
+        maCrossover:  sig.maCrossover,
         vah:          sig.vah,
         val:          sig.val,
         poc:          sig.poc,

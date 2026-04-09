@@ -412,6 +412,27 @@ const alpacaTrader = (() => {
         `<span class="at-cond ${v.pass?'at-cond-pass':'at-cond-fail'}" title="${v.detail||''}">${v.pass?'✓':'✗'} ${k.replace(/_/g,' ')}</span>`
       ).join('');
       const levStr = a.autoLeverage && a.autoLeverage > 1 ? `<span class="at-feed-lev">${a.autoLeverage}×</span>` : '';
+
+      // ── MA Ribbon ────────────────────────────────────────────────────────────
+      const maFmt = (val, label, above) => val
+        ? `<span class="at-ma-pill ${above ? 'ma-above' : 'ma-below'}" title="${label}=$${parseFloat(val).toFixed(2)}">${label} $${parseFloat(val).toFixed(2)}</span>`
+        : '';
+      const crossoverBadge = a.maCrossover
+        ? `<span class="at-ma-pill ma-crossover" title="EMA-9 crossed above EMA-21 — fresh bullish momentum">⚡ Crossover</span>`
+        : '';
+      const ribbonBadge = a.maRibbon
+        ? `<span class="at-ma-pill ma-ribbon" title="EMA-9 > EMA-21 > EMA-50 — full bull stack">▲ MA Ribbon</span>`
+        : '';
+      const maRibbonHtml = (a.ema9 || a.ema21 || a.ema50)
+        ? `<div class="at-ma-ribbon">
+            ${maFmt(a.ema9,  'EMA9',  a.aboveEMA9)}
+            ${maFmt(a.ema21, 'EMA21', a.aboveEMA21)}
+            ${maFmt(a.ema50, 'EMA50', a.aboveEMA50)}
+            ${crossoverBadge}
+            ${ribbonBadge}
+          </div>`
+        : '';
+
       return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
         <div class="at-feed-top">
           <span class="at-feed-sym">${a.symbol}</span>
@@ -421,6 +442,7 @@ const alpacaTrader = (() => {
           <span class="at-feed-px">$${a.price?parseFloat(a.price).toFixed(2):'--'}</span>
           <span class="at-feed-rsi">RSI ${a.rsi?parseFloat(a.rsi).toFixed(0):'--'}</span>
         </div>
+        ${maRibbonHtml}
         ${vpBar}
         <div class="at-feed-conds">${condStr}</div>
       </div>`;
@@ -451,8 +473,13 @@ const alpacaTrader = (() => {
         signal_reversal:         'Signal flip',
         tp_hit:                  'TP hit',
         sl_hit:                  'SL hit',
-        price_below_ema9:        'Below EMA9',
-        unfilled_timeout:        'Unfilled 2m',
+        trailing_stop_1pct:      'Trailing stop 1%',
+        dynamic_ema21_stop:      'EMA-21 dynamic stop',
+        below_ema50_breakdown:   'EMA-50 breakdown',
+        below_ema21_and_ema50:   'EMA-21+50 double exit',
+        price_below_ema21_x2:    'Below EMA-21 ×2',
+        eod_force_close:         'EOD sweep',
+        unfilled_timeout:        'GTC timeout 30m',
       };
       const statusInfo = l => {
         if (l.status==='pending_fill') return { cls:'alog-pending', label:'Pending Fill' };

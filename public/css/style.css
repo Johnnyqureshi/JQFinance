@@ -4712,6 +4712,26 @@ option { background: var(--card); }
   padding: 6px 0 8px; border-bottom: 1px solid rgba(255,255,255,0.06);
   margin-bottom: 8px;
 }
+/* ── MA Ribbon (scan feed) ───────────────────────────────────────────────── */
+.at-ma-ribbon {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 4px 0 2px;
+}
+.at-ma-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 7px; border-radius: 12px; font-size: 0.62rem; font-weight: 600;
+  white-space: nowrap; border: 1px solid rgba(255,255,255,0.1);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+.at-ma-pill.ma-above    { color: #34d399; border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.07); }
+.at-ma-pill.ma-below    { color: #f87171; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.07); }
+.at-ma-pill.ma-crossover{ color: #fbbf24; border-color: rgba(251,191,36,0.5);  background: rgba(251,191,36,0.08); animation: at-pulse 1.6s ease-in-out infinite; }
+.at-ma-pill.ma-ribbon   { color: #a78bfa; border-color: rgba(167,139,250,0.45); background: rgba(167,139,250,0.08); }
+@keyframes at-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+
 /* ── Risk gauge ──────────────────────────────────────────────────────────── */
 .at-risk-gauge {
   display: flex; flex-wrap: wrap; gap: 5px;

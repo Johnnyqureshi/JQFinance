@@ -914,6 +914,7 @@ const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAct
 // orderRateLimiter removed — Alpaca enforces its own rate limits
 const atLastTradeTs     = new Map(); // userId -> last placed-order timestamp (cooldown gate)
 const atHighWater       = new Map(); // 'userId:logId' -> peak price (trailing stop tracking)
+const atBelowEMA        = new Map(); // 'userId:logId' -> consecutive cycles price < EMA-21
 const atScanningUsers   = new Set(); // userId -> prevents concurrent scans
 
 // ── Sector ETFs — used for rotation detection each scan cycle ────────────────
@@ -1318,8 +1319,8 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
 
   // ── VP zone calculations ───────────────────────────────────────────────────
   const vaWidth    = vp.vah - vp.val;                          // value area spread
-  const nearVAL    = price >= vp.val && price <= vp.val + vaWidth * 0.12; // within 12% of VA width above VAL
-  const tightVAL   = price >= vp.val && price <= vp.val + vaWidth * 0.05; // within 5% — prime entry
+  const nearVAL    = price >= vp.val && price <= vp.val + vaWidth * 0.18; // within 18% of VA width above VAL
+  const tightVAL   = price >= vp.val && price <= vp.val + vaWidth * 0.07; // within 7% — prime entry
   const abovePOC   = price > vp.poc;
   const belowVAH   = price < vp.vah;
   const inVA       = price >= vp.val && price <= vp.vah;
@@ -1638,14 +1639,22 @@ async function atCheckExits(userId, positions, settings, session) {
       // Fetch current bars for EMA check
       const bars = await atFetchBars(log.symbol);
       const closes = bars ? bars.map(b => b.c) : [];
-      const ema9   = closes.length >= 9 ? atEMA(closes, 9) : null;
+      const ema21  = closes.length >= 21 ? atEMA(closes, 21) : null;
 
-      // ── Hard exit if price closes below 9 EMA ────────────────────────────────
-      if (ema9 != null && curPrice < ema9) {
-        await atClosePosition(userId, log, pnl, 'price_below_ema9');
-        atHighWater.delete(hwKey);
-        exitCount++;
-        continue;
+      // ── Exit if price is below EMA-21 for 2 consecutive cycles (trend reversal) ─
+      const emaBelowKey = `${userId}:${log.id}`;
+      if (ema21 != null && curPrice < ema21) {
+        const streak = (atBelowEMA.get(emaBelowKey) || 0) + 1;
+        atBelowEMA.set(emaBelowKey, streak);
+        if (streak >= 2) {
+          await atClosePosition(userId, log, pnl, 'price_below_ema21_x2');
+          atHighWater.delete(hwKey);
+          atBelowEMA.delete(emaBelowKey);
+          exitCount++;
+          continue;
+        }
+      } else {
+        atBelowEMA.delete(emaBelowKey); // reset streak on recovery
       }
 
     } catch(e) {
@@ -1851,7 +1860,7 @@ async function atRunForUser(userId, dryRun = false) {
 
     // BUY only (cash account) — VP trigger fires + minimum R:R + minimum confidence
     const MIN_RR         = 1.0;
-    const MIN_CONFIDENCE = 75; // only high-quality setups — reduces overtrading
+    const MIN_CONFIDENCE = 70; // VP trigger fires at 65 base — 70 requires just one secondary confirm
     const actionable = analyses
       .filter(a => {
         if (a.sig?.signal !== 'BUY') return false;
@@ -1932,7 +1941,7 @@ async function atRunForUser(userId, dryRun = false) {
     // ── 5. Place order — walk all actionable signals until one fills ──────────
     // Entry gates: market open + morning window + cooldown + daily trade cap + PDT
     const COOLDOWN_MS   = 5 * 60 * 1000;                               // 5 min between entries
-    const MAX_DAILY     = equity < 25000 ? 2 : 3;                      // PDT-safe daily cap
+    const MAX_DAILY     = equity < 25000 ? 3 : 6;                      // Alpaca daytradeCount already enforces PDT hard-stop
     const lastTs        = atLastTradeTs.get(userId);
     const cooldownOk    = !lastTs || (Date.now() - lastTs) >= COOLDOWN_MS;
     const cooldownLeft  = lastTs ? Math.ceil((COOLDOWN_MS - (Date.now() - lastTs)) / 60000) : 0;
@@ -1954,7 +1963,7 @@ async function atRunForUser(userId, dryRun = false) {
 
         if (orderResult.placed) {
           placed = true;
-          atLastTradeTs.set(userId, Date.now()); // start 90-min cooldown
+          atLastTradeTs.set(userId, Date.now()); // start 5-min cooldown
           break; // success — stop trying further signals this cycle
         }
         if (orderResult.insufficientBP) {

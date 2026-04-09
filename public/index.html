@@ -844,9 +844,9 @@
         <div class="at-how-block">
           <div class="at-how-title">What happens automatically</div>
           <div class="at-how-step"><span class="at-how-n">1</span> Scans 30+ stocks every 60 seconds — 9:35 AM to 3:50 PM ET (skips first 5 min of open)</div>
-          <div class="at-how-step"><span class="at-how-n">2</span> Requires 75%+ confidence + confirmed Volume Profile trigger (VAL bounce or POC breakout with 1.5× volume surge)</div>
+          <div class="at-how-step"><span class="at-how-n">2</span> Requires 70%+ confidence + confirmed Volume Profile trigger (VAL bounce or POC breakout with 1.5× volume surge)</div>
           <div class="at-how-step"><span class="at-how-n">3</span> Places bracket order — Take Profit at VAH (or VAH + VA width), trailing stop at 1% below the position's peak price</div>
-          <div class="at-how-step"><span class="at-how-n">4</span> 5-min cooldown between entries + max 2 trades/day protect against PDT violations on accounts under $25k</div>
+          <div class="at-how-step"><span class="at-how-n">4</span> 5-min cooldown between entries + Alpaca's built-in PDT guard blocks any 4th same-day round trip on accounts under $25k</div>
         </div>
 
         <div class="at-save-row" style="display:none">

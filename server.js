@@ -913,6 +913,7 @@ try { db.exec('ALTER TABLE auto_trade_log ADD COLUMN leverage REAL DEFAULT 1'); 
 const autoTraderStatus  = new Map(); // userId → { scanning, lastScan, lastAction, candidates, error }
 // orderRateLimiter removed — Alpaca enforces its own rate limits
 const atLastTradeTs     = new Map(); // userId -> last placed-order timestamp (cooldown gate)
+const atHighWater       = new Map(); // 'userId:logId' -> peak price (trailing stop tracking)
 const atScanningUsers   = new Set(); // userId -> prevents concurrent scans
 
 // ── Sector ETFs — used for rotation detection each scan cycle ────────────────
@@ -1283,10 +1284,9 @@ function atSessionInfo() {
   const mins  = et.getHours() * 60 + et.getMinutes();
   const isWeekend     = day === 0 || day === 6;
   const isMarketOpen  = !isWeekend && mins >= 570 && mins < 960; // 9:30–16:00
-  const isEarlyWindow   = !isWeekend && mins >= 570 && mins < 585; // 9:30–9:45 initial volatility blackout
-  const isMorningWindow = !isWeekend && mins >= 585 && mins < 690; // 9:45–11:30 high-volume entry window
+  const isEarlyWindow   = !isWeekend && mins >= 570 && mins < 585; // 9:30–9:45 opening bell blackout
   const isNearClose     = !isWeekend && mins >= 945;               // ≥ 15:45 force close
-  return { isMarketOpen, isEarlyWindow, isMorningWindow, isNearClose, mins };
+  return { isMarketOpen, isEarlyWindow, isNearClose, mins };
 }
 
 // ── Signal engine — Volume Profile first, RSI/VWAP/EMA as secondary ──────────
@@ -1469,13 +1469,13 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     tpPrice = isPocBreak && vaWidth > 0
       ? parseFloat((sig.vah + vaWidth).toFixed(2))
       : parseFloat(sig.vah.toFixed(2));
-    // SL = 0.5% below the actual entry price — tight, consistent, always below entry
-    slPrice = parseFloat((limitPx * 0.995).toFixed(2));
+    // Initial SL = 1% below entry — matches the trailing stop's starting level
+    slPrice = parseFloat((limitPx * 0.990).toFixed(2));
     // Sanity: TP must be above entry
     if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
   } else if (atr && atr > 0) {
     tpPrice = parseFloat((limitPx + 3.0 * atr).toFixed(2));
-    slPrice = parseFloat((limitPx * 0.995).toFixed(2));
+    slPrice = parseFloat((limitPx * 0.990).toFixed(2));
   } else {
     return { skipped: true, reason: 'No VAH/VAL or ATR for order levels' };
   }
@@ -1527,7 +1527,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
   if (!useMarket) orderBody.limit_price = String(limitPx);
 
   const durLabel = useMarket ? 'MARKET/DAY' : 'LIMIT/GTC';
-  console.log(`[AT] ${sym}: ${durLabel} qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} (0.5%) R:R=${rr}`);
+  console.log(`[AT] ${sym}: ${durLabel} qty=${shares} entry~$${entryPx.toFixed(2)} TP=$${tpPrice} SL=$${slPrice} (1% trail) R:R=${rr}`);
 
   const order = await alpacaFetch(userId, '/v2/orders', {
     method: 'POST',
@@ -1539,7 +1539,7 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
     const levStr   = lev > 1 ? ` | ${lev}x` : '';
     const vpStr    = sig.vah ? ` | VAL $${sig.val} → VAH $${sig.vah}` : '';
     const durStr   = useMarket ? 'MARKET' : 'GTC';
-    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | SL $${slPrice} (0.5%) | TP $${tpPrice} | R:R ${rr}:1 | ${sig.confidence}% conf | ${durStr}${levStr}${vpStr}`;
+    const action   = `AUTO BUY ${shares}sh ${sym} @ $${limitPx.toFixed(2)} | Trail SL $${slPrice} (1%) | TP $${tpPrice} | R:R ${rr}:1 | ${sig.confidence}% conf | ${durStr}${levStr}${vpStr}`;
     db.prepare(`
       INSERT INTO auto_trade_log
         (user_id, symbol, side, shares, entry_price, tp_price, sl_price,
@@ -1621,6 +1621,21 @@ async function atCheckExits(userId, positions, settings, session) {
       const pnl       = parseFloat(pos.unrealized_pl  || 0);
       const curPrice  = parseFloat(pos.current_price  || 0);
 
+      // ── Trailing stop at 1% — track peak price since entry ────────────────────
+      const hwKey  = `${userId}:${log.id}`;
+      const prevHW = atHighWater.get(hwKey) || log.entry_price || curPrice;
+      const newHW  = Math.max(prevHW, curPrice);
+      atHighWater.set(hwKey, newHW);
+      const trailStop = parseFloat((newHW * 0.99).toFixed(2));
+
+      if (curPrice <= trailStop && curPrice > 0) {
+        console.log(`[AT] ${log.symbol}: trailing stop hit — peak $${newHW.toFixed(2)} trail $${trailStop} current $${curPrice.toFixed(2)}`);
+        await atClosePosition(userId, log, pnl, 'trailing_stop_1pct');
+        atHighWater.delete(hwKey);
+        exitCount++;
+        continue;
+      }
+
       // Fetch current bars for EMA check
       const bars = await atFetchBars(log.symbol);
       const closes = bars ? bars.map(b => b.c) : [];
@@ -1629,6 +1644,7 @@ async function atCheckExits(userId, positions, settings, session) {
       // ── Hard exit if price closes below 9 EMA ────────────────────────────────
       if (ema9 != null && curPrice < ema9) {
         await atClosePosition(userId, log, pnl, 'price_below_ema9');
+        atHighWater.delete(hwKey);
         exitCount++;
         continue;
       }
@@ -1850,7 +1866,7 @@ async function atRunForUser(userId, dryRun = false) {
         const isPocBreak = sig.zoneStr?.includes('POC breakout');
         const vaWidth    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
         const tp  = isPocBreak && vaWidth > 0 ? sig.vah + vaWidth : sig.vah;
-        const sl  = px * 0.995;
+        const sl  = px * 0.990; // 1% initial trailing stop level
         const rr  = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
           console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR}`);
@@ -1877,8 +1893,8 @@ async function atRunForUser(userId, dryRun = false) {
           ? parseFloat((sig.vah + vaWidthDisp).toFixed(2))
           : parseFloat(sig.vah.toFixed(2));
         if (tp_price <= entryPx) tp_price = parseFloat((entryPx * 1.02).toFixed(2));
-        // SL displayed = 0.5% below entry (matches order placement)
-        sl_price = parseFloat((entryPx * 0.995).toFixed(2));
+        // SL displayed = 1% below entry (initial trailing stop level)
+        sl_price = parseFloat((entryPx * 0.990).toFixed(2));
       }
       return {
         symbol:       a.symbol,
@@ -1927,7 +1943,7 @@ async function atRunForUser(userId, dryRun = false) {
     ).get(userId, todayStr)?.cnt || 0;
     const dailyOk       = todayTrades < MAX_DAILY;
 
-    const canEnter = !dryRun && session.isMarketOpen && session.isMorningWindow
+    const canEnter = !dryRun && session.isMarketOpen && !session.isEarlyWindow
                      && atmOpen < MAX_POSITIONS && actionable.length > 0
                      && !pdtBlocked && cooldownOk && dailyOk;
     if (canEnter) {
@@ -1962,7 +1978,7 @@ async function atRunForUser(userId, dryRun = false) {
     } else if (!dryRun) {
       let idleReason;
       if (!session.isMarketOpen)         idleReason = 'Market closed — monitoring exits only';
-      else if (!session.isMorningWindow) idleReason = 'Outside entry window (9:45–11:30 AM ET) — monitoring exits only';
+      else if (session.isEarlyWindow)    idleReason = 'Opening bell blackout (9:30–9:45 ET) — waiting for price discovery';
       else if (!dailyOk)                 idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
       else if (!cooldownOk)              idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
       else if (pdtBlocked)               idleReason = `PDT protection — ${daytradeCount} day trades used`;

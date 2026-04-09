@@ -2638,11 +2638,18 @@ app.post('/api/alpaca/simulate', requireAuth, async (req, res) => {
 });
 
 // ── Backtest endpoint — 60 days of 1h bars, VP strategy simulated ─────────────
+// Now regime-aware: includes inverse ETF symbols and splits stats bull vs inverse
 app.get('/api/alpaca/backtest', requireAuth, async (req, res) => {
-  const BT_SYMBOLS = [
+  const BT_BULL_SYMBOLS = [
     'AAPL','TSLA','NVDA','AMD','META','AMZN','MSFT','GOOGL','NFLX','COIN',
     'SPY','QQQ','BABA','SHOP','SNAP','UBER','LYFT','PLTR','RBLX','SOFI'
   ];
+  // Inverse ETFs to test — top liquid ones that exist for 60+ days
+  const BT_INVERSE_SYMBOLS = [
+    'SQQQ','SPXS','SDOW','TZA','SDS','QID','FAZ','TECS','SRTY','UVXY'
+  ];
+  const BT_SYMBOLS = [...BT_BULL_SYMBOLS, ...BT_INVERSE_SYMBOLS];
+  const BT_INVERSE_SET = new Set(BT_INVERSE_SYMBOLS);
   const trades  = [];
   const errors  = [];
 
@@ -2718,31 +2725,43 @@ app.get('/api/alpaca/backtest', requireAuth, async (req, res) => {
 
         trades.push({ symbol: sym, date, trigger, hit, openPrice: parseFloat(openPrice.toFixed(2)),
           tpLevel: parseFloat(tpLevel.toFixed(2)), slLevel: parseFloat(slLevel.toFixed(2)),
-          vah: vp.vah, val: vp.val, poc: vp.poc, rr, pnlPct });
+          vah: vp.vah, val: vp.val, poc: vp.poc, rr, pnlPct,
+          isInverse: BT_INVERSE_SET.has(sym) });
       }
     } catch (e) { errors.push(sym); }
   }
 
   trades.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const wins    = trades.filter(t => t.hit === 'tp');
-  const losses  = trades.filter(t => t.hit === 'sl');
-  const expired = trades.filter(t => t.hit === 'expired');
-  const winRate = trades.length > 0 ? parseFloat((wins.length / trades.length * 100).toFixed(1)) : 0;
-  const avgRR   = trades.length > 0 ? parseFloat((trades.reduce((s, t) => s + t.rr, 0) / trades.length).toFixed(2)) : 0;
-  const totalPnl = parseFloat(trades.reduce((s, t) => s + t.pnlPct, 0).toFixed(2));
-  const avgWin  = wins.length   > 0 ? parseFloat((wins.reduce((s,t)=>s+t.pnlPct,0)/wins.length).toFixed(2))     : 0;
-  const avgLoss = losses.length > 0 ? parseFloat((losses.reduce((s,t)=>s+t.pnlPct,0)/losses.length).toFixed(2)) : 0;
-  // Kelly criterion for expected value
-  const w = winRate / 100;
-  const b = avgRR;
-  const kelly = b > 0 ? parseFloat(((w - (1 - w) / b) * 100).toFixed(1)) : 0;
+  // Helper: compute stats for a subset of trades
+  const computeStats = (subset) => {
+    const wins    = subset.filter(t => t.hit === 'tp');
+    const losses  = subset.filter(t => t.hit === 'sl');
+    const expired = subset.filter(t => t.hit === 'expired');
+    const winRate = subset.length > 0 ? parseFloat((wins.length / subset.length * 100).toFixed(1)) : 0;
+    const avgRR   = subset.length > 0 ? parseFloat((subset.reduce((s, t) => s + t.rr, 0) / subset.length).toFixed(2)) : 0;
+    const totalPnl = parseFloat(subset.reduce((s, t) => s + t.pnlPct, 0).toFixed(2));
+    const avgWin  = wins.length   > 0 ? parseFloat((wins.reduce((s,t)=>s+t.pnlPct,0)/wins.length).toFixed(2))     : 0;
+    const avgLoss = losses.length > 0 ? parseFloat((losses.reduce((s,t)=>s+t.pnlPct,0)/losses.length).toFixed(2)) : 0;
+    const w = winRate / 100;
+    const b = avgRR;
+    const kelly = b > 0 ? parseFloat(((w - (1 - w) / b) * 100).toFixed(1)) : 0;
+    return { total: subset.length, wins: wins.length, losses: losses.length, expired: expired.length,
+             winRate, avgRR, totalPnl, avgWin, avgLoss, kelly };
+  };
+
+  const allStats     = computeStats(trades);
+  const bullTrades   = trades.filter(t => !t.isInverse);
+  const invTrades    = trades.filter(t =>  t.isInverse);
+  const bullStats    = computeStats(bullTrades);
+  const inverseStats = computeStats(invTrades);
 
   res.json({
     ok: true,
-    stats: { total: trades.length, wins: wins.length, losses: losses.length,
-             expired: expired.length, winRate, avgRR, totalPnl, avgWin, avgLoss, kelly, errors },
-    trades: trades.slice(0, 200),
+    stats: { ...allStats, errors },
+    bullStats,
+    inverseStats,
+    trades: trades.slice(0, 250),
   });
 });
 

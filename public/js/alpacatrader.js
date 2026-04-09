@@ -685,17 +685,24 @@ const alpacaTrader = (() => {
     const btn   = $('atBtBtn');
     const resEl = $('atBtResults');
     if (btn) { btn.disabled=true; btn.textContent='Running backtest…'; }
-    if (resEl) { resEl.style.display=''; resEl.innerHTML='<div class="at-bt-loading"><div class="at-bt-spinner"></div> Fetching 60 days of data for 20 symbols… (~15s)</div>'; }
+    if (resEl) { resEl.style.display=''; resEl.innerHTML='<div class="at-bt-loading"><div class="at-bt-spinner"></div> Fetching 60 days of data for 30 symbols (20 bull + 10 inverse ETF)… (~20s)</div>'; }
     try {
       const r = await apiFetch('/api/alpaca/backtest');
       if (r.error) throw new Error(r.error);
-      const s = r.stats || {};
+      const s  = r.stats  || {};
+      const bs = r.bullStats    || {};
+      const is = r.inverseStats || {};
       const trades = r.trades || [];
 
-      const kellyColor  = s.kelly > 0 ? '#4ade80' : '#f87171';
-      const winColor    = s.winRate >= 55 ? '#4ade80' : s.winRate >= 45 ? '#facc15' : '#f87171';
-      const pnlColor    = s.totalPnl >= 0 ? '#4ade80' : '#f87171';
-      const pnlSign     = s.totalPnl >= 0 ? '+' : '';
+      const statColor = (wr, kelly, pnl) => ({
+        winColor:  wr   >= 55 ? '#4ade80' : wr   >= 45 ? '#facc15' : '#f87171',
+        pnlColor:  pnl  >= 0  ? '#4ade80' : '#f87171',
+        kellyColor: kelly > 0 ? '#4ade80' : '#f87171',
+        pnlSign:   pnl  >= 0  ? '+' : '',
+      });
+      const sc = statColor(s.winRate,  s.kelly,  s.totalPnl);
+      const bc = statColor(bs.winRate, bs.kelly, bs.totalPnl);
+      const ic = statColor(is.winRate, is.kelly, is.totalPnl);
 
       const verdict = s.kelly > 10 ? '🟢 Statistically profitable — Kelly is positive, deploy capital'
                     : s.kelly >  0 ? '🟡 Marginal edge — profitable but small, consider paper trading first'
@@ -703,11 +710,11 @@ const alpacaTrader = (() => {
 
       const summary = `<div class="at-bt-summary">
         <div class="at-bt-title">Volume Profile Strategy — 60-Day Backtest</div>
-        <div class="at-bt-subtitle">${trades.length} trades across 20 liquid symbols</div>
+        <div class="at-bt-subtitle">Regime-Aware: ${trades.length} trades — 20 bull stocks + 10 inverse ETFs (SQQQ · SPXS · SDOW · TZA · SDS · QID · FAZ · TECS · SRTY · UVXY)</div>
         <div class="at-bt-stats">
           <div class="at-bt-stat">
-            <div class="at-bt-stat-val" style="color:${winColor}">${s.winRate}%</div>
-            <div class="at-bt-stat-lbl">Win Rate</div>
+            <div class="at-bt-stat-val" style="color:${sc.winColor}">${s.winRate}%</div>
+            <div class="at-bt-stat-lbl">Win Rate (All)</div>
             <div class="at-bt-stat-sub">${s.wins}W / ${s.losses}L / ${s.expired} exp</div>
           </div>
           <div class="at-bt-stat">
@@ -716,17 +723,41 @@ const alpacaTrader = (() => {
             <div class="at-bt-stat-sub">TP=VAH / SL=VAL−0.5%</div>
           </div>
           <div class="at-bt-stat">
-            <div class="at-bt-stat-val" style="color:${pnlColor}">${pnlSign}${s.totalPnl}%</div>
+            <div class="at-bt-stat-val" style="color:${sc.pnlColor}">${sc.pnlSign}${s.totalPnl}%</div>
             <div class="at-bt-stat-lbl">Cumulative P&amp;L</div>
             <div class="at-bt-stat-sub">Avg win ${s.avgWin}% / Avg loss ${s.avgLoss}%</div>
           </div>
           <div class="at-bt-stat">
-            <div class="at-bt-stat-val" style="color:${kellyColor}">${s.kelly}%</div>
+            <div class="at-bt-stat-val" style="color:${sc.kellyColor}">${s.kelly}%</div>
             <div class="at-bt-stat-lbl">Kelly Criterion</div>
             <div class="at-bt-stat-sub">Optimal position size</div>
           </div>
         </div>
         <div class="at-bt-verdict">${verdict}</div>
+      </div>`;
+
+      // ── Regime split panel — Bull vs Inverse ETF performance ──────────────
+      const regimeSplit = `<div class="at-bt-regime-split">
+        <div class="at-bt-regime-panel at-bt-bull-panel">
+          <div class="at-bt-regime-title">📈 Bull Stocks (20 symbols)</div>
+          <div class="at-bt-regime-stats">
+            <div class="at-bt-regime-stat"><span style="color:${bc.winColor}">${bs.winRate}%</span><br><small>Win Rate</small></div>
+            <div class="at-bt-regime-stat"><span style="color:${bc.pnlColor}">${bc.pnlSign}${bs.totalPnl}%</span><br><small>P&L</small></div>
+            <div class="at-bt-regime-stat"><span style="color:${bc.kellyColor}">${bs.kelly}%</span><br><small>Kelly</small></div>
+            <div class="at-bt-regime-stat"><span>${bs.total}</span><br><small>Trades</small></div>
+          </div>
+        </div>
+        <div class="at-bt-regime-divider">⇄</div>
+        <div class="at-bt-regime-panel at-bt-inv-panel">
+          <div class="at-bt-regime-title">📉 Inverse ETFs (10 symbols) <span class="at-inverse-badge">INV</span></div>
+          <div class="at-bt-regime-stats">
+            <div class="at-bt-regime-stat"><span style="color:${ic.winColor}">${is.winRate}%</span><br><small>Win Rate</small></div>
+            <div class="at-bt-regime-stat"><span style="color:${ic.pnlColor}">${ic.pnlSign}${is.totalPnl}%</span><br><small>P&L</small></div>
+            <div class="at-bt-regime-stat"><span style="color:${ic.kellyColor}">${is.kelly}%</span><br><small>Kelly</small></div>
+            <div class="at-bt-regime-stat"><span>${is.total}</span><br><small>Trades</small></div>
+          </div>
+          <div class="at-bt-regime-note">In BEAR/CRASH mode these become the primary universe — engine pivots to them automatically when SPY collapses</div>
+        </div>
       </div>`;
 
       const valBounceRows = trades.filter(t => t.trigger === 'val_bounce');
@@ -749,14 +780,17 @@ const alpacaTrader = (() => {
         </div>
       </div>`;
 
-      const tradeRows = trades.slice(0, 60).map(t => {
+      const INVERSE_SYM_SET = new Set(['SQQQ','SPXS','SDOW','TZA','SDS','QID','FAZ','TECS','SRTY','UVXY']);
+      const tradeRows = trades.slice(0, 80).map(t => {
         const hitCls  = t.hit==='tp' ? 'at-bt-tp' : t.hit==='sl' ? 'at-bt-sl' : 'at-bt-exp';
         const hitLbl  = t.hit==='tp' ? '✅ TP' : t.hit==='sl' ? '❌ SL' : '⏸ Exp';
         const pnlCls  = t.pnlPct >= 0 ? 'at-bt-pnl-pos' : 'at-bt-pnl-neg';
         const pnlSign = t.pnlPct >= 0 ? '+' : '';
         const trigLbl = t.trigger==='val_bounce' ? 'VAL' : 'POC';
-        return `<div class="at-bt-row ${hitCls}">
-          <span class="at-bt-row-sym">${t.symbol}</span>
+        const isInv   = t.isInverse || INVERSE_SYM_SET.has(t.symbol);
+        const invTag  = isInv ? `<span class="at-inverse-badge" style="margin-left:3px">INV</span>` : '';
+        return `<div class="at-bt-row ${hitCls} ${isInv?'at-bt-row-inv':''}">
+          <span class="at-bt-row-sym">${t.symbol}${invTag}</span>
           <span class="at-bt-row-date">${t.date}</span>
           <span class="at-bt-row-trig at-trig-${t.trigger}">${trigLbl}</span>
           <span class="at-bt-row-px">$${t.openPrice}</span>
@@ -769,7 +803,7 @@ const alpacaTrader = (() => {
       }).join('');
 
       const tradeList = `<div class="at-bt-trades">
-        <div class="at-bt-trades-hdr">Trade Log (most recent ${Math.min(60,trades.length)} of ${trades.length})</div>
+        <div class="at-bt-trades-hdr">Trade Log (most recent ${Math.min(80,trades.length)} of ${trades.length}) — <span style="color:#f87171">red border</span> = inverse ETF</div>
         <div class="at-bt-trades-cols">
           <span>Symbol</span><span>Date</span><span>Trigger</span><span>Entry</span>
           <span>TP Target</span><span>SL Level</span><span>Result</span><span>P&amp;L %</span><span>R:R</span>
@@ -777,7 +811,7 @@ const alpacaTrader = (() => {
         ${tradeRows}
       </div>`;
 
-      if (resEl) resEl.innerHTML = summary + breakdown + tradeList;
+      if (resEl) resEl.innerHTML = summary + regimeSplit + breakdown + tradeList;
     } catch(e) {
       if (resEl) resEl.innerHTML=`<div class="at-empty at-err">Backtest error: ${e.message}</div>`;
     } finally {

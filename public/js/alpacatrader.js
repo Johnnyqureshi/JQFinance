@@ -268,8 +268,8 @@ const alpacaTrader = (() => {
       const pdtWarn = $('atPDTWarn');
       if (pdtWarn && st.pdtBlocked) pdtWarn.style.display = '';
 
-      // Geo-risk + lunch-lull gauge
-      renderRiskGauge(st.geoRisk || null, st.lunchLull || false);
+      // Geo-risk + lunch-lull gauge + regime
+      renderRiskGauge(st.geoRisk || null, st.lunchLull || false, st.regime || null);
 
       // Sector heatmap
       if (Array.isArray(st.hotSectors) || Array.isArray(st.coldSectors)) {
@@ -292,12 +292,36 @@ const alpacaTrader = (() => {
 
   function stopStatusPoll() { clearInterval(statusPoll); statusPoll = null; }
 
-  // ── Geo-risk + session-state gauge ─────────────────────────────────────────
-  function renderRiskGauge(geo, lunchLull) {
+  // ── Geo-risk + session-state gauge + regime ─────────────────────────────────
+  function renderRiskGauge(geo, lunchLull, regime) {
     const el = $('atRiskGauge');
     if (!el) return;
 
     const pills = [];
+
+    // ── Market Regime banner — always shown first, most prominent ────────────
+    if (regime?.regime) {
+      const r = regime.regime;
+      const regimeMeta = {
+        BULL:  { cls: 'regime-bull',   icon: '🟢', label: 'BULL MODE',  sub: 'Long stocks preferred' },
+        MIXED: { cls: 'regime-mixed',  icon: '🟡', label: 'MIXED MODE', sub: 'Selective entries only' },
+        BEAR:  { cls: 'regime-bear',   icon: '🔴', label: 'BEAR MODE',  sub: 'Inverse ETFs activated' },
+        CRASH: { cls: 'regime-crash',  icon: '🆘', label: 'CRASH MODE', sub: 'Inverse ETFs ONLY — longs blocked' },
+      };
+      const m = regimeMeta[r] || regimeMeta.MIXED;
+      const spyLine = regime.spyChg != null ? ` · SPY ${regime.spyChg >= 0 ? '+' : ''}${regime.spyChg.toFixed(1)}%` : '';
+      const vixLine = regime.vix   != null ? ` · VIX ${regime.vix.toFixed(0)}` : '';
+      pills.push(`<span class="at-risk-pill at-regime-pill ${m.cls}">${m.icon} <strong>${m.label}</strong> — ${m.sub}${spyLine}${vixLine}</span>`);
+      // EMA structure pills for SPY
+      if (regime.spyAbove9 != null) {
+        const ema9cls  = regime.spyAbove9  ? 'risk-low'  : 'risk-high';
+        const ema21cls = regime.spyAbove21 ? 'risk-low'  : 'risk-high';
+        const ema50cls = regime.spyAbove50 ? 'risk-low'  : 'risk-high';
+        pills.push(`<span class="at-risk-pill ${ema9cls}">SPY EMA-9 ${regime.spyAbove9 ? '✓' : '✗'}</span>`);
+        pills.push(`<span class="at-risk-pill ${ema21cls}">SPY EMA-21 ${regime.spyAbove21 ? '✓' : '✗'}</span>`);
+        pills.push(`<span class="at-risk-pill ${ema50cls}">SPY EMA-50 ${regime.spyAbove50 ? '✓' : '✗'}</span>`);
+      }
+    }
 
     if (lunchLull) {
       pills.push(`<span class="at-risk-pill risk-neutral">🕛 Lunch Lull — thin tape (12–12:30 PM ET)</span>`);
@@ -307,8 +331,7 @@ const alpacaTrader = (() => {
       const score    = geo.geoScore ?? 0;
       const cls      = score >= 60 ? 'risk-high' : score >= 30 ? 'risk-med' : 'risk-low';
       const icon     = score >= 60 ? '🔴' : score >= 30 ? '🟡' : '🟢';
-      const scoreLbl = `GeoRisk ${score}/100`;
-      pills.push(`<span class="at-risk-pill ${cls}">${icon} ${scoreLbl}</span>`);
+      pills.push(`<span class="at-risk-pill ${cls}">${icon} GeoRisk ${score}/100</span>`);
 
       if (geo.vixSpike) {
         pills.push(`<span class="at-risk-pill risk-high">⚡ VIX ${geo.vix?.toFixed(1)} — volatility spike</span>`);
@@ -324,7 +347,7 @@ const alpacaTrader = (() => {
       }
 
       if (geo.broadDown) {
-        pills.push(`<span class="at-risk-pill risk-high">📉 Broad market down — SPY ${geo.spyChg?.toFixed(2)}%</span>`);
+        pills.push(`<span class="at-risk-pill risk-high">📉 SPY ${geo.spyChg?.toFixed(2)}% — broad market selling</span>`);
       }
     }
 
@@ -433,9 +456,15 @@ const alpacaTrader = (() => {
           </div>`
         : '';
 
-      return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'}">
+      // Detect inverse ETF from symbol name patterns used in INVERSE_ETF_SET
+      const INVERSE_SYMS = new Set(['SQQQ','SPXS','SDOW','TZA','SRTY','FAZ','TECS','HIBS','SDS','QID','TWM','UVXY','UVIX','SOXS','BERZ','LABD','DRV','MIDZ','WEBS','DRIP','DUST','SCO','KOLD','DUG','GLL','ZSL','SVXY','NVDQ','NVD','MSTZ','TSLZ','TSDD','PLTD','CORD','AAPD','AMDD','GGLS','QQQD','SBIT','RGTZ','RXD']);
+      const isInvSym = INVERSE_SYMS.has(a.symbol);
+      const invBadge = isInvSym ? `<span class="at-inverse-badge" title="Inverse ETF — profits when market falls">INV</span>` : '';
+
+      return `<div class="at-feed-row ${isBuy?'at-feed-buy':'at-feed-hold'} ${isInvSym?'at-feed-inverse':''}">
         <div class="at-feed-top">
           <span class="at-feed-sym">${a.symbol}</span>
+          ${invBadge}
           <span class="at-feed-sig at-sig-${(a.signal||'hold').toLowerCase()}">${a.signal||'HOLD'}</span>
           <span class="at-feed-conf">${a.confidence||0}%</span>
           ${levStr}

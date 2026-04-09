@@ -952,6 +952,34 @@ const SECTOR_INVERSE_POOLS = {
   XLP:  ['SDS','SPXS'],                     // staples falling
 };
 
+// ── Broad-market inverse ETF basket — activated in BEAR/CRASH regime ──────────
+// These are the "turn on a dime" symbols: broad inverse funds that go up when
+// SPY/QQQ/IWM collapse. Prioritised in BEAR mode, primary focus in CRASH mode.
+const BEAR_INVERSE_BASKET = [
+  'SQQQ',  // 3x inverse Nasdaq-100   (tech collapse)
+  'SPXS',  // 3x inverse S&P 500      (broad market crash)
+  'SDOW',  // 3x inverse Dow Jones    (blue chip dump)
+  'TZA',   // 3x inverse Russell 2000 (small-cap capitulation)
+  'SRTY',  // 3x inverse Russell 2000 (Direxion)
+  'FAZ',   // 3x inverse Financials   (credit/banking stress)
+  'TECS',  // 3x inverse Technology
+  'HIBS',  // 3x inverse S&P High Beta (risk-off)
+  'SDS',   // 2x inverse S&P 500
+  'QID',   // 2x inverse Nasdaq-100
+  'TWM',   // 2x inverse Russell 2000
+  'UVXY',  // 1.5x VIX short-term futures (fear spike)
+  'UVIX',  // 2x VIX short-term futures
+];
+
+// Set of ALL inverse ETF symbols — used to skip the EMA-50 bearish penalty
+// (inverse ETFs are SUPPOSED to be below EMA-50 during bull markets — that's cheap)
+const INVERSE_ETF_SET = new Set([
+  ...BEAR_INVERSE_BASKET,
+  'SOXS','BERZ','LABD','DRV','MIDZ','WEBS','DRIP','DUST','SCO','KOLD',
+  'DUG','GLL','ZSL','SVXY','NVDQ','NVD','MSTZ','TSLZ','TSDD','PLTD',
+  'CORD','AAPD','AMDD','GGLS','QQQD','SBIT','RGTZ','RXD',
+]);
+
 // ── Baseline anchor list — always scanned, all under $50, proven liquid ───────
 const AT_BASE = [
   // ── 3× Bull ETFs ──────────────────────────────────────────────────────────
@@ -1088,9 +1116,23 @@ const AT_BASE = [
 // Cache last successful universe so a transient Yahoo failure never leaves us with nothing
 let _universeCache = null;
 
-async function atBuildUniverse() {
+async function atBuildUniverse(regime = 'BULL') {
   const symbolSet = new Set(AT_BASE);
   let hotSectors  = [];
+
+  // ── BEAR / CRASH mode — inject the full inverse ETF basket immediately ────
+  // In a bear market the engine needs to go on the offensive with inverse ETFs.
+  // BEAR: add basket but keep bull stocks. CRASH: basket goes FIRST (priority).
+  if (regime === 'BEAR' || regime === 'CRASH') {
+    for (const sym of BEAR_INVERSE_BASKET) symbolSet.add(sym);
+    // Crash mode: add ALL sector inverse pools (not just cold sectors)
+    if (regime === 'CRASH') {
+      for (const pool of Object.values(SECTOR_INVERSE_POOLS)) {
+        for (const sym of pool) symbolSet.add(sym);
+      }
+    }
+    console.log(`[AT Universe] ${regime} mode — inverse basket (${BEAR_INVERSE_BASKET.length} symbols) injected`);
+  }
 
   const [activeResult, sectorResult] = await Promise.allSettled([
     // 1. Yahoo Finance most-active — top 100 stocks by today's volume
@@ -1367,6 +1409,78 @@ async function atGlobalRisk() {
   }
 }
 
+// ── Market Regime Classifier — BULL / MIXED / BEAR / CRASH ───────────────────
+// Uses SPY EMA trend, VIX level, daily SPY change, and cold sector count.
+// Called once per scan cycle and cached — drives universe composition.
+let _regimeCache    = null;
+let _regimeCacheTs  = 0;
+async function atMarketRegime(geoRisk) {
+  // Re-use stale cache within 60s
+  if (Date.now() - _regimeCacheTs < 60_000 && _regimeCache) return _regimeCache;
+  try {
+    // Fetch 60 days of SPY 5m bars to get EMA-9/21/50 on the 5-min series
+    const spyBars = await atFetchBars('SPY', '5m', '5d');
+    const spyCloses = spyBars ? spyBars.map(b => b.c) : [];
+    const spyPrice  = spyCloses[spyCloses.length - 1] ?? 0;
+    const spyE9     = atEMA(spyCloses, 9);
+    const spyE21    = atEMA(spyCloses, 21);
+    const spyE50    = atEMA(spyCloses, 50);
+
+    // SPY structural trend
+    const spyAbove9   = spyE9  != null && spyPrice > spyE9;
+    const spyAbove21  = spyE21 != null && spyPrice > spyE21;
+    const spyAbove50  = spyE50 != null && spyPrice > spyE50;
+    const spyRibbon   = spyAbove9 && spyAbove21 && spyAbove50;   // full bull
+    const spyBearish  = !spyAbove9 && !spyAbove21;               // below both short MAs
+
+    // Context from geoRisk
+    const vix      = geoRisk?.vix      ?? 15;
+    const spyChg   = geoRisk?.spyChg   ?? 0;
+    const vixSpike = geoRisk?.vixSpike ?? false;
+    const broadDown = geoRisk?.broadDown ?? false;
+
+    // Score: each bearish signal adds weight
+    let bearScore = 0;
+    if (spyChg  <= -3)    bearScore += 4;   // SPY down 3%+ today = crash signal
+    else if (spyChg <= -2) bearScore += 3;  // SPY down 2-3%
+    else if (spyChg <= -1) bearScore += 2;  // SPY down 1-2%
+    if (!spyAbove50)      bearScore += 3;   // below 50-period EMA — bearish structure
+    if (!spyAbove21)      bearScore += 2;   // below 21-period EMA
+    if (!spyAbove9)       bearScore += 1;   // below 9-period EMA
+    if (vix >= 30)        bearScore += 3;   // VIX ≥ 30 = fear regime
+    else if (vix >= 25)   bearScore += 2;
+    if (vixSpike)         bearScore += 2;   // VIX spiking
+    if (broadDown)        bearScore += 1;
+
+    let regime, reason;
+    if (bearScore >= 10) {
+      regime = 'CRASH';
+      reason = `SPY ${spyChg.toFixed(1)}% · VIX ${vix.toFixed(0)} · below all EMAs — CRASH MODE`;
+    } else if (bearScore >= 6) {
+      regime = 'BEAR';
+      reason = `SPY ${spyChg.toFixed(1)}% · VIX ${vix.toFixed(0)} · bearish structure — BEAR MODE`;
+    } else if (bearScore >= 3 || (!spyRibbon && spyBearish)) {
+      regime = 'MIXED';
+      reason = `SPY ${spyChg.toFixed(1)}% · VIX ${vix.toFixed(0)} · mixed signals — MIXED MODE`;
+    } else {
+      regime = 'BULL';
+      reason = `SPY ${spyChg.toFixed(1)}% · VIX ${vix.toFixed(0)} · bullish structure — BULL MODE`;
+    }
+
+    _regimeCache   = { regime, reason, bearScore, spyChg, vix, spyAbove9, spyAbove21, spyAbove50, spyRibbon };
+    _regimeCacheTs = Date.now();
+    console.log(`[AT Regime] ${regime} (score=${bearScore}) — ${reason}`);
+    return _regimeCache;
+  } catch(e) {
+    console.warn('[AT Regime] classification failed:', e.message);
+    // On failure, use geoRisk to guess regime
+    const fallback = (geoRisk?.broadDown || (geoRisk?.spyChg ?? 0) < -2)
+      ? { regime: 'BEAR', reason: 'fallback — broadDown or SPY < -2%', bearScore: 6 }
+      : { regime: 'MIXED', reason: 'fallback — data unavailable', bearScore: 3 };
+    return (_regimeCache = fallback);
+  }
+}
+
 // ── Reddit/social sentiment — top WSB mentions cached 5 min ──────────────────
 let _redditTopSet    = new Set(); // top-50 tickers by mention count
 let _redditRiserSet  = new Set(); // tickers gaining rank fast
@@ -1525,13 +1639,21 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   if (primaryFires) {
     // Base 65 when VP trigger fires. Secondary indicators add points.
     confidence = 65;
+    const _isInverse = extras?.isInverse ?? false;  // inverse ETFs skip EMA-50 scoring
     if (rsiOk)        confidence += 8;   // momentum not extreme
     if (aboveVWAP)    confidence += 5;   // above intraday fair value
     if (trendOk)      confidence += 5;   // price above EMA-9 + EMA-21
-    if (aboveEMA50)   confidence += 7;   // above medium-term MA — structural uptrend
-    if (maRibbon)     confidence += 5;   // full bull stack EMA-9>21>50
-    if (maCrossover)  confidence += 10;  // fresh EMA-9/21 crossover — strong momentum signal
-    if (!aboveEMA50)  confidence -= 10;  // below EMA-50 = bearish structure — penalise
+    if (!_isInverse) {
+      // EMA-50 scoring is only meaningful for standard long positions
+      // Inverse ETFs are SUPPOSED to be below EMA-50 in a bull market (that's when they're cheap)
+      if (aboveEMA50)  confidence += 7;  // above medium-term MA — structural uptrend
+      if (maRibbon)    confidence += 5;  // full bull stack EMA-9>21>50
+      if (maCrossover) confidence += 10; // fresh crossover
+      if (!aboveEMA50) confidence -= 10; // below EMA-50 = bearish structure
+    } else {
+      // For inverse ETFs: crossover still valid (EMA-9 > EMA-21 means they're trending up = market trending down)
+      if (maCrossover) confidence += 8;
+    }
     if (hhhl)         confidence += 4;   // structure trending up
     if (volSurge)     confidence += 6;   // above-average conviction
     if (tightVAL)     confidence += 8;   // tight VAL = prime bounce spot
@@ -1542,7 +1664,7 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   }
 
   // ── EXTRA SIGNALS — applied after primary VP scoring ──────────────────────
-  const { mtf, sentiment, optionsFlow, geoRisk } = extras;
+  const { mtf, sentiment, optionsFlow, geoRisk, isInverse, regime } = extras;
   const extraReasons = [];
   if (primaryFires) {
     // Multi-timeframe confluence (1m + 15m EMA alignment)
@@ -1569,13 +1691,47 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
       confidence -= 6;
       extraReasons.push(`↘ Options: heavy put flow — P/C ratio ${optionsFlow.pcRatio} (bearish)`);
     }
-    // Geopolitical / VIX risk (high risk = penalise long longs; inverse ETFs unaffected)
-    if (geoRisk?.geoScore >= 60) {
-      confidence -= 6;
-      extraReasons.push(`↘ GeoRisk: elevated (score ${geoRisk.geoScore}) — VIX ${geoRisk.vix?.toFixed(1)}, Brent spread $${geoRisk.spread?.toFixed(2)}`);
-    } else if (geoRisk?.vixSpike) {
-      confidence -= 3;
-      extraReasons.push(`↘ GeoRisk: VIX spike (${geoRisk.vix?.toFixed(1)}) — volatile conditions`);
+    // Geopolitical / VIX risk — inverse ETFs BENEFIT from fear; long stocks suffer
+    if (isInverse) {
+      // Inverse ETFs go UP in a crash — high VIX and geo risk are tailwinds
+      if (geoRisk?.geoScore >= 60) {
+        confidence += 8;
+        extraReasons.push(`✓ GeoRisk tailwind: elevated (score ${geoRisk.geoScore}) — VIX ${geoRisk.vix?.toFixed(1)} is bullish for inverse ETFs`);
+      } else if (geoRisk?.vixSpike) {
+        confidence += 4;
+        extraReasons.push(`✓ VIX spike (${geoRisk.vix?.toFixed(1)}) — fear is fuel for inverse ETFs`);
+      }
+      // Bear / Crash regime alignment — strongest bonus
+      if (regime === 'CRASH') {
+        confidence += 15;
+        extraReasons.push(`✓ CRASH regime — inverse ETF prime entry (bear score ${geoRisk?.bearScore ?? '?'})`);
+      } else if (regime === 'BEAR') {
+        confidence += 10;
+        extraReasons.push(`✓ BEAR regime — inverse ETF aligned with market direction`);
+      } else if (regime === 'MIXED') {
+        confidence += 3;
+        extraReasons.push(`~ MIXED regime — inverse ETF partial alignment`);
+      } else {
+        // BULL regime — inverse ETF goes against the tape; penalise
+        confidence -= 12;
+        extraReasons.push(`↘ BULL regime — inverse ETF against market direction`);
+      }
+    } else {
+      // Standard long — penalise in high geo risk / bear markets
+      if (geoRisk?.geoScore >= 60) {
+        confidence -= 6;
+        extraReasons.push(`↘ GeoRisk: elevated (score ${geoRisk.geoScore}) — VIX ${geoRisk.vix?.toFixed(1)}, Brent spread $${geoRisk.spread?.toFixed(2)}`);
+      } else if (geoRisk?.vixSpike) {
+        confidence -= 3;
+        extraReasons.push(`↘ GeoRisk: VIX spike (${geoRisk.vix?.toFixed(1)}) — volatile conditions`);
+      }
+      if (regime === 'CRASH') {
+        confidence -= 15;
+        extraReasons.push(`↘ CRASH regime — avoid long entries, market collapsing`);
+      } else if (regime === 'BEAR') {
+        confidence -= 8;
+        extraReasons.push(`↘ BEAR regime — long entries discouraged, inverse plays preferred`);
+      }
     }
   }
 
@@ -2006,7 +2162,7 @@ async function atRunForUser(userId, dryRun = false) {
     nearClose:   session.isNearClose,
   });
 
-  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], coldSectors: [], geoRisk: null, marketOpen, dryRun };
+  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], coldSectors: [], geoRisk: null, regime: null, marketOpen, dryRun };
 
   try {
     // ── 1. Fetch account state from Alpaca ────────────────────────────────────
@@ -2058,6 +2214,12 @@ async function atRunForUser(userId, dryRun = false) {
     ]);
     result.geoRisk = geoRisk;
 
+    // ── Market regime — BULL/MIXED/BEAR/CRASH — drives universe + signal scoring ─
+    const regimeData = await atMarketRegime(geoRisk);
+    const regime     = regimeData.regime;   // 'BULL' | 'MIXED' | 'BEAR' | 'CRASH'
+    result.regime    = regimeData;
+    console.log(`[AT Regime] active regime: ${regime}`);
+
     const posArr   = Array.isArray(positions) ? positions : [];
     const openSyms = new Set(posArr.map(p => p.symbol));
 
@@ -2088,7 +2250,7 @@ async function atRunForUser(userId, dryRun = false) {
     try {
       let universeData;
       try {
-        universeData = await atBuildUniverse();
+        universeData = await atBuildUniverse(regime);
       } catch (universeErr) {
         // Yahoo Finance / network failure — fall back to the last known-good universe
         if (_universeCache) {
@@ -2156,7 +2318,12 @@ async function atRunForUser(userId, dryRun = false) {
         .map(async c => ({
           symbol: c.symbol,
           volume: c.volume,
-          sig:    await atAnalyze(c.symbol, { sentiment: atSentimentFor(c.symbol), geoRisk }).catch(() => null),
+          sig:    await atAnalyze(c.symbol, {
+            sentiment: atSentimentFor(c.symbol),
+            geoRisk,
+            isInverse: INVERSE_ETF_SET.has(c.symbol),
+            regime,
+          }).catch(() => null),
         }))
     );
 
@@ -2172,6 +2339,7 @@ async function atRunForUser(userId, dryRun = false) {
         // Re-run atAnalyze with full extras to get updated confidence
         const enriched = await atAnalyze(a.symbol, {
           sentiment: atSentimentFor(a.symbol), geoRisk, mtf, optionsFlow,
+          isInverse: INVERSE_ETF_SET.has(a.symbol), regime,
         });
         if (enriched) a.sig = enriched;
       } catch { /* enrichment is optional — leave Phase 1 sig if it fails */ }
@@ -2268,6 +2436,7 @@ async function atRunForUser(userId, dryRun = false) {
       hotSectors:   result.hotSectors,
       coldSectors:  result.coldSectors,
       geoRisk:      result.geoRisk,
+      regime:       result.regime,
       lunchLull:    session.isLunchLull,
       pdtBlocked,
       daytradeCount,

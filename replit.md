@@ -14,6 +14,9 @@ Johnny Qureshi Finance is a real-time stock market dashboard with a fully automa
 - TP = VAH, SL = VAL − 0.5×ATR; minimum R:R ≥ 1.0 enforced before order placement
 - Order type: configurable — Auto (limit on VAL bounce, market on POC breakout), Limit always, Market always
 - Limit price uses .toFixed(2) (Alpaca rejects sub-penny prices)
+- **Market Regime**: atMarketRegime() classifies BULL/MIXED/BEAR/CRASH per cycle using SPY EMA-9/21/50 + VIX + spyChg. BEAR injects inverse ETF basket; CRASH makes inverse ETFs primary focus. Inverse ETFs skip EMA-50 penalty and earn +10–15 confidence bonus in bear regime. Long stocks get −8 to −15 penalty in BEAR/CRASH.
+- **Inverse ETF Set**: INVERSE_ETF_SET — 30+ symbols that skip EMA-50 bearish penalty
+- **BEAR_INVERSE_BASKET**: 13 broad-market inverse ETFs injected into universe in BEAR/CRASH mode
 
 ## User Preferences
 

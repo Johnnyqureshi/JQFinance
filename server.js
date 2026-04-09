@@ -1284,9 +1284,8 @@ function atSessionInfo() {
   const mins  = et.getHours() * 60 + et.getMinutes();
   const isWeekend     = day === 0 || day === 6;
   const isMarketOpen  = !isWeekend && mins >= 570 && mins < 960; // 9:30–16:00
-  const isEarlyWindow   = !isWeekend && mins >= 570 && mins < 585; // 9:30–9:45 opening bell blackout
-  const isNearClose     = !isWeekend && mins >= 945;               // ≥ 15:45 force close
-  return { isMarketOpen, isEarlyWindow, isNearClose, mins };
+  const isNearClose     = !isWeekend && mins >= 950;               // ≥ 15:50 force close
+  return { isMarketOpen, isEarlyWindow: false, isNearClose, mins };
 }
 
 // ── Signal engine — Volume Profile first, RSI/VWAP/EMA as secondary ──────────
@@ -1978,7 +1977,6 @@ async function atRunForUser(userId, dryRun = false) {
     } else if (!dryRun) {
       let idleReason;
       if (!session.isMarketOpen)         idleReason = 'Market closed — monitoring exits only';
-      else if (session.isEarlyWindow)    idleReason = 'Opening bell blackout (9:30–9:45 ET) — waiting for price discovery';
       else if (!dailyOk)                 idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
       else if (!cooldownOk)              idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
       else if (pdtBlocked)               idleReason = `PDT protection — ${daytradeCount} day trades used`;

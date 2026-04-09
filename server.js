@@ -1016,6 +1016,12 @@ const AT_BASE = [
   // ── Volatility products ───────────────────────────────────────────────────
   'UVXY',  // 1.5x VIX Short-Term Futures
   'UVIX',  // 2x VIX Short-Term Futures
+  // ── Strait of Hormuz / tanker shipping proxy ─────────────────────────────
+  'STNG',  // Scorpio Tankers
+  'FRO',   // Frontline (crude tankers)
+  'NAT',   // Nordic American Tankers
+  'TK',    // Teekay Corp
+  'BDRY',  // Breakwave Dry Bulk Shipping ETF
   'VXX',   // 1x VIX Short-Term Futures
   'SVXY',  // -0.5x VIX (inverse volatility)
   // ── Single-stock 2× Bull leveraged ETFs ───────────────────────────────────
@@ -1312,10 +1318,100 @@ function atSessionInfo() {
   const et    = new Date(etStr);
   const day   = et.getDay();
   const mins  = et.getHours() * 60 + et.getMinutes();
-  const isWeekend     = day === 0 || day === 6;
-  const isMarketOpen  = !isWeekend && mins >= 575 && mins < 960; // 9:35–16:00 (skip first 5 min)
-  const isNearClose     = !isWeekend && mins >= 950;               // ≥ 15:50 force close
-  return { isMarketOpen, isEarlyWindow: false, isNearClose, mins };
+  const isWeekend    = day === 0 || day === 6;
+  const isMarketOpen = !isWeekend && mins >= 575 && mins < 960; // 9:35–16:00 (skip first 5 min)
+  const isNearClose  = !isWeekend && mins >= 950;               // ≥ 15:50 force close
+  const isLunchLull  = !isWeekend && mins >= 720 && mins < 750; // 12:00–12:30 PM — thin tape
+  return { isMarketOpen, isEarlyWindow: false, isNearClose, isLunchLull, mins };
+}
+
+// ── Global market risk — VIX + crude oil — fetched once per scan cycle ────────
+let _geoRiskCache = null;
+let _geoRiskTs    = 0;
+async function atGlobalRisk() {
+  if (Date.now() - _geoRiskTs < 60_000 && _geoRiskCache) return _geoRiskCache;
+  try {
+    const quotes = await yf.quote(['^VIX','CL=F','BZ=F','SPY'], {}, { validateResult: false });
+    const arr    = Array.isArray(quotes) ? quotes : [quotes];
+    const get    = sym => arr.find(q => q?.symbol === sym) || {};
+    const vix    = parseFloat(get('^VIX').regularMarketPrice          || 0);
+    const vixChg = parseFloat(get('^VIX').regularMarketChangePercent  || 0);
+    const wti    = parseFloat(get('CL=F').regularMarketPrice          || 0);
+    const wtiChg = parseFloat(get('CL=F').regularMarketChangePercent  || 0);
+    const brent  = parseFloat(get('BZ=F').regularMarketPrice          || 0);
+    const spyChg = parseFloat(get('SPY').regularMarketChangePercent   || 0);
+    // Brent premium over WTI = geopolitical supply risk (Strait of Hormuz tension)
+    const spread = brent > 0 && wti > 0 ? parseFloat((brent - wti).toFixed(2)) : 0;
+    // Composite geo risk score 0-100
+    let geoScore = 0;
+    if (vix >= 30)        geoScore += 35;
+    else if (vix >= 25)   geoScore += 20;
+    else if (vix >= 20)   geoScore += 8;
+    if (vixChg >= 10)     geoScore += 20;
+    else if (vixChg >= 5) geoScore += 10;
+    if (spread >= 5)      geoScore += 20; // large Brent premium = supply disruption risk
+    else if (spread >= 2) geoScore += 10;
+    if (wtiChg >= 3)      geoScore += 15;
+    else if (wtiChg >= 1) geoScore += 5;
+    geoScore = Math.min(100, geoScore);
+    const vixSpike   = vix > 25 || vixChg > 5;
+    const oilTension = spread >= 2 || wtiChg >= 1.5; // Strait of Hormuz / supply proxy
+    const broadDown  = spyChg < -1;
+    _geoRiskCache = { vix, vixChg, wti, wtiChg, brent, spread, spyChg, geoScore, vixSpike, oilTension, broadDown };
+    _geoRiskTs    = Date.now();
+    console.log(`[AT Risk] VIX=${vix.toFixed(1)}(${vixChg>=0?'+':''}${vixChg.toFixed(1)}%) WTI=$${wti.toFixed(2)} Brent=$${brent.toFixed(2)} spread=$${spread.toFixed(2)} geoScore=${geoScore}`);
+    return _geoRiskCache;
+  } catch(e) {
+    console.warn('[AT Risk] fetch failed:', e.message);
+    return _geoRiskCache || { vix:15, vixChg:0, wti:70, brent:72, spread:2, geoScore:0, vixSpike:false, oilTension:false, broadDown:false };
+  }
+}
+
+// ── Reddit/social sentiment — top WSB mentions cached 5 min ──────────────────
+let _redditTopSet    = new Set(); // top-50 tickers by mention count
+let _redditRiserSet  = new Set(); // tickers gaining rank fast
+let _redditCacheTs   = 0;
+async function atRefreshSentiment() {
+  if (Date.now() - _redditCacheTs < 5 * 60_000) return; // 5-min TTL
+  try {
+    const r = await fetch('https://apewisdom.io/api/v1.0/filter/wallstreetbets/page/1', {
+      headers: { 'User-Agent': 'JohnnyQureshiFinance/1.0', 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    const all  = data.results || [];
+    _redditTopSet   = new Set(all.slice(0, 50).map(x => x.ticker).filter(Boolean));
+    _redditRiserSet = new Set(all.filter(x => x.rank_24h_ago && x.rank_24h_ago > x.rank).slice(0, 20).map(x => x.ticker));
+    _redditCacheTs  = Date.now();
+  } catch { /* sentiment is optional — silent fail */ }
+}
+function atSentimentFor(sym) {
+  if (_redditRiserSet.has(sym)) return 'rising';
+  if (_redditTopSet.has(sym))   return 'trending';
+  return 'neutral';
+}
+
+// ── Options flow — near-term put/call volume ratio ─────────────────────────────
+async function atOptionsFlow(sym) {
+  try {
+    const r = await fetch(`https://query1.finance.yahoo.com/v7/finance/options/${sym}`, {
+      headers: YH, signal: AbortSignal.timeout(4000),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const chain = d?.optionChain?.result?.[0];
+    if (!chain) return null;
+    const calls    = chain.options?.[0]?.calls || [];
+    const puts     = chain.options?.[0]?.puts  || [];
+    const callVol  = calls.reduce((s, c) => s + (c.volume || 0), 0);
+    const putVol   = puts.reduce((s, p)  => s + (p.volume || 0), 0);
+    if (callVol + putVol < 100) return null; // too thin — skip
+    const pcRatio       = putVol / Math.max(callVol, 1);
+    const isUnusualBull = callVol > 500 && pcRatio < 0.5;  // heavy call flow
+    const isUnusualBear = putVol  > 500 && pcRatio > 2.0;  // heavy put flow
+    return { callVol, putVol, pcRatio: parseFloat(pcRatio.toFixed(2)), isUnusualBull, isUnusualBear };
+  } catch { return null; }
 }
 
 // ── Signal engine — Volume Profile first, RSI/VWAP/EMA as secondary ──────────
@@ -1330,7 +1426,7 @@ function atSessionInfo() {
 //    Take Profit = VAH (Value Area High — where volume thins out above)
 //    Stop Loss   = just below VAL (invalidation of the support thesis)
 //
-function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
+function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {}) {
   // No Volume Profile = no signal. VP is the foundation.
   if (!vp) {
     return {
@@ -1420,13 +1516,52 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
     confidence = secPass * 7;   // max 35 — below 65 threshold
   }
 
-  const reasons = Object.entries(checks).map(([k, v]) =>
-    (v.pass ? '✓ ' : '✗ ') + k.replace(/_/g, ' ') + ': ' + v.detail
-  );
+  // ── EXTRA SIGNALS — applied after primary VP scoring ──────────────────────
+  const { mtf, sentiment, optionsFlow, geoRisk } = extras;
+  const extraReasons = [];
+  if (primaryFires) {
+    // Multi-timeframe confluence (1m + 15m EMA alignment)
+    if (mtf?.aligned) {
+      confidence += 8;
+      extraReasons.push('✓ MTF: 1m + 15m EMAs both bullish');
+    } else if (mtf?.diverge) {
+      confidence -= 8;
+      extraReasons.push('↘ MTF: timeframe divergence — bearish signal on 1m or 15m');
+    }
+    // Social sentiment (Reddit WSB mentions / risers)
+    if (sentiment === 'rising') {
+      confidence += 5;
+      extraReasons.push('✓ Social: gaining Reddit mentions — rising momentum');
+    } else if (sentiment === 'trending') {
+      confidence += 3;
+      extraReasons.push('✓ Social: in Reddit top-50 mentions');
+    }
+    // Options flow (unusual call activity = smart money bullish)
+    if (optionsFlow?.isUnusualBull) {
+      confidence += 7;
+      extraReasons.push(`✓ Options: heavy call flow — P/C ratio ${optionsFlow.pcRatio} (bullish)`);
+    } else if (optionsFlow?.isUnusualBear) {
+      confidence -= 6;
+      extraReasons.push(`↘ Options: heavy put flow — P/C ratio ${optionsFlow.pcRatio} (bearish)`);
+    }
+    // Geopolitical / VIX risk (high risk = penalise long longs; inverse ETFs unaffected)
+    if (geoRisk?.geoScore >= 60) {
+      confidence -= 6;
+      extraReasons.push(`↘ GeoRisk: elevated (score ${geoRisk.geoScore}) — VIX ${geoRisk.vix?.toFixed(1)}, Brent spread $${geoRisk.spread?.toFixed(2)}`);
+    } else if (geoRisk?.vixSpike) {
+      confidence -= 3;
+      extraReasons.push(`↘ GeoRisk: VIX spike (${geoRisk.vix?.toFixed(1)}) — volatile conditions`);
+    }
+  }
+
+  const reasons = [
+    ...Object.entries(checks).map(([k, v]) => (v.pass ? '✓ ' : '✗ ') + k.replace(/_/g, ' ') + ': ' + v.detail),
+    ...extraReasons,
+  ];
 
   return {
     signal:     primaryFires ? 'BUY' : 'HOLD',
-    confidence: Math.min(confidence, 97),
+    confidence: Math.min(Math.max(confidence, 0), 97),
     reasons, checks, price, rsi, vwap, vwapPct,
     ema9, ema21, atr, hhhl,
     vah:      vp.vah,
@@ -1434,16 +1569,16 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp) {
     poc:      vp.poc,
     nearVAL, tightVAL, abovePOC, inVA,
     zoneStr,
+    mtf, sentiment, optionsFlow, geoScore: geoRisk?.geoScore ?? 0,
   };
 }
 
-// ── Fetch real 5-min bars from Yahoo Finance ──────────────────────────────────
-async function atFetchBars(sym) {
+// ── Fetch OHLCV bars from Yahoo Finance — parameterized ───────────────────────
+async function atFetchBars(sym, interval = '5m', range = '5d') {
   try {
-    // 5-day fixed-range VP gives a statistically meaningful distribution.
-    // Session-only (1d) has <24 bars in the first 2 hours — not enough for reliable VAH/VAL/POC.
+    const minBars = interval === '1m' ? 10 : 15;
     const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=5d&includePrePost=false`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`,
       { headers: YH }
     );
     if (!r.ok) { console.warn(`[AT bars] ${sym} HTTP ${r.status}`); return null; }
@@ -1460,12 +1595,33 @@ async function atFetchBars(sym) {
       c: q.close?.[i] ?? null,
       v: q.volume?.[i]?? null,
     })).filter(b => b.c != null && b.h != null && b.l != null && b.v > 0);
-    return bars.length >= 15 ? bars : null;
+    return bars.length >= minBars ? bars : null;
   } catch(e) { console.warn(`[AT bars] ${sym} error:`, e.message); return null; }
 }
 
+// ── Multi-timeframe EMA alignment — 1m + 5m + 15m must all point up ──────────
+async function atMTFAlignment(sym, price) {
+  try {
+    const [bars1m, bars15m] = await Promise.all([
+      atFetchBars(sym, '1m', '1d'),
+      atFetchBars(sym, '15m', '5d'),
+    ]);
+    const aboveEMA = (bars, period) => {
+      if (!bars || bars.length < period) return null;
+      const closes = bars.map(b => b.c);
+      const ema = atEMA(closes, period);
+      return ema != null ? price > ema : null;
+    };
+    const ok1m  = aboveEMA(bars1m,  9);  // 9-min momentum
+    const ok15m = aboveEMA(bars15m, 9);  // 2h15m trend
+    const aligned = ok1m === true && ok15m === true;  // all timeframes bullish
+    const diverge = ok1m === false || ok15m === false; // any timeframe bearish
+    return { ok1m, ok15m, aligned, diverge };
+  } catch { return { ok1m: null, ok15m: null, aligned: false, diverge: false }; }
+}
+
 // ── Full analysis for one symbol — returns signal or null ─────────────────────
-async function atAnalyze(sym) {
+async function atAnalyze(sym, extras = {}) {
   const bars = await atFetchBars(sym);
   if (!bars) return null;
 
@@ -1474,14 +1630,14 @@ async function atAnalyze(sym) {
   const vwap   = atVWAP(bars);
   const rsi    = atRSI(closes) ?? 50;
   const atr    = atATR(bars);
-  const vp     = atVolumeProfile(bars);   // VAH / VAL / POC
+  const vp     = atVolumeProfile(bars);
 
   const vols  = bars.map(b => b.v ?? 0).filter(v => v > 0);
   const avgV  = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
   const lastV = bars[bars.length - 1].v ?? 0;
   const volData = { lastV, avgV, surge: avgV > 0 && lastV / avgV > 1.8 };
 
-  return atSignal(bars, closes, price, rsi, vwap, volData, atr, vp);
+  return atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras);
 }
 
 // ── Place bracket order — VP-first sizing, VAH as TP, VAL as SL ──────────────
@@ -1787,7 +1943,7 @@ async function atRunForUser(userId, dryRun = false) {
     nearClose:   session.isNearClose,
   });
 
-  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], coldSectors: [], marketOpen, dryRun };
+  let result = { exitCount: 0, entryAttempt: null, candidates: [], hotSectors: [], coldSectors: [], geoRisk: null, marketOpen, dryRun };
 
   try {
     // ── 1. Fetch account state from Alpaca ────────────────────────────────────
@@ -1831,6 +1987,13 @@ async function atRunForUser(userId, dryRun = false) {
 
     // Log session state at the start of each cycle
     console.log('[AutoTrader] user=' + userId + ' settled=$' + settledCash.toFixed(2) + ' BP=$' + buyingPower.toFixed(2) + ' positions=' + (Array.isArray(positions) ? positions.length : 0) + (pdtBlocked?' [PDT BLOCKED]':''));
+
+    // ── Global risk + social sentiment (both non-blocking, cached per cycle) ──
+    const [geoRisk] = await Promise.all([
+      atGlobalRisk(),
+      atRefreshSentiment(), // updates the module-level Reddit Sets, returns void
+    ]);
+    result.geoRisk = geoRisk;
 
     const posArr   = Array.isArray(positions) ? positions : [];
     const openSyms = new Set(posArr.map(p => p.symbol));
@@ -1876,6 +2039,13 @@ async function atRunForUser(userId, dryRun = false) {
       result.hotSectors  = hotSectors;
       result.coldSectors = coldSectors;
 
+      // ── Oil tension: inject tanker/shipping proxies into scan universe ────────
+      const TANKER_SYMS = ['STNG', 'FRO', 'NAT', 'TK', 'BDRY'];
+      if (geoRisk?.oilTension) {
+        TANKER_SYMS.forEach(s => { if (!universe.includes(s)) universe.push(s); });
+        console.log(`[AutoTrader] Oil tension detected — tanker symbols injected: ${TANKER_SYMS.join(',')}`);
+      }
+
       const rawQ = await yf.quote(universe, {}, { validateResult: false });
       const arr  = Array.isArray(rawQ) ? rawQ : (rawQ ? [rawQ] : []);
       candidates = arr
@@ -1913,7 +2083,7 @@ async function atRunForUser(userId, dryRun = false) {
       `SELECT COUNT(*) as cnt FROM auto_trade_log WHERE user_id=? AND status IN ('open','pending_fill')`
     ).get(userId)?.cnt || 0;
 
-    // Analyze all candidates in parallel (no order placement yet)
+    // ── Phase 1: Analyze all candidates with base signals + sentiment + geo risk ─
     const analyses = await Promise.all(
       candidates
         .filter(c => !openSyms.has(c.symbol))
@@ -1923,9 +2093,26 @@ async function atRunForUser(userId, dryRun = false) {
         .map(async c => ({
           symbol: c.symbol,
           volume: c.volume,
-          sig:    await atAnalyze(c.symbol).catch(() => null),
+          sig:    await atAnalyze(c.symbol, { sentiment: atSentimentFor(c.symbol), geoRisk }).catch(() => null),
         }))
     );
+
+    // ── Phase 2: Enrich top BUY signals with MTF + options flow (limited API calls) ─
+    const phase1Buys = analyses.filter(a => a.sig?.signal === 'BUY').slice(0, 4);
+    await Promise.all(phase1Buys.map(async a => {
+      try {
+        const price = a.sig.price;
+        const [mtf, optionsFlow] = await Promise.all([
+          atMTFAlignment(a.symbol, price),
+          atOptionsFlow(a.symbol),
+        ]);
+        // Re-run atAnalyze with full extras to get updated confidence
+        const enriched = await atAnalyze(a.symbol, {
+          sentiment: atSentimentFor(a.symbol), geoRisk, mtf, optionsFlow,
+        });
+        if (enriched) a.sig = enriched;
+      } catch { /* enrichment is optional — leave Phase 1 sig if it fails */ }
+    }));
 
     // Log each symbol's result for full transparency
     for (const a of analyses) {
@@ -2007,12 +2194,14 @@ async function atRunForUser(userId, dryRun = false) {
       };
     });
 
-    // Persist latest analyses + sector rotation in status so polling can surface them
+    // Persist latest analyses + sector rotation + risk in status so polling can surface them
     autoTraderStatus.set(userId, {
       ...(autoTraderStatus.get(userId) || {}),
       analyses:     result.analyses,
       hotSectors:   result.hotSectors,
       coldSectors:  result.coldSectors,
+      geoRisk:      result.geoRisk,
+      lunchLull:    session.isLunchLull,
       pdtBlocked,
       daytradeCount,
     });
@@ -2032,6 +2221,7 @@ async function atRunForUser(userId, dryRun = false) {
 
     const canEnter = !dryRun && session.isMarketOpen && !session.isEarlyWindow
                      && !session.isNearClose                        // no new entries after 3:50 PM
+                     && !session.isLunchLull                        // skip 12:00–12:30 PM thin tape
                      && atmOpen < MAX_POSITIONS && actionable.length > 0
                      && !pdtBlocked && cooldownOk && dailyOk;
     if (canEnter) {
@@ -2065,13 +2255,15 @@ async function atRunForUser(userId, dryRun = false) {
       }
     } else if (!dryRun) {
       let idleReason;
-      if (!session.isMarketOpen)         idleReason = 'Market closed — monitoring exits only';
-      else if (!dailyOk)                 idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
-      else if (!cooldownOk)              idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
-      else if (pdtBlocked)               idleReason = `PDT protection — ${daytradeCount} day trades used`;
-      else if (atmOpen >= MAX_POSITIONS) idleReason = `At max positions (${atmOpen}/${MAX_POSITIONS}) — monitoring only`;
-      else if (actionable.length === 0)  idleReason = `Scan complete — no high-quality VP signals (${candidates.length} scanned, min 75% conf)`;
-      else                               idleReason = 'Scan complete — no actionable signals';
+      if (!session.isMarketOpen)          idleReason = 'Market closed — monitoring exits only';
+      else if (session.isNearClose)       idleReason = 'Near close (3:50 PM ET) — no new entries, positions closing';
+      else if (session.isLunchLull)       idleReason = 'Lunch lull (12:00–12:30 PM ET) — skipping thin-tape window';
+      else if (!dailyOk)                  idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
+      else if (!cooldownOk)               idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
+      else if (pdtBlocked)                idleReason = `PDT protection — ${daytradeCount} day trades used`;
+      else if (atmOpen >= MAX_POSITIONS)  idleReason = `At max positions (${atmOpen}/${MAX_POSITIONS}) — monitoring only`;
+      else if (actionable.length === 0)   idleReason = `Scan complete — no high-quality VP signals (${candidates.length} scanned, min 70% conf)`;
+      else                                idleReason = 'Scan complete — no actionable signals';
       if (idleReason) autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: idleReason });
     }
 
@@ -2178,6 +2370,8 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     analyses:      [],
     hotSectors:    [],
     coldSectors:   [],
+    geoRisk:       null,
+    lunchLull:     false,
     pdtBlocked:    false,
     daytradeCount: 0,
     marketOpen:    sess.isMarketOpen,

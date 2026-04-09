@@ -268,6 +268,9 @@ const alpacaTrader = (() => {
       const pdtWarn = $('atPDTWarn');
       if (pdtWarn && st.pdtBlocked) pdtWarn.style.display = '';
 
+      // Geo-risk + lunch-lull gauge
+      renderRiskGauge(st.geoRisk || null, st.lunchLull || false);
+
       // Sector heatmap
       if (Array.isArray(st.hotSectors) || Array.isArray(st.coldSectors)) {
         renderHotSectors(st.hotSectors || [], st.coldSectors || []);
@@ -288,6 +291,47 @@ const alpacaTrader = (() => {
   }
 
   function stopStatusPoll() { clearInterval(statusPoll); statusPoll = null; }
+
+  // ── Geo-risk + session-state gauge ─────────────────────────────────────────
+  function renderRiskGauge(geo, lunchLull) {
+    const el = $('atRiskGauge');
+    if (!el) return;
+
+    const pills = [];
+
+    if (lunchLull) {
+      pills.push(`<span class="at-risk-pill risk-neutral">🕛 Lunch Lull — thin tape (12–12:30 PM ET)</span>`);
+    }
+
+    if (geo) {
+      const score    = geo.geoScore ?? 0;
+      const cls      = score >= 60 ? 'risk-high' : score >= 30 ? 'risk-med' : 'risk-low';
+      const icon     = score >= 60 ? '🔴' : score >= 30 ? '🟡' : '🟢';
+      const scoreLbl = `GeoRisk ${score}/100`;
+      pills.push(`<span class="at-risk-pill ${cls}">${icon} ${scoreLbl}</span>`);
+
+      if (geo.vixSpike) {
+        pills.push(`<span class="at-risk-pill risk-high">⚡ VIX ${geo.vix?.toFixed(1)} — volatility spike</span>`);
+      } else if (geo.vix) {
+        const vixCls = geo.vix >= 25 ? 'risk-med' : 'risk-low';
+        pills.push(`<span class="at-risk-pill ${vixCls}">VIX ${geo.vix.toFixed(1)}</span>`);
+      }
+
+      if (geo.oilTension) {
+        pills.push(`<span class="at-risk-pill risk-high">🛢 Oil Tension — Brent spread $${(geo.spread||0).toFixed(2)} · Tankers active</span>`);
+      } else if (geo.wti) {
+        pills.push(`<span class="at-risk-pill risk-neutral">WTI $${geo.wti.toFixed(2)}</span>`);
+      }
+
+      if (geo.broadDown) {
+        pills.push(`<span class="at-risk-pill risk-high">📉 Broad market down — SPY ${geo.spyChg?.toFixed(2)}%</span>`);
+      }
+    }
+
+    el.innerHTML = pills.length
+      ? pills.join('')
+      : `<span class="at-risk-pill risk-low">🟢 Market conditions nominal</span>`;
+  }
 
   // ── Sector heatmap strip ────────────────────────────────────────────────────
   const SECTOR_INVERSE_LABELS = {

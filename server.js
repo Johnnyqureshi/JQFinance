@@ -1283,7 +1283,7 @@ function atSessionInfo() {
   const day   = et.getDay();
   const mins  = et.getHours() * 60 + et.getMinutes();
   const isWeekend     = day === 0 || day === 6;
-  const isMarketOpen  = !isWeekend && mins >= 570 && mins < 960; // 9:30–16:00
+  const isMarketOpen  = !isWeekend && mins >= 575 && mins < 960; // 9:35–16:00 (skip first 5 min)
   const isNearClose     = !isWeekend && mins >= 950;               // ≥ 15:50 force close
   return { isMarketOpen, isEarlyWindow: false, isNearClose, mins };
 }

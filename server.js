@@ -1931,7 +1931,7 @@ async function atRunForUser(userId, dryRun = false) {
 
     // ── 5. Place order — walk all actionable signals until one fills ──────────
     // Entry gates: market open + morning window + cooldown + daily trade cap + PDT
-    const COOLDOWN_MS   = 90 * 60 * 1000;                              // 90 min between entries
+    const COOLDOWN_MS   = 5 * 60 * 1000;                               // 5 min between entries
     const MAX_DAILY     = equity < 25000 ? 2 : 3;                      // PDT-safe daily cap
     const lastTs        = atLastTradeTs.get(userId);
     const cooldownOk    = !lastTs || (Date.now() - lastTs) >= COOLDOWN_MS;

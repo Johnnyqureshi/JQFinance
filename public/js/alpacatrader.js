@@ -507,12 +507,15 @@ const alpacaTrader = (() => {
         below_ema50_breakdown:   'EMA-50 breakdown',
         below_ema21_and_ema50:   'EMA-21+50 double exit',
         price_below_ema21_x2:    'Below EMA-21 ×2',
-        eod_force_close:         'EOD sweep',
+        eod_force_close:         'EOD closed',
+        held_overnight:          '🌙 Held overnight (trending)',
         unfilled_timeout:        'GTC timeout 30m',
       };
       const statusInfo = l => {
         if (l.status==='pending_fill') return { cls:'alog-pending', label:'Pending Fill' };
         if (l.status==='cancelled')   return { cls:'alog-cancelled', label:'Cancelled' };
+        if (l.status==='open' && l.exit_reason==='held_overnight')
+          return { cls:'alog-overnight', label:'🌙 Holding Overnight' };
         if (l.status==='open')        return { cls:'alog-open', label:'Open' };
         const pnl = l.pnl!=null ? parseFloat(l.pnl) : null;
         return { cls: pnl!=null&&pnl>0 ? 'alog-win' : 'alog-loss', label:'Closed' };

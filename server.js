@@ -1948,26 +1948,138 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 }
 
 // ── Exit monitor — runs every cycle before new entries ────────────────────────
-async function atCheckExits(userId, positions, settings, session) {
+// ── Overnight hold assessment — called at EOD before force-closing a position ──
+// Returns { hold: true, reason } if the position should be kept overnight,
+// { hold: false, reason } if it should be closed.
+// Criteria: must be profitable, regime-aligned, momentum still running, above EMA-21.
+async function atShouldHoldOvernight(log, pos, geoRisk, regimeData) {
+  try {
+    const sym          = log.symbol;
+    const isInv        = INVERSE_ETF_SET.has(sym);
+    const regime       = regimeData?.regime || 'MIXED';
+    // Alpaca returns unrealized_plpc as a decimal (e.g. 0.023 = 2.3%)
+    const unrealizedPct = parseFloat(pos.unrealized_plpc || 0) * 100;
+
+    // ── 1. Must be at least slightly profitable ───────────────────────────────
+    // Holding a losing overnight trade risks a gap against us
+    if (unrealizedPct < 0.3) {
+      return { hold: false, reason: `only ${unrealizedPct.toFixed(2)}% profit — not profitable enough to hold overnight` };
+    }
+
+    // ── 2. Regime must support the position direction ─────────────────────────
+    // Inverse ETFs should NOT be held overnight in a bull regime (they'll dump)
+    // Long stocks should NOT be held overnight in a crash regime (gap risk)
+    if (isInv) {
+      if (regime === 'BULL') {
+        return { hold: false, reason: `BULL regime — inverse ETF (${sym}) will likely reverse overnight` };
+      }
+    } else {
+      if (regime === 'CRASH') {
+        return { hold: false, reason: `CRASH regime — long position (${sym}) has overnight gap-down risk` };
+      }
+    }
+
+    // ── 3. VIX too high — overnight gap risk extreme ──────────────────────────
+    const vix = geoRisk?.vix ?? 15;
+    if (vix >= 35) {
+      return { hold: false, reason: `VIX ${vix.toFixed(0)} is extreme — overnight gap risk too high to hold` };
+    }
+
+    // ── 4. Bar momentum — is price closing strong (near bar high)? ────────────
+    const bars = await atFetchBars(sym, '5m', '1d');
+    if (!bars || bars.length < 5) {
+      // Can't assess momentum — default to hold if regime is fine and profitable
+      const reason = `holding overnight: regime ${regime}, ${unrealizedPct.toFixed(1)}% profit (no bar data for momentum check)`;
+      return { hold: true, reason };
+    }
+
+    // Look at the last 3 bars for closing strength
+    const recent   = bars.slice(-3);
+    const lastBar  = recent[recent.length - 1];
+    const barRange = lastBar.h - lastBar.l;
+    const closingStrength = barRange > 0.0001 ? (lastBar.c - lastBar.l) / barRange : 0.5;
+
+    // Closing in bottom 35% of the bar = momentum fading = risky overnight
+    if (closingStrength < 0.35) {
+      return { hold: false, reason: `closing in lower ${Math.round(closingStrength * 100)}% of bar — momentum fading, safer to close` };
+    }
+
+    // ── 5. Must still be above EMA-21 (structural support) ───────────────────
+    const closes = bars.map(b => b.c);
+    const ema21  = atEMA(closes, 21);
+    const currPx = lastBar.c;
+    if (ema21 && currPx < ema21 * 0.997) {
+      return { hold: false, reason: `price $${currPx.toFixed(2)} broke below EMA-21 $${ema21.toFixed(2)} — structural support lost` };
+    }
+
+    // ── All checks passed — hold overnight ────────────────────────────────────
+    const holdReason = [
+      `regime ${regime}`,
+      `+${unrealizedPct.toFixed(1)}% profit`,
+      `momentum ${Math.round(closingStrength * 100)}% bar strength`,
+      ema21 ? `above EMA-21 $${ema21.toFixed(2)}` : '',
+      vix < 25 ? `VIX calm (${vix.toFixed(0)})` : `VIX ${vix.toFixed(0)} — manageable`,
+    ].filter(Boolean).join(' · ');
+    return { hold: true, reason: `Holding overnight: ${holdReason}` };
+
+  } catch (e) {
+    console.warn(`[AT Hold] overnight assessment error for ${log.symbol}:`, e.message);
+    return { hold: false, reason: 'overnight assessment failed — defaulting to EOD close' };
+  }
+}
+
+async function atCheckExits(userId, positions, settings, session, geoRisk, regimeData) {
   const allTracked = db.prepare(
     `SELECT * FROM auto_trade_log WHERE user_id = ? AND status IN ('open','pending_fill')`
   ).all(userId);
 
   let exitCount = 0;
 
-  // ── Near-close sweep: cancel all pending + close all open positions by 3:50 PM ─
+  // ── Near-close sweep — intelligently close OR hold each position by 3:50 PM ──
+  // Pending orders always cancelled (never fill into overnight without intent).
+  // Open positions: assess whether the trend + regime + momentum justifies holding.
   if (session.isNearClose) {
     for (const log of allTracked) {
       try {
         if (log.status === 'pending_fill') {
+          // Always cancel pending orders — never hold an unfilled order overnight
           await alpacaFetch(userId, '/v2/orders/' + log.alpaca_order_id, { method: 'DELETE' }).catch(() => {});
           db.prepare(`UPDATE auto_trade_log SET status='cancelled', closed_at=datetime('now'), exit_reason='eod_cancel' WHERE id=?`).run(log.id);
           console.log(`[AT] EOD: cancelled pending order ${log.symbol}`);
+
         } else if (log.status === 'open') {
           const pos = Array.isArray(positions) ? positions.find(p => p.symbol === log.symbol) : null;
-          if (pos) {
+          if (!pos) continue;
+
+          // ── Smart overnight hold check ───────────────────────────────────────
+          // Only run if the feature is enabled in settings (default: on)
+          const holdEnabled = settings?.smart_overnight !== 0; // 0 = user disabled it
+          let shouldHold = false;
+          let holdReason = '';
+
+          if (holdEnabled) {
+            const holdResult = await atShouldHoldOvernight(log, pos, geoRisk, regimeData);
+            shouldHold  = holdResult.hold;
+            holdReason  = holdResult.reason;
+          }
+
+          if (shouldHold) {
+            // Keep the position open — log the decision, don't touch Alpaca
+            console.log(`[AT] EOD HOLD ${log.symbol}: ${holdReason}`);
+            db.prepare(
+              `UPDATE auto_trade_log SET exit_reason='held_overnight' WHERE id=?`
+            ).run(log.id);
+            // Clear high-water / EMA tracking so next session starts fresh
+            atHighWater.delete(`${userId}:${log.id}`);
+            atBelowEMA.delete(`${userId}:${log.id}`);
+          } else {
+            // Close the position — either manually decided or hold check said no
+            const closeReason = holdEnabled ? 'eod_force_close' : 'eod_force_close';
+            if (holdEnabled && holdReason) {
+              console.log(`[AT] EOD CLOSE ${log.symbol}: ${holdReason}`);
+            }
             const pnl = parseFloat(pos.unrealized_pl || 0);
-            await atClosePosition(userId, log, pnl, 'eod_force_close');
+            await atClosePosition(userId, log, pnl, closeReason);
             atHighWater.delete(`${userId}:${log.id}`);
             atBelowEMA.delete(`${userId}:${log.id}`);
             exitCount++;
@@ -2227,7 +2339,7 @@ async function atRunForUser(userId, dryRun = false) {
     // Runs every cycle regardless of market hours — broker_close/pending reconciliation
     // is always needed; active EMA exits are gated inside atCheckExits by session.isMarketOpen
     if (!dryRun) {
-      result.exitCount = await atCheckExits(userId, posArr, settings, session);
+      result.exitCount = await atCheckExits(userId, posArr, settings, session, geoRisk, regimeData);
 
       // Re-fetch positions after exits so position count is accurate
       if (result.exitCount > 0) {

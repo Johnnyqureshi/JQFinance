@@ -4709,6 +4709,8 @@ option { background: var(--card); }
   margin-left: auto;
 }
 .at-icon-btn:hover { color: var(--text); border-color: var(--accent); }
+.at-reset-log-btn { margin-left: 0; color: var(--text-secondary); }
+.at-reset-log-btn:hover { border-color: #f87171; color: #f87171; }
 
 /* Positions */
 .at-pos-row {

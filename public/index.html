@@ -1068,7 +1068,10 @@
     <div class="at-panel">
       <div class="at-panel-head">
         Auto-Trade Log
-        <button class="at-icon-btn" id="atRefreshLog">↻</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="at-icon-btn" id="atRefreshLog" title="Refresh log">↻</button>
+          <button class="at-icon-btn at-reset-log-btn" id="atResetLog" title="Clear all trade history and reset engine state">✕ Reset</button>
+        </div>
       </div>
       <div id="atLogBody"><div class="at-empty">No auto-trades yet — engine will trade automatically when conditions are met</div></div>
     </div>

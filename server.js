@@ -2736,6 +2736,30 @@ app.get('/api/alpaca/auto-log', requireAuth, (req, res) => {
   })));
 });
 
+// Reset trade log — wipes local trade history and all in-memory engine state for this user
+app.delete('/api/alpaca/auto-log', requireAuth, (req, res) => {
+  const uid = req.session.userId;
+
+  // 1. Delete all local trade log rows for this user
+  const del = db.prepare('DELETE FROM auto_trade_log WHERE user_id = ?').run(uid);
+
+  // 2. Clear in-memory engine state
+  autoTraderStatus.delete(uid);
+  atLastTradeTs.delete(uid);
+
+  // 3. Remove all high-water and below-EMA streak entries for this user
+  const prefix = `${uid}:`;
+  for (const key of atHighWater.keys()) {
+    if (String(key).startsWith(prefix)) atHighWater.delete(key);
+  }
+  for (const key of atBelowEMA.keys()) {
+    if (String(key).startsWith(prefix)) atBelowEMA.delete(key);
+  }
+
+  console.log(`[AT] user=${uid} reset trade log — deleted ${del.changes} rows, cleared engine state`);
+  res.json({ ok: true, deleted: del.changes });
+});
+
 app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
   const st       = autoTraderStatus.get(req.session.userId) || {};
   const sess     = atSessionInfo();

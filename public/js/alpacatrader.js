@@ -924,6 +924,21 @@ const alpacaTrader = (() => {
 
     // Refresh log
     $('atRefreshLog')?.addEventListener('click', loadAutoLog);
+
+    // Reset trade log + engine state
+    $('atResetLog')?.addEventListener('click', async () => {
+      if (!confirm('This will permanently delete all local trade history and reset the engine state (cooldowns, trailing stops, streaks).\n\nNote: positions and orders already on Alpaca are unaffected.\n\nContinue?')) return;
+      const btn = $('atResetLog');
+      btn.disabled = true; btn.textContent = 'Resetting…';
+      try {
+        const r = await apiFetch('/api/alpaca/auto-log', { method: 'DELETE' });
+        if (r.ok) {
+          const body = $('atLogBody');
+          if (body) body.innerHTML = '<div class="at-empty">Trade log cleared — engine state reset and ready for a fresh start</div>';
+        }
+      } catch(e) {}
+      btn.disabled = false; btn.textContent = '✕ Reset';
+    });
   }
 
   // ── Reset — called on logout to stop polling and clear connection state ────

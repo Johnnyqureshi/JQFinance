@@ -4842,3 +4842,200 @@ option { background: var(--card); }
   .at-log-header, .at-log-row { grid-template-columns: 38px 48px 30px 56px 56px 56px 36px 54px 60px 76px; }
   .at-log-row > span:nth-child(8) { display: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Trading Intelligence Panel — injected below stock analysis, above RT console
+   ═══════════════════════════════════════════════════════════════════════════ */
+.tdi-panel {
+  margin: 0 auto 16px;
+  max-width: 1300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tdi-header {
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.015);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.tdi-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tdi-icon { font-size: 1rem; }
+.tdi-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+.tdi-sub {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.tdi-inv-badge {
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(248,113,113,0.2);
+  color: #f87171;
+  border: 1px solid rgba(248,113,113,0.5);
+  letter-spacing: 0.05em;
+  margin-left: 2px;
+}
+
+.tdi-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tdi-regime-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tdi-regime-reason {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tdi-risk-pills {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── Body ── */
+.tdi-body {
+  padding: 12px 16px;
+}
+
+.tdi-sig-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.tdi-sig-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.tdi-sig-content {
+  display: flex;
+  gap: 0;
+}
+
+/* Verdict column */
+.tdi-verdict-col {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 120px;
+  border-right: 1px solid var(--border);
+}
+.tdi-verdict {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 6px 18px;
+  border-radius: 8px;
+  border: 2px solid;
+}
+.tdi-verdict.buy  { color: #34d399; border-color: rgba(52,211,153,0.6); background: rgba(52,211,153,0.12); }
+.tdi-verdict.hold { color: #fbbf24; border-color: rgba(251,191,36,0.5);  background: rgba(251,191,36,0.08); }
+.tdi-verdict.sell { color: #f87171; border-color: rgba(248,113,113,0.6); background: rgba(248,113,113,0.12); }
+.tdi-conf {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.tdi-zone {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 110px;
+  line-height: 1.3;
+}
+
+/* VP column */
+.tdi-vp-col {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 200px;
+  border-right: 1px solid var(--border);
+}
+.tdi-vp-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+
+/* EMA + reasons column */
+.tdi-ema-col {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+}
+.tdi-ema-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+.tdi-ema-pills {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.tdi-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+.tdi-reason-row {
+  font-size: 0.63rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  padding-left: 10px;
+  border-left: 2px solid rgba(255,255,255,0.1);
+}
+
+@media (max-width: 768px) {
+  .tdi-sig-content { flex-direction: column; }
+  .tdi-verdict-col { border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; align-items: center; gap: 12px; min-width: unset; }
+  .tdi-vp-col { border-right: none; border-bottom: 1px solid var(--border); min-width: unset; }
+  .tdi-regime-reason { display: none; }
+  .tdi-risk-pills { margin-left: 0; }
+}

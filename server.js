@@ -455,6 +455,39 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── GET /api/market-regime (public — no Alpaca auth needed) ──────────────────
+app.get('/api/market-regime', async (_req, res) => {
+  try {
+    const geoRisk = await atGlobalRisk();
+    const regime  = await atMarketRegime(geoRisk);
+    res.json({ ok: true, geoRisk, regime });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── GET /api/signal/:symbol (full VP + EMA + regime signal — no Alpaca auth) ──
+app.get('/api/signal/:symbol', async (req, res) => {
+  const sym = req.params.symbol?.toUpperCase().trim();
+  if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
+  try {
+    const geoRisk    = await atGlobalRisk();
+    const regimeData = await atMarketRegime(geoRisk);
+    const isInverse  = INVERSE_ETF_SET.has(sym);
+    const sentiment  = atSentimentFor(sym);
+    const sig = await atAnalyze(sym, {
+      sentiment,
+      geoRisk,
+      isInverse,
+      regime: regimeData.regime,
+    });
+    if (!sig) return res.json({ ok: false, error: 'Insufficient bar data for ' + sym });
+    res.json({ ok: true, symbol: sym, signal: sig, regime: regimeData, geoRisk, isInverse });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /api/intraday/:symbol (5-min bars — includes pre/post market) ──────────
 app.get('/api/intraday/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();

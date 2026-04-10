@@ -762,6 +762,147 @@ const rtTrader = (() => {
     startCountdown(() => analyze(sym));
   }
 
+  // ── Trading Intelligence Panel ───────────────────────────────────────────────
+  function renderIntelPanel(data) {
+    const panel = $('tdiPanel');
+    if (!panel) return;
+
+    const { ok, signal, regime, geoRisk, isInverse, symbol } = data || {};
+
+    // Always show panel (even on error)
+    panel.style.display = '';
+
+    // INV badge
+    const invBadge = $('tdiInvBadge');
+    if (invBadge) invBadge.style.display = isInverse ? 'inline-block' : 'none';
+
+    // ── Market Regime badge ─────────────────────────────────────────────────
+    const regimeWrap = $('tdiRegimeWrap');
+    if (regimeWrap && regime) {
+      const r  = regime.regime || 'MIXED';
+      const cls = r === 'BULL' ? 'regime-bull' : r === 'MIXED' ? 'regime-mixed' : r === 'BEAR' ? 'regime-bear' : 'regime-crash';
+      regimeWrap.innerHTML = `<span class="at-risk-pill at-regime-pill ${cls}">${r}</span>
+        <span class="tdi-regime-reason">${regime.reason || ''}</span>`;
+    } else if (regimeWrap) {
+      regimeWrap.innerHTML = '';
+    }
+
+    // ── Geo Risk pills ──────────────────────────────────────────────────────
+    const pillsEl = $('tdiRiskPills');
+    if (pillsEl && geoRisk) {
+      const vix     = geoRisk.vix?.toFixed(1) ?? '--';
+      const spyChg  = geoRisk.spyChg;
+      const spread  = geoRisk.spread?.toFixed(2) ?? '--';
+      const vixCls  = geoRisk.vix >= 30 ? 'risk-high' : geoRisk.vix >= 20 ? 'risk-med' : 'risk-low';
+      const spyCls  = spyChg <= -2 ? 'risk-high' : spyChg <= -1 ? 'risk-med' : spyChg >= 1 ? 'risk-low' : 'risk-neutral';
+      const oilCls  = geoRisk.oilTension ? 'risk-high' : 'risk-neutral';
+      const spyStr  = spyChg != null ? (spyChg >= 0 ? '+' : '') + spyChg.toFixed(2) + '%' : '--';
+      pillsEl.innerHTML = `
+        <span class="at-risk-pill ${vixCls}">VIX ${vix}</span>
+        <span class="at-risk-pill ${spyCls}">SPY ${spyStr}</span>
+        <span class="at-risk-pill ${oilCls}">${geoRisk.oilTension ? '⚠ Oil Risk' : 'Oil OK'}</span>`;
+    } else if (pillsEl) {
+      pillsEl.innerHTML = '';
+    }
+
+    // ── Loading / error states ──────────────────────────────────────────────
+    const loadEl = $('tdiLoading');
+    const contEl = $('tdiSigContent');
+    if (!ok || !signal) {
+      if (loadEl) loadEl.style.display = 'none';
+      if (contEl) {
+        contEl.style.display = 'flex';
+        const verdictEl = $('tdiVerdict');
+        if (verdictEl) { verdictEl.textContent = 'N/A'; verdictEl.className = 'tdi-verdict hold'; }
+        const confEl = $('tdiConf'); if (confEl) confEl.textContent = 'No data';
+        const zoneEl = $('tdiZone'); if (zoneEl) zoneEl.textContent = data?.error || 'Insufficient bar data';
+        const vpHero = $('tdiVPHero'); if (vpHero) vpHero.style.display = 'none';
+        const emaEl  = $('tdiEmaPills'); if (emaEl) emaEl.innerHTML = '';
+        const resEl  = $('tdiReasons');  if (resEl) resEl.innerHTML = '';
+      }
+      return;
+    }
+
+    if (loadEl) loadEl.style.display = 'none';
+    if (contEl) contEl.style.display = 'flex';
+
+    // ── Verdict + confidence ────────────────────────────────────────────────
+    const sig = signal.signal || 'HOLD';
+    const verdictEl = $('tdiVerdict');
+    if (verdictEl) {
+      verdictEl.textContent = sig;
+      verdictEl.className   = 'tdi-verdict ' + sig.toLowerCase();
+    }
+    const confEl = $('tdiConf');
+    if (confEl) confEl.textContent = (signal.confidence || 0) + '% confidence';
+
+    const zoneEl = $('tdiZone');
+    if (zoneEl) {
+      const zoneMap = {
+        'val_bounce': '📍 VAL Bounce Zone',
+        'poc_breakout': '🔼 POC Breakout',
+      };
+      zoneEl.textContent = signal.zoneStr || (signal.checks?.vp_primary?.detail || 'No VP trigger');
+    }
+
+    // ── Volume Profile visual bar ───────────────────────────────────────────
+    const vpHero = $('tdiVPHero');
+    if (vpHero && signal.vah && signal.val && signal.poc && signal.price) {
+      vpHero.style.display = '';
+      const { vah, val, poc, price: px } = signal;
+      const range = vah - val;
+      if (range > 0) {
+        const pocPct   = ((poc - val) / range) * 100;
+        const fillPct  = pocPct;
+        const pricePct = Math.max(0, Math.min(100, ((px - val) / range) * 100));
+        const fillEl   = $('tdiVPFill');    if (fillEl)  fillEl.style.width = fillPct + '%';
+        const pocLine  = $('tdiVPPocLine'); if (pocLine) pocLine.style.left = pocPct + '%';
+        const priceTick= $('tdiVPPriceTick'); if (priceTick) priceTick.style.left = pricePct + '%';
+        const valEl = $('tdiVPVal'); if (valEl) valEl.textContent = '$' + val.toFixed(2);
+        const pocEl = $('tdiVPPoc'); if (pocEl) pocEl.textContent = '$' + poc.toFixed(2);
+        const vahEl = $('tdiVPVah'); if (vahEl) vahEl.textContent = '$' + vah.toFixed(2);
+      }
+    } else if (vpHero) {
+      vpHero.style.display = 'none';
+    }
+
+    // ── EMA Ribbon pills ────────────────────────────────────────────────────
+    const emaEl = $('tdiEmaPills');
+    if (emaEl) {
+      const checks = signal.checks || {};
+      const isCross = checks.ma_crossover?.pass;
+      const isRibbon = checks.ma_ribbon_bullish?.pass;
+      const ema9Det  = checks.ema_trend?.detail      || '';
+      const ema50Det = checks.above_ema50?.detail     || '';
+      const above9   = checks.ema_trend?.pass;
+      const above50  = checks.above_ema50?.pass;
+
+      let pills = '';
+      if (isCross) {
+        pills += `<span class="at-ma-pill ma-crossover">EMA Cross ↑</span>`;
+      }
+      if (isRibbon) {
+        pills += `<span class="at-ma-pill ma-ribbon">Bull Ribbon</span>`;
+      }
+      const e9Cls  = above9  ? 'ma-above' : 'ma-below';
+      const e50Cls = above50 ? 'ma-above' : 'ma-below';
+      pills += `<span class="at-ma-pill ${e9Cls}">EMA 9/21 ${above9 ? '▲' : '▼'}</span>`;
+      pills += `<span class="at-ma-pill ${e50Cls}">EMA 50 ${above50 ? '▲' : '▼'}</span>`;
+
+      if (isInverse) {
+        pills += `<span class="at-ma-pill" style="color:#f87171;border-color:rgba(248,113,113,0.4);background:rgba(248,113,113,0.06)">INV mode</span>`;
+      }
+      emaEl.innerHTML = pills;
+    }
+
+    // ── Top signal reasons (max 3) ──────────────────────────────────────────
+    const resEl = $('tdiReasons');
+    if (resEl) {
+      const reasons = (signal.reasons || []).slice(0, 3);
+      resEl.innerHTML = reasons.map(r => `<div class="tdi-reason-row">${r}</div>`).join('');
+    }
+  }
+
   // ── Analyze ─────────────────────────────────────────────────────────────────
   async function analyze(sym) {
     sym = sym.toUpperCase().trim();
@@ -774,11 +915,26 @@ const rtTrader = (() => {
     const ls = $('rtLoadSym'); if (ls) ls.textContent = sym;
     clearInterval(cdTimer);
 
+    // Show intel panel in loading state
+    const tdiPanel = $('tdiPanel');
+    if (tdiPanel) tdiPanel.style.display = '';
+    const tdiLoad = $('tdiLoading');
+    if (tdiLoad) tdiLoad.style.display = 'flex';
+    const tdiCont = $('tdiSigContent');
+    if (tdiCont) tdiCont.style.display = 'none';
+    const tdiReg  = $('tdiRegimeWrap');
+    if (tdiReg)  tdiReg.innerHTML  = '';
+    const tdiPills = $('tdiRiskPills');
+    if (tdiPills) tdiPills.innerHTML = '';
+    const tdiInvB  = $('tdiInvBadge');
+    if (tdiInvB)  tdiInvB.style.display = 'none';
+
     try {
-      const [quoteRes, intradayRes, histRes] = await Promise.all([
+      const [quoteRes, intradayRes, histRes, signalRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/signal/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       const price       = quoteRes?.price ?? intradayRes?.price ?? null;
@@ -791,10 +947,15 @@ const rtTrader = (() => {
 
       $('rtInput').value = sym;
       render(sym, bars, price, dailyBars, marketState);
+
+      // Render trading intelligence panel
+      renderIntelPanel(signalRes || { ok: false, error: 'Signal data unavailable' });
+
     } catch (e) {
       $('rtLoading').style.display = 'none';
       $('rtError').style.display   = 'flex';
       const em = $('rtErrMsg'); if (em) em.textContent = e.message || 'Failed to analyze. Please try again.';
+      renderIntelPanel({ ok: false, error: e.message });
     }
   }
 

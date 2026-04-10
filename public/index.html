@@ -289,6 +289,62 @@
 
     </div><!-- .hw-layout -->
 
+    <!-- ── Trading Intelligence Panel ────────────────────────────────────────── -->
+    <div class="tdi-panel" id="tdiPanel" style="display:none">
+
+      <div class="tdi-header">
+        <div class="tdi-title-row">
+          <span class="tdi-icon">⚡</span>
+          <span class="tdi-title">Trading Intelligence</span>
+          <span class="tdi-sub">VP · EMA Ribbon · Regime · Geo Risk</span>
+          <span class="tdi-inv-badge" id="tdiInvBadge" style="display:none">INV</span>
+        </div>
+        <div class="tdi-meta-row">
+          <div class="tdi-regime-wrap" id="tdiRegimeWrap"></div>
+          <div class="tdi-risk-pills" id="tdiRiskPills"></div>
+        </div>
+      </div>
+
+      <div class="tdi-body" id="tdiBody">
+
+        <!-- Signal card -->
+        <div class="tdi-sig-card" id="tdiSigCard">
+          <div class="tdi-sig-loading" id="tdiLoading">
+            <div class="t-spinner"></div>
+            <span>Analyzing signal…</span>
+          </div>
+          <div class="tdi-sig-content" id="tdiSigContent" style="display:none">
+            <div class="tdi-verdict-col">
+              <div class="tdi-verdict" id="tdiVerdict">--</div>
+              <div class="tdi-conf" id="tdiConf">--%</div>
+              <div class="tdi-zone" id="tdiZone"></div>
+            </div>
+            <div class="tdi-vp-col">
+              <div class="tdi-vp-label">Volume Profile · 5-Day</div>
+              <div class="at-vp-hero" id="tdiVPHero" style="display:none">
+                <div class="at-vp-labels">
+                  <span class="at-vp-label-val"><b id="tdiVPVal">--</b><br/>VAL</span>
+                  <span class="at-vp-label-poc"><b id="tdiVPPoc">--</b><br/>POC</span>
+                  <span class="at-vp-label-vah"><b id="tdiVPVah">--</b><br/>VAH</span>
+                </div>
+                <div class="at-vp-track">
+                  <div class="at-vp-fill" id="tdiVPFill"></div>
+                  <div class="at-vp-poc-line" id="tdiVPPocLine"></div>
+                  <div class="at-vp-price-tick" id="tdiVPPriceTick"></div>
+                </div>
+              </div>
+            </div>
+            <div class="tdi-ema-col">
+              <div class="tdi-ema-label">EMA Ribbon</div>
+              <div class="tdi-ema-pills" id="tdiEmaPills"></div>
+              <div class="tdi-reasons" id="tdiReasons"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ── Realtime Trader Console ─────────────────────────────────────────── -->
     <div class="rt-console" id="rtConsole">
 

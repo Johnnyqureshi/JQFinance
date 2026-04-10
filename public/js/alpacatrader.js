@@ -120,16 +120,21 @@ const alpacaTrader = (() => {
       if ($('atCash'))   $('atCash').textContent   = '$' + fmt(cash);
       if ($('atBP'))     $('atBP').textContent     = '$' + fmt(bp);
 
-      // PDT display
-      const pdtChip = $('atPDTChip');
-      const pdtVal  = $('atDayTrades');
-      const pdtWarn = $('atPDTWarn');
+      // PDT display — small accounts soft-stop at 2 (leaves 1 buffer before hard PDT limit)
+      const pdtChip    = $('atPDTChip');
+      const pdtVal     = $('atDayTrades');
+      const pdtWarn    = $('atPDTWarn');
+      const smallAcct  = equity < 25000;
+      const softLimit  = smallAcct ? 2 : 4;
       if (pdtChip) {
         pdtChip.style.display = '';
-        if (pdtVal) pdtVal.textContent = dtc + '/3 day trades';
-        if (dtc >= 3 && equity < 25000) {
+        if (pdtVal) pdtVal.textContent = `${dtc}/${softLimit} day trades${smallAcct ? ' (soft-stop)' : ''}`;
+        if (dtc >= softLimit && smallAcct) {
           pdtChip.style.borderColor = '#f87171';
-          if (pdtWarn) pdtWarn.style.display = '';
+          if (pdtWarn) { pdtWarn.style.display = ''; pdtWarn.textContent = `PDT guard active — ${dtc}/${softLimit} day trades used. New entries paused.`; }
+        } else if (dtc >= softLimit - 1 && smallAcct) {
+          pdtChip.style.borderColor = '#fbbf24'; // amber warning — 1 trade left
+          if (pdtWarn) { pdtWarn.style.display = ''; pdtWarn.textContent = `PDT caution — ${dtc}/${softLimit} day trades used. 1 trade remaining today.`; }
         } else {
           pdtChip.style.borderColor = '';
           if (pdtWarn) pdtWarn.style.display = 'none';
@@ -299,9 +304,18 @@ const alpacaTrader = (() => {
         else err.style.display = 'none';
       }
 
-      // PDT warn from server
+      // PDT warn from server — reflects the tighter small-account soft-stop logic
       const pdtWarn = $('atPDTWarn');
-      if (pdtWarn && st.pdtBlocked) pdtWarn.style.display = '';
+      if (pdtWarn) {
+        if (st.pdtBlocked) {
+          pdtWarn.style.display = '';
+          if (st.pdtDetail && !pdtWarn.textContent.includes('PDT guard'))
+            pdtWarn.textContent = `PDT guard active — ${st.pdtDetail}. New entries paused.`;
+        } else if (st.localPdtBlocked) {
+          pdtWarn.style.display = '';
+          pdtWarn.textContent = `PDT guard — local 7-day same-day trades: ${st.localDayTrades}/2. New entries paused.`;
+        }
+      }
 
       // Geo-risk + lunch-lull gauge + regime
       renderRiskGauge(st.geoRisk || null, st.lunchLull || false, st.regime || null);

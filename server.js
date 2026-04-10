@@ -1985,18 +1985,42 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 // Returns { hold: true, reason } if the position should be kept overnight,
 // { hold: false, reason } if it should be closed.
 // Criteria: must be profitable, regime-aligned, momentum still running, above EMA-21.
-async function atShouldHoldOvernight(log, pos, geoRisk, regimeData) {
+async function atShouldHoldOvernight(log, pos, geoRisk, regimeData, equity = 0) {
   try {
-    const sym          = log.symbol;
-    const isInv        = INVERSE_ETF_SET.has(sym);
-    const regime       = regimeData?.regime || 'MIXED';
+    const sym           = log.symbol;
+    const isInv         = INVERSE_ETF_SET.has(sym);
+    const regime        = regimeData?.regime || 'MIXED';
+    const isSmallAcct   = equity > 0 && equity < 25000;
     // Alpaca returns unrealized_plpc as a decimal (e.g. 0.023 = 2.3%)
     const unrealizedPct = parseFloat(pos.unrealized_plpc || 0) * 100;
 
+    // ── PDT GUARD (small accounts only) ──────────────────────────────────────
+    // If this position was opened TODAY, closing it NOW creates a day trade.
+    // For small accounts we aggressively prefer holding overnight over taking a
+    // day trade — unless the position is a deep loss (> 4%) or regime is CRASH.
+    if (isSmallAcct) {
+      const openedToday = log.created_at && log.created_at.startsWith(new Date().toISOString().slice(0, 10));
+      if (openedToday) {
+        if (unrealizedPct < -4.0) {
+          return { hold: false, reason: `PDT guard override: loss too deep (${unrealizedPct.toFixed(1)}%) — closing to limit damage` };
+        }
+        if (regime === 'CRASH' && !isInv) {
+          return { hold: false, reason: `PDT guard override: CRASH regime — closing to avoid overnight gap risk` };
+        }
+        if ((geoRisk?.vix ?? 15) >= 40) {
+          return { hold: false, reason: `PDT guard override: VIX ${(geoRisk?.vix ?? 40).toFixed(0)} — extreme volatility, closing` };
+        }
+        // All other cases: hold overnight to avoid the day trade
+        return { hold: true, reason: `PDT guard: position opened today — holding overnight to avoid day trade (${unrealizedPct.toFixed(1)}% P&L)` };
+      }
+    }
+
     // ── 1. Must be at least slightly profitable ───────────────────────────────
     // Holding a losing overnight trade risks a gap against us
-    if (unrealizedPct < 0.3) {
-      return { hold: false, reason: `only ${unrealizedPct.toFixed(2)}% profit — not profitable enough to hold overnight` };
+    // Small accounts get a slightly more lenient threshold (-0.5% ok to hold)
+    const minProfitPct = isSmallAcct ? -0.5 : 0.3;
+    if (unrealizedPct < minProfitPct) {
+      return { hold: false, reason: `${unrealizedPct.toFixed(2)}% P&L — below minimum to hold overnight` };
     }
 
     // ── 2. Regime must support the position direction ─────────────────────────
@@ -2061,7 +2085,7 @@ async function atShouldHoldOvernight(log, pos, geoRisk, regimeData) {
   }
 }
 
-async function atCheckExits(userId, positions, settings, session, geoRisk, regimeData) {
+async function atCheckExits(userId, positions, settings, session, geoRisk, regimeData, equity = 0) {
   const allTracked = db.prepare(
     `SELECT * FROM auto_trade_log WHERE user_id = ? AND status IN ('open','pending_fill')`
   ).all(userId);
@@ -2091,7 +2115,7 @@ async function atCheckExits(userId, positions, settings, session, geoRisk, regim
           let holdReason = '';
 
           if (holdEnabled) {
-            const holdResult = await atShouldHoldOvernight(log, pos, geoRisk, regimeData);
+            const holdResult = await atShouldHoldOvernight(log, pos, geoRisk, regimeData, equity);
             shouldHold  = holdResult.hold;
             holdReason  = holdResult.reason;
           }
@@ -2333,24 +2357,23 @@ async function atRunForUser(userId, dryRun = false) {
       return result;
     }
 
-    const equity      = parseFloat(acct.equity      || 0);
-    const buyingPower = parseFloat(acct.buying_power || 0);
-    const settledCash = parseFloat(acct.cash         || acct.equity || 0); // settled cash only
+    const equity        = parseFloat(acct.equity      || 0);
+    const buyingPower   = parseFloat(acct.buying_power || 0);
+    const settledCash   = parseFloat(acct.cash         || acct.equity || 0); // settled cash only
     if (equity <= 0) { atScanningUsers.delete(userId); return result; }
 
-    // ── PDT protection ───────────────────────────────────────────────────────
-    // Pattern Day Trader rule: if equity < $25k AND daytrade_count >= 3, skip entries
+    // ── Small-account flag (used throughout this function) ───────────────────
+    const isSmallAcct   = equity < 25000;
+
+    // ── PDT tracking data from Alpaca ─────────────────────────────────────────
+    // Actual gate is computed later in the entry section with the tighter logic.
     const daytradeCount = parseInt(acct.daytrade_count || 0, 10);
     const isPDT         = acct.pattern_day_trader === true;
-    const pdtBlocked    = equity < 25000 && daytradeCount >= 3;
-    result.pdtBlocked   = pdtBlocked;
-    result.daytradeCount= daytradeCount;
-    if (pdtBlocked && !dryRun) {
-      console.warn('[AT] user=' + userId + ' PDT protection active — daytradeCount=' + daytradeCount + ' equity=$' + equity.toFixed(0));
-    }
+    // Early display value — entry section will set the final pdtBlocked flag
+    result.daytradeCount = daytradeCount;
 
     // Log session state at the start of each cycle
-    console.log('[AutoTrader] user=' + userId + ' settled=$' + settledCash.toFixed(2) + ' BP=$' + buyingPower.toFixed(2) + ' positions=' + (Array.isArray(positions) ? positions.length : 0) + (pdtBlocked?' [PDT BLOCKED]':''));
+    console.log(`[AutoTrader] user=${userId} settled=$${settledCash.toFixed(2)} BP=$${buyingPower.toFixed(2)} equity=$${equity.toFixed(0)} positions=${Array.isArray(positions)?positions.length:0}${isSmallAcct?' [SMALL-ACCT]':''}`);
 
     // ── Global risk + social sentiment (both non-blocking, cached per cycle) ──
     const [geoRisk] = await Promise.all([
@@ -2372,7 +2395,7 @@ async function atRunForUser(userId, dryRun = false) {
     // Runs every cycle regardless of market hours — broker_close/pending reconciliation
     // is always needed; active EMA exits are gated inside atCheckExits by session.isMarketOpen
     if (!dryRun) {
-      result.exitCount = await atCheckExits(userId, posArr, settings, session, geoRisk, regimeData);
+      result.exitCount = await atCheckExits(userId, posArr, settings, session, geoRisk, regimeData, equity);
 
       // Re-fetch positions after exits so position count is accurate
       if (result.exitCount > 0) {
@@ -2499,9 +2522,11 @@ async function atRunForUser(userId, dryRun = false) {
       console.log(`[AT] ${a.symbol}: ${s.signal} conf=${s.confidence}% price=$${s.price?.toFixed(2)} zone="${zone}" ${vpStr}`);
     }
 
+    // ── Small-account thresholds — only take the very highest-quality setups ──
+    // isSmallAcct is set earlier (equity < 25000) — small accounts face PDT restrictions.
     // BUY only (cash account) — VP trigger fires + minimum R:R + minimum confidence
-    const MIN_RR         = 1.0;
-    const MIN_CONFIDENCE = 70; // VP trigger fires at 65 base — 70 requires just one secondary confirm
+    const MIN_RR         = isSmallAcct ? 1.5  : 1.0;  // 1.5:1 R:R for small, 1:1 for large
+    const MIN_CONFIDENCE = isSmallAcct ? 82   : 72;   // 82% for small accounts — top setups only
     const actionable = analyses
       .filter(a => {
         if (a.sig?.signal !== 'BUY') return false;
@@ -2509,22 +2534,28 @@ async function atRunForUser(userId, dryRun = false) {
         const px  = sig.price;
         if (!sig.vah || !px) return false;
         if ((sig.confidence || 0) < MIN_CONFIDENCE) {
-          console.log(`[AT] ${a.symbol}: BUY skipped — confidence ${sig.confidence}% < ${MIN_CONFIDENCE}%`);
+          console.log(`[AT] ${a.symbol}: BUY skipped — confidence ${sig.confidence}% < ${MIN_CONFIDENCE}%${isSmallAcct?' (small-account threshold)':''}`);
           return false;
         }
-        const isPocBreak = sig.zoneStr?.includes('POC breakout');
-        const vaWidth    = (sig.vah && sig.val) ? sig.vah - sig.val : 0;
+        // Small accounts: also require bullish EMA context (above EMA-9 at minimum)
+        if (isSmallAcct && sig.checks) {
+          const emaBullish = sig.checks.ema_trend?.pass || sig.checks.ma_crossover?.pass;
+          if (!emaBullish) {
+            console.log(`[AT] ${a.symbol}: BUY skipped — EMA not bullish (small-account stricter filter)`);
+            return false;
+          }
+        }
         const tp  = sig.vah;   // VAH for both triggers (backtest-validated)
         const sl  = px * 0.990; // 1% initial trailing stop level
         const rr  = (tp - px) / Math.max(px - sl, 0.001);
         if (rr < MIN_RR) {
-          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR}`);
+          console.log(`[AT] ${a.symbol}: BUY skipped — R:R=${rr.toFixed(2)} < ${MIN_RR}${isSmallAcct?' (small-account threshold)':''}`);
           return false;
         }
         return true;
       })
       .sort((a, b) => b.sig.confidence - a.sig.confidence);
-    console.log('[AutoTrader] BUY signals: ' + actionable.length + ' of ' + analyses.length + ' analyzed (R:R≥' + MIN_RR + ')');
+    console.log(`[AutoTrader] BUY signals: ${actionable.length} of ${analyses.length} analyzed (R:R≥${MIN_RR} conf≥${MIN_CONFIDENCE}%${isSmallAcct?' small-acct-mode':''}`);
 
     // Build analyses for UI — include VP levels and zone context
     const maxLevSetting = Math.min(4, Math.max(1, settings.leverage || 1));
@@ -2574,23 +2605,11 @@ async function atRunForUser(userId, dryRun = false) {
       };
     });
 
-    // Persist latest analyses + sector rotation + risk in status so polling can surface them
-    autoTraderStatus.set(userId, {
-      ...(autoTraderStatus.get(userId) || {}),
-      analyses:     result.analyses,
-      hotSectors:   result.hotSectors,
-      coldSectors:  result.coldSectors,
-      geoRisk:      result.geoRisk,
-      regime:       result.regime,
-      lunchLull:    session.isLunchLull,
-      pdtBlocked,
-      daytradeCount,
-    });
-
     // ── 5. Place order — walk all actionable signals until one fills ──────────
     // Entry gates: market open + morning window + cooldown + daily trade cap + PDT
-    const COOLDOWN_MS   = 5 * 60 * 1000;                               // 5 min between entries
-    const MAX_DAILY     = equity < 25000 ? 3 : 6;                      // Alpaca daytradeCount already enforces PDT hard-stop
+    // Small accounts (<$25k): much stricter — 1 trade/day, 90-min cooldown, PDT buffer
+    const COOLDOWN_MS   = isSmallAcct ? 90 * 60 * 1000 : 30 * 60 * 1000; // 90 min small / 30 min large
+    const MAX_DAILY     = isSmallAcct ? 1 : 4;                            // 1/day small, 4/day large
     const lastTs        = atLastTradeTs.get(userId);
     const cooldownOk    = !lastTs || (Date.now() - lastTs) >= COOLDOWN_MS;
     const cooldownLeft  = lastTs ? Math.ceil((COOLDOWN_MS - (Date.now() - lastTs)) / 60000) : 0;
@@ -2600,11 +2619,55 @@ async function atRunForUser(userId, dryRun = false) {
     ).get(userId, todayStr)?.cnt || 0;
     const dailyOk       = todayTrades < MAX_DAILY;
 
+    // ── PDT HARD GATE (small accounts) ───────────────────────────────────────
+    // Alpaca's daytrade_count tracks the rolling 5-day window. We also count our
+    // own same-day opens/closes from the local DB as a secondary safety net.
+    // Soft-stop at 2 (not 3) — leaves 1 trade of buffer before the hard PDT limit of 4.
+    const pdtSoftLimit    = isSmallAcct ? 2 : 4;
+    const pdtBlocked      = isSmallAcct && daytradeCount >= pdtSoftLimit;
+
+    // Local 7-calendar-day day-trade count (same-day open + close in our DB)
+    const localDayTrades  = isSmallAcct ? (db.prepare(
+      `SELECT COUNT(*) as cnt FROM auto_trade_log
+       WHERE user_id=? AND date(created_at) = date(closed_at)
+         AND date(created_at) >= date('now','-7 days')`
+    ).get(userId)?.cnt || 0) : 0;
+    const localPdtBlocked = isSmallAcct && localDayTrades >= 2;
+
+    // Same-day open guard: if we already have a position opened today, don't open
+    // another — closing the first one to make room would be a day trade.
+    const todayOpenPos  = isSmallAcct ? (db.prepare(
+      `SELECT COUNT(*) as cnt FROM auto_trade_log
+       WHERE user_id=? AND date(created_at)=? AND status IN ('open','pending_fill')`
+    ).get(userId, todayStr)?.cnt || 0) : 0;
+    const sameDayGuard  = isSmallAcct && todayOpenPos > 0;
+
+    if (isSmallAcct) {
+      console.log(`[AT PDT] daytradeCount=${daytradeCount}/${pdtSoftLimit} localDT=${localDayTrades} todayOpen=${todayOpenPos} todayTrades=${todayTrades}/${MAX_DAILY}`);
+    }
+
+    // Persist latest analyses + sector rotation + risk in status so polling can surface them
+    autoTraderStatus.set(userId, {
+      ...(autoTraderStatus.get(userId) || {}),
+      analyses:       result.analyses,
+      hotSectors:     result.hotSectors,
+      coldSectors:    result.coldSectors,
+      geoRisk:        result.geoRisk,
+      regime:         result.regime,
+      lunchLull:      session.isLunchLull,
+      pdtBlocked,
+      localPdtBlocked,
+      localDayTrades,
+      daytradeCount,
+      isSmallAcct,
+    });
+
     const canEnter = !dryRun && session.isMarketOpen && !session.isEarlyWindow
                      && !session.isNearClose                        // no new entries after 3:50 PM
                      && !session.isLunchLull                        // skip 12:00–12:30 PM thin tape
                      && atmOpen < MAX_POSITIONS && actionable.length > 0
-                     && !pdtBlocked && cooldownOk && dailyOk;
+                     && !pdtBlocked && !localPdtBlocked && !sameDayGuard
+                     && cooldownOk && dailyOk;
     if (canEnter) {
       let placed = false;
       for (const candidate of actionable) {
@@ -2639,14 +2702,21 @@ async function atRunForUser(userId, dryRun = false) {
       if (!session.isMarketOpen)          idleReason = 'Market closed — monitoring exits only';
       else if (session.isNearClose)       idleReason = 'Near close (3:50 PM ET) — no new entries, positions closing';
       else if (session.isLunchLull)       idleReason = 'Lunch lull (12:00–12:30 PM ET) — skipping thin-tape window';
-      else if (!dailyOk)                  idleReason = `Daily trade cap reached (${todayTrades}/${MAX_DAILY}) — no new entries today`;
-      else if (!cooldownOk)               idleReason = `Cooldown active — next entry in ${cooldownLeft} min`;
-      else if (pdtBlocked)                idleReason = `PDT protection — ${daytradeCount} day trades used`;
+      else if (pdtBlocked)                idleReason = `PDT guard — ${daytradeCount}/${pdtSoftLimit} day trades used (soft-stop to protect your account)`;
+      else if (localPdtBlocked)           idleReason = `PDT guard — ${localDayTrades} same-day trades logged this week (local safety net)`;
+      else if (sameDayGuard)              idleReason = `PDT guard — holding today's open position; next entry available tomorrow`;
+      else if (!dailyOk)                  idleReason = `Daily cap reached (${todayTrades}/${MAX_DAILY} trade${MAX_DAILY===1?'':'s'}) — waiting for tomorrow${isSmallAcct?' (small-account limit)':''}`;
+      else if (!cooldownOk)               idleReason = `Cooldown — next entry available in ${cooldownLeft} min${isSmallAcct?' (90-min spacing to avoid over-trading)':''}`;
       else if (atmOpen >= MAX_POSITIONS)  idleReason = `At max positions (${atmOpen}/${MAX_POSITIONS}) — monitoring only`;
-      else if (actionable.length === 0)   idleReason = `Scan complete — no high-quality VP signals (${candidates.length} scanned, min 70% conf)`;
+      else if (actionable.length === 0)   idleReason = `Scan complete — no setups met the bar (${candidates.length} scanned, min ${MIN_CONFIDENCE}% conf + ${MIN_RR}:1 R:R)`;
       else                                idleReason = 'Scan complete — no actionable signals';
       if (idleReason) autoTraderStatus.set(userId, { ...(autoTraderStatus.get(userId) || {}), lastAction: idleReason });
     }
+
+    // Push final PDT state into result for status endpoint
+    result.pdtBlocked     = pdtBlocked || localPdtBlocked || sameDayGuard;
+    result.pdtDetail      = `${daytradeCount}/${pdtSoftLimit} Alpaca · ${localDayTrades} local 7d`;
+    result.isSmallAcct    = isSmallAcct;
 
   } catch(e) {
     console.error(`[AutoTrader] user=${userId} fatal:`, e.message);
@@ -2777,9 +2847,13 @@ app.get('/api/alpaca/auto-status', requireAuth, (req, res) => {
     coldSectors:   [],
     geoRisk:       null,
     lunchLull:     false,
-    pdtBlocked:    false,
-    daytradeCount: 0,
-    marketOpen:    sess.isMarketOpen,
+    pdtBlocked:      false,
+    localPdtBlocked: false,
+    localDayTrades:  0,
+    daytradeCount:   0,
+    isSmallAcct:     false,
+    pdtDetail:       null,
+    marketOpen:      sess.isMarketOpen,
     openPositions: openCount,
     maxPositions:  settings2?.max_positions || 1,
     ...st,

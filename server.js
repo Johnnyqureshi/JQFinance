@@ -1584,9 +1584,9 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
     };
   }
 
-  // ── Staleness guard: if the 5-day VAH is >15% above current price the VP is from
+  // ── Staleness guard: if the 5-day VAH is >10% above current price the VP is from
   //    a different price regime (e.g. a spike 3 days ago). TP would be unreachable. ──
-  if (vp.vah > price * 1.15) {
+  if (vp.vah > price * 1.10) {
     return {
       signal: 'HOLD', confidence: 0, price, rsi, vwap,
       reasons: [`✗ VP stale: VAH $${vp.vah.toFixed(2)} is >${((vp.vah/price-1)*100).toFixed(0)}% above price — from a different price regime`],
@@ -1607,8 +1607,8 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   const vwapPct = vwap ? ((price - vwap) / vwap) * 100 : 0;
 
   // ── VP zone calculations ───────────────────────────────────────────────────
-  const vaWidth    = vp.vah - vp.val;                          // value area spread
-  const nearVAL    = price >= vp.val && price <= vp.val + vaWidth * 0.18; // within 18% of VA width above VAL
+  const vaWidth    = vp.vah - vp.val;                           // value area spread
+  const nearVAL    = price >= vp.val && price <= vp.val + vaWidth * 0.12; // within 12% of VA width above VAL (tightened from 18%)
   const tightVAL   = price >= vp.val && price <= vp.val + vaWidth * 0.07; // within 7% — prime entry
   const abovePOC   = price > vp.poc;
   const belowVAH   = price < vp.vah;
@@ -1620,11 +1620,21 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   const volOk    = volRatio >= 1.0;   // at least average
 
   // ── PRIMARY TRIGGERS (Volume Profile-based) ───────────────────────────────
-  //  val_bounce:   price on VAL support — pure price location, no volume requirement
-  //                (mid-day bars always read low volume vs open — volOk would kill every setup)
-  //  poc_breakout: price above POC with any above-average volume conviction
-  const val_bounce   = nearVAL  && belowVAH && price > 2;
-  const poc_breakout = abovePOC && belowVAH && price > 2 && volRatio >= 1.5; // require surge (1.5×) for breakout conviction
+  //  val_bounce:   price within tight band above VAL, not in a confirmed downtrend
+  //                (tightened zone to 12% of VA width + EMA filter to block short-side setups)
+  //  poc_breakout: price above POC, 2× volume surge, AND price above EMA-9
+  //                (raised surge bar from 1.5× to 2.0× + EMA check for follow-through)
+
+  const aboveEMA9_primary  = ema9  != null && price > ema9;
+  const aboveEMA21_primary = ema21 != null && price > ema21;
+
+  // VAL bounce: price must be in the tight zone AND not in a confirmed downtrend
+  // (allow entry if above EMA-9 OR within tight VAL — but block if below both EMA-9 AND EMA-21)
+  const val_ema_ok   = aboveEMA9_primary || aboveEMA21_primary || tightVAL; // tight VAL gets a free pass on EMAs
+  const val_bounce   = nearVAL && belowVAH && price > 2 && val_ema_ok;
+
+  // POC breakout: require 2× surge (raised from 1.5×) AND price above EMA-9 for follow-through
+  const poc_breakout = abovePOC && belowVAH && price > 2 && volRatio >= 2.0 && aboveEMA9_primary;
   const primaryFires = val_bounce || poc_breakout;
 
   // ── Zone description for UI ────────────────────────────────────────────────
@@ -1637,7 +1647,8 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
     : '–';
 
   // ── SECONDARY: Confidence scoring (not blockers) ───────────────────────────
-  const rsiOk      = rsi != null && rsi >= 30 && rsi <= 70;
+  // RSI must be in a healthy range — 30-60 for entry (not 30-70) to avoid overbought entries
+  const rsiOk      = rsi != null && rsi >= 30 && rsi <= 60;
   const aboveVWAP  = vwap && price > vwap;
   const aboveEMA9  = ema9  != null && price > ema9;
   const aboveEMA21 = ema21 != null && price > ema21;
@@ -1655,45 +1666,53 @@ function atSignal(bars, closes, price, rsi, vwap, volData, atr, vp, extras = {})
   ].filter(Boolean).join(' · ');
 
   const checks = {
-    vp_primary:         { pass: primaryFires,  detail: primaryFires ? `${val_bounce?'VAL bounce':'POC breakout'} — ${vpDetail}` : `no VP trigger (${zoneStr}) — ${vpDetail}` },
-    price_above_2:      { pass: price > 2,     detail: '$' + price.toFixed(2) },
-    rsi_healthy:        { pass: rsiOk,         detail: rsi != null ? `RSI=${rsi.toFixed(0)}` : 'n/a' },
-    above_vwap:         { pass: !!aboveVWAP,   detail: vwap ? `VWAP=$${vwap.toFixed(2)} (${vwapPct.toFixed(1)}%)` : 'n/a' },
-    ema_trend:          { pass: trendOk,       detail: maDetail || 'n/a' },
-    above_ema50:        { pass: !!aboveEMA50,  detail: ema50 ? `EMA50=$${ema50.toFixed(2)} — ${aboveEMA50 ? 'above (uptrend)' : 'BELOW (bearish structure)'}` : 'n/a (need 50 bars)' },
-    ma_ribbon_bullish:  { pass: maRibbon,      detail: maRibbon ? 'EMA9>EMA21>EMA50 — full bull stack' : 'ribbon not aligned' },
-    ma_crossover:       { pass: maCrossover,   detail: maCrossover ? 'EMA-9 just crossed above EMA-21 — fresh momentum' : 'no recent crossover' },
-    hhhl_structure:     { pass: hhhl,          detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
-    volume_surge:       { pass: volSurge,      detail: volData.avgV > 0 ? volRatio.toFixed(1) + '× avg' : 'n/a' },
+    vp_primary:         { pass: primaryFires,    detail: primaryFires ? `${val_bounce?'VAL bounce':'POC breakout'} — ${vpDetail}` : `no VP trigger (${zoneStr}) — ${vpDetail}` },
+    price_above_2:      { pass: price > 2,       detail: '$' + price.toFixed(2) },
+    rsi_healthy:        { pass: rsiOk,           detail: rsi != null ? `RSI=${rsi.toFixed(0)} (need 30–60)` : 'n/a' },
+    not_atr_extended:   { pass: !atrExtended,    detail: atr && ema21 ? `price $${price.toFixed(2)} vs EMA21+2×ATR=${(ema21+atr*2).toFixed(2)}${atrExtended?' — too extended':''}` : 'n/a' },
+    above_vwap:         { pass: !!aboveVWAP,     detail: vwap ? `VWAP=$${vwap.toFixed(2)} (${vwapPct.toFixed(1)}%)` : 'n/a' },
+    ema_trend:          { pass: trendOk,         detail: maDetail || 'n/a' },
+    above_ema50:        { pass: !!aboveEMA50,    detail: ema50 ? `EMA50=$${ema50.toFixed(2)} — ${aboveEMA50 ? 'above (uptrend)' : 'BELOW (bearish structure)'}` : 'n/a (need 50 bars)' },
+    ma_ribbon_bullish:  { pass: maRibbon,        detail: maRibbon ? 'EMA9>EMA21>EMA50 — full bull stack' : 'ribbon not aligned' },
+    ma_crossover:       { pass: maCrossover,     detail: maCrossover ? 'EMA-9 just crossed above EMA-21 — fresh momentum' : 'no recent crossover' },
+    hhhl_structure:     { pass: hhhl,            detail: hhhl ? 'HH+HL confirmed' : 'no structure' },
+    volume_surge:       { pass: volSurge,        detail: volData.avgV > 0 ? volRatio.toFixed(1) + '× avg' : 'n/a' },
   };
+
+  // ── ATR extension guard — don't enter when price is too extended from mean ──
+  // If price is more than 2× ATR above EMA-21, the move is already mature and
+  // risk of reverting to the mean before hitting TP is very high.
+  const atrExtended = atr && ema21 && price > ema21 + (atr * 2);
 
   // ── Confidence calculation ─────────────────────────────────────────────────
   let confidence;
   if (primaryFires) {
-    // Base 65 when VP trigger fires. Secondary indicators add points.
-    confidence = 65;
+    // Base 62 when VP trigger fires (down from 65 — makes it harder to reach thresholds on secondaries alone)
+    confidence = 62;
     const _isInverse = extras?.isInverse ?? false;  // inverse ETFs skip EMA-50 scoring
-    if (rsiOk)        confidence += 8;   // momentum not extreme
-    if (aboveVWAP)    confidence += 5;   // above intraday fair value
-    if (trendOk)      confidence += 5;   // price above EMA-9 + EMA-21
+    if (rsiOk)          confidence += 8;   // RSI 30-60 — not overbought
+    if (aboveVWAP)      confidence += 5;   // above intraday fair value
+    if (trendOk)        confidence += 6;   // price above EMA-9 + EMA-21
+    if (atrExtended)    confidence -= 12;  // price too extended above EMA-21 — likely to mean-revert
     if (!_isInverse) {
       // EMA-50 scoring is only meaningful for standard long positions
       // Inverse ETFs are SUPPOSED to be below EMA-50 in a bull market (that's when they're cheap)
-      if (aboveEMA50)  confidence += 7;  // above medium-term MA — structural uptrend
-      if (maRibbon)    confidence += 5;  // full bull stack EMA-9>21>50
-      if (maCrossover) confidence += 10; // fresh crossover
-      if (!aboveEMA50) confidence -= 10; // below EMA-50 = bearish structure
+      if (aboveEMA50)   confidence += 7;   // above medium-term MA — structural uptrend
+      if (maRibbon)     confidence += 5;   // full bull stack EMA-9>21>50
+      if (maCrossover)  confidence += 10;  // fresh crossover — rare and reliable
+      if (!aboveEMA50)  confidence -= 10;  // below EMA-50 = bearish structure
     } else {
       // For inverse ETFs: crossover still valid (EMA-9 > EMA-21 means they're trending up = market trending down)
       if (maCrossover) confidence += 8;
     }
-    if (hhhl)         confidence += 4;   // structure trending up
-    if (volSurge)     confidence += 6;   // above-average conviction
-    if (tightVAL)     confidence += 8;   // tight VAL = prime bounce spot
+    if (hhhl)           confidence += 4;   // higher-high / higher-low structure confirmed
+    if (volSurge)       confidence += 6;   // above-average volume = real conviction
+    if (tightVAL)       confidence += 8;   // tight VAL = prime bounce spot, low risk entry
+    if (poc_breakout)   confidence += 5;   // POC breakout is a stronger signal than generic VAL bounce
   } else {
     // No VP trigger — score secondaries only (won't reach trade threshold)
     const secPass = [rsiOk, !!aboveVWAP, trendOk, aboveEMA50, hhhl, volSurge].filter(Boolean).length;
-    confidence = secPass * 6;   // max 36 — below 65 threshold
+    confidence = secPass * 6;   // max 36 — well below any trade threshold
   }
 
   // ── EXTRA SIGNALS — applied after primary VP scoring ──────────────────────
@@ -1882,18 +1901,26 @@ async function atPlaceOrder(userId, sym, sig, settledCash, buyingPower, settings
 
   let tpPrice, slPrice;
   if (sig.vah && sig.val) {
-    const isPocBreak = sig.zoneStr?.includes('POC breakout');
-    const vaWidth    = sig.vah - sig.val;
-    tpPrice = parseFloat(sig.vah.toFixed(2));  // VAH for both triggers (backtest-validated)
-    // Initial SL = 1% below entry — matches the trailing stop's starting level
-    slPrice = parseFloat((limitPx * 0.990).toFixed(2));
+    tpPrice = parseFloat(sig.vah.toFixed(2));  // VAH — backtest-validated target
+
+    // ── Improved SL: ATR-based when available, 1.5% floor ────────────────────
+    // A fixed 1% SL is too tight — normal price noise can stop out a good trade.
+    // Use 1.5× ATR below entry so the trade has room to breathe, with a 1.5% floor.
+    if (atr && atr > 0) {
+      const atrSL = parseFloat((limitPx - Math.max(atr * 1.5, limitPx * 0.015)).toFixed(2));
+      slPrice = atrSL;
+    } else {
+      slPrice = parseFloat((limitPx * 0.985).toFixed(2)); // 1.5% SL if no ATR
+    }
+    // Sanity: SL must be below entry and not below VAL (that would give up too much)
+    slPrice = Math.max(slPrice, parseFloat((sig.val * 0.99).toFixed(2)));
     // Sanity: TP must be above entry
-    if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.02).toFixed(2));
+    if (tpPrice <= limitPx) tpPrice = parseFloat((limitPx * 1.025).toFixed(2));
     // Hard cap: TP must never exceed 8% above entry (prevents phantom targets from stale VP spikes)
     if (tpPrice > limitPx * MAX_TP_PCT) tpPrice = parseFloat((limitPx * MAX_TP_PCT).toFixed(2));
   } else if (atr && atr > 0) {
     tpPrice = parseFloat((limitPx + 3.0 * atr).toFixed(2));
-    slPrice = parseFloat((limitPx * 0.990).toFixed(2));
+    slPrice = parseFloat((limitPx - 1.5 * atr).toFixed(2));
   } else {
     return { skipped: true, reason: 'No VAH/VAL or ATR for order levels' };
   }

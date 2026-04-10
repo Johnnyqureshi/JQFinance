@@ -611,3 +611,404 @@ const scanner = (() => {
 
   return { open, runScan };
 })();
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Custom / Manual Scanner — user-defined ticker list with full trading intelligence
+// ═══════════════════════════════════════════════════════════════════════════════
+const customScanner = (() => {
+
+  const $ = id => document.getElementById(id);
+  const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d});
+  const fmtV = v => !v ? '--' : v >= 1e9 ? (v/1e9).toFixed(1)+'B' : v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v);
+  const esc  = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  let tickers    = [];   // ordered list of symbols the user added
+  let results    = [];   // scan results after running
+  let mscSortCol = 'confidence';
+  let mscSortDir = -1;
+  let _inited    = false;
+
+  // ── Ticker chip management ────────────────────────────────────────────────
+  function addTicker(sym) {
+    sym = sym.toUpperCase().trim().replace(/[^A-Z0-9.\-]/g, '');
+    if (!sym || tickers.includes(sym)) return;
+    tickers.push(sym);
+    renderChips();
+  }
+
+  function removeTicker(sym) {
+    tickers = tickers.filter(t => t !== sym);
+    renderChips();
+  }
+
+  function clearTickers() {
+    tickers = [];
+    renderChips();
+    resetResults();
+  }
+
+  function renderChips() {
+    const wrap  = $('mscChipsWrap');
+    const chips = $('mscChips');
+    const count = $('mscChipCount');
+    if (!chips) return;
+    if (!tickers.length) {
+      if (wrap) wrap.style.display = 'none';
+      return;
+    }
+    if (wrap) wrap.style.display = '';
+    chips.innerHTML = tickers.map(t =>
+      `<span class="msc-chip" data-sym="${esc(t)}">${esc(t)}<button class="msc-chip-remove" data-sym="${esc(t)}" title="Remove">✕</button></span>`
+    ).join('');
+    chips.querySelectorAll('.msc-chip-remove').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); removeTicker(btn.dataset.sym); });
+    });
+    if (count) count.textContent = tickers.length + ' ticker' + (tickers.length !== 1 ? 's' : '') + ' queued';
+  }
+
+  // ── Autocomplete search ────────────────────────────────────────────────────
+  function setupSearch() {
+    const input = $('mscInput');
+    const drop  = $('mscDrop');
+    if (!input || !drop) return;
+
+    let debounce;
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      const q = input.value.trim();
+      if (q.length < 1) { drop.style.display = 'none'; return; }
+      debounce = setTimeout(async () => {
+        try {
+          const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+          const items = await r.json();
+          if (!items.length) { drop.style.display = 'none'; return; }
+          drop.innerHTML = items.slice(0,8).map(it =>
+            `<div class="drop-item" data-sym="${esc(it.symbol)}">
+              <span class="drop-sym">${esc(it.symbol)}</span>
+              <span class="drop-name">${esc(it.name)}</span>
+            </div>`
+          ).join('');
+          drop.style.display = 'block';
+          drop.querySelectorAll('.drop-item').forEach(d => {
+            d.addEventListener('mousedown', e => {
+              e.preventDefault();
+              addTicker(d.dataset.sym);
+              input.value = '';
+              drop.style.display = 'none';
+            });
+          });
+        } catch { drop.style.display = 'none'; }
+      }, 240);
+    });
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const v = input.value.trim();
+        if (v) {
+          // Support comma-separated input
+          v.split(',').forEach(t => addTicker(t.trim()));
+          input.value = '';
+          drop.style.display = 'none';
+        }
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      setTimeout(() => { drop.style.display = 'none'; }, 200);
+    });
+
+    $('mscAddBtn')?.addEventListener('click', () => {
+      const v = input.value.trim();
+      if (v) { v.split(',').forEach(t => addTicker(t.trim())); input.value = ''; drop.style.display = 'none'; }
+    });
+  }
+
+  // ── Scan logic ────────────────────────────────────────────────────────────
+  async function runScan() {
+    if (!tickers.length) {
+      alert('Add at least one ticker before scanning.');
+      return;
+    }
+
+    setLoading(true);
+    results = [];
+
+    const total = tickers.length;
+    let done = 0;
+
+    // Fetch snapshots (price/volume) in batch
+    const snapRes = await fetch(`/api/snapshots?symbols=${tickers.join(',')}`).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+
+    // Fetch signals in parallel (VP + EMA + regime) — throttle to 6 at once
+    const CONCURRENT = 6;
+    const queue = [...tickers];
+    const sigMap = {};
+    const rsiMap = {};
+
+    async function worker() {
+      while (queue.length) {
+        const sym = queue.shift();
+        try {
+          const [sigRes, intraRes] = await Promise.all([
+            fetch(`/api/signal/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          ]);
+          sigMap[sym] = sigRes;
+          if (intraRes?.bars?.length >= 15) {
+            const closes = intraRes.bars.map(b => b.c);
+            rsiMap[sym] = calcRSI14(closes);
+          }
+        } catch {}
+        done++;
+        updateLoadingText(done, total);
+      }
+    }
+
+    // Spin up CONCURRENT workers
+    await Promise.all(Array.from({ length: CONCURRENT }, worker));
+
+    // Build results
+    results = tickers.map(sym => {
+      const snap = snapRes[sym] || {};
+      const sig  = sigMap[sym];
+      const rsi  = rsiMap[sym] ?? null;
+      const px   = snap.price || 0;
+      const pv   = snap.previousClose || 0;
+      const vol  = snap.volume || 0;
+      const avg  = snap.avgVolume || 1;
+      const chgPct = pv > 0 ? (px - pv) / pv * 100 : 0;
+      const relVol = avg > 0 ? vol / avg : 0;
+
+      const sigData = sig?.signal || {};
+      const signal     = sigData.signal     || 'HOLD';
+      const confidence = sigData.confidence ?? 0;
+      const vpZone     = sigData.zoneStr    || '';
+      const checks     = sigData.checks     || {};
+      const regime     = sig?.regime?.regime || '';
+      const isInverse  = sig?.isInverse     || false;
+
+      // EMA state summary
+      const above9  = checks.ema_trend?.pass;
+      const above50 = checks.above_ema50?.pass;
+      const ribbon  = checks.ma_ribbon_bullish?.pass;
+      const cross   = checks.ma_crossover?.pass;
+      const emaState = cross ? 'CROSS' : ribbon ? 'RIBBON' : above9 ? 'ABOVE' : 'BELOW';
+
+      return {
+        sym, price: px, chg: px - pv, chgPct, volume: vol, avgVol: avg,
+        relVol, rsi, signal, confidence, vpZone, emaState,
+        regime, isInverse, above9, above50, ribbon, cross,
+        dayHigh: snap.dayHigh || null, dayLow: snap.dayLow || null,
+        name: snap.name || sym,
+      };
+    });
+
+    // Apply filters
+    applyFiltersAndRender();
+    setLoading(false);
+  }
+
+  // Simple RSI (same as main scanner)
+  function calcRSI14(closes, period = 14) {
+    if (closes.length < period + 1) return null;
+    let g = 0, l = 0;
+    for (let i = 1; i <= period; i++) { const d = closes[i] - closes[i-1]; d >= 0 ? g += d : l += Math.abs(d); }
+    let ag = g / period, al = l / period;
+    for (let i = period + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i-1];
+      ag = (ag * (period-1) + (d >= 0 ? d : 0)) / period;
+      al = (al * (period-1) + (d < 0 ? Math.abs(d) : 0)) / period;
+    }
+    return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+
+  function applyFiltersAndRender() {
+    const sigFilter = ($('mscSignalFilter')?.value || '').toUpperCase();
+    const minConf   = parseFloat($('mscMinConf')?.value || '0') || 0;
+    const minRsi    = parseFloat($('mscMinRsi')?.value  || '0') || 0;
+    const maxRsi    = parseFloat($('mscMaxRsi')?.value  || '100') || 100;
+    const minChgPct = parseFloat($('mscMinChg')?.value  || '-999') || -999;
+    const minRelVol = parseFloat($('mscMinRelVol')?.value || '0') || 0;
+
+    let filtered = results.filter(r => {
+      if (sigFilter && r.signal !== sigFilter) return false;
+      if (r.confidence < minConf) return false;
+      if (r.rsi !== null && (r.rsi < minRsi || r.rsi > maxRsi)) return false;
+      if (r.chgPct < minChgPct) return false;
+      if (minRelVol > 0 && r.relVol < minRelVol) return false;
+      return true;
+    });
+
+    // Sort
+    const sortSel = $('mscSortSel');
+    mscSortCol = sortSel ? sortSel.value : 'confidence';
+    filtered.sort((a, b) => {
+      const av = a[mscSortCol] ?? -Infinity;
+      const bv = b[mscSortCol] ?? -Infinity;
+      return (av < bv ? -1 : av > bv ? 1 : 0) * mscSortDir;
+    });
+
+    renderTable(filtered);
+  }
+
+  // ── Table sort (click headers) ─────────────────────────────────────────────
+  function setupTableSort() {
+    document.querySelectorAll('.msc-th[data-col]').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        mscSortDir = mscSortCol === col ? mscSortDir * -1 : -1;
+        mscSortCol = col;
+        document.querySelectorAll('.msc-th[data-col]').forEach(h => {
+          h.dataset.sort = h.dataset.col === col ? (mscSortDir === 1 ? 'asc' : 'desc') : '';
+        });
+        // Also sync the dropdown
+        const sel = $('mscSortSel');
+        if (sel && [...sel.options].some(o => o.value === col)) sel.value = col;
+        applyFiltersAndRender();
+      });
+    });
+  }
+
+  // ── Render results table ──────────────────────────────────────────────────
+  function renderTable(rows) {
+    const table  = $('mscTable');
+    const body   = $('mscBody');
+    const empty  = $('mscEmpty');
+    const bar    = $('mscStatusBar');
+    const count  = $('mscCount');
+    const upd    = $('mscUpdated');
+
+    if (!body) return;
+
+    if (!rows.length) {
+      if (table) table.style.display = 'none';
+      if (empty) { empty.style.display = 'flex'; empty.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".35"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><span>No results match your filters — try relaxing the criteria</span>'; }
+      if (bar) bar.style.display = 'none';
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    if (table) table.style.display = '';
+    if (bar)   bar.style.display   = '';
+
+    body.innerHTML = rows.map(r => {
+      const chgCls  = r.chgPct >= 0 ? 'up' : 'down';
+      const rvCls   = r.relVol >= 3 ? 'sc-surge' : '';
+      const rsiStr  = r.rsi !== null ? fmt(r.rsi, 1) : '--';
+      const rsiCls  = r.rsi === null ? '' : r.rsi < 30 ? 'sc-oversold' : r.rsi > 70 ? 'sc-overbought' : '';
+
+      const sigCls  = r.signal === 'BUY' ? 'msc-sig-buy' : r.signal === 'SELL' ? 'msc-sig-sell' : 'msc-sig-hold';
+      const confCls = r.confidence >= 80 ? 'msc-conf-high' : r.confidence >= 65 ? 'msc-conf-med' : 'msc-conf-low';
+
+      const emaCls  = r.cross ? 'msc-ema-cross' : r.ribbon ? 'msc-ema-ribbon' : r.above9 ? 'msc-ema-above' : 'msc-ema-below';
+      const emaLbl  = r.cross ? '✦ CROSS' : r.ribbon ? '▲▲▲ RIBBON' : r.above9 ? '▲ ABOVE' : '▼ BELOW';
+
+      const invTag  = r.isInverse ? '<span class="at-inverse-badge">INV</span>' : '';
+      const regTag  = r.regime ? `<span class="msc-regime-tag msc-regime-${r.regime.toLowerCase()}">${r.regime}</span>` : '';
+
+      const vpShort = r.vpZone.replace(/^[^\w]*/, '').slice(0, 22);
+
+      return `<tr class="msc-row ${rsiCls}" data-sym="${esc(r.sym)}">
+        <td class="msc-td msc-td-sym">
+          <span class="msc-sym">${esc(r.sym)}</span>${invTag}
+          <span class="msc-name">${esc(r.name)}</span>
+          <div class="msc-tags">${regTag}</div>
+        </td>
+        <td class="msc-td msc-td-r">${r.price ? '$'+fmt(r.price) : '--'}</td>
+        <td class="msc-td msc-td-r ${chgCls}">${r.chgPct !== 0 ? (r.chgPct>=0?'+':'')+ fmt(r.chgPct)+'%' : '--'}</td>
+        <td class="msc-td msc-td-r">${fmtV(r.volume)}</td>
+        <td class="msc-td msc-td-r ${rvCls}">${fmt(r.relVol,1)}x</td>
+        <td class="msc-td msc-td-r">${rsiStr}</td>
+        <td class="msc-td"><span class="msc-sig ${sigCls}">${r.signal}</span></td>
+        <td class="msc-td msc-td-r"><span class="msc-conf ${confCls}">${r.confidence}%</span></td>
+        <td class="msc-td msc-td-zone">${esc(vpShort) || '--'}</td>
+        <td class="msc-td"><span class="msc-ema ${emaCls}">${emaLbl}</span></td>
+      </tr>`;
+    }).join('');
+
+    // Row click → open full analysis
+    body.querySelectorAll('.msc-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const r = results.find(x => x.sym === row.dataset.sym);
+        if (r && typeof openStock === 'function') {
+          openStock(r.sym, { symbol: r.sym, price: r.price, previousClose: r.price - r.chg, name: r.name });
+        }
+      });
+    });
+
+    if (count) count.textContent = `${rows.length} of ${results.length} result${results.length !== 1 ? 's' : ''}`;
+    if (upd)   upd.textContent   = 'Updated ' + new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+  }
+
+  function resetResults() {
+    results = [];
+    const table = $('mscTable'); if (table) table.style.display = 'none';
+    const empty = $('mscEmpty');
+    if (empty) { empty.style.display = 'flex'; empty.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".35"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><span>Add tickers above and click <strong>RUN SCAN</strong> to see results</span>'; }
+    const bar   = $('mscStatusBar'); if (bar) bar.style.display = 'none';
+  }
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  function setLoading(on) {
+    const ov  = $('mscLoading');
+    const btn = $('mscRunBtn');
+    if (ov) ov.style.display = on ? 'flex' : 'none';
+    if (btn) { btn.disabled = on; btn.textContent = on ? 'SCANNING…' : '▶ RUN SCAN'; }
+    if (!on) return;
+    const empty = $('mscEmpty'); if (empty) empty.style.display = 'none';
+    const table = $('mscTable'); if (table) table.style.display = 'none';
+    const bar   = $('mscStatusBar'); if (bar) bar.style.display = 'none';
+  }
+
+  function updateLoadingText(done, total) {
+    const el = $('mscLoadingTxt');
+    if (el) el.textContent = `Scanning ${done}/${total}…`;
+  }
+
+  // ── Export CSV ────────────────────────────────────────────────────────────
+  function exportCSV() {
+    if (!results.length) return;
+    const hdr = 'Ticker,Name,Price,Chg%,Volume,RelVol,RSI,Signal,Confidence,VP Zone,EMA,Regime,Inverse';
+    const rows = results.map(r =>
+      `${r.sym},"${r.name}",${fmt(r.price)},${fmt(r.chgPct)},${r.volume},${fmt(r.relVol,2)},${r.rsi!==null?fmt(r.rsi,1):''},${r.signal},${r.confidence},"${r.vpZone}",${r.emaState},${r.regime},${r.isInverse}`
+    );
+    const blob = new Blob([[hdr,...rows].join('\n')], {type:'text/csv'});
+    const a = Object.assign(document.createElement('a'), {href:URL.createObjectURL(blob), download:`custom_scan_${new Date().toISOString().slice(0,10)}.csv`});
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  // ── Import watchlist ──────────────────────────────────────────────────────
+  function importWatchlist() {
+    const wl = (typeof state !== 'undefined' && state.watchlist) ? state.watchlist : [];
+    if (!wl.length) { alert('Your watchlist is empty — add some stocks first.'); return; }
+    wl.forEach(sym => addTicker(sym));
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+  function init() {
+    if (_inited) return;
+    _inited = true;
+
+    setupSearch();
+    setupTableSort();
+
+    $('mscClearBtn')?.addEventListener('click', clearTickers);
+    $('mscImportWl')?.addEventListener('click', importWatchlist);
+    $('mscExportBtn')?.addEventListener('click', exportCSV);
+    $('mscRunBtn')?.addEventListener('click', runScan);
+
+    // Re-sort when dropdown changes
+    $('mscSortSel')?.addEventListener('change', () => {
+      mscSortCol = $('mscSortSel').value;
+      mscSortDir = -1;
+      applyFiltersAndRender();
+    });
+
+    resetResults();
+  }
+
+  return { init };
+})();
+
+document.addEventListener('DOMContentLoaded', () => customScanner.init());

@@ -658,7 +658,86 @@
 <div class="page" id="page-scanner">
   <div class="sc-page-wrap">
 
+    <!-- ── Scanner Tab Bar ────────────────────────────────────────────────────── -->
+    <div class="sc-tab-bar">
+      <button class="sc-tab active" id="scTabRegular" data-tab="regular">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Stock Scanner
+      </button>
+      <button class="sc-tab" id="scTabPM" data-tab="premarket">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a10 10 0 0 1 0 20"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="12" y1="12" x2="16" y2="14"/></svg>
+        Pre-Market Pumps
+        <span class="sc-tab-badge" id="pmTabBadge" style="display:none">0</span>
+      </button>
+    </div>
+
+    <!-- ── PRE-MARKET SCANNER PANEL ────────────────────────────────────────── -->
+    <div id="pmPanel" style="display:none">
+      <div class="pm-header">
+        <div>
+          <h2 class="pm-title">Pre-Market Pumps</h2>
+          <p class="pm-sub">Top movers before the bell — sorted by gap % from previous close</p>
+        </div>
+        <div class="pm-header-right">
+          <div class="pm-filter-row">
+            <label class="pm-filter-lbl">MIN GAP</label>
+            <select class="pm-sel" id="pmMinPct">
+              <option value="0">Any</option>
+              <option value="1" selected>1%+</option>
+              <option value="2">2%+</option>
+              <option value="3">3%+</option>
+              <option value="5">5%+</option>
+              <option value="10">10%+</option>
+            </select>
+            <div class="pm-side-toggle">
+              <button class="pm-side-btn active" id="pmGainersBtn" data-side="gainers">▲ Gainers</button>
+              <button class="pm-side-btn" id="pmLosersBtn" data-side="losers">▼ Losers</button>
+            </div>
+          </div>
+          <button class="pm-refresh-btn" id="pmRefreshBtn">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="pm-table-wrap">
+        <div class="pm-loading" id="pmLoading" style="display:none">
+          <div class="sc-spinner"></div>
+          <span>Scanning pre-market…</span>
+        </div>
+        <table class="pm-table">
+          <thead>
+            <tr>
+              <th class="pm-th pm-th-rank">#</th>
+              <th class="pm-th">TICKER</th>
+              <th class="pm-th pm-th-name">NAME</th>
+              <th class="pm-th pm-th-r">PM PRICE</th>
+              <th class="pm-th pm-th-r">GAP %</th>
+              <th class="pm-th pm-th-r">PM VOL</th>
+              <th class="pm-th pm-th-r">VS AVG VOL</th>
+              <th class="pm-th pm-th-act"></th>
+            </tr>
+          </thead>
+          <tbody id="pmBody"></tbody>
+        </table>
+        <div class="pm-empty" id="pmEmpty" style="display:none">No movers found matching your filter — try lowering the min gap %</div>
+      </div>
+
+      <div class="pm-status-bar">
+        <span class="pm-status-note" id="pmNote">Data from Yahoo Finance · Pre-market session 4:00–9:30 AM ET</span>
+        <span class="pm-status-right">
+          <span id="pmCount" class="pm-count"></span>
+          <span id="pmAsOf" class="pm-asof"></span>
+          <span class="pm-auto-row">
+            AUTO <button class="pm-auto-btn active" data-secs="0">OFF</button>
+            <button class="pm-auto-btn" data-secs="60">60s</button>
+            <button class="pm-auto-btn" data-secs="120">2m</button>
+          </span>
+        </span>
+      </div>
+    </div><!-- /pmPanel -->
+
+    <!-- Regular scanner content below (shown by default) -->
     <!-- Header -->
+    <div id="scRegularContent">
     <div class="sc-header">
       <div>
         <h1 class="sc-title">Stock Scanner</h1>
@@ -774,6 +853,7 @@
       <span class="sc-status-upd" id="scUpdated"></span>
     </div>
 
+  </div><!-- /scRegularContent -->
   </div><!-- /sc-page-wrap -->
 
   <!-- ── Custom / Manual Scanner ────────────────────────────────────────────── -->

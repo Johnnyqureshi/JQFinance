@@ -1012,3 +1012,205 @@ const customScanner = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', () => customScanner.init());
+
+// ── Pre-Market Pumps Scanner ──────────────────────────────────────────────────
+const premarketScanner = (() => {
+  const $ = id => document.getElementById(id);
+  const fmt  = n => n == null ? '—' : n.toLocaleString();
+  const fmtPct = n => n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  const fmtVol = v => {
+    if (v == null) return '—';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    return v.toString();
+  };
+
+  let _side    = 'gainers';
+  let _minPct  = 1;
+  let _timer   = null;
+  let _autoSec = 0;
+  let _cdTimer = null;
+  let _cdLeft  = 0;
+
+  // ── Fetch & Render ──────────────────────────────────────────────────────────
+  async function fetchAndRender(force = false) {
+    const loading = $('pmLoading');
+    const body    = $('pmBody');
+    const empty   = $('pmEmpty');
+    const count   = $('pmCount');
+    const asOf    = $('pmAsOf');
+    const badge   = $('pmTabBadge');
+
+    if (loading) loading.style.display = '';
+    if (empty)   empty.style.display   = 'none';
+
+    try {
+      const url = `/api/premarket-scan?minPct=${_minPct}&side=${_side}&top=50${force ? '&bust=' + Date.now() : ''}`;
+      const r   = await fetch(url);
+      const d   = await r.json();
+      const movers = d.movers || [];
+
+      if (loading) loading.style.display = 'none';
+
+      if (!movers.length) {
+        if (body)  body.innerHTML = '';
+        if (empty) empty.style.display = '';
+        if (count) count.textContent = '0 results';
+        if (badge) badge.style.display = 'none';
+        return;
+      }
+
+      if (count) count.textContent = movers.length + ' result' + (movers.length !== 1 ? 's' : '');
+      if (badge) { badge.textContent = movers.length; badge.style.display = ''; }
+      if (asOf && d.asOf) {
+        const t = new Date(d.asOf);
+        asOf.textContent = 'Updated ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      if (body) body.innerHTML = movers.map((m, i) => {
+        const pct     = m.pmPct ?? 0;
+        const pos     = pct >= 0;
+        const pctCls  = pos ? 'pm-pos' : 'pm-neg';
+        const relVol  = m.relVolume;
+        const relStr  = relVol == null ? '—' : relVol.toFixed(2) + '×';
+        const relCls  = relVol != null && relVol >= 3 ? 'pm-rel-hot' : relVol != null && relVol >= 1.5 ? 'pm-rel-warm' : '';
+        const pmHasDot = m.hasPMData ? '<span class="pm-dot" title="Live pre-market data"></span>' : '';
+        const sym     = m.symbol;
+
+        return `<tr class="pm-row" data-sym="${sym}">
+          <td class="pm-td pm-td-rank">${i + 1}</td>
+          <td class="pm-td pm-td-sym">
+            <span class="pm-sym">${sym}</span>${pmHasDot}
+          </td>
+          <td class="pm-td pm-td-name">${m.name || sym}</td>
+          <td class="pm-td pm-td-r">
+            ${m.pmPrice != null ? '$' + m.pmPrice.toFixed(2) : '—'}
+            ${m.prevClose != null ? '<span class="pm-prev">prev $' + m.prevClose.toFixed(2) + '</span>' : ''}
+          </td>
+          <td class="pm-td pm-td-r">
+            <span class="pm-pct ${pctCls}">${fmtPct(pct)}</span>
+          </td>
+          <td class="pm-td pm-td-r pm-vol">${fmtVol(m.pmVolume)}</td>
+          <td class="pm-td pm-td-r ${relCls}">${relStr}</td>
+          <td class="pm-td pm-td-act">
+            <button class="pm-add-btn" data-sym="${sym}" title="Send to Custom Scanner">+ Custom</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      // Wire up "add to custom scanner" buttons
+      body.querySelectorAll('.pm-add-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const sym = btn.dataset.sym;
+          // Dispatch to customScanner input
+          const inp = document.getElementById('mscInput');
+          if (inp) {
+            inp.value = sym;
+            inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          }
+          btn.textContent = '✓ Added';
+          btn.disabled = true;
+          setTimeout(() => { btn.textContent = '+ Custom'; btn.disabled = false; }, 2000);
+        });
+      });
+
+      // Click row → navigate to regular scanner and highlight symbol
+      body.querySelectorAll('.pm-row').forEach(row => {
+        row.addEventListener('click', e => {
+          if (e.target.closest('.pm-add-btn')) return;
+          // Switch to regular scanner tab and send to custom scanner
+          const sym = row.dataset.sym;
+          switchTab('regular');
+          const inp = document.getElementById('mscInput');
+          if (inp) {
+            inp.value = sym;
+            inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          }
+        });
+      });
+
+    } catch(e) {
+      if (loading) loading.style.display = 'none';
+      console.error('[PM Scan]', e.message);
+    }
+  }
+
+  // ── Tab switching ────────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    const pmPanel  = $('pmPanel');
+    const scRegular = $('scRegularContent');
+    const mscWrap  = $('mscWrap');
+    const tabRegular = $('scTabRegular');
+    const tabPM    = $('scTabPM');
+
+    if (tab === 'premarket') {
+      if (pmPanel)    pmPanel.style.display    = '';
+      if (scRegular)  scRegular.style.display  = 'none';
+      if (mscWrap)    mscWrap.style.display    = 'none';
+      tabRegular?.classList.remove('active');
+      tabPM?.classList.add('active');
+      fetchAndRender(); // load data when tab opens
+    } else {
+      if (pmPanel)    pmPanel.style.display    = 'none';
+      if (scRegular)  scRegular.style.display  = '';
+      if (mscWrap)    mscWrap.style.display    = '';
+      tabRegular?.classList.add('active');
+      tabPM?.classList.remove('active');
+    }
+  }
+
+  // ── Auto-refresh countdown ───────────────────────────────────────────────────
+  function startAutoRefresh(secs) {
+    clearInterval(_timer);
+    clearInterval(_cdTimer);
+    _autoSec = secs;
+    if (!secs) return;
+    _cdLeft = secs;
+    _timer = setInterval(() => fetchAndRender(true), secs * 1000);
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────────
+  function init() {
+    // Tab toggle
+    document.querySelectorAll('.sc-tab').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    // Min gap filter
+    $('pmMinPct')?.addEventListener('change', e => {
+      _minPct = parseFloat(e.target.value);
+      fetchAndRender(true);
+    });
+
+    // Gainers / Losers toggle
+    $('pmGainersBtn')?.addEventListener('click', () => {
+      _side = 'gainers';
+      $('pmGainersBtn')?.classList.add('active');
+      $('pmLosersBtn')?.classList.remove('active');
+      fetchAndRender(true);
+    });
+    $('pmLosersBtn')?.addEventListener('click', () => {
+      _side = 'losers';
+      $('pmLosersBtn')?.classList.add('active');
+      $('pmGainersBtn')?.classList.remove('active');
+      fetchAndRender(true);
+    });
+
+    // Refresh button
+    $('pmRefreshBtn')?.addEventListener('click', () => fetchAndRender(true));
+
+    // Auto-refresh buttons
+    document.querySelectorAll('.pm-auto-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.pm-auto-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        startAutoRefresh(parseInt(btn.dataset.secs));
+      });
+    });
+  }
+
+  return { init };
+})();
+
+document.addEventListener('DOMContentLoaded', () => premarketScanner.init());

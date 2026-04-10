@@ -455,6 +455,115 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── Pre-market scanner universe — broad pool of retail-active names ────────────
+const PM_UNIVERSE = [
+  // Mega-cap / high-beta — always move pre-market on macro news
+  'AAPL','MSFT','NVDA','TSLA','META','AMZN','GOOGL','AMD','INTC','AVGO',
+  'QCOM','TXN','MU','AMAT','KLAC','NFLX','CRM','ADBE','NOW','SNOW',
+  // High-momentum growth + retail favourites
+  'PLTR','SMCI','CRWD','NET','DDOG','RBLX','ABNB','DASH','UBER','SNAP',
+  'PINS','U','IONQ','PATH','AI','BBAI','SOUN','RXRX','MSTR','COIN',
+  'HOOD','SOFI','UPST','AFRM','OPEN','OPRA','ACHR','LUNR','RDW','RKLB',
+  'ASTS','SPCE','JOBY','LILM','NKLA','RIVN','LCID','FSR','ZEV','FFIE',
+  // Finance & crypto-adjacent
+  'JPM','BAC','GS','MS','V','MA','PYPL','SQ','NU','WFC','C','BLK',
+  // Biotech / pharma — big pre-market movers on FDA news
+  'MRNA','BNTX','GILD','BIIB','REGN','VRTX','AMGN','ABBV','PFE','LLY',
+  'NVAX','SAVA','AGEN','OCGN','ACAD','EXEL','KPTI','IDYA','TGTX','ACMR',
+  'DNLI','ARWR','MRTX','KURA','PRAX','PRGO','INVA','FOLD','IMVT','ANAB',
+  // ETFs — sector leaders show what's hot pre-market
+  'QQQ','SPY','IWM','SOXS','SOXL','TQQQ','SQQQ','UVXY','VXX','ARKK',
+  'XLF','XLK','XLE','XLV','XLU','XLI','XLRE','XLC','XLB','XLP','XLY',
+  // Energy, commodities & tankers
+  'XOM','CVX','SLB','HAL','OXY','MRO','APA','HES','COP','FANG',
+  'STNG','FRO','NAT','TK','BDRY',
+  // Small/mid cap momentum names that frequently gap
+  'GME','AMC','BBBY','CLOV','SPRT','IRNT','ATER','PHUN','CTRM','NAKD',
+  'EXPR','WISH','FAMI','MULN','EVGO','PLUG','FCEL','BLNK','CHPT','WM',
+  'HYLN','NKLA','SOLO','ARVL','IDEX','XPEV','NIO','LI','BIDU','PDD',
+  // Healthcare & biotech mid-cap
+  'TDOC','HIMS','ACMR','MELI','SE','GRAB','DKNG','PENN','MGM','WYNN',
+  // Miscellaneous high-float retail favs
+  'F','GM','FORD','T','VZ','DIS','BAC','KO','PEP','WMT','TGT','COST',
+];
+
+// ── GET /api/premarket-scan ────────────────────────────────────────────────────
+// Returns stocks with significant pre-market moves sorted by % gain/loss.
+// Works during market hours too — shows the opening gap from prev close.
+const _pmCache = { data: null, ts: 0 };
+app.get('/api/premarket-scan', async (req, res) => {
+  const minPct  = parseFloat(req.query.minPct ?? 1);   // default: show any mover ≥ 1%
+  const topN    = parseInt(req.query.top    ?? 50);    // return top N results
+  const gainers = req.query.side !== 'losers';         // default: show gainers
+
+  // Cache for 60 s — avoid hammering Yahoo Finance on repeated refreshes
+  if (_pmCache.data && Date.now() - _pmCache.ts < 60_000) {
+    return res.json(filterPM(_pmCache.data, minPct, topN, gainers));
+  }
+
+  try {
+    // De-dupe universe
+    const universe = [...new Set(PM_UNIVERSE.filter(Boolean))];
+
+    // Batch-fetch in groups of 40 (Yahoo rate-limit safe)
+    const chunks = [];
+    for (let i = 0; i < universe.length; i += 40) chunks.push(universe.slice(i, i + 40));
+
+    const raw = (await Promise.all(
+      chunks.map(batch => yf.quote(batch, {}, { validateResult: false }).catch(() => []))
+    )).flat();
+
+    const all = raw
+      .filter(q => q?.symbol)
+      .map(q => {
+        const prev     = q.regularMarketPreviousClose ?? null;
+        const pmPrice  = q.preMarketPrice ?? null;
+        const pmChange = q.preMarketChange ?? (pmPrice != null && prev != null ? pmPrice - prev : null);
+        const pmPct    = q.preMarketChangePercent != null
+          ? q.preMarketChangePercent          // already a percentage from Yahoo
+          : (pmChange != null && prev ? (pmChange / prev) * 100 : null);
+        const pmVol    = q.preMarketVolume ?? null;
+        const avgVol   = q.averageDailyVolume3Month ?? q.averageDailyVolume10Day ?? null;
+
+        // If no pre-market data, try today's gap from regular open vs prev close
+        const regOpen  = q.regularMarketOpen ?? null;
+        const gapPct   = pmPct != null ? pmPct
+          : (regOpen != null && prev ? ((regOpen - prev) / prev) * 100 : null);
+
+        return {
+          symbol:       q.symbol,
+          name:         q.longName || q.shortName || q.symbol,
+          pmPrice:      pmPrice ?? regOpen,
+          pmChange:     pmChange,
+          pmPct:        gapPct,
+          pmVolume:     pmVol,
+          avgVolume:    avgVol,
+          relVolume:    pmVol && avgVol ? +(pmVol / avgVol).toFixed(2) : null,
+          prevClose:    prev,
+          marketState:  q.marketState || 'CLOSED',
+          hasPMData:    pmPrice != null,
+        };
+      })
+      .filter(q => q.pmPct != null);
+
+    _pmCache.data = all;
+    _pmCache.ts   = Date.now();
+
+    res.json(filterPM(all, minPct, topN, gainers));
+  } catch(e) {
+    console.error('[PM Scan]', e.message);
+    res.status(500).json({ ok: false, error: e.message, movers: [] });
+  }
+});
+
+function filterPM(all, minPct, topN, gainers) {
+  const sorted = all
+    .filter(q => gainers ? q.pmPct >= minPct : q.pmPct <= -minPct)
+    .sort((a, b) => gainers ? b.pmPct - a.pmPct : a.pmPct - b.pmPct)
+    .slice(0, topN);
+  return { movers: sorted, total: sorted.length, asOf: new Date().toISOString() };
+}
+
 // ── GET /api/market-regime (public — no Alpaca auth needed) ──────────────────
 app.get('/api/market-regime', async (_req, res) => {
   try {

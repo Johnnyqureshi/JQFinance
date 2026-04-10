@@ -9,6 +9,9 @@ const alpacaTrader = (() => {
   let atLeverage     = 1;
   let atOrderType    = 'auto';
   let statusPoll  = null;
+  let keepAlivePoll = null;      // session keep-alive timer
+  let _pollFailures = 0;         // consecutive poll failures before hard disconnect
+  const POLL_FAIL_LIMIT = 3;    // tolerate up to 3 consecutive 401s before showing auth
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const $   = id => document.getElementById(id);
@@ -22,22 +25,34 @@ const alpacaTrader = (() => {
     return s < 60 ? s + 's ago' : Math.round(s/60) + 'm ago';
   };
 
+  // opts._silent = true  → caller handles 401 itself (polling); no auto-overlay
   async function apiFetch(url, opts={}) {
-    const r = await fetch(url, { credentials:'include', ...opts });
-    // Session expired — show auth overlay in-place (no redirect to a missing route)
+    const { _silent, ...fetchOpts } = opts;
+    const r = await fetch(url, { credentials:'include', ...fetchOpts });
     if (r.status === 401) {
+      if (_silent) {
+        // Let the poll decide when to hard-disconnect (after POLL_FAIL_LIMIT hits)
+        throw new Error('session_expired');
+      }
+      // Hard disconnect — user-triggered action returned 401, session is gone
       stopStatusPoll();
       connected   = false;
       autoEnabled = false;
-      // Use the global SPA overlay if available, else fall back to root redirect
-      if (typeof showAuthOverlay === 'function') {
-        showAuthOverlay();
-      } else {
-        window.location.href = '/';
-      }
+      if (typeof showAuthOverlay === 'function') showAuthOverlay();
+      else window.location.href = '/';
       throw new Error('session_expired');
     }
     return r.json();
+  }
+
+  // Hard-disconnect: called only after POLL_FAIL_LIMIT consecutive auth failures
+  function _hardDisconnect() {
+    stopStatusPoll();
+    connected   = false;
+    autoEnabled = false;
+    _pollFailures = 0;
+    updateConnStatus();
+    if (typeof showAuthOverlay === 'function') showAuthOverlay();
   }
 
   // ── Connection ─────────────────────────────────────────────────────────────
@@ -62,14 +77,31 @@ const alpacaTrader = (() => {
     }
   }
 
-  async function checkCredentials() {
-    try {
-      const r = await apiFetch('/api/alpaca/credentials');
-      connected  = !!r.connected;
-      alpacaMode = r.mode || 'live';
-      updateConnStatus();
-      if (connected) { loadAccount(); loadAutoSettings(); startStatusPoll(); loadAutoLog(); }
-    } catch(e) {}
+  // Retry up to `maxTries` times with `delay` ms between attempts.
+  // This makes the post-login re-connect resilient to cookie-timing edge cases.
+  async function checkCredentials(maxTries = 3, delay = 600) {
+    for (let attempt = 1; attempt <= maxTries; attempt++) {
+      try {
+        const r = await apiFetch('/api/alpaca/credentials');
+        connected  = !!r.connected;
+        alpacaMode = r.mode || 'paper';
+        _pollFailures = 0;
+        updateConnStatus();
+        if (connected) {
+          loadAccount();
+          loadAutoSettings();
+          startStatusPoll();
+          startKeepAlive();
+          loadAutoLog();
+        }
+        return; // success — stop retrying
+      } catch(e) {
+        if (attempt < maxTries) {
+          await new Promise(res => setTimeout(res, delay));
+        }
+        // On final attempt failure: leave connected as-is, don't wipe it to false
+      }
+    }
   }
 
   // ── Account snapshot ───────────────────────────────────────────────────────
@@ -231,7 +263,10 @@ const alpacaTrader = (() => {
   async function pollStatus() {
     if (!connected) return;
     try {
-      const st = await apiFetch('/api/alpaca/auto-status');
+      // _silent=true: a single 401 won't show the auth overlay immediately.
+      // We track consecutive failures and only hard-disconnect after POLL_FAIL_LIMIT.
+      const st = await apiFetch('/api/alpaca/auto-status', { _silent: true });
+      _pollFailures = 0; // successful response — reset failure counter
 
       // Spinner
       const sp = $('atScanSpinner');
@@ -281,16 +316,39 @@ const alpacaTrader = (() => {
         renderScanFeed(st.analyses);
       }
 
-    } catch(e) {}
+    } catch(e) {
+      if (e.message === 'session_expired') {
+        _pollFailures++;
+        if (_pollFailures >= POLL_FAIL_LIMIT) {
+          // Confirmed session has gone — hard disconnect now
+          _hardDisconnect();
+        }
+        // Otherwise stay connected; might be a transient blip — try again next tick
+      }
+      // Non-auth errors (network, JSON parse, server error) are silently ignored
+    }
   }
 
   function startStatusPoll() {
+    _pollFailures = 0;
     clearInterval(statusPoll);
     statusPoll = setInterval(pollStatus, 5000);
     pollStatus();
   }
 
   function stopStatusPoll() { clearInterval(statusPoll); statusPoll = null; }
+
+  // ── Session keep-alive — pings /api/auth/me every 10 min to prevent expiry ──
+  // This is important for long-running trading sessions where the user may leave
+  // the page idle without any other API calls being made.
+  function startKeepAlive() {
+    clearInterval(keepAlivePoll);
+    keepAlivePoll = setInterval(async () => {
+      try { await fetch('/api/auth/me', { credentials: 'include' }); } catch {}
+    }, 10 * 60 * 1000); // every 10 minutes
+  }
+
+  function stopKeepAlive() { clearInterval(keepAlivePoll); keepAlivePoll = null; }
 
   // ── Geo-risk + session-state gauge + regime ─────────────────────────────────
   function renderRiskGauge(geo, lunchLull, regime) {
@@ -579,11 +637,13 @@ const alpacaTrader = (() => {
       if (acct.error) throw new Error('Credentials saved but account failed: ' + acct.error);
       connected  = true;
       alpacaMode = r.mode || 'live';
+      _pollFailures = 0;
       hideModal();
       updateConnStatus();
       loadAccount();
       await loadAutoSettings();   // auto-enables engine
       startStatusPoll();
+      startKeepAlive();
       loadAutoLog();
     } catch(e) { if(errEl) errEl.textContent = e.message; }
     finally { btn.disabled=false; btn.textContent='Connect'; }
@@ -593,6 +653,7 @@ const alpacaTrader = (() => {
     await apiFetch('/api/alpaca/credentials', { method:'DELETE' });
     connected=false; autoEnabled=false;
     stopStatusPoll();
+    stopKeepAlive();
     updateConnStatus();
     updateEngineUI();
     hideModal();
@@ -868,6 +929,8 @@ const alpacaTrader = (() => {
   // ── Reset — called on logout to stop polling and clear connection state ────
   function reset() {
     stopStatusPoll();
+    stopKeepAlive();
+    _pollFailures = 0;
     connected    = false;
     autoEnabled  = false;
     updateConnStatus();
@@ -875,14 +938,28 @@ const alpacaTrader = (() => {
 
   // ── Page open ──────────────────────────────────────────────────────────────
   function open() {
-    checkCredentials().then(() => {
-      if (connected) startStatusPoll();
-    });
+    // checkCredentials already starts the poll + keep-alive if connected.
+    // The extra .then() guard here prevents a second startStatusPoll if credentials
+    // call is still in flight (it'll be a no-op since startStatusPoll clears first).
+    checkCredentials();
     loadAutoLog();
+  }
+
+  // ── Tab visibility reconnect — when user returns to tab after being away ───
+  // Re-validate the connection to catch any session expiry that happened while hidden.
+  function _setupVisibilityReconnect() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && connected) {
+        // Reset failure counter and let poll re-confirm connection status
+        _pollFailures = 0;
+        pollStatus();
+      }
+    });
   }
 
   function init() {
     bindEvents();
+    _setupVisibilityReconnect();
   }
 
   return { init, open, checkCredentials, reset };

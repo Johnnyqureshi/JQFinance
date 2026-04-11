@@ -1525,10 +1525,14 @@ async function runVEAutoTrader() {
       const amount = (user.amount || 1000) * lev;
 
       let price = sig.price;
-      const tpPct = sig.tpLevel && price ? Math.abs((sig.tpLevel - price) / price * 100) : 0;
-      const slPct = 1.5; // fixed 1.5% SL per strategy rules
-
       const shares = Math.max(1, Math.floor(amount / price));
+
+      // SL = midpoint of consolidation range (sig.slLevel); TP = prior structure swing
+      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2)
+        : side === 'buy' ? (price * 0.985).toFixed(2) : (price * 1.015).toFixed(2);
+      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2)
+        : side === 'buy' ? (price * 1.06).toFixed(2)  : (price * 0.94).toFixed(2);
+
       const orderBody = {
         symbol:         sig.symbol,
         qty:            String(shares),
@@ -1536,19 +1540,9 @@ async function runVEAutoTrader() {
         type:           'market',
         time_in_force:  'day',
         order_class:    'bracket',
+        take_profit:    { limit_price: tpPrice },
+        stop_loss:      { stop_price:  slPrice },
       };
-      if (tpPct > 0.2) {
-        const tpPrice = side === 'buy'
-          ? (price * (1 + tpPct / 100)).toFixed(2)
-          : (price * (1 - tpPct / 100)).toFixed(2);
-        orderBody.take_profit = { limit_price: tpPrice };
-      }
-      if (slPct > 0) {
-        const slPrice = side === 'buy'
-          ? (price * (1 - slPct / 100)).toFixed(2)
-          : (price * (1 + slPct / 100)).toFixed(2);
-        orderBody.stop_loss = { stop_price: slPrice };
-      }
 
       try {
         const order = await alpacaFetch(user.user_id, '/v2/orders', {

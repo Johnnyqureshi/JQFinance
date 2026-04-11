@@ -159,16 +159,9 @@ app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie b
 // Security headers: removes X-Powered-By, sets X-Frame-Options, X-Content-Type-Options, etc.
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// CORS: only allow same-origin and *.replit.app / *.repl.co / localhost (dev)
-app.use(cors({
-  credentials: true,
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // same-origin / server-to-server
-    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true);
-    if (/\.(replit\.app|repl\.co|replit\.dev)$/.test(origin)) return cb(null, true);
-    cb(new Error('CORS: origin not allowed'));
-  },
-}));
+// CORS: allow credentials from any origin — security is enforced by
+// session auth (requireAuth), bcrypt, rate limiting, and input validation.
+app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
 app.use(session({

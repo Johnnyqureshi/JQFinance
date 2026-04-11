@@ -631,6 +631,19 @@
 <div class="page" id="page-scanner">
   <div class="sc-page-wrap">
 
+    <!-- ── Strategy Tab Bar ───────────────────────────────────────────────────── -->
+    <div class="strat-tab-bar">
+      <button class="strat-tab active" data-strat="bounce">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Bounce 2.0
+      </button>
+      <button class="strat-tab" data-strat="volatility">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Volatility Expansion
+        <span class="strat-tab-badge" id="veTabBadge" style="display:none">0</span>
+      </button>
+    </div>
+
     <!-- ── Bounce 2.0 Scanner ─────────────────────────────────────────────────── -->
     <div class="bs-page">
 
@@ -703,6 +716,106 @@
       </div>
 
     </div><!-- /.bs-page -->
+
+    <!-- ── Volatility Expansion Scanner ──────────────────────────────────────── -->
+    <div class="ve-page" id="vePage" style="display:none">
+
+      <!-- Header -->
+      <div class="ve-header">
+        <div class="ve-header-left">
+          <h1 class="ve-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Volatility Expansion
+          </h1>
+          <p class="ve-subtitle">ATR Contraction → BB Squeeze → Volume Surge → Breakout · Auto-trades when enabled</p>
+        </div>
+        <div class="ve-header-right">
+          <div class="ve-auto-toggle-wrap">
+            <label class="ve-auto-lbl">Auto-Trade</label>
+            <label class="ve-toggle-switch">
+              <input type="checkbox" id="veAutoEnabled"/>
+              <span class="ve-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="ve-filter-pills">
+            <button class="ve-filter-btn active" data-filter="all">All</button>
+            <button class="ve-filter-btn" data-filter="confirmed">Confirmed Only</button>
+            <button class="ve-filter-btn" data-filter="squeeze">Squeezing</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rules card -->
+      <div class="ve-rules-card">
+        <div class="ve-rules-title">Setup Rules</div>
+        <div class="ve-rules-grid">
+          <div class="ve-rule"><span class="ve-rule-n">1</span><span class="ve-rule-txt"><strong>ATR Contraction:</strong> 5+ consecutive bars with ATR(14) below its 20-period average</span></div>
+          <div class="ve-rule"><span class="ve-rule-n">2</span><span class="ve-rule-txt"><strong>BB Squeeze:</strong> Bollinger Band (20,2) width at or near its lowest point in the last 20 bars</span></div>
+          <div class="ve-rule"><span class="ve-rule-n">3</span><span class="ve-rule-txt"><strong>Volume Surge:</strong> Current bar volume ≥ 1.5× the 20-bar average</span></div>
+          <div class="ve-rule"><span class="ve-rule-n">4</span><span class="ve-rule-txt"><strong>Breakout trigger:</strong> Long — close above consolidation high · Short — close below consolidation low</span></div>
+        </div>
+        <div class="ve-rules-exits">
+          <span class="ve-exits-lbl">Stop Loss:</span>
+          Long — below consolidation midpoint · Short — above consolidation midpoint
+        </div>
+      </div>
+
+      <!-- Auto-trade settings panel (shown when enabled) -->
+      <div class="ve-auto-panel" id="veAutoPanel" style="display:none">
+        <div class="ve-auto-title">Auto-Trade Configuration</div>
+        <div class="ve-auto-fields">
+          <div class="ve-auto-field">
+            <label class="ve-auto-flbl">Amount per trade</label>
+            <div class="ve-dollar-wrap"><span>$</span><input type="number" id="veAmount" class="ve-inp" value="1000" min="50" step="50"/></div>
+          </div>
+          <div class="ve-auto-field">
+            <label class="ve-auto-flbl">Leverage</label>
+            <div class="ve-lev-row">
+              <button class="ve-lb active" data-lev="1">1×</button>
+              <button class="ve-lb" data-lev="2">2×</button>
+              <button class="ve-lb" data-lev="4">4×</button>
+            </div>
+          </div>
+        </div>
+        <div class="ve-auto-note">Bot scans every 5 min during market hours (9:35–3:50 ET) and places bracket orders automatically via Alpaca when all 4 conditions are met. PDT rules and cooldowns are enforced.</div>
+        <button class="ve-save-btn" id="veSaveBtn">Save Settings</button>
+        <span class="ve-save-msg" id="veSaveMsg"></span>
+      </div>
+
+      <!-- Controls -->
+      <div class="ve-controls">
+        <div class="ve-input-group">
+          <input type="text" id="veCustomInput" class="ve-input" placeholder="Add tickers (press Enter)…" autocomplete="off" spellcheck="false"/>
+          <button class="ve-add-btn" id="veAddBtn">+ Add</button>
+          <button class="ve-import-btn" id="veImportWl">↓ Watchlist</button>
+        </div>
+        <div id="veChips" class="ve-chips"></div>
+        <div class="ve-run-row">
+          <button class="ve-run-btn" id="veRunBtn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Scan Universe
+          </button>
+          <div class="ve-spinner" id="veSpinner" style="display:none"></div>
+          <span class="ve-summary" id="veSummary">Click Scan Universe to check 60+ stocks for volatility squeeze setups</span>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div class="ve-table-wrap" id="veTableWrap">
+        <div class="ve-empty">Click <strong>Scan Universe</strong> to run the Volatility Expansion screen.</div>
+      </div>
+
+      <!-- Trade log -->
+      <div class="ve-log-section" id="veLogSection" style="display:none">
+        <div class="ve-log-title">
+          Auto-Trade Log
+          <button class="ve-log-refresh" id="veLogRefresh">↻ Refresh</button>
+        </div>
+        <div id="veLogBody"><div class="ve-empty">No auto-trades yet</div></div>
+      </div>
+
+    </div><!-- /.ve-page -->
+
   </div><!-- /.sc-page-wrap -->
 </div>
 
@@ -876,6 +989,7 @@
 <script src="/js/trader.js"></script>
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/scanner.js"></script>
+<script src="/js/volatility.js"></script>
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
 

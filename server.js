@@ -82,7 +82,19 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN buying_power REAL`,
   `ALTER TABLE auto_trade_log ADD COLUMN settled_cash REAL`,
   `ALTER TABLE auto_trade_log ADD COLUMN atr REAL`,
+  `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
+
+// ── VE auto-trade settings table ──────────────────────────────────────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS ve_auto_settings (
+    user_id  INTEGER PRIMARY KEY,
+    enabled  INTEGER DEFAULT 0,
+    amount   REAL    DEFAULT 1000.0,
+    leverage INTEGER DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie behaviour
@@ -1120,5 +1132,387 @@ app.get('/api/bounce-scan', async (req, res) => {
   });
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VOLATILITY EXPANSION STRATEGY ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── ATR (14) using Simple Moving Average of True Range ───────────────────────
+function calcATR(bars, period = 14) {
+  if (bars.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < bars.length; i++) {
+    const { h, l, c: prevC } = bars[i - 1];
+    const { h: ch, l: cl } = bars[i];
+    const tr = Math.max(ch - cl, Math.abs(ch - prevC), Math.abs(cl - prevC));
+    trs.push(tr);
+  }
+  if (trs.length < period) return null;
+  return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+// Returns full ATR series (one value per bar, null for first bar)
+function calcATRSeries(bars, period = 14) {
+  const result = new Array(bars.length).fill(null);
+  for (let i = period; i < bars.length; i++) {
+    const trs = [];
+    for (let j = 1; j <= period; j++) {
+      const prev = bars[i - j];
+      const cur  = bars[i - j + 1];
+      const tr   = Math.max(
+        cur.h - cur.l,
+        Math.abs(cur.h - prev.c),
+        Math.abs(cur.l - prev.c)
+      );
+      trs.push(tr);
+    }
+    result[i] = trs.reduce((a, b) => a + b, 0) / period;
+  }
+  return result;
+}
+
+// ── Bollinger Bands series ────────────────────────────────────────────────────
+function calcBBWidth(closes, period = 20, mult = 2) {
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const sma   = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + (b - sma) ** 2, 0) / period;
+  const std   = Math.sqrt(variance);
+  const upper = sma + mult * std;
+  const lower = sma - mult * std;
+  const width = sma > 0 ? (upper - lower) / sma * 100 : 0;
+  return { sma, upper, lower, std, width };
+}
+
+// Returns last N BB widths for squeeze detection
+function calcBBWidthSeries(closes, period = 20, mult = 2, lookback = 20) {
+  const widths = [];
+  for (let i = closes.length - lookback; i <= closes.length; i++) {
+    if (i < period) { widths.push(null); continue; }
+    const slice = closes.slice(i - period, i);
+    const sma   = slice.reduce((a, b) => a + b, 0) / period;
+    const std   = Math.sqrt(slice.reduce((a, b) => a + (b - sma) ** 2, 0) / period);
+    const w     = sma > 0 ? ((sma + mult * std) - (sma - mult * std)) / sma * 100 : 0;
+    widths.push(w);
+  }
+  return widths.filter(v => v !== null);
+}
+
+// ── Volatility Expansion Signal Computation ───────────────────────────────────
+async function computeVESignal(symbol) {
+  const bars = await fetchOHLCV(symbol, 150);
+  if (!bars || bars.length < 60) return { symbol, error: 'Insufficient data', direction: null, confirmed: false };
+
+  const closes  = bars.map(b => b.c);
+  const volumes = bars.map(b => b.v || 0);
+  const cur     = bars.at(-1);
+
+  // ── ATR series and 20-period ATR average ──────────────────────────────────
+  const atrSeries = calcATRSeries(bars, 14);
+  const curATR    = atrSeries.at(-1);
+  if (!curATR) return { symbol, error: 'ATR error', direction: null, confirmed: false };
+
+  const recentATRs = atrSeries.slice(-20).filter(v => v !== null);
+  const atrAvg20   = recentATRs.reduce((a, b) => a + b, 0) / recentATRs.length;
+
+  // ── Count consecutive recent bars where ATR < avg (contraction) ───────────
+  let contractionBars = 0;
+  for (let i = atrSeries.length - 1; i >= 0; i--) {
+    if (atrSeries[i] !== null && atrSeries[i] < atrAvg20) contractionBars++;
+    else break;
+  }
+  const hasContraction = contractionBars >= 5;
+
+  // ── Bollinger Band width — current and lookback ───────────────────────────
+  const bbCur  = calcBBWidth(closes, 20, 2);
+  if (!bbCur)  return { symbol, error: 'BB error', direction: null, confirmed: false };
+
+  const bbWidths   = calcBBWidthSeries(closes, 20, 2, 21);
+  const minWidth20 = Math.min(...bbWidths);
+  const isSqueezed = bbCur.width <= minWidth20 * 1.15;  // within 15% of the 20-bar minimum
+
+  // ── Consolidation range (highest high / lowest low during contraction) ────
+  const contractionWindow = Math.max(contractionBars, 5);
+  const rangeBars  = bars.slice(-contractionWindow);
+  const rangeHigh  = Math.max(...rangeBars.map(b => b.h));
+  const rangeLow   = Math.min(...rangeBars.map(b => b.l));
+  const rangeMid   = (rangeHigh + rangeLow) / 2;
+
+  // ── Volume surge ──────────────────────────────────────────────────────────
+  const avgVol20   = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
+  const curVol     = cur.v || 0;
+  const volRatio   = avgVol20 > 0 ? curVol / avgVol20 : 0;
+  const hasVolSurge = volRatio >= 1.5;
+
+  // ── Entry triggers ────────────────────────────────────────────────────────
+  const price      = cur.c;
+  const longTrig   = price > rangeHigh && hasVolSurge;
+  const shortTrig  = price < rangeLow  && hasVolSurge;
+  const confirmed  = (longTrig || shortTrig) && hasContraction && isSqueezed;
+  const direction  = confirmed ? (longTrig ? 'LONG' : 'SHORT') : null;
+
+  // ── Stop loss ─────────────────────────────────────────────────────────────
+  const slLong  = rangeMid;
+  const slShort = rangeMid;
+  const sl      = direction === 'LONG' ? slLong : direction === 'SHORT' ? slShort : rangeMid;
+
+  // Risk/Reward — TP is previous structure high (Long) / low (Short)
+  const swingTP = direction === 'LONG'
+    ? Math.max(...bars.slice(-40, -contractionWindow).map(b => b.h) || [price * 1.06])
+    : Math.min(...bars.slice(-40, -contractionWindow).map(b => b.l) || [price * 0.94]);
+  const tpLevel = swingTP || (direction === 'LONG' ? price * 1.06 : price * 0.94);
+
+  const riskDist   = direction === 'LONG'  ? price - sl : sl - price;
+  const rewardDist = direction === 'LONG'  ? tpLevel - price : price - tpLevel;
+  const rr         = riskDist > 0 ? +(rewardDist / riskDist).toFixed(2) : 0;
+
+  return {
+    symbol,
+    price:           +price.toFixed(4),
+    atr:             +curATR.toFixed(4),
+    atrAvg20:        +atrAvg20.toFixed(4),
+    atrRatio:        +(curATR / atrAvg20).toFixed(3),
+    contractionBars,
+    hasContraction,
+    bbWidth:         +bbCur.width.toFixed(3),
+    bbSMA:           +bbCur.sma.toFixed(4),
+    bbUpper:         +bbCur.upper.toFixed(4),
+    bbLower:         +bbCur.lower.toFixed(4),
+    bbMinWidth20:    +minWidth20.toFixed(3),
+    isSqueezed,
+    rangeHigh:       +rangeHigh.toFixed(4),
+    rangeLow:        +rangeLow.toFixed(4),
+    rangeMid:        +rangeMid.toFixed(4),
+    volRatio:        +volRatio.toFixed(2),
+    hasVolSurge,
+    direction,
+    confirmed,
+    signal:          confirmed ? `VOLATILITY EXPANSION CONFIRMED — ${direction}` : null,
+    slLevel:         +sl.toFixed(4),
+    tpLevel:         +tpLevel.toFixed(4),
+    rr,
+    date:            cur.t,
+    error:           null,
+  };
+}
+
+// ── VE Universe (same broad universe as Bounce 2.0) ───────────────────────────
+const VE_UNIVERSE = [
+  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
+  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ',
+  'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS',
+  'SPY','QQQ','IWM','DIA','SMH','ARKK',
+  'NFLX','UBER','SHOP','SQ','PYPL','SNAP','PINS','RBLX','DKNG',
+  'F','GM','RIVN','NIO','LI',
+  'TSM','AVGO','QCOM','MU','INTC','AMAT','LRCX','KLAC','ARM','SMCI',
+  'JPM','BAC','GS','MS','C','WFC','SCHW',
+  'XOM','CVX','COP','SLB','HAL',
+  'GLD','SLV','GDX','GDXJ','USO',
+  'CRWD','PANW','SNOW','DDOG','NET','ZS','MDB',
+  'MRNA','PFE','ABBV','LLY','REGN',
+];
+
+// ── VE signal cache ────────────────────────────────────────────────────────────
+const _veCache = new Map();
+const VE_TTL   = 5 * 60 * 1000;
+
+// ── GET /api/ve/signal/:symbol ────────────────────────────────────────────────
+app.get('/api/ve/signal/:symbol', async (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  try {
+    const sig = await computeVESignal(sym);
+    res.json(sig);
+  } catch (e) {
+    res.status(500).json({ symbol: sym, error: e.message, confirmed: false });
+  }
+});
+
+// ── GET /api/ve/scan?symbols=... ──────────────────────────────────────────────
+app.get('/api/ve/scan', async (req, res) => {
+  let syms = req.query.symbols
+    ? req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+    : VE_UNIVERSE;
+  syms = [...new Set(syms)].slice(0, 80);
+
+  const now   = Date.now();
+  const BATCH = 6;
+  const results = [];
+
+  for (let i = 0; i < syms.length; i += BATCH) {
+    const batch   = syms.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _veCache.get(sym);
+      if (cached && now - cached.ts < VE_TTL) return cached.data;
+      const sig = await computeVESignal(sym);
+      _veCache.set(sym, { data: sig, ts: now });
+      return sig;
+    }));
+    settled.forEach((r, idx) => {
+      if (r.status === 'fulfilled') results.push(r.value);
+      else results.push({ symbol: batch[idx], error: r.reason?.message || 'Failed', confirmed: false });
+    });
+  }
+
+  results.sort((a, b) => {
+    if (a.confirmed && !b.confirmed) return -1;
+    if (!a.confirmed && b.confirmed) return 1;
+    const aScore = (a.hasContraction ? 1 : 0) + (a.isSqueezed ? 1 : 0) + (a.hasVolSurge ? 1 : 0);
+    const bScore = (b.hasContraction ? 1 : 0) + (b.isSqueezed ? 1 : 0) + (b.hasVolSurge ? 1 : 0);
+    return bScore - aScore;
+  });
+
+  res.json({
+    ok: true,
+    total: results.length,
+    confirmed: results.filter(r => r.confirmed).length,
+    results,
+    scannedAt: new Date().toISOString(),
+  });
+});
+
+// ── GET /api/ve/auto-settings ─────────────────────────────────────────────────
+app.get('/api/ve/auto-settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM ve_auto_settings WHERE user_id = ?').get(req.session.userId);
+  res.json(row || { enabled: 0, amount: 1000, leverage: 1 });
+});
+
+// ── PUT /api/ve/auto-settings ─────────────────────────────────────────────────
+app.put('/api/ve/auto-settings', requireAuth, (req, res) => {
+  const { enabled, amount, leverage } = req.body || {};
+  db.prepare(`
+    INSERT INTO ve_auto_settings (user_id, enabled, amount, leverage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, amount = excluded.amount, leverage = excluded.leverage
+  `).run(req.session.userId, enabled ? 1 : 0, +amount || 1000, +leverage || 1);
+  res.json({ ok: true });
+});
+
+// ── Server-side VE Auto-Trader ────────────────────────────────────────────────
+// Runs every 5 minutes during regular US market hours (9:35 AM – 3:50 PM ET Mon-Fri)
+function isMarketOpen() {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day  = et.getDay();
+  const mins = et.getHours() * 60 + et.getMinutes();
+  return day >= 1 && day <= 5 && mins >= 575 && mins < 950; // 9:35–3:50 ET
+}
+
+async function runVEAutoTrader() {
+  if (!isMarketOpen()) return;
+
+  const users = db.prepare('SELECT user_id, amount, leverage FROM ve_auto_settings WHERE enabled = 1').all();
+  if (!users.length) return;
+
+  console.log(`[VE-Bot] Auto-scan triggered for ${users.length} user(s)`);
+
+  // Scan universe with a focused batch
+  const now = Date.now();
+  const universe = VE_UNIVERSE.slice(0, 40); // top 40 most liquid symbols
+  const BATCH = 6;
+  const signals = [];
+
+  for (let i = 0; i < universe.length; i += BATCH) {
+    const batch   = universe.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _veCache.get(sym);
+      if (cached && now - cached.ts < VE_TTL) return cached.data;
+      const sig = await computeVESignal(sym);
+      _veCache.set(sym, { data: sig, ts: Date.now() });
+      return sig;
+    }));
+    settled.forEach(r => { if (r.status === 'fulfilled' && r.value.confirmed) signals.push(r.value); });
+  }
+
+  if (!signals.length) { console.log('[VE-Bot] No confirmed signals.'); return; }
+  console.log(`[VE-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => s.symbol + ' ' + s.direction).join(', ')}`);
+
+  for (const user of users) {
+    const creds = getAlpacaCreds(user.user_id);
+    if (!creds) continue;
+
+    for (const sig of signals) {
+      // Check for existing position to avoid duplicates
+      let positions = [];
+      try {
+        positions = await alpacaFetch(user.user_id, '/v2/positions');
+      } catch { continue; }
+
+      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
+      if (alreadyIn) { console.log(`[VE-Bot] Already in ${sig.symbol} — skipping`); continue; }
+
+      // Check for recent trade in this symbol (30-min cooldown)
+      const recentTrade = db.prepare(`
+        SELECT id FROM auto_trade_log
+        WHERE user_id = ? AND symbol = ? AND strategy = 'volatility_expansion'
+        AND created_at >= datetime('now', '-30 minutes')
+      `).get(user.user_id, sig.symbol);
+      if (recentTrade) { console.log(`[VE-Bot] Cooldown active for ${sig.symbol}`); continue; }
+
+      const side   = sig.direction === 'LONG' ? 'buy' : 'sell';
+      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 1000) * lev;
+
+      let price = sig.price;
+      const tpPct = sig.tpLevel && price ? Math.abs((sig.tpLevel - price) / price * 100) : 0;
+      const slPct = sig.slLevel && price ? Math.abs((sig.slLevel - price) / price * 100) : 2;
+
+      const shares = Math.max(1, Math.floor(amount / price));
+      const orderBody = {
+        symbol:         sig.symbol,
+        qty:            String(shares),
+        side,
+        type:           'market',
+        time_in_force:  'day',
+        order_class:    'bracket',
+      };
+      if (tpPct > 0.2) {
+        const tpPrice = side === 'buy'
+          ? (price * (1 + tpPct / 100)).toFixed(2)
+          : (price * (1 - tpPct / 100)).toFixed(2);
+        orderBody.take_profit = { limit_price: tpPrice };
+      }
+      if (slPct > 0) {
+        const slPrice = side === 'buy'
+          ? (price * (1 - slPct / 100)).toFixed(2)
+          : (price * (1 + slPct / 100)).toFixed(2);
+        orderBody.stop_loss = { stop_price: slPrice };
+      }
+
+      try {
+        const order = await alpacaFetch(user.user_id, '/v2/orders', {
+          method: 'POST',
+          body:   JSON.stringify(orderBody),
+        });
+
+        db.prepare(`
+          INSERT INTO auto_trade_log
+            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'volatility_expansion', 'open', datetime('now'))
+        `).run(user.user_id, sig.symbol, side, shares, price,
+              orderBody.take_profit?.limit_price || null,
+              orderBody.stop_loss?.stop_price    || null,
+              order.id || null,
+              sig.signal || sig.direction);
+
+        console.log(`[VE-Bot] ORDER PLACED: ${side.toUpperCase()} ${shares} ${sig.symbol} @ ~$${price} for user ${user.user_id}`);
+      } catch (e) {
+        console.error(`[VE-Bot] Order failed for ${sig.symbol}:`, e.message);
+      }
+    }
+  }
+}
+
+// ── GET /api/ve/trade-log ─────────────────────────────────────────────────────
+app.get('/api/ve/trade-log', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT * FROM auto_trade_log
+    WHERE user_id = ? AND strategy = 'volatility_expansion'
+    ORDER BY created_at DESC LIMIT 50
+  `).all(req.session.userId);
+  res.json(rows);
+});
+
+// ── Start VE auto-trader interval ─────────────────────────────────────────────
+setInterval(runVEAutoTrader, 5 * 60 * 1000); // every 5 minutes
+console.log('[VE-Bot] Auto-trader engine initialized — scans every 5 min during market hours');
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

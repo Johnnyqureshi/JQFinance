@@ -17,17 +17,17 @@ const veScanner = (() => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.strat-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        const strat = tab.dataset.strat;
+        const strat  = tab.dataset.strat;
         const bsPage = document.querySelector('.bs-page');
         const vePage = $('vePage');
-        if (strat === 'bounce') {
-          if (bsPage) bsPage.style.display = '';
-          if (vePage) vePage.style.display = 'none';
-        } else {
-          if (bsPage) bsPage.style.display = 'none';
-          if (vePage) vePage.style.display = '';
-          loadAutoSettings();
-        }
+        const eePage = $('eePage');
+
+        if (bsPage) bsPage.style.display = strat === 'bounce'    ? '' : 'none';
+        if (vePage) vePage.style.display  = strat === 'volatility' ? '' : 'none';
+        if (eePage) eePage.style.display  = strat === 'earnings'  ? '' : 'none';
+
+        if (strat === 'volatility') loadAutoSettings();
+        if (strat === 'earnings' && typeof eeScanner !== 'undefined') eeScanner.onTabOpen();
       });
     });
   }

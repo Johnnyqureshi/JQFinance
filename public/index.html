@@ -642,6 +642,11 @@
         Volatility Expansion
         <span class="strat-tab-badge" id="veTabBadge" style="display:none">0</span>
       </button>
+      <button class="strat-tab" data-strat="earnings">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+        Explosive Earnings
+        <span class="strat-tab-badge" id="eeTabBadge" style="display:none">0</span>
+      </button>
     </div>
 
     <!-- ── Bounce 2.0 Scanner ─────────────────────────────────────────────────── -->
@@ -815,6 +820,116 @@
       </div>
 
     </div><!-- /.ve-page -->
+
+    <!-- ── Explosive Earnings Scanner ────────────────────────────────────────── -->
+    <div class="ee-page" id="eePage" style="display:none">
+
+      <!-- Header -->
+      <div class="ee-header">
+        <div class="ee-header-left">
+          <h1 class="ee-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+            Explosive Earnings Setup
+          </h1>
+          <p class="ee-subtitle">EPS beat ≥15% · Revenue growth ≥25% · Gap up ≥5% · Volume 2×+ · 10 EMA consolidation entry</p>
+        </div>
+        <div class="ee-header-right">
+          <div class="ee-auto-toggle-wrap">
+            <label class="ee-auto-lbl">Auto-Trade</label>
+            <label class="ee-toggle-switch">
+              <input type="checkbox" id="eeAutoEnabled"/>
+              <span class="ee-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="ee-filter-pills">
+            <button class="ee-filter-btn active" data-filter="all">All</button>
+            <button class="ee-filter-btn" data-filter="entry">Entry Zone</button>
+            <button class="ee-filter-btn" data-filter="shakeout">Shakeout</button>
+            <button class="ee-filter-btn" data-filter="watching">Watching</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rules card -->
+      <div class="ee-rules-card">
+        <div class="ee-rules-title">Setup Rules</div>
+        <div class="ee-rules-cols">
+          <div class="ee-rules-col">
+            <div class="ee-rules-col-title">Fundamental (FMP)</div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F1</span><span class="ee-rule-txt"><strong>EPS Surprise ≥15%</strong> vs analyst estimate</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F2</span><span class="ee-rule-txt"><strong>Revenue Growth ≥25%</strong> year-over-year</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F3</span><span class="ee-rule-txt"><strong>Analyst target</strong> tracked post-earnings</span></div>
+          </div>
+          <div class="ee-rules-col">
+            <div class="ee-rules-col-title">Technical</div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T1</span><span class="ee-rule-txt"><strong>Gap up ≥5%</strong> at open on earnings day</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T2</span><span class="ee-rule-txt"><strong>Volume ≥2×</strong> 20-day average on earnings day</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T3</span><span class="ee-rule-txt"><strong>Breaks 3-month resistance</strong> (prior 63-bar high)</span></div>
+          </div>
+          <div class="ee-rules-col">
+            <div class="ee-rules-col-title">Entry Trigger</div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-entry">E1</span><span class="ee-rule-txt"><strong>ENTRY ZONE:</strong> Close above prev bar high while within 2% of 10 EMA</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-entry">E2</span><span class="ee-rule-txt"><strong>SHAKEOUT:</strong> Dips below 10 EMA, then reclaims on next bar close</span></div>
+            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-risk">SL</span><span class="ee-rule-txt"><strong>Stop Loss:</strong> 3% below entry · TP 9% (3:1 R/R)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-trade settings panel -->
+      <div class="ee-auto-panel" id="eeAutoPanel" style="display:none">
+        <div class="ee-auto-title">Auto-Trade Configuration</div>
+        <div class="ee-auto-fields">
+          <div class="ee-auto-field">
+            <label class="ee-auto-flbl">Amount per trade</label>
+            <div class="ee-dollar-wrap"><span>$</span><input type="number" id="eeAmount" class="ee-inp" value="1000" min="50" step="50"/></div>
+          </div>
+          <div class="ee-auto-field">
+            <label class="ee-auto-flbl">Leverage</label>
+            <div class="ee-lev-row">
+              <button class="ee-lb active" data-lev="1">1×</button>
+              <button class="ee-lb" data-lev="2">2×</button>
+              <button class="ee-lb" data-lev="4">4×</button>
+            </div>
+          </div>
+        </div>
+        <div class="ee-auto-note">Bot scans every 5 min during market hours. It places a bracket BUY order (SL −3%, TP +9%) when ENTRY ZONE or SHAKEOUT signal fires and all fundamental/technical conditions are met. Requires FMP API key for fundamental checks.</div>
+        <button class="ee-save-btn" id="eeSaveBtn">Save Settings</button>
+        <span class="ee-save-msg" id="eeSaveMsg"></span>
+      </div>
+
+      <!-- Controls -->
+      <div class="ee-controls">
+        <div class="ee-input-group">
+          <input type="text" id="eeCustomInput" class="ee-input" placeholder="Add tickers (press Enter) — or leave blank to scan recent earnings…" autocomplete="off" spellcheck="false"/>
+          <button class="ee-add-btn" id="eeAddBtn">+ Add</button>
+          <button class="ee-import-btn" id="eeImportWl">↓ Watchlist</button>
+        </div>
+        <div id="eeChips" class="ee-chips"></div>
+        <div class="ee-run-row">
+          <button class="ee-run-btn" id="eeRunBtn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Scan Earnings Universe
+          </button>
+          <div class="ee-spinner" id="eeSpinner" style="display:none"></div>
+          <span class="ee-summary" id="eeSummary">Click Scan to screen stocks from recent earnings calendar for explosive setups</span>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div class="ee-table-wrap" id="eeTableWrap">
+        <div class="ee-empty">Click <strong>Scan Earnings Universe</strong> to screen stocks that recently reported earnings.</div>
+      </div>
+
+      <!-- Trade log -->
+      <div class="ee-log-section" id="eeLogSection" style="display:none">
+        <div class="ee-log-title">
+          Auto-Trade Log
+          <button class="ee-log-refresh" id="eeLogRefresh">↻ Refresh</button>
+        </div>
+        <div id="eeLogBody"><div class="ee-empty">No auto-trades yet</div></div>
+      </div>
+
+    </div><!-- /.ee-page -->
 
   </div><!-- /.sc-page-wrap -->
 </div>
@@ -990,6 +1105,7 @@
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/scanner.js"></script>
 <script src="/js/volatility.js"></script>
+<script src="/js/earnings.js"></script>
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
 

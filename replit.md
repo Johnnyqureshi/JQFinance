@@ -77,6 +77,24 @@ Preferred communication style: Simple, everyday language.
 - **Free plan limit**: ~250 requests/day — app degrades gracefully when hit
 - **Used only for**: analyst ratings, price targets, upgrades/downgrades, news (with Yahoo fallback)
 
+### Strategy Scanner (3 active bots)
+
+**Setup 1 — Bounce 2.0** (`/api/bounce-signal`, `/api/bounce-scan`)
+- EMA 8/21/34 + SMA 50 + Stochastic (8,3,3) pullback-to-trend entries
+- Bot: `auto_trade_settings` table, `runBounceAutoTrader()`, 5-min interval
+
+**Setup 2 — Volatility Expansion** (`/api/ve/*`)
+- ATR(14) contraction ≥5 bars → BB(20,2) squeeze → volume surge ≥1.5x → breakout close
+- Bot: `ve_auto_settings` table, `runVEAutoTrader()`, 5-min interval
+
+**Setup 3 — Explosive Earnings** (`/api/ee/*`)
+- EPS surprise ≥15% + Revenue growth ≥25% YoY + gap up ≥5% on earnings day + volume ≥2x
+- Post-gap entry: ENTRY_ZONE (close above prev bar high within 2% of 10 EMA) or SHAKEOUT_ENTRY
+- SL = 3% below entry; TP = 9% (3:1 R/R); auto-trades both signal types
+- Data: Yahoo Finance `earningsHistory` + `incomeStatementHistory` (FMP if valid key)
+- Earnings date detection: FMP exact date → volume spike heuristic in 5–75 days after fiscal quarter end
+- Bot: `ee_auto_settings` table, `runEEAutoTrader()`, 5-min interval, 90-day earnings window
+
 ### API Endpoints (server.js)
 - `GET /api/snapshots?symbols=A,B,C` — Yahoo Finance parallel chart quotes
 - `GET /api/quote/:symbol` — Yahoo Finance single chart quote
@@ -85,6 +103,10 @@ Preferred communication style: Simple, everyday language.
 - `GET /api/search?q=...` — Yahoo Finance search (equity symbols, US exchanges)
 - `GET /api/news/:symbol` — NewsAPI.org primary (20 articles w/ images + summaries), FMP fallback, Yahoo fallback
 - `GET /api/stock/:ticker` — FMP analyst ratings, price targets, upgrades/downgrades (graceful empty on rate limit)
+- `GET /api/ee/signal/:symbol` — Explosive Earnings signal for single symbol
+- `GET /api/ee/scan?symbols=...` — Explosive Earnings scan (default: recent earnings universe)
+- `GET|PUT /api/ee/auto-settings` — EE auto-trade settings per user
+- `GET /api/ee/trade-log` — EE auto-trade history
 
 ## Available Environment Variables
 - `FMP_API_KEY` — Financial Modeling Prep (analyst ratings, price targets, upgrades)

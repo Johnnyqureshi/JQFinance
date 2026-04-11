@@ -11,6 +11,14 @@ const SQLiteStore  = require('connect-sqlite3')(session);
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
+// Suppress noisy yahoo-finance2 deprecation warnings for modules we use intentionally
+const _origWarn = console.warn.bind(console);
+console.warn = (...args) => {
+  const msg = args[0]?.toString() || '';
+  if (msg.includes('financial statements submodules') || msg.includes('fundamentalsTimeSeries')) return;
+  _origWarn(...args);
+};
+
 const app      = express();
 const PORT     = 5000;
 const FMP_KEY  = process.env.FMP_API_KEY;
@@ -1514,5 +1522,506 @@ app.get('/api/ve/trade-log', requireAuth, (req, res) => {
 // ── Start VE auto-trader interval ─────────────────────────────────────────────
 setInterval(runVEAutoTrader, 5 * 60 * 1000); // every 5 minutes
 console.log('[VE-Bot] Auto-trader engine initialized — scans every 5 min during market hours');
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXPLOSIVE EARNINGS SETUP — Strategy 3
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── EE auto-trade settings table ──────────────────────────────────────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS ee_auto_settings (
+    user_id  INTEGER PRIMARY KEY,
+    enabled  INTEGER DEFAULT 0,
+    amount   REAL    DEFAULT 1000.0,
+    leverage INTEGER DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
+
+// ── FMP helpers ───────────────────────────────────────────────────────────────
+const FMP_BASE = 'https://financialmodelingprep.com/api';
+const FMP_H    = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+
+async function fmpGet(path) {
+  if (!FMP_KEY) return null;
+  const sep = path.includes('?') ? '&' : '?';
+  const r   = await fetch(`${FMP_BASE}${path}${sep}apikey=${FMP_KEY}`, FMP_H);
+  if (!r.ok) return null;
+  return r.json().catch(() => null);
+}
+
+// ── EMA series helper ─────────────────────────────────────────────────────────
+function calcEMASeries(closes, period) {
+  const result = new Array(closes.length).fill(null);
+  if (closes.length < period) return result;
+  const k = 2 / (period + 1);
+  let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  result[period - 1] = ema;
+  for (let i = period; i < closes.length; i++) {
+    ema = closes[i] * k + ema * (1 - k);
+    result[i] = ema;
+  }
+  return result;
+}
+
+// ── Fetch Yahoo Finance earnings fundamentals (primary data source) ────────────
+async function fetchYahooEarningsFundamentals(symbol) {
+  try {
+    // earningsHistory: EPS surprise + incomeStatementHistory: annual revenue
+    const data = await yf.quoteSummary(symbol, {
+      modules: ['earningsHistory', 'incomeStatementHistory'],
+    });
+    return data;
+  } catch { return null; }
+}
+
+// ── Detect earnings announcement date from price bars via volume spike ─────────
+// When we know the fiscal quarter end but not the exact announcement date,
+// find the bar with the highest volume spike in the 5-75 day window after quarter end.
+function detectEarningsBarIdx(bars, fiscalQuarterEndDate) {
+  const qEndMs = new Date(fiscalQuarterEndDate).getTime();
+  const winStart = qEndMs + 5  * 86400000;
+  const winEnd   = qEndMs + 75 * 86400000;
+
+  // Bars before the quarter end, for avg volume reference
+  const preBars = bars.filter(b => new Date(b.t).getTime() < qEndMs);
+  const preAvg  = preBars.slice(-20).reduce((a, b) => a + (b.v || 0), 0) / Math.max(1, Math.min(20, preBars.length));
+
+  let bestIdx = -1, bestScore = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const bMs = new Date(bars[i].t).getTime();
+    if (bMs < winStart || bMs > winEnd) continue;
+    const volRatio = preAvg > 0 ? (bars[i].v || 0) / preAvg : 0;
+    // Score = volume ratio * abs(gap) — high volume + big move = likely earnings day
+    const gapMag = i > 0 ? Math.abs((bars[i].o - bars[i - 1].c) / bars[i - 1].c) : 0;
+    const score  = volRatio * (1 + gapMag * 10);
+    if (score > bestScore) { bestScore = score; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+// ── Explosive Earnings Signal Computation ─────────────────────────────────────
+async function computeEESignal(symbol) {
+  const base = {
+    symbol, confirmed: false, signalType: null, earningsDate: null,
+    hasRecentEarnings: false, dataSource: 'yahoo',
+    epsSurprisePct: null, revenueGrowthPct: null, analystTarget: null,
+    shortFloat: null, shortSqueezePotential: false,
+    passEPS: false, passRevenue: false,
+    gapPct: null, volRatio: null, resistance: null,
+    resistanceBroken: false, passGap: false, passVolume: false, passResistance: false,
+    price: null, ema10: null, ema10Distance: null, nearEMA10: false, stopLoss: null,
+  };
+
+  // 1. Fetch Yahoo Finance fundamentals + price bars in parallel;
+  //    also try FMP as a premium supplement (fails gracefully if key invalid)
+  const [yfData, fmpSurprises, fmpIncome, fmpTarget, fmpShortFloat, bars] = await Promise.all([
+    fetchYahooEarningsFundamentals(symbol),
+    fmpGet(`/v3/earnings-surprises/${symbol}`).catch(() => null),
+    fmpGet(`/v3/income-statement/${symbol}?period=quarter&limit=5`).catch(() => null),
+    fmpGet(`/v3/price-target-consensus?symbol=${symbol}`).catch(() => null),
+    fmpGet(`/v4/short-float?symbol=${symbol}`).catch(() => null),
+    fetchOHLCV(symbol, 150),
+  ]);
+
+  if (!bars || bars.length < 30) return { ...base, error: 'Insufficient price data' };
+  base.price = bars.at(-1).c;
+
+  // ── 2. Resolve earnings date ───────────────────────────────────────────────
+  // Prefer FMP (gives exact announcement date), fall back to Yahoo quarterly end + heuristic
+  let earningsDate = null;
+  let epsSurprisePct = null;
+
+  const fmpEps = Array.isArray(fmpSurprises) ? fmpSurprises[0] : null;
+  if (fmpEps?.date) {
+    // FMP has exact announcement date
+    earningsDate = fmpEps.date;
+    base.dataSource = 'fmp';
+    if (fmpEps.actualEarningResult != null && fmpEps.estimatedEarning != null && fmpEps.estimatedEarning !== 0) {
+      epsSurprisePct = ((fmpEps.actualEarningResult - fmpEps.estimatedEarning) / Math.abs(fmpEps.estimatedEarning)) * 100;
+    }
+  } else {
+    // Use Yahoo Finance earningsHistory — quarter field = fiscal quarter END date
+    const yfHist = yfData?.earningsHistory?.history;
+    const lastQ  = yfHist?.length ? yfHist[yfHist.length - 1] : null;
+    if (!lastQ) return { ...base, error: 'No earnings history available' };
+
+    const fiscalQEnd = lastQ.quarter instanceof Date
+      ? lastQ.quarter.toISOString().slice(0, 10)
+      : String(lastQ.quarter).slice(0, 10);
+
+    epsSurprisePct = lastQ.surprisePercent != null ? lastQ.surprisePercent * 100 : null;
+
+    // Detect actual announcement bar from volume spike
+    const detectedIdx = detectEarningsBarIdx(bars, fiscalQEnd);
+    if (detectedIdx > 0) {
+      earningsDate = bars[detectedIdx].t;
+    } else {
+      // Estimate: fiscal quarter end + ~30 days (typical announcement lag)
+      const estMs = new Date(fiscalQEnd).getTime() + 30 * 86400000;
+      const estDate = new Date(estMs).toISOString().slice(0, 10);
+      // Find closest bar
+      const closeIdx = bars.findIndex(b => b.t >= estDate);
+      if (closeIdx > 0) earningsDate = bars[closeIdx].t;
+    }
+  }
+
+  if (!earningsDate) return { ...base, error: 'Could not determine earnings date' };
+
+  const ageDays = (Date.now() - new Date(earningsDate).getTime()) / 86400000;
+  if (ageDays > 90) return { ...base, error: `Last earnings ~${Math.round(ageDays)}d ago — outside 90-day window` };
+
+  base.hasRecentEarnings = true;
+  base.earningsDate = earningsDate;
+
+  // ── 3. EPS Surprise % ─────────────────────────────────────────────────────
+  // Prefer FMP if available (more accurate), else Yahoo surprise %
+  if (epsSurprisePct != null) {
+    base.epsSurprisePct = epsSurprisePct;
+    base.passEPS        = base.epsSurprisePct >= 15;
+  }
+
+  // ── 4. Revenue Growth YoY ─────────────────────────────────────────────────
+  // FMP quarterly income (preferred) → Yahoo annual income (fallback)
+  if (Array.isArray(fmpIncome) && fmpIncome.length >= 2) {
+    const curQ  = fmpIncome[0];
+    const cmpQ  = fmpIncome.length >= 5 ? fmpIncome[4] : fmpIncome[1];
+    if (curQ?.revenue && cmpQ?.revenue > 0) {
+      base.revenueGrowthPct = ((curQ.revenue - cmpQ.revenue) / cmpQ.revenue) * 100;
+      base.passRevenue      = base.revenueGrowthPct >= 25;
+    }
+  } else {
+    // Yahoo annual income — YoY comparison (most recent 2 years)
+    const annualStmts = yfData?.incomeStatementHistory?.incomeStatementHistory;
+    if (Array.isArray(annualStmts) && annualStmts.length >= 2) {
+      const cur  = annualStmts[0];
+      const prev = annualStmts[1];
+      if (cur?.totalRevenue && prev?.totalRevenue > 0) {
+        base.revenueGrowthPct = ((cur.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100;
+        base.passRevenue      = base.revenueGrowthPct >= 25;
+      }
+    }
+  }
+
+  // ── 5. Analyst target (FMP premium) ───────────────────────────────────────
+  const pt = Array.isArray(fmpTarget) ? fmpTarget[0] : fmpTarget;
+  base.analystTarget = pt?.targetConsensus ?? pt?.priceTarget ?? null;
+
+  // ── 6. Short float (FMP premium) ──────────────────────────────────────────
+  if (Array.isArray(fmpShortFloat) && fmpShortFloat[0]) {
+    base.shortFloat           = fmpShortFloat[0].shortFloat ?? null;
+    base.shortSqueezePotential = (base.shortFloat || 0) > 10;
+  }
+
+  // ── 7. Find earnings day bar ───────────────────────────────────────────────
+  const earningsIdx = bars.findIndex(b => b.t >= earningsDate);
+  if (earningsIdx < 1) return { ...base, error: 'No price bar found for earnings date' };
+  const earningsBar = bars[earningsIdx];
+  const prevBarE    = bars[earningsIdx - 1];
+
+  // ── 8. Gap % on earnings day ───────────────────────────────────────────────
+  if (earningsBar.o != null && prevBarE.c != null) {
+    base.gapPct  = ((earningsBar.o - prevBarE.c) / prevBarE.c) * 100;
+    base.passGap = base.gapPct >= 5;
+  }
+
+  // ── 9. Volume vs 20-day pre-earnings average ───────────────────────────────
+  const preSlice  = bars.slice(Math.max(0, earningsIdx - 20), earningsIdx);
+  const avgVol    = preSlice.length ? preSlice.reduce((a, b) => a + (b.v || 0), 0) / preSlice.length : 0;
+  base.volRatio   = avgVol > 0 ? (earningsBar.v || 0) / avgVol : null;
+  base.passVolume = (base.volRatio || 0) >= 2;
+
+  // ── 10. 3-month resistance (highest high in 63 bars before earnings) ───────
+  const resBars         = bars.slice(Math.max(0, earningsIdx - 63), earningsIdx);
+  base.resistance       = resBars.length ? Math.max(...resBars.map(b => b.h)) : null;
+  base.resistanceBroken = base.resistance != null && earningsBar.c > base.resistance;
+  base.passResistance   = base.resistanceBroken;
+
+  // ── 11. 10 EMA on full bar series ─────────────────────────────────────────
+  const closes    = bars.map(b => b.c);
+  const ema10Ser  = calcEMASeries(closes, 10);
+  base.ema10      = ema10Ser.at(-1);
+  if (base.ema10 && base.price) {
+    base.ema10Distance = ((base.price - base.ema10) / base.ema10) * 100;
+  }
+  base.nearEMA10 = Math.abs(base.ema10Distance ?? 999) <= 2;
+
+  // ── 12. Post-earnings entry trigger detection ──────────────────────────────
+  const postBars = bars.slice(earningsIdx + 1);
+  const postEMAs = ema10Ser.slice(earningsIdx + 1);
+
+  if (postBars.length >= 1) {
+    const lastBar   = bars.at(-1);
+    const prevBar2  = bars.at(-2);
+    const lastEMA10 = ema10Ser.at(-1);
+
+    // ENTRY_ZONE: price consolidating near 10 EMA, close above prev bar high
+    if (base.nearEMA10 && prevBar2 && lastBar.c > prevBar2.h) {
+      base.signalType = 'ENTRY_ZONE';
+    }
+
+    // SHAKEOUT_ENTRY: prev bar dipped below 10 EMA, this bar reclaims above EMA
+    if (postBars.length >= 2) {
+      const n          = postBars.length;
+      const pb         = postBars[n - 2];
+      const pema       = postEMAs[n - 2];
+      const shakeoutDip = pb && pema != null && pb.l < pema;
+      const reclaim     = lastEMA10 != null && lastBar.c > lastEMA10;
+      if (shakeoutDip && reclaim) base.signalType = 'SHAKEOUT_ENTRY';
+    }
+
+    // WATCHING: gap + volume confirmed but no entry trigger yet
+    if (!base.signalType && base.passGap && base.passVolume) base.signalType = 'WATCHING';
+  }
+
+  // ── 13. Stop loss (3% below entry) ────────────────────────────────────────
+  if (base.price) base.stopLoss = +(base.price * 0.97).toFixed(2);
+
+  // ── 14. Confirmed flag ────────────────────────────────────────────────────
+  // Full confirmation requires fundamentals (EPS + Revenue) AND technical (gap + volume) AND entry trigger
+  // If fundamental data is unavailable (neither FMP nor Yahoo returned it), skip fundamental gate
+  const hasFundamental = base.epsSurprisePct != null && base.revenueGrowthPct != null;
+  const fundamentalPass = hasFundamental ? (base.passEPS && base.passRevenue) : false;
+  base.confirmed = fundamentalPass && base.passGap && base.passVolume
+    && (base.signalType === 'ENTRY_ZONE' || base.signalType === 'SHAKEOUT_ENTRY');
+
+  return base;
+}
+
+// ── Fetch recent earnings from FMP calendar (default EE scan universe) ─────────
+async function fetchRecentEarningsSymbols() {
+  // Try FMP calendar first (exact announcement dates)
+  const today = new Date();
+  const from  = new Date(today); from.setDate(from.getDate() - 30);
+  const fmt   = d => d.toISOString().slice(0, 10);
+  const data  = await fmpGet(`/v3/earning_calendar?from=${fmt(from)}&to=${fmt(today)}`).catch(() => null);
+  if (Array.isArray(data) && data.length) {
+    const seen = new Set();
+    const syms = [];
+    for (const item of data) {
+      if (!item.symbol || seen.has(item.symbol) || item.symbol.includes('.') || item.symbol.length > 5) continue;
+      seen.add(item.symbol);
+      syms.push(item.symbol);
+      if (syms.length >= 50) break;
+    }
+    if (syms.length) return syms;
+  }
+
+  // FMP failed — return a curated list of high-volume earners likely to have
+  // reported earnings in the last 60 days (banks in early Q, tech mid-Q, etc.)
+  return [
+    // Q1 2026 early reporters (banks, financials)
+    'JPM','BAC','WFC','GS','MS','C','BLK','USB','PNC',
+    // Large-cap tech (report mid-Q)
+    'MSFT','GOOGL','META','AMZN','AAPL','NVDA','AMD','TSLA','NFLX',
+    // Growth / AI
+    'SNOW','CRWD','DDOG','PANW','NET','S','MDB','ZS',
+    // Consumer / Retail
+    'AMZN','COST','TGT','WMT','HD','LOW',
+    // Healthcare
+    'LLY','ABBV','REGN','MRNA','PFE',
+  ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+}
+
+// ── EE cache ──────────────────────────────────────────────────────────────────
+const _eeCache = new Map();
+const EE_TTL   = 10 * 60 * 1000; // 10 min (FMP calls are heavy)
+
+// ── GET /api/ee/signal/:symbol ────────────────────────────────────────────────
+app.get('/api/ee/signal/:symbol', async (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  try {
+    const cached = _eeCache.get(sym);
+    if (cached && Date.now() - cached.ts < EE_TTL) return res.json(cached.data);
+    const sig = await computeEESignal(sym);
+    _eeCache.set(sym, { data: sig, ts: Date.now() });
+    res.json(sig);
+  } catch (e) {
+    res.status(500).json({ symbol: sym, error: e.message, confirmed: false });
+  }
+});
+
+// ── GET /api/ee/scan?symbols=AAPL,TSLA,... ────────────────────────────────────
+app.get('/api/ee/scan', async (req, res) => {
+  let syms;
+  if (req.query.symbols) {
+    syms = req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  } else {
+    // Try to get symbols that recently had earnings from FMP
+    const earningsSyms = await fetchRecentEarningsSymbols();
+    syms = earningsSyms || BOUNCE_UNIVERSE.slice(0, 40);
+  }
+  syms = [...new Set(syms)].slice(0, 60);
+
+  const now    = Date.now();
+  const BATCH  = 4; // small batch — each symbol makes 4 FMP calls
+  const results = [];
+
+  for (let i = 0; i < syms.length; i += BATCH) {
+    const batch   = syms.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _eeCache.get(sym);
+      if (cached && now - cached.ts < EE_TTL) return cached.data;
+      const sig = await computeEESignal(sym);
+      _eeCache.set(sym, { data: sig, ts: Date.now() });
+      return sig;
+    }));
+    settled.forEach((r, idx) => {
+      if (r.status === 'fulfilled') results.push(r.value);
+      else results.push({ symbol: batch[idx], error: r.reason?.message || 'Failed', confirmed: false });
+    });
+    // Small pause between FMP batches to respect rate limits
+    if (i + BATCH < syms.length) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Sort: ENTRY_ZONE first, then SHAKEOUT, WATCHING, rest
+  const order = { ENTRY_ZONE: 0, SHAKEOUT_ENTRY: 1, WATCHING: 2 };
+  results.sort((a, b) => {
+    const oa = order[a.signalType] ?? 9;
+    const ob = order[b.signalType] ?? 9;
+    if (oa !== ob) return oa - ob;
+    return (b.gapPct || 0) - (a.gapPct || 0);
+  });
+
+  res.json({
+    ok: true,
+    total: results.length,
+    confirmed: results.filter(r => r.confirmed).length,
+    entryZone: results.filter(r => r.signalType === 'ENTRY_ZONE').length,
+    shakeout:  results.filter(r => r.signalType === 'SHAKEOUT_ENTRY').length,
+    watching:  results.filter(r => r.signalType === 'WATCHING').length,
+    results,
+    scannedAt: new Date().toISOString(),
+  });
+});
+
+// ── GET/PUT /api/ee/auto-settings ─────────────────────────────────────────────
+app.get('/api/ee/auto-settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM ee_auto_settings WHERE user_id = ?').get(req.session.userId);
+  res.json({ enabled: !!(row?.enabled), amount: row?.amount || 1000, leverage: row?.leverage || 1 });
+});
+
+app.put('/api/ee/auto-settings', requireAuth, (req, res) => {
+  const { enabled, amount, leverage } = req.body || {};
+  db.prepare(`
+    INSERT INTO ee_auto_settings (user_id, enabled, amount, leverage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      enabled  = excluded.enabled,
+      amount   = excluded.amount,
+      leverage = excluded.leverage
+  `).run(req.session.userId, enabled ? 1 : 0, +amount || 1000, +leverage || 1);
+  res.json({ ok: true });
+});
+
+// ── GET /api/ee/trade-log ─────────────────────────────────────────────────────
+app.get('/api/ee/trade-log', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT * FROM auto_trade_log
+    WHERE user_id = ? AND strategy = 'explosive_earnings'
+    ORDER BY created_at DESC LIMIT 50
+  `).all(req.session.userId);
+  res.json(rows);
+});
+
+// ── Server-side EE Auto-Trader ─────────────────────────────────────────────────
+async function runEEAutoTrader() {
+  if (!isMarketOpen()) return;
+
+  const users = db.prepare('SELECT user_id, amount, leverage FROM ee_auto_settings WHERE enabled = 1').all();
+  if (!users.length) return;
+
+  console.log(`[EE-Bot] Auto-scan triggered for ${users.length} user(s)`);
+
+  const now     = Date.now();
+  const earningSyms = await fetchRecentEarningsSymbols().catch(() => null) || BOUNCE_UNIVERSE.slice(0, 25);
+  const BATCH   = 4;
+  const signals = [];
+
+  for (let i = 0; i < earningSyms.length; i += BATCH) {
+    const batch   = earningSyms.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _eeCache.get(sym);
+      if (cached && now - cached.ts < EE_TTL) return cached.data;
+      const sig = await computeEESignal(sym);
+      _eeCache.set(sym, { data: sig, ts: Date.now() });
+      return sig;
+    }));
+    settled.forEach(r => {
+      if (r.status === 'fulfilled' && r.value.confirmed) signals.push(r.value);
+    });
+    if (i + BATCH < earningSyms.length) await new Promise(r => setTimeout(r, 300));
+  }
+
+  if (!signals.length) { console.log('[EE-Bot] No confirmed entry signals.'); return; }
+  console.log(`[EE-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => `${s.symbol} ${s.signalType}`).join(', ')}`);
+
+  for (const user of users) {
+    const creds = getAlpacaCreds(user.user_id);
+    if (!creds) continue;
+
+    for (const sig of signals) {
+      let positions = [];
+      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+
+      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
+      if (alreadyIn) { console.log(`[EE-Bot] Already in ${sig.symbol} — skipping`); continue; }
+
+      const recentTrade = db.prepare(`
+        SELECT id FROM auto_trade_log
+        WHERE user_id = ? AND symbol = ? AND strategy = 'explosive_earnings'
+        AND created_at >= datetime('now', '-60 minutes')
+      `).get(user.user_id, sig.symbol);
+      if (recentTrade) { console.log(`[EE-Bot] Cooldown active for ${sig.symbol}`); continue; }
+
+      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 1000) * lev;
+      const price  = sig.price;
+      const shares = Math.max(1, Math.floor(amount / price));
+
+      // SL = 3% below entry; TP = 9% above (3:1 R/R)
+      const slPrice = (price * 0.97).toFixed(2);
+      const tpPrice = (price * 1.09).toFixed(2);
+
+      const orderBody = {
+        symbol:        sig.symbol,
+        qty:           String(shares),
+        side:          'buy',
+        type:          'market',
+        time_in_force: 'day',
+        order_class:   'bracket',
+        take_profit:   { limit_price: tpPrice },
+        stop_loss:     { stop_price: slPrice },
+      };
+
+      try {
+        const order = await alpacaFetch(user.user_id, '/v2/orders', {
+          method: 'POST',
+          body:   JSON.stringify(orderBody),
+        });
+
+        db.prepare(`
+          INSERT INTO auto_trade_log
+            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
+          VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, 'explosive_earnings', 'open', datetime('now'))
+        `).run(
+          user.user_id, sig.symbol, shares, price,
+          tpPrice, slPrice,
+          order.id || null,
+          sig.signalType
+        );
+
+        console.log(`[EE-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] user=${user.user_id}`);
+      } catch (e) {
+        console.error(`[EE-Bot] Order failed ${sig.symbol}:`, e.message);
+      }
+    }
+  }
+}
+
+// ── Start EE auto-trader interval ─────────────────────────────────────────────
+setInterval(runEEAutoTrader, 5 * 60 * 1000);
+console.log('[EE-Bot] Explosive Earnings auto-trader initialized — scans every 5 min during market hours');
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

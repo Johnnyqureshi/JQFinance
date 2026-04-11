@@ -1141,6 +1141,23 @@ app.get('/api/bounce-scan', async (req, res) => {
 });
 
 
+// ── GET/PUT /api/bounce/auto-settings ─────────────────────────────────────────
+app.get('/api/bounce/auto-settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM auto_trade_settings WHERE user_id = ?').get(req.session.userId);
+  res.json(row ? { enabled: row.enabled, amount: row.investment_amount, leverage: row.leverage } : { enabled: 0, amount: 500, leverage: 1 });
+});
+
+app.put('/api/bounce/auto-settings', requireAuth, (req, res) => {
+  const { enabled, amount, leverage } = req.body;
+  db.prepare(`
+    INSERT INTO auto_trade_settings (user_id, enabled, investment_amount, leverage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, investment_amount=excluded.investment_amount, leverage=excluded.leverage
+  `).run(req.session.userId, enabled ? 1 : 0, amount || 500, leverage || 1);
+  res.json({ ok: true });
+});
+
+
 // ══════════════════════════════════════════════════════════════════════════════
 // VOLATILITY EXPANSION STRATEGY ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1404,6 +1421,54 @@ function isMarketOpen() {
   return day >= 1 && day <= 5 && mins >= 575 && mins < 950; // 9:35–3:50 ET
 }
 
+// ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
+async function runBounceAutoTrader() {
+  if (!isMarketOpen()) return;
+  const users = db.prepare('SELECT user_id, investment_amount AS amount, leverage FROM auto_trade_settings WHERE enabled = 1').all();
+  if (!users.length) return;
+  console.log(`[Bounce-Bot] Auto-scan for ${users.length} user(s)`);
+  const now = Date.now();
+  const signals = [];
+  for (let i = 0; i < BOUNCE_UNIVERSE.length; i += 8) {
+    const batch = BOUNCE_UNIVERSE.slice(i, i + 8);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _bounceCache.get(sym);
+      if (cached && now - cached.ts < BOUNCE_TTL) return cached.data;
+      const sig = await computeBounceSignal(sym);
+      _bounceCache.set(sym, { data: sig, ts: now });
+      return sig;
+    }));
+    settled.forEach(r => { if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value); });
+  }
+  if (!signals.length) { console.log('[Bounce-Bot] No confirmed signals.'); return; }
+  console.log(`[Bounce-Bot] ${signals.length} confirmed: ${signals.map(s => s.symbol).join(', ')}`);
+  for (const user of users) {
+    const creds = getAlpacaCreds(user.user_id);
+    if (!creds) continue;
+    for (const sig of signals) {
+      let positions = [];
+      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+      if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
+      const recent = db.prepare(`SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='bounce' AND created_at >= datetime('now','-30 minutes')`).get(user.user_id, sig.symbol);
+      if (recent) continue;
+      const lev = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 500) * lev;
+      const price = sig.price;
+      const shares = Math.max(1, Math.floor(amount / price));
+      const slPrice = (price * 0.985).toFixed(2);
+      const tpPrice = sig.tp ? sig.tp.toFixed(2) : (price * 1.045).toFixed(2);
+      const orderBody = { symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
+      try {
+        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
+        console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price}`);
+      } catch (e) { console.error(`[Bounce-Bot] Order failed ${sig.symbol}:`, e.message); }
+    }
+  }
+}
+setInterval(runBounceAutoTrader, 5 * 60 * 1000);
+console.log('[Bounce-Bot] Bounce 2.0 auto-trader initialized — scans every 5 min during market hours');
+
 async function runVEAutoTrader() {
   if (!isMarketOpen()) return;
 
@@ -1461,7 +1526,7 @@ async function runVEAutoTrader() {
 
       let price = sig.price;
       const tpPct = sig.tpLevel && price ? Math.abs((sig.tpLevel - price) / price * 100) : 0;
-      const slPct = sig.slLevel && price ? Math.abs((sig.slLevel - price) / price * 100) : 2;
+      const slPct = 1.5; // fixed 1.5% SL per strategy rules
 
       const shares = Math.max(1, Math.floor(amount / price));
       const orderBody = {
@@ -1980,9 +2045,9 @@ async function runEEAutoTrader() {
       const price  = sig.price;
       const shares = Math.max(1, Math.floor(amount / price));
 
-      // SL = 3% below entry; TP = 9% above (3:1 R/R)
-      const slPrice = (price * 0.97).toFixed(2);
-      const tpPrice = (price * 1.09).toFixed(2);
+      // SL = 1.5% below entry; TP = 4.5% above (3:1 R/R)
+      const slPrice = (price * 0.985).toFixed(2);
+      const tpPrice = (price * 1.045).toFixed(2);
 
       const orderBody = {
         symbol:        sig.symbol,

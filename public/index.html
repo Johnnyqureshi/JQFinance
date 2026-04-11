@@ -647,11 +647,6 @@
         Explosive Earnings
         <span class="strat-tab-badge" id="eeTabBadge" style="display:none">0</span>
       </button>
-      <button class="strat-tab" data-strat="countertrend">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-        Countertrend
-        <span class="strat-tab-badge" id="ctTabBadge" style="display:none">0</span>
-      </button>
     </div>
 
     <!-- ── Bounce 2.0 Scanner ─────────────────────────────────────────────────── -->
@@ -936,108 +931,6 @@
 
     </div><!-- /.ee-page -->
 
-    <!-- ── Countertrend Scanner ────────────────────────────────────────────────── -->
-    <div class="ct-page" id="ctPage" style="display:none">
-
-      <!-- Header -->
-      <div class="ct-header">
-        <div class="ct-header-left">
-          <h1 class="ct-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-            Countertrend Setups
-          </h1>
-          <p class="ct-subtitle">RSI extremes · S/R rejection · Engulfing candles · RSI divergence · 2618 retest</p>
-        </div>
-        <div class="ct-header-right">
-          <div class="ct-stat-box"><span class="ct-stat-val" id="ctStatTotal">--</span><span class="ct-stat-lbl">Scanned</span></div>
-          <div class="ct-stat-box ct-stat-box--hot"><span class="ct-stat-val" id="ctStatConfirmed">--</span><span class="ct-stat-lbl">Signals</span></div>
-        </div>
-      </div>
-
-      <!-- Rules -->
-      <div class="ct-rules-card">
-        <div class="ct-rules-title">Strategy Rules</div>
-        <div class="ct-rules-grid">
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-over">O1</span><span class="ct-rule-txt"><strong>RSI ≥70 (short)</strong> or <strong>RSI ≤30 (long)</strong> — overextension required</span></div>
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-over">O2</span><span class="ct-rule-txt"><strong>Within 1%</strong> of major resistance (short) or support (long) tested ≥2× in 6 months</span></div>
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-rev">R1</span><span class="ct-rule-txt"><strong>Bearish engulfing</strong> at resistance (short) or <strong>bullish engulfing</strong> at support (long)</span></div>
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-rev">R2</span><span class="ct-rule-txt"><strong>RSI divergence</strong> — price makes new extreme but RSI does not confirm</span></div>
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-2618">2618</span><span class="ct-rule-txt"><strong>2618 retest</strong> — trendline break + price retests broken trendline and closes in reversal direction</span></div>
-          <div class="ct-rule"><span class="ct-rule-n ct-rule-n-risk">RM</span><span class="ct-rule-txt"><strong>SL 1.5%</strong> from entry (or 1 tick outside swing high/low) · <strong>TP ≥2:1 R/R</strong> at nearest S/R or key MA</span></div>
-        </div>
-      </div>
-
-      <!-- Auto-trade config -->
-      <div class="ct-auto-card" id="ctAutoCard">
-        <div class="ct-auto-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-          Auto-Trade Bot
-          <span class="ct-auto-badge" id="ctAutoBadge">OFF</span>
-        </div>
-        <div class="ct-auto-fields">
-          <label class="ct-auto-label">Position Size ($)<input type="number" id="ctAmount" class="ct-auto-input" value="500" min="10" step="50"/></label>
-          <label class="ct-auto-label">Leverage<input type="number" id="ctLeverage" class="ct-auto-input" value="1" min="1" max="4" step="0.5"/></label>
-          <button class="ct-auto-save" id="ctAutoSave">Save</button>
-          <button class="ct-auto-toggle" id="ctAutoToggle" data-enabled="0">Enable Bot</button>
-        </div>
-        <div class="ct-auto-note">Bot scans every 5 min during market hours. SL fixed at 1.5% · Target ≥2:1 R/R. Longs &amp; shorts executed via Alpaca.</div>
-      </div>
-
-      <!-- Custom tickers -->
-      <div class="ct-chips-wrap">
-        <div class="ct-chips" id="ctChips"></div>
-        <input type="text" id="ctCustomInput" class="ct-input" placeholder="Add tickers (press Enter) — or leave blank to scan 80+ large-caps…" autocomplete="off" spellcheck="false"/>
-      </div>
-
-      <!-- Filter + scan -->
-      <div class="ct-controls">
-        <div class="ct-filters">
-          <button class="ct-filter-btn active" data-filter="all">All</button>
-          <button class="ct-filter-btn" data-filter="short">Short Setups</button>
-          <button class="ct-filter-btn" data-filter="long">Long Setups</button>
-          <button class="ct-filter-btn" data-filter="2618">2618 Retest</button>
-          <button class="ct-filter-btn" data-filter="confirmed">Confirmed Only</button>
-        </div>
-        <button class="ct-scan-btn" id="ctScanBtn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          Scan Universe
-        </button>
-      </div>
-      <div class="ct-summary" id="ctSummary">Click Scan Universe to screen 80+ large-caps for countertrend reversal setups</div>
-
-      <!-- Results table -->
-      <div class="ct-table-wrap">
-        <div class="ct-empty" id="ctEmpty">Click <strong>Scan Universe</strong> to screen stocks for countertrend setups at key S/R levels.</div>
-        <table class="ct-table" id="ctTable" style="display:none">
-          <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Price</th>
-              <th>RSI</th>
-              <th>S/R Level</th>
-              <th>Candle</th>
-              <th>Divergence</th>
-              <th>Signal</th>
-              <th>Stop</th>
-              <th>Target</th>
-              <th>R/R</th>
-            </tr>
-          </thead>
-          <tbody id="ctTableBody"></tbody>
-        </table>
-      </div>
-
-      <!-- Trade log -->
-      <div class="ct-log-card" id="ctLogCard">
-        <div class="ct-log-title">
-          Auto-Trade Log
-          <button class="ct-log-refresh" id="ctLogRefresh">↻ Refresh</button>
-        </div>
-        <div id="ctLogBody"><div class="ct-empty">No auto-trades yet</div></div>
-      </div>
-
-    </div><!-- /.ct-page -->
-
   </div><!-- /.sc-page-wrap -->
 </div>
 
@@ -1165,6 +1058,86 @@
 
     </div><!-- /.at-body -->
 
+    <!-- ── Auto-Trade Bot Settings ───────────────────────────────────────────── -->
+    <div class="at-bots-section">
+      <div class="at-bots-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Automated Bot Settings
+        <span class="at-bots-sub">Bots scan every 5 min during market hours · All orders via Alpaca · SL 1.5% on all strategies</span>
+      </div>
+      <div class="at-bots-grid">
+
+        <!-- Bot 1: Bounce 2.0 -->
+        <div class="at-bot-card" id="atBotBounce">
+          <div class="at-bot-head">
+            <span class="at-bot-name">Bounce 2.0</span>
+            <span class="at-bot-badge" id="atBotBadge1">OFF</span>
+          </div>
+          <div class="at-bot-desc">EMA 8/21/34 · SMA 50 · Stochastic pullback · TP at swing high</div>
+          <div class="at-bot-fields">
+            <label class="at-bot-lbl">Amount ($)<input type="number" id="atBotAmt1" class="at-bot-inp" value="500" min="10" step="50"/></label>
+            <label class="at-bot-lbl">Leverage<input type="number" id="atBotLev1" class="at-bot-inp" value="1" min="1" max="4" step="0.5"/></label>
+          </div>
+          <div class="at-bot-btns">
+            <button class="at-bot-save" data-bot="bounce">Save</button>
+            <button class="at-bot-toggle" data-bot="bounce" data-enabled="0">Enable</button>
+          </div>
+        </div>
+
+        <!-- Bot 2: Volatility Expansion -->
+        <div class="at-bot-card" id="atBotVE">
+          <div class="at-bot-head">
+            <span class="at-bot-name">Volatility Expansion</span>
+            <span class="at-bot-badge" id="atBotBadge2">OFF</span>
+          </div>
+          <div class="at-bot-desc">ATR(14) squeeze → BB breakout · Vol surge ≥1.5× · TP at 2× ATR above entry</div>
+          <div class="at-bot-fields">
+            <label class="at-bot-lbl">Amount ($)<input type="number" id="atBotAmt2" class="at-bot-inp" value="500" min="10" step="50"/></label>
+            <label class="at-bot-lbl">Leverage<input type="number" id="atBotLev2" class="at-bot-inp" value="1" min="1" max="4" step="0.5"/></label>
+          </div>
+          <div class="at-bot-btns">
+            <button class="at-bot-save" data-bot="ve">Save</button>
+            <button class="at-bot-toggle" data-bot="ve" data-enabled="0">Enable</button>
+          </div>
+        </div>
+
+        <!-- Bot 3: Explosive Earnings -->
+        <div class="at-bot-card" id="atBotEE">
+          <div class="at-bot-head">
+            <span class="at-bot-name">Explosive Earnings</span>
+            <span class="at-bot-badge" id="atBotBadge3">OFF</span>
+          </div>
+          <div class="at-bot-desc">EPS ≥15% · Rev ≥25% · Gap ≥5% · Vol ≥2× · 10 EMA entry/shakeout · TP 9%</div>
+          <div class="at-bot-fields">
+            <label class="at-bot-lbl">Amount ($)<input type="number" id="atBotAmt3" class="at-bot-inp" value="500" min="10" step="50"/></label>
+            <label class="at-bot-lbl">Leverage<input type="number" id="atBotLev3" class="at-bot-inp" value="1" min="1" max="4" step="0.5"/></label>
+          </div>
+          <div class="at-bot-btns">
+            <button class="at-bot-save" data-bot="ee">Save</button>
+            <button class="at-bot-toggle" data-bot="ee" data-enabled="0">Enable</button>
+          </div>
+        </div>
+
+        <!-- Bot 4: Countertrend -->
+        <div class="at-bot-card" id="atBotCT">
+          <div class="at-bot-head">
+            <span class="at-bot-name">Countertrend</span>
+            <span class="at-bot-badge" id="atBotBadge4">OFF</span>
+          </div>
+          <div class="at-bot-desc">RSI extreme · S/R rejection · Engulfing/divergence · 2618 retest · TP at nearest S/R or MA</div>
+          <div class="at-bot-fields">
+            <label class="at-bot-lbl">Amount ($)<input type="number" id="atBotAmt4" class="at-bot-inp" value="500" min="10" step="50"/></label>
+            <label class="at-bot-lbl">Leverage<input type="number" id="atBotLev4" class="at-bot-inp" value="1" min="1" max="4" step="0.5"/></label>
+          </div>
+          <div class="at-bot-btns">
+            <button class="at-bot-save" data-bot="ct">Save</button>
+            <button class="at-bot-toggle" data-bot="ct" data-enabled="0">Enable</button>
+          </div>
+        </div>
+
+      </div><!-- /.at-bots-grid -->
+    </div><!-- /.at-bots-section -->
+
   </div><!-- /.at-page -->
 </div><!-- /.page#page-trading -->
 
@@ -1213,7 +1186,7 @@
 <script src="/js/scanner.js"></script>
 <script src="/js/volatility.js"></script>
 <script src="/js/earnings.js"></script>
-<script src="/js/countertrend.js"></script>
+
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
 

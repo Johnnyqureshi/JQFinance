@@ -7299,3 +7299,36 @@ option { background: var(--card); }
   .ct-header      { flex-direction: column; }
   .ct-rules-grid  { grid-template-columns: 1fr; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRADING DESK — 4-Bot Settings Panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.at-bots-section     { margin: 24px 0 0; padding: 0 24px 40px; }
+.at-bots-title       { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+.at-bots-title svg   { color: #f0b429; }
+.at-bots-sub         { font-weight: 400; font-size: 0.72rem; color: #484f58; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.at-bots-grid        { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+.at-bot-card         { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; }
+.at-bot-head         { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.at-bot-name         { font-size: 0.85rem; font-weight: 700; color: #e6edf3; }
+.at-bot-badge        { padding: 2px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; background: #30363d; color: #8b949e; }
+.at-bot-badge--on    { background: #3fb95022; color: #3fb950; }
+.at-bot-desc         { font-size: 0.72rem; color: #8b949e; margin-bottom: 10px; line-height: 1.4; }
+.at-bot-fields       { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.at-bot-lbl          { display: flex; flex-direction: column; gap: 3px; font-size: 0.7rem; color: #8b949e; }
+.at-bot-inp          { background: #0d1117; border: 1px solid #30363d; border-radius: 5px; color: #e6edf3; padding: 5px 8px; font-size: 0.8rem; width: 90px; outline: none; font-family: 'DM Mono', monospace; }
+.at-bot-inp:focus    { border-color: #f0b429; }
+.at-bot-btns         { display: flex; gap: 8px; }
+.at-bot-save         { padding: 5px 12px; background: #21262d; border: 1px solid #30363d; border-radius: 5px; color: #c9d1d9; font-size: 0.75rem; cursor: pointer; transition: background .15s; }
+.at-bot-save:hover   { background: #30363d; }
+.at-bot-toggle       { padding: 5px 14px; background: #f0b42918; border: 1px solid #f0b42944; border-radius: 5px; color: #f0b429; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.at-bot-toggle:hover { background: #f0b42930; }
+.at-bot-toggle--on   { background: #3fb95018; border-color: #3fb95044; color: #3fb950; }
+
+@media (max-width: 768px) {
+  .at-bots-section { padding: 0 12px 40px; }
+  .at-bots-grid    { grid-template-columns: 1fr; }
+}

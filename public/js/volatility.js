@@ -11,7 +11,7 @@ const veScanner = (() => {
   let _results  = [];
   let _veLev    = 1;
 
-  // ── Tab switching (all 4 strategies) ────────────────────────────────────
+  // ── Tab switching (Bounce 2.0 ↔ Volatility Expansion ↔ Explosive Earnings) ──
   function initTabs() {
     document.querySelectorAll('.strat-tab').forEach(tab => {
       tab.addEventListener('click', () => {
@@ -21,16 +21,13 @@ const veScanner = (() => {
         const bsPage = document.querySelector('.bs-page');
         const vePage = $('vePage');
         const eePage = $('eePage');
-        const ctPage = $('ctPage');
 
-        if (bsPage) bsPage.style.display = strat === 'bounce'       ? '' : 'none';
-        if (vePage) vePage.style.display  = strat === 'volatility'   ? '' : 'none';
-        if (eePage) eePage.style.display  = strat === 'earnings'     ? '' : 'none';
-        if (ctPage) ctPage.style.display  = strat === 'countertrend' ? '' : 'none';
+        if (bsPage) bsPage.style.display = strat === 'bounce'    ? '' : 'none';
+        if (vePage) vePage.style.display  = strat === 'volatility' ? '' : 'none';
+        if (eePage) eePage.style.display  = strat === 'earnings'  ? '' : 'none';
 
-        if (strat === 'volatility')   loadAutoSettings();
-        if (strat === 'earnings'     && typeof eeScanner  !== 'undefined') eeScanner.onTabOpen();
-        if (strat === 'countertrend' && typeof ctScanner  !== 'undefined') ctScanner.onTabOpen();
+        if (strat === 'volatility') loadAutoSettings();
+        if (strat === 'earnings' && typeof eeScanner !== 'undefined') eeScanner.onTabOpen();
       });
     });
   }

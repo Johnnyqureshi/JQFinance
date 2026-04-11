@@ -8,7 +8,7 @@
     'SPY','QQQ','GE','NIO'
   ];
 
-  let tickers     = [];
+  const tickers   = [...DEFAULT_TICKERS];   // fixed list — no UI management
   let scanData    = [];
   let sortCol     = 'relVol';
   let sortDir     = 'desc';
@@ -37,25 +37,6 @@
     if (n >= 1e9)  return (n / 1e9).toFixed(1)  + 'B';
     if (n >= 1e6)  return (n / 1e6).toFixed(0)  + 'M';
     return '--';
-  }
-
-  function saveTickers() {
-    try { localStorage.setItem('nsc_tickers', JSON.stringify(tickers)); } catch (_) {}
-  }
-  function loadTickers() {
-    try {
-      const v = JSON.parse(localStorage.getItem('nsc_tickers') || 'null');
-      return Array.isArray(v) && v.length ? v : null;
-    } catch (_) { return null; }
-  }
-
-  /* ── chip rendering ───────────────────────────────────────────────────────── */
-  function renderChips() {
-    const wrap = $('nscChips');
-    if (!wrap) return;
-    wrap.innerHTML = tickers.map(t =>
-      `<span class="nsc-chip">${t}<button class="nsc-chip-rm" data-sym="${t}" title="Remove">×</button></span>`
-    ).join('');
   }
 
   /* ── filtering ────────────────────────────────────────────────────────────── */
@@ -182,26 +163,6 @@
     }, 1000);
   }
 
-  /* ── ticker management ────────────────────────────────────────────────────── */
-  function addTicker(raw) {
-    const sym = (raw || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '').trim();
-    if (!sym || tickers.includes(sym)) return false;
-    tickers.push(sym);
-    saveTickers();
-    renderChips();
-    fetchData();
-    startCountdown();
-    return true;
-  }
-
-  function removeTicker(sym) {
-    tickers  = tickers.filter(t => t !== sym);
-    scanData = scanData.filter(r => r.sym !== sym);
-    saveTickers();
-    renderChips();
-    renderTable();
-  }
-
   /* ── read filter inputs ───────────────────────────────────────────────────── */
   function readFilters() {
     const pv = id => { const n = parseFloat($(id)?.value); return isNaN(n) ? null : n; };
@@ -223,34 +184,8 @@
     if (initialized) return;
     initialized = true;
 
-    const saved = loadTickers();
-    tickers = saved || [...DEFAULT_TICKERS];
-    renderChips();
     fetchData();
     startCountdown();
-
-    /* add ticker */
-    const addInput = $('nscAddInput');
-    const addBtn   = $('nscAddBtn');
-    if (addInput && addBtn) {
-      addBtn.addEventListener('click', () => {
-        if (addTicker(addInput.value)) addInput.value = '';
-      });
-      addInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
-          if (addTicker(addInput.value)) addInput.value = '';
-        }
-      });
-    }
-
-    /* remove chip via event delegation */
-    const chipsWrap = $('nscChips');
-    if (chipsWrap) {
-      chipsWrap.addEventListener('click', e => {
-        const rm = e.target.closest('.nsc-chip-rm');
-        if (rm) removeTicker(rm.dataset.sym);
-      });
-    }
 
     /* sortable column headers */
     document.querySelectorAll('.nsc-table .nsc-th[data-col]').forEach(th => {

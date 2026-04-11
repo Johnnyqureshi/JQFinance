@@ -345,14 +345,14 @@ const botPanel = (() => {
   const $ = id => document.getElementById(id);
 
   const BOTS = [
-    { key: 'bounce', endpoint: '/api/bounce/auto-settings', amtId: 'atBotAmt1', levId: 'atBotLev1', badgeId: 'atBotBadge1' },
-    { key: 've',     endpoint: '/api/ve/auto-settings',     amtId: 'atBotAmt2', levId: 'atBotLev2', badgeId: 'atBotBadge2' },
-    { key: 'ee',     endpoint: '/api/ee/auto-settings',     amtId: 'atBotAmt3', levId: 'atBotLev3', badgeId: 'atBotBadge3' },
-    { key: 'ct',     endpoint: '/api/ct/auto-settings',     amtId: 'atBotAmt4', levId: 'atBotLev4', badgeId: 'atBotBadge4' },
+    { key: 'bounce', endpoint: '/api/bounce/auto-settings', badgeId: 'atBotBadge1' },
+    { key: 've',     endpoint: '/api/ve/auto-settings',     badgeId: 'atBotBadge2' },
+    { key: 'ee',     endpoint: '/api/ee/auto-settings',     badgeId: 'atBotBadge3' },
+    { key: 'ct',     endpoint: '/api/ct/auto-settings',     badgeId: 'atBotBadge4' },
   ];
 
   function updateBadge(bot, enabled) {
-    const badge = $(bot.badgeId);
+    const badge = document.getElementById(bot.badgeId);
     if (!badge) return;
     badge.textContent = enabled ? 'ON' : 'OFF';
     badge.classList.toggle('at-bot-badge--on', !!enabled);
@@ -363,10 +363,6 @@ const botPanel = (() => {
       const r = await fetch(bot.endpoint, { credentials: 'include' });
       if (!r.ok) return;
       const d = await r.json();
-      const amtEl = $(bot.amtId), levEl = $(bot.levId);
-      if (amtEl) amtEl.value = d.amount || 500;
-      if (levEl) levEl.value = d.leverage || 1;
-      // store enabled state on toggle button
       const toggle = document.querySelector(`.at-bot-toggle[data-bot="${bot.key}"]`);
       if (toggle) {
         toggle.dataset.enabled = d.enabled ? '1' : '0';
@@ -377,57 +373,37 @@ const botPanel = (() => {
     } catch {}
   }
 
-  async function saveBot(botKey, enabled) {
+  async function toggleBot(botKey, enabled) {
     const bot = BOTS.find(b => b.key === botKey);
     if (!bot) return;
-    const amt = parseFloat($(bot.amtId)?.value) || 500;
-    const lev = parseFloat($(bot.levId)?.value) || 1;
     try {
       await fetch(bot.endpoint, {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, amount: amt, leverage: lev }),
+        body: JSON.stringify({ enabled }),
       });
       await loadBot(bot);
     } catch {}
   }
 
   function init() {
-    // Load all bots when Trading Desk tab is opened
     const tradingNavBtn = document.querySelector('[data-page="trading"], [data-tab="trading"], .nav-btn[href*="trading"], #navTrading');
-    if (tradingNavBtn) {
-      tradingNavBtn.addEventListener('click', () => BOTS.forEach(loadBot));
-    }
-    // Also load on page visibility if trading page is visible
+    if (tradingNavBtn) tradingNavBtn.addEventListener('click', () => BOTS.forEach(loadBot));
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         const tradingPage = document.getElementById('page-trading');
-        if (tradingPage && tradingPage.style.display !== 'none') {
-          BOTS.forEach(loadBot);
-        }
+        if (tradingPage && tradingPage.style.display !== 'none') BOTS.forEach(loadBot);
       }
     });
 
-    // Wire up Save buttons
-    document.querySelectorAll('.at-bot-save').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const key = btn.dataset.bot;
-        const toggle = document.querySelector(`.at-bot-toggle[data-bot="${key}"]`);
-        const enabled = toggle?.dataset.enabled === '1' ? 1 : 0;
-        saveBot(key, enabled);
-      });
-    });
-
-    // Wire up Enable/Disable toggle buttons
     document.querySelectorAll('.at-bot-toggle').forEach(btn => {
       btn.addEventListener('click', () => {
-        const key = btn.dataset.bot;
         const newEnabled = btn.dataset.enabled === '1' ? 0 : 1;
-        saveBot(key, newEnabled);
+        toggleBot(btn.dataset.bot, newEnabled);
       });
     });
 
-    // Load immediately on init
     BOTS.forEach(loadBot);
   }
 

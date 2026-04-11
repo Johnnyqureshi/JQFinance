@@ -1834,15 +1834,19 @@ async function computeEESignal(symbol) {
     if (!base.signalType && base.passGap && base.passVolume) base.signalType = 'WATCHING';
   }
 
-  // ── 13. Stop loss (3% below entry) ────────────────────────────────────────
+  // ── 13. Stop loss (3% below entry per strategy rules) ────────────────────
   if (base.price) base.stopLoss = +(base.price * 0.97).toFixed(2);
 
-  // ── 14. Confirmed flag ────────────────────────────────────────────────────
-  // Full confirmation requires fundamentals (EPS + Revenue) AND technical (gap + volume) AND entry trigger
-  // If fundamental data is unavailable (neither FMP nor Yahoo returned it), skip fundamental gate
-  const hasFundamental = base.epsSurprisePct != null && base.revenueGrowthPct != null;
+  // ── 14. Human-readable signal flag strings ────────────────────────────────
+  base.signal = base.signalType === 'ENTRY_ZONE'    ? 'EXPLOSIVE EARNINGS SETUP — ENTRY ZONE'
+    : base.signalType === 'SHAKEOUT_ENTRY'           ? 'SHAKEOUT ENTRY OPPORTUNITY'
+    : null;
+
+  // ── 15. Confirmed flag ────────────────────────────────────────────────────
+  // Requires: EPS ≥15% + Revenue growth ≥25% + gap ≥5% + vol ≥2× + resistance broken + entry trigger
+  const hasFundamental  = base.epsSurprisePct != null && base.revenueGrowthPct != null;
   const fundamentalPass = hasFundamental ? (base.passEPS && base.passRevenue) : false;
-  base.confirmed = fundamentalPass && base.passGap && base.passVolume
+  base.confirmed = fundamentalPass && base.passGap && base.passVolume && base.passResistance
     && (base.signalType === 'ENTRY_ZONE' || base.signalType === 'SHAKEOUT_ENTRY');
 
   return base;
@@ -2039,9 +2043,9 @@ async function runEEAutoTrader() {
       const price  = sig.price;
       const shares = Math.max(1, Math.floor(amount / price));
 
-      // SL = 1.5% below entry; TP = 4.5% above (3:1 R/R)
-      const slPrice = (price * 0.985).toFixed(2);
-      const tpPrice = (price * 1.045).toFixed(2);
+      // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
+      const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.97).toFixed(2);
+      const tpPrice = (price * 1.09).toFixed(2);
 
       const orderBody = {
         symbol:        sig.symbol,

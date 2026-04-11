@@ -1124,6 +1124,8 @@ function showAuthOverlay() {
   window.jqfAgent?.hide();
   // Stop the trading desk poll and clear connection state cleanly on logout
   alpacaTrader.reset();
+  // Pause scanner auto-refresh so it doesn't fire API calls while logged out
+  window.stockScanner?.pause();
   state.currentUser = null;
   state.watchlist   = [];
   // Always land on the Sign In tab — prevents "username already taken" loop

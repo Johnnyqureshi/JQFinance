@@ -289,7 +289,23 @@
     });
   }
 
-  window.stockScanner = { init, refresh: fetchData };
+  /* pause countdown (e.g. on logout) */
+  function pause() {
+    clearInterval(cdInterval);
+    cdInterval = null;
+  }
+
+  /* resume: refresh immediately + restart countdown */
+  function resume() {
+    if (!initialized) { init(); return; }
+    fetchData();
+    startCountdown();
+  }
+
+  window.stockScanner = { init, refresh: fetchData, pause, resume };
+
+  /* Compat alias — app.js calls scanner.open() on nav to scanner page */
+  window.scanner = { open: resume };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

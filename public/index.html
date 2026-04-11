@@ -629,20 +629,98 @@
 
 <!-- SCANNER PAGE -->
 <div class="page" id="page-scanner">
+  <div class="nsc-page">
 
-  <!-- ── Custom Scanner ─────────────────────────────────────────────────────── -->
-  <div class="msc-wrap" id="mscWrap">
+    <!-- Top bar -->
+    <div class="nsc-topbar">
+      <div class="nsc-topbar-left">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <h1 class="nsc-title">Stock Scanner</h1>
+        <span class="nsc-count-badge" id="nscCount"></span>
+      </div>
+      <div class="nsc-topbar-right">
+        <span class="nsc-rf-lbl">Auto-refresh in</span>
+        <span class="nsc-rf-cd" id="nscCountdown">60s</span>
+        <button class="nsc-rf-btn" id="nscRefreshBtn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
 
+    <!-- Add ticker row -->
+    <div class="nsc-add-row">
+      <input type="text" id="nscAddInput" class="nsc-add-input" placeholder="Add ticker (e.g. TSLA, NVDA)…" autocomplete="off" spellcheck="false" maxlength="12"/>
+      <button class="nsc-add-btn" id="nscAddBtn">+ Add</button>
+      <div class="nsc-chips" id="nscChips"></div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="nsc-filter-bar">
+      <div class="nsc-fg">
+        <label class="nsc-flbl">MIN PRICE</label>
+        <input type="number" id="nscMinPrice" class="nsc-finp" placeholder="$0" min="0" step="1">
+      </div>
+      <div class="nsc-fg">
+        <label class="nsc-flbl">MAX PRICE</label>
+        <input type="number" id="nscMaxPrice" class="nsc-finp" placeholder="any" min="0" step="1">
+      </div>
+      <div class="nsc-fg">
+        <label class="nsc-flbl">MIN REL VOL</label>
+        <input type="number" id="nscMinRelVol" class="nsc-finp" placeholder="0" min="0" step="0.5">
+      </div>
+      <div class="nsc-fg">
+        <label class="nsc-flbl">MIN % CHG</label>
+        <input type="number" id="nscMinChg" class="nsc-finp" placeholder="any" step="0.5">
+      </div>
+      <button class="nsc-apply-btn" id="nscApplyFilters">Apply</button>
+      <button class="nsc-reset-btn" id="nscResetFilters">Reset</button>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="nsc-loading" id="nscLoading" style="display:none">
+      <div class="nsc-spinner"></div>
+      <span>Scanning market data…</span>
+    </div>
+
+    <!-- Table -->
+    <div class="nsc-table-wrap" id="nscTableWrap">
+      <table class="nsc-table" id="nscTable">
+        <thead>
+          <tr>
+            <th class="nsc-th" data-col="sym">TICKER <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="price">PRICE <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="change">% CHG <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="volume">VOLUME <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="relVol">REL VOL <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="atr14">ATR 14 <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="rsi14">RSI 14 <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="floatSh">FLOAT <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="marketCap">MKT CAP <span class="nsc-arrow"></span></th>
+            <th class="nsc-th nsc-r" data-col="w52Dist">52W HIGH % <span class="nsc-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="nscBody">
+          <tr><td colspan="10" class="nsc-empty-row">Loading scanner…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Status bar -->
+    <div class="nsc-statusbar">
+      <span class="nsc-legend"><span class="nsc-leg nsc-leg-surge"></span>Rel Vol ≥ 2×</span>
+      <span class="nsc-legend"><span class="nsc-leg nsc-leg-os"></span>RSI Oversold &lt;30</span>
+      <span class="nsc-legend"><span class="nsc-leg nsc-leg-ob"></span>RSI Overbought &gt;70</span>
+      <span class="nsc-status-txt" id="nscStatus"></span>
+    </div>
+
+  </div><!-- /nsc-page -->
+
+  <!-- (msc-wrap kept for compat) -->
+  <div class="msc-wrap" id="mscWrap" style="display:none">
     <div class="msc-header">
       <div>
         <h2 class="msc-title">Custom Scanner</h2>
-        <p class="msc-sub">Add any tickers and run a full signal scan — VP · EMA Ribbon · Regime Intelligence</p>
-      </div>
-      <div class="msc-header-right">
-        <button class="msc-import-btn" id="mscImportWl" title="Import your watchlist">↓ Import Watchlist</button>
-        <button class="msc-export-btn" id="mscExportBtn" title="Export results to CSV">↓ CSV</button>
-      </div>
-    </div>
 
     <!-- Ticker input row -->
     <div class="msc-input-row">

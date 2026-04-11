@@ -476,6 +476,51 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── POST /api/scanner-batch (stock scanner — all metrics for N tickers) ────────
+app.post('/api/scanner-batch', async (req, res) => {
+  const symbols = (req.body.symbols || [])
+    .map(s => String(s).toUpperCase().replace(/[^A-Z0-9.\-]/g, '').trim())
+    .filter(Boolean).slice(0, 50);
+  if (!symbols.length) return res.json({ results: [] });
+
+  const BATCH = 5;
+  const out   = [];
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    const chunk   = symbols.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(chunk.map(async sym => {
+      try {
+        const [quote, bars] = await Promise.all([
+          yf.quote(sym, {}, { validateResult: false }).catch(() => null),
+          fetchOHLCV(sym, 70).catch(() => null),
+        ]);
+        if (!quote?.regularMarketPrice) return null;
+
+        const price     = quote.regularMarketPrice;
+        const change    = quote.regularMarketChangePercent ?? 0;
+        const volume    = quote.regularMarketVolume ?? 0;
+        const avgVol    = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? 0;
+        const relVol    = avgVol > 0 ? +(volume / avgVol).toFixed(2) : null;
+        const marketCap = quote.marketCap ?? null;
+        const floatSh   = quote.floatShares ?? null;
+        const w52High   = quote.fiftyTwoWeekHigh ?? null;
+        const w52Dist   = w52High ? +((price - w52High) / w52High * 100).toFixed(2) : null;
+        const name      = quote.shortName ?? quote.longName ?? sym;
+
+        let atr14 = null, rsi14 = null;
+        if (bars && bars.length >= 20) {
+          const closes = bars.map(b => b.c);
+          try { atr14 = +calcATR(bars, 14).toFixed(3); } catch(_) {}
+          try { rsi14 = +calcRSI(closes, 14).toFixed(1); } catch(_) {}
+        }
+
+        return { sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14, floatSh, marketCap, w52Dist };
+      } catch { return null; }
+    }));
+    out.push(...settled.map(r => r.value).filter(Boolean));
+  }
+  res.json({ results: out });
+});
+
 // ── GET /api/signal/:symbol (scanner intelligence panel signal) ────────────────
 app.get('/api/signal/:symbol', async (req, res) => {
   const sym = req.params.symbol?.toUpperCase().trim();

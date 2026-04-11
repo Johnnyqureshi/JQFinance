@@ -1217,30 +1217,32 @@ const MASTER_UNIVERSE = [
   // ── Mega-cap tech ──────────────────────────────────────────────────────────
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
   // ── High-beta / crypto adjacent ────────────────────────────────────────────
-  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ','HUT','BITF','IREN','BMNR',
+  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ','HUT','BITF','IREN','BMNR','SMCL','PMAX',
   // ── Leveraged long ETFs ────────────────────────────────────────────────────
   'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS',
-  'TSLL','NVDX','AMDL','PLTG','HOOG','NVDG',
+  'TSLL','NVDX','AMDL','PLTG','HOOG','NVDG','MSFU',
   // ── Major index ETFs ───────────────────────────────────────────────────────
   'SPY','QQQ','IWM','DIA','SMH','ARKK',
   // ── Inverse / short ETFs ───────────────────────────────────────────────────
   'SQQQ','QID','AAPD','AMDD','PLTD','QQQD','NVD','NVDQ','MSTZ','TSLZ','TSDD',
   'SBIT','TZA','SPXS','SOXS','TECS','FAZ','ERY','LABD','DUST','JDST',
+  'AIBD','TSXD','DRIP',
   'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
   // ── Consumer / growth tech ─────────────────────────────────────────────────
   'NFLX','UBER','SHOP','SQ','PYPL','SNAP','PINS','RBLX','DKNG',
   // ── Autos / EV ─────────────────────────────────────────────────────────────
   'F','GM','RIVN','NIO','LI','ACHR',
   // ── Robotics / drones ──────────────────────────────────────────────────────
-  'RCAT','UMAC','RR','SERV',
-  // ── Quantum computing ──────────────────────────────────────────────────────
-  'QBTS','RGTI',
+  'RCAT','UMAC','RR','SERV','ONDS',
+  // ── Quantum / AI stocks ────────────────────────────────────────────────────
+  'QBTS','RGTI','SOUN','BBAI',
   // ── Semiconductors ─────────────────────────────────────────────────────────
   'TSM','AVGO','QCOM','MU','INTC','AMAT','LRCX','KLAC','ARM','SMCI','NVTS',
   // ── Financials ─────────────────────────────────────────────────────────────
   'JPM','BAC','GS','MS','C','WFC','SCHW','AXP','LDI',
   // ── Energy ─────────────────────────────────────────────────────────────────
   'XOM','CVX','COP','SLB','HAL','RIG','EGY','BTE','ANNA','NEXT','URG',
+  'UUUU','SMR',
   'TALO','SOC','SSL','PBR','CLF',
   // ── Commodities / metals ETFs ──────────────────────────────────────────────
   'GLD','SLV','GDX','GDXJ','USO',

@@ -6085,13 +6085,13 @@ option { background: var(--card); }
    TRADING DESK OVERHAUL  (.at-*)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Two-column layout */
-.at-body { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 0 28px 24px; align-items: start; }
-@media (max-width: 860px) { .at-body { grid-template-columns: 1fr; padding: 0 14px 24px; } }
+/* Single-column layout — manual order form removed, bots handle all trading */
+.at-body { display: block; padding: 0 28px 24px; }
+@media (max-width: 860px) { .at-body { padding: 0 14px 24px; } }
 
-/* Order column */
-.at-order-col, .at-right-col { display: flex; flex-direction: column; gap: 14px; }
-.at-order-form { display: flex; flex-direction: column; gap: 13px; }
+/* Right column (now full-width) */
+.at-right-col { display: flex; flex-direction: column; gap: 14px; }
+.at-right-col--full { width: 100%; }
 .at-field { display: flex; flex-direction: column; gap: 5px; }
 .at-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .at-flbl { font-size: 0.7rem; font-weight: 700; color: var(--text-secondary); letter-spacing: 0.06em; text-transform: uppercase; }

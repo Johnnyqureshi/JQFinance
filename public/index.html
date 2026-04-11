@@ -966,74 +966,11 @@
     <!-- PDT + Market Hours Banner -->
     <div class="at-pdt-banner" id="atPDTBanner" style="display:none"></div>
 
-    <!-- Two-column layout: Manual Order + Account -->
+    <!-- Account Overview: Positions + Orders -->
     <div class="at-body">
 
-      <!-- Manual Order Panel -->
-      <div class="at-order-col">
-        <div class="at-col-head">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Place Order
-        </div>
-
-        <div class="at-order-form" id="atOrderForm">
-          <div class="at-field">
-            <label class="at-flbl">Symbol</label>
-            <input type="text" id="atSymbol" class="at-finp" placeholder="e.g. TSLA" autocomplete="off" spellcheck="false" maxlength="10"/>
-          </div>
-
-          <div class="at-field-row">
-            <div class="at-field">
-              <label class="at-flbl">Side</label>
-              <div class="at-side-row">
-                <button class="at-side-btn active" data-side="buy">Buy / Long</button>
-                <button class="at-side-btn" data-side="sell">Sell / Short</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="at-field">
-            <label class="at-flbl">Amount ($)</label>
-            <input type="number" id="atAmount" class="at-finp" value="1000" min="1" step="100"/>
-          </div>
-
-          <div class="at-field">
-            <label class="at-flbl">Leverage</label>
-            <div class="at-lev-row">
-              <button class="at-lb active" data-lev="1">1×</button>
-              <button class="at-lb" data-lev="2">2×</button>
-              <button class="at-lb" data-lev="4">4×</button>
-            </div>
-          </div>
-
-          <div class="at-field-row">
-            <div class="at-field">
-              <label class="at-flbl">Take Profit %</label>
-              <input type="number" id="atTP" class="at-finp" placeholder="e.g. 5" min="0" step="0.5"/>
-            </div>
-            <div class="at-field">
-              <label class="at-flbl">Stop Loss %</label>
-              <input type="number" id="atSL" class="at-finp" placeholder="e.g. 2" min="0" step="0.5"/>
-            </div>
-          </div>
-
-          <div class="at-pdt-rules">
-            <div class="at-pdt-title">PDT Rules (Pattern Day Trader)</div>
-            <ul class="at-pdt-list">
-              <li>Accounts under $25k — max 3 day trades in any rolling 5-day window</li>
-              <li>Opening &amp; closing the same position on the same day = 1 day trade</li>
-              <li>Use swing trades (hold overnight) to avoid PDT restrictions</li>
-              <li>Trading hours: 9:30 AM – 4:00 PM ET Mon–Fri</li>
-            </ul>
-          </div>
-
-          <button class="at-place-btn" id="atPlaceBtn" disabled>Connect Alpaca to Trade</button>
-          <div class="at-order-msg" id="atOrderMsg"></div>
-        </div>
-      </div>
-
-      <!-- Positions / Orders column -->
-      <div class="at-right-col">
+      <!-- Positions / Orders (full width) -->
+      <div class="at-right-col at-right-col--full">
         <!-- Open Positions -->
         <div class="at-panel">
           <div class="at-panel-head">

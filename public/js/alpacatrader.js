@@ -4,8 +4,6 @@ const alpacaTrader = (() => {
 
   let connected     = false;
   let alpacaMode    = 'live';
-  let _side         = 'buy';
-  let _leverage     = 1;
   let _pollFailures = 0;
   let _keepAlive    = null;
   const POLL_FAIL_LIMIT = 3;
@@ -212,51 +210,6 @@ const alpacaTrader = (() => {
     });
   }
 
-  // ── Place order ────────────────────────────────────────────────────────────
-  async function placeOrder() {
-    const sym    = $('atSymbol')?.value.trim().toUpperCase();
-    const amount = parseFloat($('atAmount')?.value);
-    const tp     = parseFloat($('atTP')?.value) || 0;
-    const sl     = parseFloat($('atSL')?.value) || 0;
-    const msgEl  = $('atOrderMsg');
-
-    if (!sym)         { showMsg('Enter a symbol.', 'err'); return; }
-    if (!amount || amount < 1) { showMsg('Enter a valid dollar amount.', 'err'); return; }
-
-    const ms = marketStatus();
-    if (!ms.open) {
-      showMsg('Market is currently closed. Trading hours: 9:30 AM–4:00 PM ET, Mon–Fri.', 'warn');
-    }
-
-    const btn = $('atPlaceBtn');
-    btn.disabled = true; btn.textContent = 'Placing order…';
-    if (msgEl) msgEl.className = '';
-
-    try {
-      const r = await apiFetch('/api/alpaca/order', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ symbol: sym, side: _side, amount, tpPct: tp, slPct: sl, leverage: _leverage }),
-      });
-      if (r.error) throw new Error(r.error);
-      const shares = r.shares ? ` (${r.shares} shares)` : '';
-      showMsg(`Order placed: ${_side.toUpperCase()} ${sym}${shares} @ $${fmt(r.price)}`, 'ok');
-      loadPositions(); loadOrders(); loadAccount();
-    } catch (e) {
-      showMsg(e.message, 'err');
-    } finally {
-      btn.disabled = false; btn.textContent = 'Place Order';
-    }
-  }
-
-  function showMsg(text, type) {
-    const el = $('atOrderMsg');
-    if (!el) return;
-    el.textContent = text;
-    el.className   = 'at-order-msg at-msg-' + type;
-    if (type === 'ok') setTimeout(() => { el.textContent = ''; el.className = 'at-order-msg'; }, 5000);
-  }
-
   // ── Check credentials ──────────────────────────────────────────────────────
   async function checkCredentials() {
     try {
@@ -354,31 +307,8 @@ const alpacaTrader = (() => {
       });
     });
 
-    // Side buttons
-    document.querySelectorAll('.at-side-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.at-side-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        _side = btn.dataset.side;
-      });
-    });
-
-    // Leverage buttons
-    document.querySelectorAll('.at-lb').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.at-lb').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        _leverage = parseInt(btn.dataset.lev);
-      });
-    });
-
-    $('atPlaceBtn')?.addEventListener('click', placeOrder);
     $('atRefreshPos')?.addEventListener('click', () => { loadPositions(); loadAccount(); });
     $('atRefreshOrders')?.addEventListener('click', loadOrders);
-
-    // Allow Enter on symbol field
-    $('atSymbol')?.addEventListener('keydown', e => { if (e.key === 'Enter') $('atAmount')?.focus(); });
-    $('atAmount')?.addEventListener('keydown', e => { if (e.key === 'Enter' && connected) placeOrder(); });
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────

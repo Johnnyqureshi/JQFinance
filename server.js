@@ -20,7 +20,8 @@ console.warn = (...args) => {
 };
 
 const app      = express();
-const PORT     = 5000;
+const PORT           = 5000;
+const MAX_TRADE_PRICE = 30; // Bot only executes LONG trades on stocks priced ≤ $30
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
 
@@ -1058,32 +1059,55 @@ async function computeBounceSignal(symbol) {
 }
 
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
-const BOUNCE_UNIVERSE = [
-  // Mega-cap
+// ── Master scan universe — all 4 bots use this list ───────────────────────────
+const MASTER_UNIVERSE = [
+  // ── Mega-cap tech ──────────────────────────────────────────────────────────
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
-  // High-beta growth
-  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ','HUT','BITF','IREN',
-  // Leveraged ETFs (momentum vehicles)
+  // ── High-beta / crypto adjacent ────────────────────────────────────────────
+  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ','HUT','BITF','IREN','BMNR',
+  // ── Leveraged long ETFs ────────────────────────────────────────────────────
   'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS',
-  // Major index ETFs
+  'TSLL','NVDX','AMDL','PLTG','HOOG','NVDG',
+  // ── Major index ETFs ───────────────────────────────────────────────────────
   'SPY','QQQ','IWM','DIA','SMH','ARKK',
-  // Consumer tech
+  // ── Inverse / short ETFs ───────────────────────────────────────────────────
+  'SQQQ','QID','AAPD','AMDD','PLTD','QQQD','NVD','NVDQ','MSTZ','TSLZ','TSDD',
+  'SBIT','TZA','SPXS','SOXS','TECS','FAZ','ERY','LABD','DUST','JDST',
+  'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
+  // ── Consumer / growth tech ─────────────────────────────────────────────────
   'NFLX','UBER','SHOP','SQ','PYPL','SNAP','PINS','RBLX','DKNG',
-  // Auto/EV
-  'F','GM','RIVN','NIO','LI',
-  // Semis
-  'TSM','AVGO','QCOM','MU','INTC','AMAT','LRCX','KLAC','ARM','SMCI',
-  // Financials
-  'JPM','BAC','GS','MS','C','WFC','SCHW',
-  // Energy
-  'XOM','CVX','COP','SLB','HAL',
-  // Commodities/Metals
+  // ── Autos / EV ─────────────────────────────────────────────────────────────
+  'F','GM','RIVN','NIO','LI','ACHR',
+  // ── Robotics / drones ──────────────────────────────────────────────────────
+  'RCAT','UMAC','RR','SERV',
+  // ── Quantum computing ──────────────────────────────────────────────────────
+  'QBTS','RGTI',
+  // ── Semiconductors ─────────────────────────────────────────────────────────
+  'TSM','AVGO','QCOM','MU','INTC','AMAT','LRCX','KLAC','ARM','SMCI','NVTS',
+  // ── Financials ─────────────────────────────────────────────────────────────
+  'JPM','BAC','GS','MS','C','WFC','SCHW','AXP','LDI',
+  // ── Energy ─────────────────────────────────────────────────────────────────
+  'XOM','CVX','COP','SLB','HAL','RIG','EGY','BTE','ANNA','NEXT','URG',
+  'TALO','SOC','SSL','PBR','CLF',
+  // ── Commodities / metals ETFs ──────────────────────────────────────────────
   'GLD','SLV','GDX','GDXJ','USO',
-  // Cloud/Cyber
+  // ── Mining / precious metals stocks ───────────────────────────────────────
+  'USAS','ASM','CRML','DNN','NVA','TMQ','TGB','NAK','PLG','IAUX',
+  // ── Lithium / battery materials ────────────────────────────────────────────
+  'LAC',
+  // ── Cloud / cyber ──────────────────────────────────────────────────────────
   'CRWD','S','PANW','SNOW','DDOG','TWLO','MDB','ZS','NET',
-  // Biotech/Pharma
+  // ── Biotech / pharma ───────────────────────────────────────────────────────
   'MRNA','BNTX','PFE','ABBV','LLY','REGN',
+  // ── Large-cap value / defensives ───────────────────────────────────────────
+  'BRK.B','V','MA','UNH','JNJ','PG','HD','MRK','COST','WMT','KO','PEP',
+  'TMO','ORCL','CRM','CSCO','ACN','MCD','LIN','ADBE','ABT','DHR','NKE',
+  'TXN','AMGN','QCOM','NEE','UNP','PM','RTX','HON','INTU','IBM',
+  'SPGI','LOW','CAT','DE','ELV','ISRG','BLK','BKNG','SYK','MMC',
+  'GILD','PLD','ADI','MDT','TJX','VRTX','SO','DUK','MO','ZTS','CB','CI',
+  'CME','EOG','TLT','HYG',
 ];
+const BOUNCE_UNIVERSE = MASTER_UNIVERSE;
 
 // GET /api/bounce-signal/:symbol
 app.get('/api/bounce-signal/:symbol', async (req, res) => {
@@ -1327,10 +1351,10 @@ async function computeVESignal(symbol) {
 const INVERSE_MAP = {
   // ── Broad market indices ───────────────────────────────────────────────────
   'SPY':   'SH',    // inverse S&P 500 (1×)
-  'QQQ':   'PSQ',   // inverse Nasdaq-100 (1×)
-  'IWM':   'RWM',   // inverse Russell 2000 (1×)
+  'QQQ':   'QID',   // 2× inverse Nasdaq-100 (upgraded from PSQ)
+  'IWM':   'TZA',   // 3× inverse Russell 2000
   'DIA':   'DOG',   // inverse Dow Jones (1×)
-  // ── Leveraged longs → their inverse counterpart ────────────────────────────
+  // ── Leveraged longs → their direct inverse counterpart ────────────────────
   'TQQQ':  'SQQQ',  // 3× inverse Nasdaq-100
   'SPXL':  'SPXS',  // 3× inverse S&P 500
   'UPRO':  'SPXS',  // 3× inverse S&P 500
@@ -1339,6 +1363,10 @@ const INVERSE_MAP = {
   'LABU':  'LABD',  // 3× inverse Biotech
   'TNA':   'TZA',   // 3× inverse Russell 2000
   'FAS':   'FAZ',   // 3× inverse Financials
+  'TSLL':  'TSLZ',  // inverse TSLA leveraged long → T-Rex 2× inverse TSLA
+  'NVDX':  'NVD',   // inverse NVDA leveraged long → T-Rex 2× inverse NVDA
+  'AMDL':  'AMDD',  // inverse AMD leveraged long → Direxion AMD bear
+  'PLTG':  'PLTD',  // inverse PLTR leveraged long → Direxion PLTR bear
   'SMH':   'SOXS',  // inverse Semiconductor ETF
   'ARKK':  'SARK',  // inverse ARK Innovation
   // ── Bonds ─────────────────────────────────────────────────────────────────
@@ -1350,30 +1378,39 @@ const INVERSE_MAP = {
   'GDX':   'DUST',  // 3× inverse Gold Miners
   'GDXJ':  'JDST',  // 3× inverse Junior Gold Miners
   'USO':   'SCO',   // 2× inverse Crude Oil
-  // ── Semiconductors → SOXS ─────────────────────────────────────────────────
-  'NVDA':  'SOXS',  'AMD':   'SOXS',  'AVGO':  'SOXS',
-  'QCOM':  'SOXS',  'MU':    'SOXS',  'INTC':  'SOXS',
-  'AMAT':  'SOXS',  'LRCX':  'SOXS',  'KLAC':  'SOXS',
-  'ARM':   'SOXS',  'SMCI':  'SOXS',  'TSM':   'SOXS',
-  'ADI':   'SOXS',  'TXN':   'SOXS',
-  // ── Large-cap Tech → TECS ─────────────────────────────────────────────────
-  'AAPL':  'TECS',  'MSFT':  'TECS',  'GOOGL': 'TECS',
-  'META':  'TECS',  'AMZN':  'TECS',  'TSLA':  'TECS',
+  // ── Single-stock specific inverse ETFs (from user watchlist) ─────────────
+  'TSLA':  'TSLZ',  // T-Rex 2× Inverse TSLA
+  'NVDA':  'NVD',   // T-Rex 2× Inverse NVDA
+  'MSFT':  'MSTZ',  // T-Rex 2× Inverse MSFT
+  'PLTR':  'PLTD',  // Direxion Daily PLTR Bear 1×
+  'AAPL':  'AAPD',  // Direxion Daily AAPL Bear 1×
+  'AMD':   'AMDD',  // Direxion Daily AMD Bear 1×
+  // ── Crypto / Bitcoin mining → SBIT ────────────────────────────────────────
+  'COIN':  'SBIT',  'MARA':  'SBIT',  'RIOT':  'SBIT',
+  'CLSK':  'SBIT',  'CORZ':  'SBIT',  'HUT':   'SBIT',
+  'BITF':  'SBIT',  'IREN':  'SBIT',  'BMNR':  'SBIT',
+  // ── Remaining semis → SOXS ────────────────────────────────────────────────
+  'AVGO':  'SOXS',  'QCOM':  'SOXS',  'MU':    'SOXS',
+  'INTC':  'SOXS',  'AMAT':  'SOXS',  'LRCX':  'SOXS',
+  'KLAC':  'SOXS',  'ARM':   'SOXS',  'SMCI':  'SOXS',
+  'TSM':   'SOXS',  'ADI':   'SOXS',  'TXN':   'SOXS',
+  'NVTS':  'SOXS',
+  // ── Large-cap tech (no specific single-stock inverse) → TECS ──────────────
+  'GOOGL': 'TECS',  'META':  'TECS',  'AMZN':  'TECS',
   'NFLX':  'TECS',  'CRM':   'TECS',  'ORCL':  'TECS',
   'ADBE':  'TECS',  'CSCO':  'TECS',  'IBM':   'TECS',
   'ACN':   'TECS',  'INTU':  'TECS',
-  // ── Growth / Fintech → TECS ───────────────────────────────────────────────
-  'PLTR':  'TECS',  'COIN':  'TECS',  'HOOD':  'TECS',
-  'MARA':  'TECS',  'RIOT':  'TECS',  'CLSK':  'TECS',
-  'CORZ':  'TECS',  'UBER':  'TECS',  'SHOP':  'TECS',
+  // ── Growth / SaaS / Cloud → TECS ─────────────────────────────────────────
+  'HOOD':  'TECS',  'UBER':  'TECS',  'SHOP':  'TECS',
   'SNAP':  'TECS',  'PINS':  'TECS',  'RBLX':  'TECS',
-  'DKNG':  'TECS',
-  // ── SaaS / Cloud → TECS ───────────────────────────────────────────────────
-  'CRWD':  'TECS',  'PANW':  'TECS',  'SNOW':  'TECS',
-  'DDOG':  'TECS',  'NET':   'TECS',  'ZS':    'TECS',
-  'MDB':   'TECS',
+  'DKNG':  'TECS',  'CRWD':  'TECS',  'PANW':  'TECS',
+  'SNOW':  'TECS',  'DDOG':  'TECS',  'NET':   'TECS',
+  'ZS':    'TECS',  'MDB':   'TECS',  'TWLO':  'TECS',  'S': 'TECS',
+  // ── Robotics / drones / quantum → TECS ───────────────────────────────────
+  'RCAT':  'TECS',  'UMAC':  'TECS',  'RR':    'TECS',  'SERV':  'TECS',
+  'QBTS':  'TECS',  'RGTI':  'TECS',  'ACHR':  'TECS',
   // ── Fintech / Payments → FAZ ──────────────────────────────────────────────
-  'SQ':    'FAZ',   'PYPL':  'FAZ',   'SOFI':  'FAZ',
+  'SQ':    'FAZ',   'PYPL':  'FAZ',   'SOFI':  'FAZ',  'LDI':   'FAZ',
   // ── EV / Auto → TECS ──────────────────────────────────────────────────────
   'RIVN':  'TECS',  'NIO':   'TECS',  'LI':    'TECS',
   'F':     'TECS',  'GM':    'TECS',
@@ -1386,6 +1423,15 @@ const INVERSE_MAP = {
   // ── Energy → ERY ──────────────────────────────────────────────────────────
   'XOM':   'ERY',   'CVX':   'ERY',   'COP':   'ERY',
   'SLB':   'ERY',   'HAL':   'ERY',   'EOG':   'ERY',
+  'RIG':   'ERY',   'EGY':   'ERY',   'BTE':   'ERY',
+  'ANNA':  'ERY',   'NEXT':  'ERY',   'URG':   'ERY',
+  'TALO':  'ERY',   'SOC':   'ERY',   'SSL':   'ERY',
+  'PBR':   'ERY',   'CLF':   'SH',
+  // ── Mining / precious metals → DUST / JDST / GLL ─────────────────────────
+  'USAS':  'DUST',  'ASM':   'DUST',  'CRML':  'DUST',
+  'DNN':   'JDST',  'NVA':   'DUST',  'TMQ':   'DUST',
+  'TGB':   'DUST',  'NAK':   'DUST',  'PLG':   'DUST',
+  'IAUX':  'DUST',  'LAC':   'GLL',
   // ── Healthcare / Biotech → RXD / LABD ────────────────────────────────────
   'JNJ':   'RXD',   'UNH':   'RXD',   'ABT':   'RXD',
   'DHR':   'RXD',   'TMO':   'RXD',   'SYK':   'RXD',
@@ -1393,6 +1439,7 @@ const INVERSE_MAP = {
   'MRNA':  'LABD',  'PFE':   'LABD',  'ABBV':  'LABD',
   'LLY':   'LABD',  'REGN':  'LABD',  'GILD':  'LABD',
   'AMGN':  'LABD',  'ZTS':   'LABD',  'VRTX':  'LABD',
+  'BNTX':  'LABD',
   // ── Broad consumer / defensives / industrials → SH ───────────────────────
   'WMT':   'SH',    'COST':  'SH',    'NKE':   'SH',
   'MCD':   'SH',    'HD':    'SH',    'TJX':   'SH',
@@ -1401,24 +1448,12 @@ const INVERSE_MAP = {
   'HON':   'SH',    'CAT':   'SH',    'DE':    'SH',
   'UNP':   'SH',    'RTX':   'SH',    'LIN':   'SH',
   'NEE':   'SH',    'SO':    'SH',    'DUK':   'SH',
-  'PLD':   'SH',    'BRK.B': 'SH',
+  'PLD':   'SH',    'BRK.B': 'SH',    'V':     'SH',
+  'MA':    'SH',
 };
 
 // ── VE Universe (same broad universe as Bounce 2.0) ───────────────────────────
-const VE_UNIVERSE = [
-  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
-  'HOOD','SOFI','MARA','RIOT','CLSK','CORZ',
-  'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS',
-  'SPY','QQQ','IWM','DIA','SMH','ARKK',
-  'NFLX','UBER','SHOP','SQ','PYPL','SNAP','PINS','RBLX','DKNG',
-  'F','GM','RIVN','NIO','LI',
-  'TSM','AVGO','QCOM','MU','INTC','AMAT','LRCX','KLAC','ARM','SMCI',
-  'JPM','BAC','GS','MS','C','WFC','SCHW',
-  'XOM','CVX','COP','SLB','HAL',
-  'GLD','SLV','GDX','GDXJ','USO',
-  'CRWD','PANW','SNOW','DDOG','NET','ZS','MDB',
-  'MRNA','PFE','ABBV','LLY','REGN',
-];
+const VE_UNIVERSE = MASTER_UNIVERSE;
 
 // ── VE signal cache ────────────────────────────────────────────────────────────
 const _veCache = new Map();
@@ -1537,6 +1572,7 @@ async function runBounceAutoTrader() {
       const lev = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 500) * lev;
       const price = sig.price;
+      if (price > MAX_TRADE_PRICE) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const shares = Math.max(1, Math.floor(amount / price));
       const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
       const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
@@ -1562,7 +1598,7 @@ async function runVEAutoTrader() {
 
   // Scan universe with a focused batch
   const now = Date.now();
-  const universe = VE_UNIVERSE.slice(0, 40); // top 40 most liquid symbols
+  const universe = VE_UNIVERSE; // full master universe — no slice cap
   const BATCH = 6;
   const signals = [];
 
@@ -1609,6 +1645,7 @@ async function runVEAutoTrader() {
       if (sig.direction === 'LONG') {
         // ── LONG: buy the underlying directly ───────────────────────────────
         const price  = sig.price;
+        if (price > MAX_TRADE_PRICE) { console.log(`[VE-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
@@ -2002,9 +2039,9 @@ app.get('/api/ee/scan', async (req, res) => {
   } else {
     // Try to get symbols that recently had earnings from FMP
     const earningsSyms = await fetchRecentEarningsSymbols();
-    syms = earningsSyms || BOUNCE_UNIVERSE.slice(0, 40);
+    syms = earningsSyms || MASTER_UNIVERSE;
   }
-  syms = [...new Set(syms)].slice(0, 60);
+  syms = [...new Set(syms)].slice(0, 80);
 
   const now    = Date.now();
   const BATCH  = 4; // small batch — each symbol makes 4 FMP calls
@@ -2087,7 +2124,7 @@ async function runEEAutoTrader() {
   console.log(`[EE-Bot] Auto-scan triggered for ${users.length} user(s)`);
 
   const now     = Date.now();
-  const earningSyms = await fetchRecentEarningsSymbols().catch(() => null) || BOUNCE_UNIVERSE.slice(0, 25);
+  const earningSyms = await fetchRecentEarningsSymbols().catch(() => null) || MASTER_UNIVERSE;
   const BATCH   = 4;
   const signals = [];
 
@@ -2130,6 +2167,7 @@ async function runEEAutoTrader() {
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 1000) * lev;
       const price  = sig.price;
+      if (price > MAX_TRADE_PRICE) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const shares = Math.max(1, Math.floor(amount / price));
 
       // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
@@ -2500,17 +2538,7 @@ async function computeCTSignal(symbol) {
 }
 
 // ── CT scan universe (broad large-cap list) ────────────────────────────────────
-const CT_UNIVERSE = [
-  'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','BRK.B','JPM','V',
-  'UNH','XOM','LLY','JNJ','PG','MA','AVGO','HD','CVX','MRK',
-  'COST','ABBV','AMD','NFLX','WMT','BAC','KO','PEP','TMO','ORCL',
-  'CRM','CSCO','ACN','MCD','LIN','ADBE','ABT','DHR','NKE','TXN',
-  'AMGN','QCOM','NEE','UNP','PM','SCHW','RTX','HON','INTU','IBM',
-  'SPGI','LOW','GS','CAT','AMAT','DE','ELV','ISRG','BLK','BKNG',
-  'SYK','AXP','MMC','GILD','PLD','ADI','MDT','TJX','VRTX','C',
-  'REGN','SO','DUK','MO','ZTS','CB','CI','CME','EOG','SLB',
-  'SPY','QQQ','IWM','DIA','GLD','TLT','HYG',
-];
+const CT_UNIVERSE = MASTER_UNIVERSE;
 
 // ── CT signal cache ────────────────────────────────────────────────────────────
 const _ctCache = new Map();
@@ -2642,6 +2670,7 @@ async function runCTAutoTrader() {
       if (sig.direction === 'LONG') {
         // ── LONG: buy the underlying directly ─────────────────────────────
         const price  = sig.price;
+        if (price > MAX_TRADE_PRICE) { console.log(`[CT-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);

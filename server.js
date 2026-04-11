@@ -1261,6 +1261,17 @@ const MASTER_UNIVERSE = [
   'SPGI','LOW','CAT','DE','ELV','ISRG','BLK','BKNG','SYK','MMC',
   'GILD','PLD','ADI','MDT','TJX','VRTX','SO','DUK','MO','ZTS','CB','CI',
   'CME','EOG','TLT','HYG',
+  // ── Crypto tokens (Layer-1 / Layer-2) ─────────────────────────────────────
+  'AVAX','LINK','ETC','UNI','TRUMP','RENDER','ZRO','TON','NEAR',
+  'XRP','DOT','LIT','SUI','ORCA','MNT','ASTER','VIRTUAL',
+  'XTZ','ADA','ARB','OP','HBAR','XLM','DOGE',
+  // ── DeFi tokens ────────────────────────────────────────────────────────────
+  'RAY','AERO','LDO','SNX','ONDO','SYRUP','CRV',
+  'ENA','EIGEN','IMX','GRT','SKY','SEI','PYTH',
+  // ── Meme / community tokens ────────────────────────────────────────────────
+  'WIF','POPCAT','MOODENG','PENGU','FLOKI','SHIB','BONK','PEPE',
+  // ── Smaller / emerging tokens ──────────────────────────────────────────────
+  'WLFI','AVNT','XPL','SKR','ZORA','XCN','MEW','CC',
 ];
 const BOUNCE_UNIVERSE = MASTER_UNIVERSE;
 

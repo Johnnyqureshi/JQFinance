@@ -476,6 +476,49 @@ app.get('/api/valuation/:symbol', async (req, res) => {
   } catch { res.json(empty); }
 });
 
+// ── GET /api/signal/:symbol (scanner intelligence panel signal) ────────────────
+app.get('/api/signal/:symbol', async (req, res) => {
+  const sym = req.params.symbol?.toUpperCase().trim();
+  if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
+  try {
+    const sig = await computeBounceSignal(sym);
+    if (!sig || sig.error) return res.json({ ok: false, error: sig?.error || 'Insufficient data' });
+
+    const confirmed = sig.confirmed;
+    const condsMet  = [sig.cond1, sig.cond2, sig.cond3, sig.cond4].filter(Boolean).length;
+    const signal    = confirmed ? 'BUY' : condsMet >= 2 ? 'WATCH' : 'HOLD';
+    const confidence = confirmed ? 78 : condsMet >= 3 ? 62 : condsMet >= 2 ? 45 : 30;
+
+    const reasons = [];
+    if (sig.cond1) reasons.push('Uptrend stack confirmed (8/21/34 EMA > 50 SMA)');
+    if (sig.cond2) reasons.push('Price in pullback zone (between EMA 8 and SMA 50)');
+    if (sig.cond3) reasons.push('Stochastic oversold — momentum reset in progress');
+    if (sig.cond4) reasons.push('Entry trigger fired — close above prior bar high');
+
+    res.json({
+      ok: true,
+      symbol: sym,
+      signal: {
+        signal,
+        confidence,
+        reasons,
+        price:    sig.price,
+        tpLevel:  sig.tpLevel,
+        slLevel:  sig.slLevel,
+        rr:       sig.rr,
+        stochK:   sig.stochK,
+        ema8:     sig.ema8,
+        sma50:    sig.sma50,
+        confirmed,
+        zoneStr: confirmed ? 'Bounce 2.0 confirmed setup' : condsMet >= 2 ? 'Partial setup — monitoring' : 'No active setup',
+      },
+      regime: { regime: 'NEUTRAL', label: 'Market Neutral' },
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /api/intraday/:symbol (5-min bars — includes pre/post market) ──────────
 app.get('/api/intraday/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();

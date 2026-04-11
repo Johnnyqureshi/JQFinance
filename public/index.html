@@ -631,307 +631,278 @@
 <div class="page" id="page-scanner">
   <div class="sc-page-wrap">
 
-    <!-- ── Strategy Tab Bar ───────────────────────────────────────────────────── -->
-    <div class="strat-tab-bar">
-      <button class="strat-tab active" data-strat="bounce">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-        Bounce 2.0
-      </button>
-      <button class="strat-tab" data-strat="volatility">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Volatility Expansion
-        <span class="strat-tab-badge" id="veTabBadge" style="display:none">0</span>
-      </button>
-      <button class="strat-tab" data-strat="earnings">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-        Explosive Earnings
-        <span class="strat-tab-badge" id="eeTabBadge" style="display:none">0</span>
-      </button>
+    <!-- Header -->
+    <div class="sc-header">
+      <div>
+        <h1 class="sc-title">Stock Scanner</h1>
+        <p class="sc-subtitle">Real-time screening across 50+ stocks via Yahoo Finance</p>
+      </div>
+      <div class="sc-header-right">
+        <div class="sc-refresh-group">
+          <span class="sc-rf-label">AUTO</span>
+          <button class="sc-rf-btn active" data-secs="0">OFF</button>
+          <button class="sc-rf-btn" data-secs="30">30s</button>
+          <button class="sc-rf-btn" data-secs="60">60s</button>
+          <span class="sc-cd-wrap"><span id="scCdNum" class="sc-cd-num">OFF</span></span>
+        </div>
+        <button class="sc-export-btn" id="scExportBtn">↓ CSV</button>
+      </div>
     </div>
 
-    <!-- ── Bounce 2.0 Scanner ─────────────────────────────────────────────────── -->
-    <div class="bs-page">
+    <!-- Presets -->
+    <div class="sc-presets-bar">
+      <button class="sc-preset active" data-preset="all">ALL</button>
+      <button class="sc-preset" data-preset="momentum">⚡ MOMENTUM</button>
+      <button class="sc-preset" data-preset="oversold">↩ OVERSOLD</button>
+      <button class="sc-preset" data-preset="highvol">🔥 HIGH VOL</button>
+      <button class="sc-preset" data-preset="smallcap">🚀 SMALL CAP</button>
+      <span class="sc-preset-divider">|</span>
+      <button class="sc-preset sc-preset-bull" data-preset="levbull">▲ LEV BULL</button>
+      <button class="sc-preset sc-preset-bear" data-preset="levbear">▼ LEV BEAR</button>
+      <button class="sc-preset sc-preset-vix"  data-preset="volatility">⚡ VIX / VOL</button>
+      <button class="sc-preset sc-preset-crypto" data-preset="crypto">₿ CRYPTO</button>
+    </div>
 
-      <!-- Header -->
-      <div class="bs-header">
-        <div class="bs-header-left">
-          <h1 class="bs-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-            Bounce 2.0 Scanner
-          </h1>
-          <p class="bs-subtitle">EMA 8/21/34 · SMA 50 · Stochastic (8,3,3) — pullback-to-trend entries</p>
-        </div>
-        <div class="bs-header-right">
-          <div id="bsPDTBanner" class="bs-pdt-banner" style="display:none"></div>
-          <div class="bs-filter-pills">
-            <button class="bs-filter-btn active" data-filter="all">All</button>
-            <button class="bs-filter-btn" data-filter="confirmed">Confirmed Only</button>
-            <button class="bs-filter-btn" data-filter="setup">Partial Setup</button>
+    <!-- Filter bar -->
+    <div class="sc-filter-bar">
+      <button class="sc-filter-toggle" id="scFilterToggle">▼ FILTERS</button>
+      <div class="sc-filter-panel" id="scFilterPanel">
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">MARKET CAP</label>
+          <div class="sc-mcap-row">
+            <button class="sc-mcap-btn active" data-mcap="Large">Large</button>
+            <button class="sc-mcap-btn active" data-mcap="Mid">Mid</button>
+            <button class="sc-mcap-btn active" data-mcap="Small">Small</button>
+            <button class="sc-mcap-btn active" data-mcap="Micro">Micro</button>
           </div>
         </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">SECTOR</label>
+          <select class="sc-sel" id="scSector"></select>
+        </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">MIN % CHG</label>
+          <input type="number" class="sc-inp" id="scMinChg" placeholder="e.g. 2" step="0.5">
+        </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">MIN VOLUME</label>
+          <select class="sc-sel" id="scMinVol">
+            <option value="0">Any</option>
+            <option value="500K">500K+</option>
+            <option value="1M">1M+</option>
+            <option value="5M">5M+</option>
+          </select>
+        </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">RSI MIN</label>
+          <input type="number" class="sc-inp" id="scMinRsi" placeholder="0" min="0" max="100">
+        </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">RSI MAX</label>
+          <input type="number" class="sc-inp" id="scMaxRsi" placeholder="100" min="0" max="100">
+        </div>
+        <div class="sc-filter-group">
+          <label class="sc-filter-label">REL.VOL MIN</label>
+          <select class="sc-sel" id="scMinRelVol">
+            <option value="0">Any</option>
+            <option value="2">2x+</option>
+            <option value="3">3x+</option>
+            <option value="5">5x+</option>
+          </select>
+        </div>
+        <button class="sc-scan-btn" id="scScanBtn">▶ SCAN</button>
+      </div>
+    </div>
+
+    <!-- Table wrapper -->
+    <div class="sc-table-wrap">
+      <div class="sc-loading-ov" id="scLoadingOv" style="display:none">
+        <div class="sc-spinner"></div>
+        <span class="sc-loading-txt">SCANNING MARKET…</span>
+      </div>
+      <table class="sc-table">
+        <thead>
+          <tr>
+            <th class="sc-th sc-th-star"></th>
+            <th class="sc-th" data-col="sym">TICKER</th>
+            <th class="sc-th sc-th-name" data-col="name">NAME</th>
+            <th class="sc-th sc-th-r" data-col="price">PRICE</th>
+            <th class="sc-th sc-th-r" data-col="chgPct">% CHG</th>
+            <th class="sc-th sc-th-r" data-col="volume">VOLUME</th>
+            <th class="sc-th sc-th-r" data-col="relVol">REL.VOL</th>
+            <th class="sc-th sc-th-r" data-col="rsi">RSI</th>
+            <th class="sc-th" data-col="mcap">CAP</th>
+          </tr>
+        </thead>
+        <tbody id="scBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Status bar -->
+    <div class="sc-status-bar">
+      <span class="sc-legend"><span class="sc-leg-os"></span>Oversold &lt;30</span>
+      <span class="sc-legend"><span class="sc-leg-ob"></span>Overbought &gt;70</span>
+      <span class="sc-legend"><span class="sc-leg-surge"></span>Vol Surge 3x+</span>
+      <span class="sc-status-count" id="scCount">-- results</span>
+      <span class="sc-status-upd" id="scUpdated"></span>
+    </div>
+
+  </div><!-- /sc-page-wrap -->
+
+  <!-- ── Custom / Manual Scanner ────────────────────────────────────────────── -->
+  <div class="msc-wrap" id="mscWrap">
+
+    <div class="msc-header">
+      <div>
+        <h2 class="msc-title">Custom Scanner</h2>
+        <p class="msc-sub">Add any tickers and run a full signal scan — VP · EMA Ribbon · Regime Intelligence</p>
+      </div>
+      <div class="msc-header-right">
+        <button class="msc-import-btn" id="mscImportWl" title="Import your watchlist">↓ Import Watchlist</button>
+        <button class="msc-export-btn" id="mscExportBtn" title="Export results to CSV">↓ CSV</button>
+      </div>
+    </div>
+
+    <!-- Ticker input row -->
+    <div class="msc-input-row">
+      <div class="msc-search-wrap">
+        <svg class="msc-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="text" id="mscInput" class="msc-input" placeholder="Add ticker… (e.g. TSLA, NVDA, BTC-USD)" autocomplete="off" spellcheck="false" maxlength="12"/>
+        <div class="msc-drop" id="mscDrop"></div>
+      </div>
+      <button class="msc-add-btn" id="mscAddBtn">+ Add</button>
+      <button class="msc-clear-btn" id="mscClearBtn">✕ Clear All</button>
+    </div>
+
+    <!-- Ticker chips -->
+    <div class="msc-chips-wrap" id="mscChipsWrap" style="display:none">
+      <div class="msc-chips" id="mscChips"></div>
+      <span class="msc-chip-count" id="mscChipCount"></span>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="msc-filters">
+      <div class="msc-fg">
+        <label class="msc-label">SIGNAL</label>
+        <select class="msc-sel" id="mscSignalFilter">
+          <option value="">All</option>
+          <option value="BUY">BUY only</option>
+          <option value="HOLD">HOLD only</option>
+        </select>
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">MIN CONF %</label>
+        <input type="number" class="msc-inp" id="mscMinConf" placeholder="0" min="0" max="100" step="5">
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">RSI MIN</label>
+        <input type="number" class="msc-inp" id="mscMinRsi" placeholder="0" min="0" max="100">
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">RSI MAX</label>
+        <input type="number" class="msc-inp" id="mscMaxRsi" placeholder="100" min="0" max="100">
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">MIN % CHG</label>
+        <input type="number" class="msc-inp" id="mscMinChg" placeholder="any" step="0.5">
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">MIN REL.VOL</label>
+        <select class="msc-sel" id="mscMinRelVol">
+          <option value="0">Any</option>
+          <option value="1.5">1.5x+</option>
+          <option value="2">2x+</option>
+          <option value="3">3x+</option>
+        </select>
+      </div>
+      <div class="msc-fg">
+        <label class="msc-label">SORT BY</label>
+        <select class="msc-sel" id="mscSortSel">
+          <option value="confidence">Confidence</option>
+          <option value="chgPct">% Change</option>
+          <option value="relVol">Rel. Volume</option>
+          <option value="rsi">RSI</option>
+          <option value="price">Price</option>
+        </select>
+      </div>
+      <button class="msc-run-btn" id="mscRunBtn">▶ RUN SCAN</button>
+    </div>
+
+    <!-- Results area -->
+    <div class="msc-results-area">
+
+      <div class="msc-loading-ov" id="mscLoading" style="display:none">
+        <div class="sc-spinner"></div>
+        <span class="msc-loading-txt" id="mscLoadingTxt">Scanning…</span>
       </div>
 
-      <!-- Strategy explainer -->
-      <div class="bs-rules-card">
-        <div class="bs-rules-title">Setup Rules (all 4 must be met)</div>
-        <div class="bs-rules-grid">
-          <div class="bs-rule"><span class="bs-rule-n">1</span><span class="bs-rule-txt"><strong>Uptrend stack:</strong> 8 EMA &gt; 21 EMA &gt; 34 EMA &gt; 50 SMA</span></div>
-          <div class="bs-rule"><span class="bs-rule-n">2</span><span class="bs-rule-txt"><strong>Pullback zone:</strong> Price between EMA 8 and SMA 50</span></div>
-          <div class="bs-rule"><span class="bs-rule-n">3</span><span class="bs-rule-txt"><strong>Stochastic:</strong> %K (8,3,3) below 40</span></div>
-          <div class="bs-rule"><span class="bs-rule-n">4</span><span class="bs-rule-txt"><strong>Entry trigger:</strong> Current bar closes above previous bar's high</span></div>
-        </div>
-        <div class="bs-rules-exits">
-          <span class="bs-exits-lbl">Exits:</span>
-          Price reaches prev swing high · Stoch %K crosses above 80 · Daily close below EMA 8
-          &nbsp;|&nbsp; <span class="bs-exits-lbl">Stop:</span> Below SMA 50 or pullback low (closer of the two)
-        </div>
+      <div class="msc-empty-state" id="mscEmpty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".35"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <span>Add tickers above and click <strong>RUN SCAN</strong> to see results</span>
       </div>
 
-      <!-- Control bar -->
-      <div class="bs-controls">
-        <div class="bs-input-group">
-          <input type="text" id="bsCustomInput" class="bs-input" placeholder="Add tickers (press Enter)…" autocomplete="off" spellcheck="false"/>
-          <button class="bs-add-btn" id="bsAddBtn">+ Add</button>
-          <button class="bs-import-btn" id="bsImportWl">↓ Watchlist</button>
-        </div>
-        <div id="bsChips" class="bs-chips"></div>
-        <div class="bs-run-row">
-          <button class="bs-run-btn" id="bsRunBtn">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Scan Universe
-          </button>
-          <div class="bs-spinner" id="bsSpinner" style="display:none"></div>
-          <span class="bs-summary" id="bsSummary">Add tickers above or click Scan Universe to check 60+ stocks</span>
-        </div>
-      </div>
+      <table class="msc-table" id="mscTable" style="display:none">
+        <thead>
+          <tr>
+            <th class="msc-th" data-col="sym">TICKER</th>
+            <th class="msc-th msc-th-r" data-col="price">PRICE</th>
+            <th class="msc-th msc-th-r" data-col="chgPct">% CHG</th>
+            <th class="msc-th msc-th-r" data-col="volume">VOLUME</th>
+            <th class="msc-th msc-th-r" data-col="relVol">REL.VOL</th>
+            <th class="msc-th msc-th-r" data-col="rsi">RSI</th>
+            <th class="msc-th" data-col="signal">SIGNAL</th>
+            <th class="msc-th msc-th-r" data-col="confidence">CONF</th>
+            <th class="msc-th" data-col="vpZone">VP ZONE</th>
+            <th class="msc-th" data-col="emaState">EMA</th>
+          </tr>
+        </thead>
+        <tbody id="mscBody"></tbody>
+      </table>
 
-      <!-- Results table -->
-      <div class="bs-table-wrap" id="bsTableWrap">
-        <div class="bs-empty">Click <strong>Scan Universe</strong> to run the Bounce 2.0 screen, or add your own tickers above.</div>
-      </div>
-
-      <!-- Single symbol lookup -->
-      <div class="bs-single-section">
-        <div class="bs-single-title">Single Symbol Signal Check</div>
-        <div class="bs-single-input-row">
-          <input type="text" id="bsSingleInput" class="bs-input bs-single-input" placeholder="e.g. AAPL" autocomplete="off" spellcheck="false" maxlength="10"/>
-          <button class="bs-check-btn" id="bsSingleBtn">Check Signal</button>
-        </div>
-        <div id="bsSinglePanel"></div>
-      </div>
-
-    </div><!-- /.bs-page -->
-
-    <!-- ── Volatility Expansion Scanner ──────────────────────────────────────── -->
-    <div class="ve-page" id="vePage" style="display:none">
-
-      <!-- Header -->
-      <div class="ve-header">
-        <div class="ve-header-left">
-          <h1 class="ve-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            Volatility Expansion
-          </h1>
-          <p class="ve-subtitle">ATR Contraction → BB Squeeze → Volume Surge → Breakout · Auto-trades when enabled</p>
-        </div>
-        <div class="ve-header-right">
-          <div class="ve-auto-toggle-wrap">
-            <label class="ve-auto-lbl">Auto-Trade</label>
-            <label class="ve-toggle-switch">
-              <input type="checkbox" id="veAutoEnabled"/>
-              <span class="ve-toggle-slider"></span>
-            </label>
-          </div>
-          <div class="ve-filter-pills">
-            <button class="ve-filter-btn active" data-filter="all">All</button>
-            <button class="ve-filter-btn" data-filter="confirmed">Confirmed Only</button>
-            <button class="ve-filter-btn" data-filter="squeeze">Squeezing</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Rules card -->
-      <div class="ve-rules-card">
-        <div class="ve-rules-title">Setup Rules</div>
-        <div class="ve-rules-grid">
-          <div class="ve-rule"><span class="ve-rule-n">1</span><span class="ve-rule-txt"><strong>ATR Contraction:</strong> 5+ consecutive bars with ATR(14) below its 20-period average</span></div>
-          <div class="ve-rule"><span class="ve-rule-n">2</span><span class="ve-rule-txt"><strong>BB Squeeze:</strong> Bollinger Band (20,2) width at or near its lowest point in the last 20 bars</span></div>
-          <div class="ve-rule"><span class="ve-rule-n">3</span><span class="ve-rule-txt"><strong>Volume Surge:</strong> Current bar volume ≥ 1.5× the 20-bar average</span></div>
-          <div class="ve-rule"><span class="ve-rule-n">4</span><span class="ve-rule-txt"><strong>Breakout trigger:</strong> Long — close above consolidation high · Short — close below consolidation low</span></div>
-        </div>
-        <div class="ve-rules-exits">
-          <span class="ve-exits-lbl">Stop Loss:</span>
-          Long — below consolidation midpoint · Short — above consolidation midpoint
-        </div>
-      </div>
-
-      <!-- Auto-trade settings panel (shown when enabled) -->
-      <div class="ve-auto-panel" id="veAutoPanel" style="display:none">
-        <div class="ve-auto-title">Auto-Trade Configuration</div>
-        <div class="ve-auto-fields">
-          <div class="ve-auto-field">
-            <label class="ve-auto-flbl">Amount per trade</label>
-            <div class="ve-dollar-wrap"><span>$</span><input type="number" id="veAmount" class="ve-inp" value="1000" min="50" step="50"/></div>
-          </div>
-          <div class="ve-auto-field">
-            <label class="ve-auto-flbl">Leverage</label>
-            <div class="ve-lev-row">
-              <button class="ve-lb active" data-lev="1">1×</button>
-              <button class="ve-lb" data-lev="2">2×</button>
-              <button class="ve-lb" data-lev="4">4×</button>
-            </div>
-          </div>
-        </div>
-        <div class="ve-auto-note">Bot scans every 5 min during market hours (9:35–3:50 ET) and places bracket orders automatically via Alpaca when all 4 conditions are met. PDT rules and cooldowns are enforced.</div>
-        <button class="ve-save-btn" id="veSaveBtn">Save Settings</button>
-        <span class="ve-save-msg" id="veSaveMsg"></span>
-      </div>
-
-      <!-- Controls -->
-      <div class="ve-controls">
-        <div class="ve-input-group">
-          <input type="text" id="veCustomInput" class="ve-input" placeholder="Add tickers (press Enter)…" autocomplete="off" spellcheck="false"/>
-          <button class="ve-add-btn" id="veAddBtn">+ Add</button>
-          <button class="ve-import-btn" id="veImportWl">↓ Watchlist</button>
-        </div>
-        <div id="veChips" class="ve-chips"></div>
-        <div class="ve-run-row">
-          <button class="ve-run-btn" id="veRunBtn">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Scan Universe
-          </button>
-          <div class="ve-spinner" id="veSpinner" style="display:none"></div>
-          <span class="ve-summary" id="veSummary">Click Scan Universe to check 60+ stocks for volatility squeeze setups</span>
-        </div>
-      </div>
-
-      <!-- Results table -->
-      <div class="ve-table-wrap" id="veTableWrap">
-        <div class="ve-empty">Click <strong>Scan Universe</strong> to run the Volatility Expansion screen.</div>
-      </div>
-
-      <!-- Trade log -->
-      <div class="ve-log-section" id="veLogSection" style="display:none">
-        <div class="ve-log-title">
-          Auto-Trade Log
-          <button class="ve-log-refresh" id="veLogRefresh">↻ Refresh</button>
-        </div>
-        <div id="veLogBody"><div class="ve-empty">No auto-trades yet</div></div>
-      </div>
-
-    </div><!-- /.ve-page -->
-
-    <!-- ── Explosive Earnings Scanner ────────────────────────────────────────── -->
-    <div class="ee-page" id="eePage" style="display:none">
-
-      <!-- Header -->
-      <div class="ee-header">
-        <div class="ee-header-left">
-          <h1 class="ee-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-            Explosive Earnings Setup
-          </h1>
-          <p class="ee-subtitle">EPS beat ≥15% · Revenue growth ≥25% · Gap up ≥5% · Volume 2×+ · 10 EMA consolidation entry</p>
-        </div>
-        <div class="ee-header-right">
-          <div class="ee-auto-toggle-wrap">
-            <label class="ee-auto-lbl">Auto-Trade</label>
-            <label class="ee-toggle-switch">
-              <input type="checkbox" id="eeAutoEnabled"/>
-              <span class="ee-toggle-slider"></span>
-            </label>
-          </div>
-          <div class="ee-filter-pills">
-            <button class="ee-filter-btn active" data-filter="all">All</button>
-            <button class="ee-filter-btn" data-filter="entry">Entry Zone</button>
-            <button class="ee-filter-btn" data-filter="shakeout">Shakeout</button>
-            <button class="ee-filter-btn" data-filter="watching">Watching</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Rules card -->
-      <div class="ee-rules-card">
-        <div class="ee-rules-title">Setup Rules</div>
-        <div class="ee-rules-cols">
-          <div class="ee-rules-col">
-            <div class="ee-rules-col-title">Fundamental (FMP)</div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F1</span><span class="ee-rule-txt"><strong>EPS Surprise ≥15%</strong> vs analyst estimate</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F2</span><span class="ee-rule-txt"><strong>Revenue Growth ≥25%</strong> year-over-year</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-fund">F3</span><span class="ee-rule-txt"><strong>Analyst target</strong> tracked post-earnings</span></div>
-          </div>
-          <div class="ee-rules-col">
-            <div class="ee-rules-col-title">Technical</div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T1</span><span class="ee-rule-txt"><strong>Gap up ≥5%</strong> at open on earnings day</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T2</span><span class="ee-rule-txt"><strong>Volume ≥2×</strong> 20-day average on earnings day</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-tech">T3</span><span class="ee-rule-txt"><strong>Breaks 3-month resistance</strong> (prior 63-bar high)</span></div>
-          </div>
-          <div class="ee-rules-col">
-            <div class="ee-rules-col-title">Entry Trigger</div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-entry">E1</span><span class="ee-rule-txt"><strong>ENTRY ZONE:</strong> Close above prev bar high while within 2% of 10 EMA</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-entry">E2</span><span class="ee-rule-txt"><strong>SHAKEOUT:</strong> Dips below 10 EMA, then reclaims on next bar close</span></div>
-            <div class="ee-rule"><span class="ee-rule-n ee-rule-n-risk">SL</span><span class="ee-rule-txt"><strong>Stop Loss:</strong> 3% below entry · TP 9% (3:1 R/R)</span></div>
-          </div>
+      <div class="msc-status-bar" id="mscStatusBar" style="display:none">
+        <span class="msc-status-count" id="mscCount"></span>
+        <span class="msc-status-upd" id="mscUpdated"></span>
+        <div class="msc-legend-row">
+          <span class="msc-legend"><span class="msc-leg-buy"></span>BUY signal</span>
+          <span class="msc-legend"><span class="msc-leg-hold"></span>HOLD</span>
+          <span class="msc-legend"><span class="msc-leg-surge"></span>Vol surge 3x+</span>
         </div>
       </div>
 
-      <!-- Auto-trade settings panel -->
-      <div class="ee-auto-panel" id="eeAutoPanel" style="display:none">
-        <div class="ee-auto-title">Auto-Trade Configuration</div>
-        <div class="ee-auto-fields">
-          <div class="ee-auto-field">
-            <label class="ee-auto-flbl">Amount per trade</label>
-            <div class="ee-dollar-wrap"><span>$</span><input type="number" id="eeAmount" class="ee-inp" value="1000" min="50" step="50"/></div>
-          </div>
-          <div class="ee-auto-field">
-            <label class="ee-auto-flbl">Leverage</label>
-            <div class="ee-lev-row">
-              <button class="ee-lb active" data-lev="1">1×</button>
-              <button class="ee-lb" data-lev="2">2×</button>
-              <button class="ee-lb" data-lev="4">4×</button>
-            </div>
-          </div>
-        </div>
-        <div class="ee-auto-note">Bot scans every 5 min during market hours. It places a bracket BUY order (SL −3%, TP +9%) when ENTRY ZONE or SHAKEOUT signal fires and all fundamental/technical conditions are met. Requires FMP API key for fundamental checks.</div>
-        <button class="ee-save-btn" id="eeSaveBtn">Save Settings</button>
-        <span class="ee-save-msg" id="eeSaveMsg"></span>
-      </div>
+    </div><!-- /msc-results-area -->
 
-      <!-- Controls -->
-      <div class="ee-controls">
-        <div class="ee-input-group">
-          <input type="text" id="eeCustomInput" class="ee-input" placeholder="Add tickers (press Enter) — or leave blank to scan recent earnings…" autocomplete="off" spellcheck="false"/>
-          <button class="ee-add-btn" id="eeAddBtn">+ Add</button>
-          <button class="ee-import-btn" id="eeImportWl">↓ Watchlist</button>
+  </div><!-- /msc-wrap -->
+
+  <!-- Detail modal -->
+  <div class="sc-modal-bg" id="scModal">
+    <div class="sc-modal">
+      <button class="sc-modal-close" id="scModalClose">✕</button>
+      <div class="sc-modal-head">
+        <div>
+          <div class="sc-modal-sym" id="scMSym">--</div>
+          <div class="sc-modal-name" id="scMName">--</div>
         </div>
-        <div id="eeChips" class="ee-chips"></div>
-        <div class="ee-run-row">
-          <button class="ee-run-btn" id="eeRunBtn">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Scan Earnings Universe
-          </button>
-          <div class="ee-spinner" id="eeSpinner" style="display:none"></div>
-          <span class="ee-summary" id="eeSummary">Click Scan to screen stocks from recent earnings calendar for explosive setups</span>
+        <div class="sc-modal-px-group">
+          <span class="sc-modal-price" id="scMPrice">--</span>
+          <span class="sc-modal-chg" id="scMChg">--</span>
         </div>
       </div>
-
-      <!-- Results table -->
-      <div class="ee-table-wrap" id="eeTableWrap">
-        <div class="ee-empty">Click <strong>Scan Earnings Universe</strong> to screen stocks that recently reported earnings.</div>
+      <div class="sc-modal-grid">
+        <div class="sc-mrow"><span class="sc-mk">Sector</span><span class="sc-mv" id="scMSector">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Market Cap</span><span class="sc-mv" id="scMMcap">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Float</span><span class="sc-mv" id="scMFloat">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Volume</span><span class="sc-mv" id="scMVol">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Avg Volume</span><span class="sc-mv" id="scMAvgVol">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Rel Volume</span><span class="sc-mv" id="scMRelVol">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Open</span><span class="sc-mv" id="scMOpen">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Day High</span><span class="sc-mv" id="scMDayHigh">--</span></div>
+        <div class="sc-mrow"><span class="sc-mk">Day Low</span><span class="sc-mv" id="scMDayLow">--</span></div>
+        <div class="sc-mrow sc-mrow-full"><span class="sc-mk">RSI (Intraday)</span><span class="sc-mv" id="scMRsi">--</span><span class="sc-mzone" id="scMRsiZone"></span></div>
       </div>
+      <button class="sc-modal-open-btn" id="scMOpenStock">Full Analysis →</button>
+    </div>
+  </div>
 
-      <!-- Trade log -->
-      <div class="ee-log-section" id="eeLogSection" style="display:none">
-        <div class="ee-log-title">
-          Auto-Trade Log
-          <button class="ee-log-refresh" id="eeLogRefresh">↻ Refresh</button>
-        </div>
-        <div id="eeLogBody"><div class="ee-empty">No auto-trades yet</div></div>
-      </div>
-
-    </div><!-- /.ee-page -->
-
-  </div><!-- /.sc-page-wrap -->
 </div>
 
 <!-- TRADING PAGE -->
@@ -1089,8 +1060,6 @@
 <script src="/js/trader.js"></script>
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/scanner.js"></script>
-<script src="/js/volatility.js"></script>
-<script src="/js/earnings.js"></script>
 
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>

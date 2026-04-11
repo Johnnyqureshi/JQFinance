@@ -8,6 +8,8 @@ const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
 const SQLiteStore  = require('connect-sqlite3')(session);
+const helmet       = require('helmet');
+const crypto       = require('crypto');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -94,6 +96,52 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 
+// ── App settings table (persists generated secrets etc.) ──────────────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )
+`).run();
+
+// Generate or retrieve a persistent session secret so sessions survive restarts
+// and cannot be forged even if SESSION_SECRET env var is absent.
+function getSessionSecret() {
+  const envSecret = process.env.SESSION_SECRET;
+  if (envSecret && envSecret.length >= 32) return envSecret;
+  const row = db.prepare("SELECT value FROM app_settings WHERE key='session_secret'").get();
+  if (row) return row.value;
+  const generated = crypto.randomBytes(64).toString('hex');
+  db.prepare("INSERT INTO app_settings (key, value) VALUES ('session_secret', ?)").run(generated);
+  console.log('[Security] No SESSION_SECRET env var found — generated and stored a random secret in DB.');
+  return generated;
+}
+const SESSION_SECRET = getSessionSecret();
+
+// ── In-memory rate limiter for auth endpoints ──────────────────────────────────
+const authAttempts = new Map();
+function rateLimitAuth(req, res, next) {
+  const ip    = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now   = Date.now();
+  const WINDOW = 15 * 60 * 1000; // 15 minutes
+  const LIMIT  = 15;
+  let entry = authAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + WINDOW };
+    authAttempts.set(ip, entry);
+  }
+  entry.count++;
+  if (entry.count > LIMIT) {
+    return res.status(429).json({ error: 'Too many attempts. Please wait 15 minutes and try again.' });
+  }
+  next();
+}
+// Clean up stale entries every 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of authAttempts) if (now > entry.resetAt) authAttempts.delete(ip);
+}, 15 * 60 * 1000);
+
 // ── VE auto-trade settings table ──────────────────────────────────────────────
 db.prepare(`
   CREATE TABLE IF NOT EXISTS ve_auto_settings (
@@ -107,17 +155,31 @@ db.prepare(`
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie behaviour
-app.use(cors({ credentials: true, origin: true }));
-app.use(express.json());
+
+// Security headers: removes X-Powered-By, sets X-Frame-Options, X-Content-Type-Options, etc.
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// CORS: only allow same-origin and *.replit.app / *.repl.co / localhost (dev)
+app.use(cors({
+  credentials: true,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // same-origin / server-to-server
+    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true);
+    if (/\.(replit\.app|repl\.co|replit\.dev)$/.test(origin)) return cb(null, true);
+    cb(new Error('CORS: origin not allowed'));
+  },
+}));
+
+app.use(express.json({ limit: '50kb' }));
 app.use(session({
   store:             new SQLiteStore({ db: 'sessions.db', dir: '.' }),
-  secret:            process.env.SESSION_SECRET || 'jqf-dev-secret-change-me',
+  secret:            SESSION_SECRET,
   resave:            false,
   saveUninitialized: false,
   rolling:           true,   // Reset cookie expiry on every request (keeps active users logged in)
   cookie: {
     httpOnly: true,
-    secure:   false,          // Works over both HTTP and HTTPS
+    secure:   true,           // HTTPS only (Replit always serves via HTTPS proxy)
     sameSite: 'lax',
     maxAge:   90 * 24 * 60 * 60 * 1000,  // 90 days
   },
@@ -135,7 +197,7 @@ const YH = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 // ── Auth Routes ────────────────────────────────────────────────────────────────
 
 // Register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
@@ -160,7 +222,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // Login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
@@ -198,7 +260,7 @@ app.get('/api/watchlist', requireAuth, (req, res) => {
 // Add symbol
 app.post('/api/watchlist', requireAuth, (req, res) => {
   const sym = (req.body?.symbol || '').toUpperCase().trim();
-  if (!sym) return res.status(400).json({ error: 'Symbol required.' });
+  if (!sym || !/^[A-Z0-9.\-]{1,12}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol.' });
   db.prepare('INSERT OR IGNORE INTO watchlists (user_id, symbol) VALUES (?, ?)').run(req.session.userId, sym);
   const rows = db.prepare('SELECT symbol FROM watchlists WHERE user_id = ? ORDER BY added_at ASC').all(req.session.userId);
   res.json({ watchlist: rows.map(r => r.symbol) });
@@ -995,13 +1057,16 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
 
 // Cancel order
 app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
+  if (!/^[a-f0-9\-]{10,40}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid order ID.' });
   try { await alpacaFetch(req.session.userId, `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // Close position (market sell)
 app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
-  try { res.json(await alpacaFetch(req.session.userId, `/v2/positions/${req.params.sym}`, { method: 'DELETE' })); }
+  const sym = req.params.sym.toUpperCase();
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol.' });
+  try { res.json(await alpacaFetch(req.session.userId, `/v2/positions/${sym}`, { method: 'DELETE' })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 

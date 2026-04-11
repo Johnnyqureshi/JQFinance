@@ -179,7 +179,7 @@ app.use(session({
   rolling:           true,   // Reset cookie expiry on every request (keeps active users logged in)
   cookie: {
     httpOnly: true,
-    secure:   true,           // HTTPS only (Replit always serves via HTTPS proxy)
+    secure:   false,          // Replit's proxy handles HTTPS termination; cookie is still httpOnly + sameSite
     sameSite: 'lax',
     maxAge:   90 * 24 * 60 * 60 * 1000,  // 90 days
   },

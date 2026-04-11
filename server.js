@@ -9,7 +9,7 @@ const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
 const SQLiteStore  = require('connect-sqlite3')(session);
 
-const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
 // Suppress noisy yahoo-finance2 deprecation warnings for modules we use intentionally
 const _origWarn = console.warn.bind(console);
@@ -2023,5 +2023,489 @@ async function runEEAutoTrader() {
 // ── Start EE auto-trader interval ─────────────────────────────────────────────
 setInterval(runEEAutoTrader, 5 * 60 * 1000);
 console.log('[EE-Bot] Explosive Earnings auto-trader initialized — scans every 5 min during market hours');
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COUNTERTREND SETUP — Strategy 4
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── CT auto-trade settings table ──────────────────────────────────────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS ct_auto_settings (
+    user_id  INTEGER PRIMARY KEY,
+    enabled  INTEGER NOT NULL DEFAULT 0,
+    amount   REAL    NOT NULL DEFAULT 500,
+    leverage REAL    NOT NULL DEFAULT 1
+  )
+`).run();
+
+// ── RSI(14) helper ─────────────────────────────────────────────────────────────
+function calcRSI(closes, period = 14) {
+  if (!closes || closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  let avgG = gains / period, avgL = losses / period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
+    avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (avgL === 0) return 100;
+  return 100 - 100 / (1 + avgG / avgL);
+}
+
+// ── Full RSI series (one value per bar) ───────────────────────────────────────
+function calcRSISeries(closes, period = 14) {
+  const out = new Array(closes.length).fill(null);
+  if (closes.length < period + 1) return out;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  let avgG = gains / period, avgL = losses / period;
+  out[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
+    avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
+    out[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+  }
+  return out;
+}
+
+// ── SMA helper ─────────────────────────────────────────────────────────────────
+function calcSMA(arr, period) {
+  if (!arr || arr.length < period) return null;
+  const slice = arr.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+// ── Pivot high/low detection ───────────────────────────────────────────────────
+function findPivots(bars, wing = 5) {
+  const highs = [], lows = [];
+  for (let i = wing; i < bars.length - wing; i++) {
+    const h = bars[i].h, l = bars[i].l;
+    let isHigh = true, isLow = true;
+    for (let j = i - wing; j <= i + wing; j++) {
+      if (j === i) continue;
+      if (bars[j].h >= h) isHigh = false;
+      if (bars[j].l <= l) isLow  = false;
+    }
+    if (isHigh) highs.push({ idx: i, price: h });
+    if (isLow)  lows.push({ idx: i,  price: l });
+  }
+  return { highs, lows };
+}
+
+// ── S/R levels tested ≥2 times in 6 months ────────────────────────────────────
+function findSRLevels(bars) {
+  const tol = 0.015; // 1.5% cluster tolerance
+  const { highs, lows } = findPivots(bars, 5);
+
+  function cluster(pivots, type) {
+    const levels = [];
+    for (const p of pivots) {
+      let merged = false;
+      for (const lv of levels) {
+        if (Math.abs(p.price - lv.price) / lv.price < tol) {
+          lv.price = (lv.price * lv.count + p.price) / (lv.count + 1);
+          lv.count++;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) levels.push({ price: p.price, count: 1, type });
+    }
+    return levels.filter(lv => lv.count >= 2);
+  }
+
+  const resistance = cluster(highs, 'resistance');
+  const support    = cluster(lows,  'support');
+  return { resistance, support };
+}
+
+// ── Engulfing candle detection ─────────────────────────────────────────────────
+function detectEngulfing(bars) {
+  if (bars.length < 2) return { bearish: false, bullish: false };
+  const prev = bars[bars.length - 2];
+  const curr = bars[bars.length - 1];
+  const bearish = curr.o > prev.c && curr.c < prev.o && curr.c < curr.o;
+  const bullish = curr.o < prev.c && curr.c > prev.o && curr.c > curr.o;
+  return { bearish, bullish };
+}
+
+// ── RSI divergence (look back up to 50 bars) ──────────────────────────────────
+function detectRSIDivergence(bars, rsiSeries) {
+  const wing = 4, lookback = Math.min(50, bars.length - 1);
+  const start = bars.length - lookback;
+
+  const swingHighs = [], swingLows = [];
+  for (let i = start + wing; i < bars.length - wing; i++) {
+    let isPH = true, isPL = true;
+    for (let j = i - wing; j <= i + wing; j++) {
+      if (j === i) continue;
+      if (bars[j].h >= bars[i].h) isPH = false;
+      if (bars[j].l <= bars[i].l) isPL  = false;
+    }
+    if (isPH && rsiSeries[i] != null) swingHighs.push({ i, price: bars[i].h, rsi: rsiSeries[i] });
+    if (isPL  && rsiSeries[i] != null) swingLows.push({ i,  price: bars[i].l, rsi: rsiSeries[i] });
+  }
+
+  let bearishDiv = false, bullishDiv = false;
+  if (swingHighs.length >= 2) {
+    const [a, b] = swingHighs.slice(-2);
+    if (b.price > a.price && b.rsi < a.rsi) bearishDiv = true;
+  }
+  if (swingLows.length >= 2) {
+    const [a, b] = swingLows.slice(-2);
+    if (b.price < a.price && b.rsi > a.rsi) bullishDiv = true;
+  }
+  return { bearishDiv, bullishDiv };
+}
+
+// ── 2618 trendline-break + retest ─────────────────────────────────────────────
+function detect2618(bars, rsiSeries) {
+  const { highs, lows } = findPivots(bars, 5);
+  const n = bars.length;
+
+  function checkBreakRetest(pivots, side) {
+    if (pivots.length < 2) return false;
+    const [p1, p2] = pivots.slice(-2);
+    // Trendline: y = p1.price + (p2.price - p1.price) * (x - p1.idx) / (p2.idx - p1.idx)
+    const slope  = (p2.price - p1.price) / (p2.idx - p1.idx);
+    const trendAt = x => p1.price + slope * (x - p1.idx);
+
+    // Did price cross the trendline after p2?
+    let crossIdx = -1;
+    for (let i = p2.idx + 1; i < n; i++) {
+      const tl = trendAt(i);
+      if (side === 'bear' && bars[i].c < tl) { crossIdx = i; break; }
+      if (side === 'bull' && bars[i].c > tl) { crossIdx = i; break; }
+    }
+    if (crossIdx < 0) return false;
+
+    // After cross, has price retested the trendline?
+    const currTL = trendAt(n - 1);
+    const currClose = bars[n - 1].c;
+    const dist = Math.abs(currClose - currTL) / currTL;
+    if (dist > 0.015) return false; // within 1.5%
+
+    // Retest bar closes in reversal direction
+    if (side === 'bear' && bars[n - 1].c < bars[n - 2].c) return true;
+    if (side === 'bull' && bars[n - 1].c > bars[n - 2].c) return true;
+    return false;
+  }
+
+  const bearish2618 = checkBreakRetest(highs, 'bear');
+  const bullish2618 = checkBreakRetest(lows,  'bull');
+  return { bearish2618, bullish2618 };
+}
+
+// ── Main CT Signal Computation ─────────────────────────────────────────────────
+async function computeCTSignal(symbol) {
+  try {
+    // Fetch ~200 days of daily bars
+    const rawBars = await yf.historical(symbol, {
+      period1: new Date(Date.now() - 210 * 86400000),
+      period2: new Date(),
+      interval: '1d',
+    });
+    if (!rawBars || rawBars.length < 30) return null;
+
+    const bars = rawBars.map(b => ({
+      t: b.date, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume,
+    })).filter(b => b.c > 0);
+    if (bars.length < 30) return null;
+
+    const closes = bars.map(b => b.c);
+    const highs  = bars.map(b => b.h);
+    const lows   = bars.map(b => b.l);
+    const n = bars.length;
+    const price = closes[n - 1];
+
+    // ── Indicators ──────────────────────────────────────────────────────────
+    const rsiSeries = calcRSISeries(closes);
+    const rsi       = rsiSeries[n - 1];
+    const sma50     = calcSMA(closes, 50);
+    const sma200    = calcSMA(closes, 200);
+    const swingHigh = Math.max(...highs.slice(-20));
+    const swingLow  = Math.min(...lows.slice(-20));
+
+    // ── RSI overbought/oversold ─────────────────────────────────────────────
+    const overbought  = rsi != null && rsi >= 70;
+    const oversold    = rsi != null && rsi <= 30;
+
+    // ── S/R Levels ──────────────────────────────────────────────────────────
+    const { resistance, support } = findSRLevels(bars);
+
+    // Find nearest resistance/support to current price (within 3%)
+    const nearRes = resistance
+      .filter(lv => Math.abs(price - lv.price) / price < 0.03)
+      .sort((a, b) => Math.abs(price - a.price) - Math.abs(price - b.price))[0] || null;
+    const nearSup = support
+      .filter(lv => Math.abs(price - lv.price) / price < 0.03)
+      .sort((a, b) => Math.abs(price - a.price) - Math.abs(price - b.price))[0] || null;
+
+    const nearResWithin1pct = nearRes && Math.abs(price - nearRes.price) / price < 0.01;
+    const nearSupWithin1pct = nearSup && Math.abs(price - nearSup.price) / price < 0.01;
+
+    // ── Engulfing candles ────────────────────────────────────────────────────
+    const { bearish: bearEngulf, bullish: bullEngulf } = detectEngulfing(bars);
+
+    // ── RSI Divergence ───────────────────────────────────────────────────────
+    const { bearishDiv, bullishDiv } = detectRSIDivergence(bars, rsiSeries);
+
+    // ── 2618 Setup ───────────────────────────────────────────────────────────
+    const { bearish2618, bullish2618 } = detect2618(bars, rsiSeries);
+
+    // ── Short: at resistance + reversal confirmation ─────────────────────────
+    const shortAtRes     = overbought && nearResWithin1pct;
+    const shortConfirm   = bearEngulf || bearishDiv;
+    const shortSignal    = shortAtRes && shortConfirm;
+
+    // ── Long: at support + reversal confirmation ─────────────────────────────
+    const longAtSup      = oversold && nearSupWithin1pct;
+    const longConfirm    = bullEngulf || bullishDiv;
+    const longSignal     = longAtSup && longConfirm;
+
+    // ── 2618 signals (override direction) ───────────────────────────────────
+    const is2618Short = bearish2618 && (overbought || nearResWithin1pct);
+    const is2618Long  = bullish2618 && (oversold  || nearSupWithin1pct);
+
+    // ── Determine primary signal type ────────────────────────────────────────
+    let signalType = 'WATCHING';
+    let direction  = null;
+    if (is2618Short || is2618Long) {
+      signalType = '2618 RETEST ENTRY';
+      direction  = is2618Short ? 'SHORT' : 'LONG';
+    } else if (shortSignal) {
+      signalType = 'COUNTERTREND SHORT SETUP';
+      direction  = 'SHORT';
+    } else if (longSignal) {
+      signalType = 'COUNTERTREND LONG SETUP';
+      direction  = 'LONG';
+    }
+
+    const confirmed = signalType !== 'WATCHING';
+
+    // ── Stop & target (1.5% stop per user spec; 2:1 R/R minimum) ────────────
+    const slPct  = 0.015;
+    let stopLoss = null, target = null, riskReward = null;
+    const srLevel = direction === 'SHORT' ? nearRes?.price : nearSup?.price;
+    const srLabel = direction === 'SHORT' ? 'Resistance' : 'Support';
+
+    if (direction === 'SHORT') {
+      const stopFromSwing = swingHigh * 1.001; // 1 tick above swing high
+      const stopFrom15   = price * (1 + slPct);
+      stopLoss = Math.max(stopFromSwing, stopFrom15);
+      const stopDist = stopLoss - price;
+      // Target: nearest support or key MA; fallback = 2× stop dist
+      const candidates = [sma50, sma200, nearSup?.price].filter(v => v && v < price);
+      target = candidates.length ? Math.max(...candidates) : price - 2 * stopDist;
+      riskReward = stopDist > 0 ? ((price - target) / stopDist).toFixed(2) : null;
+    } else if (direction === 'LONG') {
+      const stopFromSwing = swingLow * 0.999;
+      const stopFrom15   = price * (1 - slPct);
+      stopLoss = Math.min(stopFromSwing, stopFrom15);
+      const stopDist = price - stopLoss;
+      const candidates = [sma50, sma200, nearRes?.price].filter(v => v && v > price);
+      target = candidates.length ? Math.min(...candidates) : price + 2 * stopDist;
+      riskReward = stopDist > 0 ? ((target - price) / stopDist).toFixed(2) : null;
+    }
+
+    return {
+      symbol,
+      price:              +price.toFixed(2),
+      rsi:                rsi != null ? +rsi.toFixed(1) : null,
+      overbought,
+      oversold,
+      sma50:              sma50 ? +sma50.toFixed(2) : null,
+      sma200:             sma200 ? +sma200.toFixed(2) : null,
+      nearResistance:     nearRes ? +nearRes.price.toFixed(2) : null,
+      nearSupport:        nearSup ? +nearSup.price.toFixed(2) : null,
+      nearResWithin1pct,
+      nearSupWithin1pct,
+      srLevel:            srLevel ? +srLevel.toFixed(2) : null,
+      srLabel,
+      bearEngulf,
+      bullEngulf,
+      bearishDiv,
+      bullishDiv,
+      bearish2618,
+      bullish2618,
+      swingHigh:          +swingHigh.toFixed(2),
+      swingLow:           +swingLow.toFixed(2),
+      direction,
+      signalType,
+      confirmed,
+      stopLoss:           stopLoss ? +stopLoss.toFixed(2) : null,
+      target:             target   ? +target.toFixed(2)   : null,
+      riskReward:         riskReward ? +riskReward : null,
+      candlePattern:      bearEngulf ? 'Bearish Engulfing' : bullEngulf ? 'Bullish Engulfing' : null,
+      divergence:         bearishDiv ? 'Bearish RSI Divergence' : bullishDiv ? 'Bullish RSI Divergence' : null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── CT scan universe (broad large-cap list) ────────────────────────────────────
+const CT_UNIVERSE = [
+  'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','BRK.B','JPM','V',
+  'UNH','XOM','LLY','JNJ','PG','MA','AVGO','HD','CVX','MRK',
+  'COST','ABBV','AMD','NFLX','WMT','BAC','KO','PEP','TMO','ORCL',
+  'CRM','CSCO','ACN','MCD','LIN','ADBE','ABT','DHR','NKE','TXN',
+  'AMGN','QCOM','NEE','UNP','PM','SCHW','RTX','HON','INTU','IBM',
+  'SPGI','LOW','GS','CAT','AMAT','DE','ELV','ISRG','BLK','BKNG',
+  'SYK','AXP','MMC','GILD','PLD','ADI','MDT','TJX','VRTX','C',
+  'REGN','SO','DUK','MO','ZTS','CB','CI','CME','EOG','SLB',
+  'SPY','QQQ','IWM','DIA','GLD','TLT','HYG',
+];
+
+// ── CT signal cache ────────────────────────────────────────────────────────────
+const _ctCache = new Map();
+
+// ── GET /api/ct/signal/:symbol ─────────────────────────────────────────────────
+app.get('/api/ct/signal/:symbol', async (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  const cached = _ctCache.get(sym);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return res.json(cached.data);
+  const data = await computeCTSignal(sym);
+  if (!data) return res.status(404).json({ error: 'No data' });
+  _ctCache.set(sym, { ts: Date.now(), data });
+  res.json(data);
+});
+
+// ── GET /api/ct/scan?symbols=... ──────────────────────────────────────────────
+app.get('/api/ct/scan', async (req, res) => {
+  const requested = req.query.symbols
+    ? req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+    : CT_UNIVERSE;
+
+  const results = [];
+  const concurrency = 6;
+  for (let i = 0; i < requested.length; i += concurrency) {
+    const batch = requested.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(batch.map(s => computeCTSignal(s)));
+    settled.forEach((r, j) => {
+      if (r.status === 'fulfilled' && r.value) {
+        _ctCache.set(batch[j], { ts: Date.now(), data: r.value });
+        results.push(r.value);
+      }
+    });
+  }
+  results.sort((a, b) => {
+    const rank = s => s === '2618 RETEST ENTRY' ? 0 : s === 'COUNTERTREND SHORT SETUP' || s === 'COUNTERTREND LONG SETUP' ? 1 : 2;
+    return rank(a.signalType) - rank(b.signalType);
+  });
+  res.json({ results, total: results.length, confirmed: results.filter(r => r.confirmed).length });
+});
+
+// ── GET /api/ct/auto-settings ─────────────────────────────────────────────────
+app.get('/api/ct/auto-settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM ct_auto_settings WHERE user_id = ?').get(req.session.userId);
+  res.json(row || { enabled: 0, amount: 500, leverage: 1 });
+});
+
+// ── PUT /api/ct/auto-settings ─────────────────────────────────────────────────
+app.put('/api/ct/auto-settings', requireAuth, (req, res) => {
+  const { enabled, amount, leverage } = req.body;
+  db.prepare(`
+    INSERT INTO ct_auto_settings (user_id, enabled, amount, leverage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, amount=excluded.amount, leverage=excluded.leverage
+  `).run(req.session.userId, enabled ? 1 : 0, amount || 500, leverage || 1);
+  res.json({ ok: true });
+});
+
+// ── GET /api/ct/trade-log ─────────────────────────────────────────────────────
+app.get('/api/ct/trade-log', requireAuth, (req, res) => {
+  const rows = db.prepare(
+    `SELECT * FROM auto_trade_log WHERE user_id = ? AND strategy = 'countertrend' ORDER BY created_at DESC LIMIT 50`
+  ).all(req.session.userId);
+  res.json(rows);
+});
+
+// ── Server-side CT Auto-Trader ─────────────────────────────────────────────────
+async function runCTAutoTrader() {
+  const now = new Date();
+  const h = now.getUTCHours(), m = now.getUTCMinutes();
+  const inSession = (h > 13 || (h === 13 && m >= 30)) && h < 20;
+  if (!inSession) return;
+
+  const users = db.prepare('SELECT user_id, amount, leverage FROM ct_auto_settings WHERE enabled = 1').all();
+  if (!users.length) return;
+
+  const signals = [];
+  const concurrency = 4;
+  for (let i = 0; i < CT_UNIVERSE.length; i += concurrency) {
+    const batch = CT_UNIVERSE.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(batch.map(s => computeCTSignal(s)));
+    settled.forEach((r, j) => {
+      if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value);
+    });
+  }
+  if (!signals.length) return;
+
+  for (const user of users) {
+    const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
+    if (!creds) continue;
+
+    const base = creds.paper
+      ? 'https://paper-api.alpaca.markets'
+      : 'https://api.alpaca.markets';
+    const headers = {
+      'APCA-API-KEY-ID': creds.api_key,
+      'APCA-API-SECRET-KEY': creds.api_secret,
+      'Content-Type': 'application/json',
+    };
+
+    for (const sig of signals) {
+      const alreadyTraded = db.prepare(
+        `SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='countertrend'
+         AND created_at > datetime('now','-1 day')`
+      ).get(user.user_id, sig.symbol);
+      if (alreadyTraded) continue;
+
+      try {
+        const notional = (user.amount * user.leverage).toFixed(2);
+        const side = sig.direction === 'SHORT' ? 'sell' : 'buy';
+
+        const orderBody = {
+          symbol: sig.symbol,
+          notional,
+          side,
+          type: 'market',
+          time_in_force: 'day',
+        };
+
+        const orderRes = await fetch(`${base}/v2/orders`, {
+          method: 'POST', headers, body: JSON.stringify(orderBody),
+        });
+        const order = await orderRes.json();
+        const orderId = order.id || null;
+        const status  = orderRes.ok ? 'placed' : `error:${order.message || order.code}`;
+
+        db.prepare(
+          `INSERT INTO auto_trade_log (user_id, symbol, strategy, signal_type, confidence, amount, order_id, status)
+           VALUES (?, ?, 'countertrend', ?, ?, ?, ?, ?)`
+        ).run(user.user_id, sig.symbol, sig.signalType, sig.riskReward || 0, notional, orderId, status);
+      } catch (err) {
+        db.prepare(
+          `INSERT INTO auto_trade_log (user_id, symbol, strategy, signal_type, confidence, amount, order_id, status)
+           VALUES (?, ?, 'countertrend', ?, 0, 0, NULL, ?)`
+        ).run(user.user_id, sig.symbol, sig.signalType, `error:${err.message}`);
+      }
+    }
+  }
+}
+
+// ── Start CT auto-trader interval ─────────────────────────────────────────────
+setInterval(runCTAutoTrader, 5 * 60 * 1000);
+console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 5 min during market hours');
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

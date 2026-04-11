@@ -95,6 +95,16 @@ Preferred communication style: Simple, everyday language.
 - Earnings date detection: FMP exact date → volume spike heuristic in 5–75 days after fiscal quarter end
 - Bot: `ee_auto_settings` table, `runEEAutoTrader()`, 5-min interval, 90-day earnings window
 
+**Setup 4 — Countertrend Setups** (`/api/ct/*`)
+- RSI(14) ≥70 (short) or ≤30 (long) + price within 1% of major S/R (tested ≥2× in 6 months)
+- Reversal confirmation: bearish/bullish engulfing candle OR RSI divergence (price makes new extreme, RSI doesn't)
+- 2618 Setup: trendline break + price retests broken trendline + closes in reversal direction → "2618 RETEST ENTRY"
+- Signals: COUNTERTREND SHORT SETUP / COUNTERTREND LONG SETUP / 2618 RETEST ENTRY
+- SL = 1.5% from entry (or 1 tick outside swing high/low, whichever is wider)
+- TP = nearest S/R or key MA (SMA50/SMA200); minimum 2:1 R/R enforced
+- Position sizing and leverage: user-configurable in UI (manual per user spec)
+- Bot: `ct_auto_settings` table, `runCTAutoTrader()`, 5-min interval; auto-places both longs and shorts via Alpaca
+
 ### API Endpoints (server.js)
 - `GET /api/snapshots?symbols=A,B,C` — Yahoo Finance parallel chart quotes
 - `GET /api/quote/:symbol` — Yahoo Finance single chart quote

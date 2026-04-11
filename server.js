@@ -2355,25 +2355,19 @@ async function computeCTSignal(symbol) {
 
     const confirmed = signalType !== 'WATCHING';
 
-    // ── Stop & target (1.5% stop per user spec; 2:1 R/R minimum) ────────────
-    const slPct  = 0.015;
+    // ── Stop & target — SL = 1 tick outside swing high/low; TP = prior S/R or key MA (min 2:1) ──
     let stopLoss = null, target = null, riskReward = null;
     const srLevel = direction === 'SHORT' ? nearRes?.price : nearSup?.price;
     const srLabel = direction === 'SHORT' ? 'Resistance' : 'Support';
 
     if (direction === 'SHORT') {
-      const stopFromSwing = swingHigh * 1.001; // 1 tick above swing high
-      const stopFrom15   = price * (1 + slPct);
-      stopLoss = Math.max(stopFromSwing, stopFrom15);
+      stopLoss = +(swingHigh * 1.001).toFixed(2); // 1 tick above swing high
       const stopDist = stopLoss - price;
-      // Target: nearest support or key MA; fallback = 2× stop dist
       const candidates = [sma50, sma200, nearSup?.price].filter(v => v && v < price);
       target = candidates.length ? Math.max(...candidates) : price - 2 * stopDist;
       riskReward = stopDist > 0 ? ((price - target) / stopDist).toFixed(2) : null;
     } else if (direction === 'LONG') {
-      const stopFromSwing = swingLow * 0.999;
-      const stopFrom15   = price * (1 - slPct);
-      stopLoss = Math.min(stopFromSwing, stopFrom15);
+      stopLoss = +(swingLow * 0.999).toFixed(2);  // 1 tick below swing low
       const stopDist = price - stopLoss;
       const candidates = [sma50, sma200, nearRes?.price].filter(v => v && v > price);
       target = candidates.length ? Math.min(...candidates) : price + 2 * stopDist;
@@ -2503,72 +2497,98 @@ async function runCTAutoTrader() {
   const users = db.prepare('SELECT user_id, amount, leverage FROM ct_auto_settings WHERE enabled = 1').all();
   if (!users.length) return;
 
+  // Build confirmed signals using cache (5-min TTL) to avoid hammering Yahoo every 60 sec
+  const nowMs = Date.now();
+  const CT_CACHE_TTL = 5 * 60 * 1000;
   const signals = [];
   const concurrency = 4;
   for (let i = 0; i < CT_UNIVERSE.length; i += concurrency) {
     const batch = CT_UNIVERSE.slice(i, i + concurrency);
-    const settled = await Promise.allSettled(batch.map(s => computeCTSignal(s)));
-    settled.forEach((r, j) => {
+    const settled = await Promise.allSettled(batch.map(async s => {
+      const cached = _ctCache.get(s);
+      if (cached && nowMs - cached.ts < CT_CACHE_TTL) return cached.data;
+      const data = await computeCTSignal(s);
+      if (data) _ctCache.set(s, { ts: nowMs, data });
+      return data;
+    }));
+    settled.forEach(r => {
       if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value);
     });
   }
   if (!signals.length) return;
+  console.log(`[CT-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => `${s.symbol} ${s.signalType}`).join(', ')}`);
 
   for (const user of users) {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
     if (!creds) continue;
 
-    const base = creds.paper
-      ? 'https://paper-api.alpaca.markets'
-      : 'https://api.alpaca.markets';
-    const headers = {
-      'APCA-API-KEY-ID': creds.api_key,
-      'APCA-API-SECRET-KEY': creds.api_secret,
-      'Content-Type': 'application/json',
-    };
+    // ── PDT compliance: skip if account has ≥3 day-trades in rolling 5 days ──
+    try {
+      const acct = await alpacaFetch(user.user_id, '/v2/account');
+      const daytradeCount = parseInt(acct.daytrade_count ?? acct.daytrading_buying_power != null ? acct.daytrade_count : 0, 10);
+      if (!acct.pattern_day_trader && daytradeCount >= 3) {
+        console.log(`[CT-Bot] PDT limit reached for user ${user.user_id} (${daytradeCount} day-trades) — skipping`);
+        continue;
+      }
+    } catch (e) {
+      console.warn(`[CT-Bot] Could not fetch account for PDT check (user ${user.user_id}):`, e.message);
+    }
 
     for (const sig of signals) {
+      // Cooldown: 1 trade per symbol per day per strategy
       const alreadyTraded = db.prepare(
         `SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='countertrend'
          AND created_at > datetime('now','-1 day')`
       ).get(user.user_id, sig.symbol);
       if (alreadyTraded) continue;
 
+      // Skip if already holding this position
+      let positions = [];
+      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+      if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
+
+      const side   = sig.direction === 'SHORT' ? 'sell' : 'buy';
+      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 500) * lev;
+      const price  = sig.price;
+      const shares = Math.max(1, Math.floor(amount / price));
+
+      // SL = 1 tick outside swing high/low; TP = nearest S/R or key MA (min 2:1)
+      const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2)
+        : side === 'buy' ? (price * 0.985).toFixed(2) : (price * 1.015).toFixed(2);
+      const tpPrice = sig.target ? sig.target.toFixed(2)
+        : side === 'buy' ? (price * 1.04).toFixed(2)  : (price * 0.96).toFixed(2);
+
+      const orderBody = {
+        symbol:        sig.symbol,
+        qty:           String(shares),
+        side,
+        type:          'market',
+        time_in_force: 'day',
+        order_class:   'bracket',
+        take_profit:   { limit_price: tpPrice },
+        stop_loss:     { stop_price:  slPrice },
+      };
+
       try {
-        const notional = (user.amount * user.leverage).toFixed(2);
-        const side = sig.direction === 'SHORT' ? 'sell' : 'buy';
-
-        const orderBody = {
-          symbol: sig.symbol,
-          notional,
-          side,
-          type: 'market',
-          time_in_force: 'day',
-        };
-
-        const orderRes = await fetch(`${base}/v2/orders`, {
-          method: 'POST', headers, body: JSON.stringify(orderBody),
+        const order = await alpacaFetch(user.user_id, '/v2/orders', {
+          method: 'POST', body: JSON.stringify(orderBody),
         });
-        const order = await orderRes.json();
-        const orderId = order.id || null;
-        const status  = orderRes.ok ? 'placed' : `error:${order.message || order.code}`;
-
-        db.prepare(
-          `INSERT INTO auto_trade_log (user_id, symbol, strategy, signal_type, confidence, amount, order_id, status)
-           VALUES (?, ?, 'countertrend', ?, ?, ?, ?, ?)`
-        ).run(user.user_id, sig.symbol, sig.signalType, sig.riskReward || 0, notional, orderId, status);
-      } catch (err) {
-        db.prepare(
-          `INSERT INTO auto_trade_log (user_id, symbol, strategy, signal_type, confidence, amount, order_id, status)
-           VALUES (?, ?, 'countertrend', ?, 0, 0, NULL, ?)`
-        ).run(user.user_id, sig.symbol, sig.signalType, `error:${err.message}`);
+        db.prepare(`
+          INSERT INTO auto_trade_log
+            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'countertrend', 'open', datetime('now'))
+        `).run(user.user_id, sig.symbol, side, shares, price, tpPrice, slPrice, order.id || null, sig.signalType);
+        console.log(`[CT-Bot] ORDER: ${side.toUpperCase()} ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] SL=${slPrice} TP=${tpPrice}`);
+      } catch (e) {
+        console.error(`[CT-Bot] Order failed ${sig.symbol}:`, e.message);
       }
     }
   }
 }
 
-// ── Start CT auto-trader interval ─────────────────────────────────────────────
-setInterval(runCTAutoTrader, 5 * 60 * 1000);
-console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 5 min during market hours');
+// ── Start CT auto-trader interval — scans every 60 seconds during market hours ─
+setInterval(runCTAutoTrader, 60 * 1000);
+console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 60 sec during market hours');
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));

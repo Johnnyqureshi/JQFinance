@@ -1321,6 +1321,89 @@ async function computeVESignal(symbol) {
   };
 }
 
+// ── Inverse ETF Map ────────────────────────────────────────────────────────────
+// For any SHORT signal, buy the corresponding inverse ETF instead of shorting.
+// Individual stocks map to their sector inverse; ETFs map to their direct inverse.
+const INVERSE_MAP = {
+  // ── Broad market indices ───────────────────────────────────────────────────
+  'SPY':   'SH',    // inverse S&P 500 (1×)
+  'QQQ':   'PSQ',   // inverse Nasdaq-100 (1×)
+  'IWM':   'RWM',   // inverse Russell 2000 (1×)
+  'DIA':   'DOG',   // inverse Dow Jones (1×)
+  // ── Leveraged longs → their inverse counterpart ────────────────────────────
+  'TQQQ':  'SQQQ',  // 3× inverse Nasdaq-100
+  'SPXL':  'SPXS',  // 3× inverse S&P 500
+  'UPRO':  'SPXS',  // 3× inverse S&P 500
+  'SOXL':  'SOXS',  // 3× inverse Semiconductors
+  'TECL':  'TECS',  // 3× inverse Technology
+  'LABU':  'LABD',  // 3× inverse Biotech
+  'TNA':   'TZA',   // 3× inverse Russell 2000
+  'FAS':   'FAZ',   // 3× inverse Financials
+  'SMH':   'SOXS',  // inverse Semiconductor ETF
+  'ARKK':  'SARK',  // inverse ARK Innovation
+  // ── Bonds ─────────────────────────────────────────────────────────────────
+  'TLT':   'TBF',   // inverse 20+ yr Treasuries (1×)
+  'HYG':   'SJB',   // inverse High Yield Bonds
+  // ── Commodities ───────────────────────────────────────────────────────────
+  'GLD':   'GLL',   // 2× inverse Gold
+  'SLV':   'ZSL',   // 2× inverse Silver
+  'GDX':   'DUST',  // 3× inverse Gold Miners
+  'GDXJ':  'JDST',  // 3× inverse Junior Gold Miners
+  'USO':   'SCO',   // 2× inverse Crude Oil
+  // ── Semiconductors → SOXS ─────────────────────────────────────────────────
+  'NVDA':  'SOXS',  'AMD':   'SOXS',  'AVGO':  'SOXS',
+  'QCOM':  'SOXS',  'MU':    'SOXS',  'INTC':  'SOXS',
+  'AMAT':  'SOXS',  'LRCX':  'SOXS',  'KLAC':  'SOXS',
+  'ARM':   'SOXS',  'SMCI':  'SOXS',  'TSM':   'SOXS',
+  'ADI':   'SOXS',  'TXN':   'SOXS',
+  // ── Large-cap Tech → TECS ─────────────────────────────────────────────────
+  'AAPL':  'TECS',  'MSFT':  'TECS',  'GOOGL': 'TECS',
+  'META':  'TECS',  'AMZN':  'TECS',  'TSLA':  'TECS',
+  'NFLX':  'TECS',  'CRM':   'TECS',  'ORCL':  'TECS',
+  'ADBE':  'TECS',  'CSCO':  'TECS',  'IBM':   'TECS',
+  'ACN':   'TECS',  'INTU':  'TECS',
+  // ── Growth / Fintech → TECS ───────────────────────────────────────────────
+  'PLTR':  'TECS',  'COIN':  'TECS',  'HOOD':  'TECS',
+  'MARA':  'TECS',  'RIOT':  'TECS',  'CLSK':  'TECS',
+  'CORZ':  'TECS',  'UBER':  'TECS',  'SHOP':  'TECS',
+  'SNAP':  'TECS',  'PINS':  'TECS',  'RBLX':  'TECS',
+  'DKNG':  'TECS',
+  // ── SaaS / Cloud → TECS ───────────────────────────────────────────────────
+  'CRWD':  'TECS',  'PANW':  'TECS',  'SNOW':  'TECS',
+  'DDOG':  'TECS',  'NET':   'TECS',  'ZS':    'TECS',
+  'MDB':   'TECS',
+  // ── Fintech / Payments → FAZ ──────────────────────────────────────────────
+  'SQ':    'FAZ',   'PYPL':  'FAZ',   'SOFI':  'FAZ',
+  // ── EV / Auto → TECS ──────────────────────────────────────────────────────
+  'RIVN':  'TECS',  'NIO':   'TECS',  'LI':    'TECS',
+  'F':     'TECS',  'GM':    'TECS',
+  // ── Financials → FAZ ──────────────────────────────────────────────────────
+  'JPM':   'FAZ',   'BAC':   'FAZ',   'GS':    'FAZ',
+  'MS':    'FAZ',   'C':     'FAZ',   'WFC':   'FAZ',
+  'SCHW':  'FAZ',   'AXP':   'FAZ',   'CME':   'FAZ',
+  'BLK':   'FAZ',   'SPGI':  'FAZ',   'MMC':   'FAZ',
+  'CB':    'FAZ',   'CI':    'FAZ',
+  // ── Energy → ERY ──────────────────────────────────────────────────────────
+  'XOM':   'ERY',   'CVX':   'ERY',   'COP':   'ERY',
+  'SLB':   'ERY',   'HAL':   'ERY',   'EOG':   'ERY',
+  // ── Healthcare / Biotech → RXD / LABD ────────────────────────────────────
+  'JNJ':   'RXD',   'UNH':   'RXD',   'ABT':   'RXD',
+  'DHR':   'RXD',   'TMO':   'RXD',   'SYK':   'RXD',
+  'ISRG':  'RXD',   'ELV':   'RXD',   'MDT':   'RXD',
+  'MRNA':  'LABD',  'PFE':   'LABD',  'ABBV':  'LABD',
+  'LLY':   'LABD',  'REGN':  'LABD',  'GILD':  'LABD',
+  'AMGN':  'LABD',  'ZTS':   'LABD',  'VRTX':  'LABD',
+  // ── Broad consumer / defensives / industrials → SH ───────────────────────
+  'WMT':   'SH',    'COST':  'SH',    'NKE':   'SH',
+  'MCD':   'SH',    'HD':    'SH',    'TJX':   'SH',
+  'LOW':   'SH',    'PG':    'SH',    'KO':    'SH',
+  'PEP':   'SH',    'MO':    'SH',    'PM':    'SH',
+  'HON':   'SH',    'CAT':   'SH',    'DE':    'SH',
+  'UNP':   'SH',    'RTX':   'SH',    'LIN':   'SH',
+  'NEE':   'SH',    'SO':    'SH',    'DUK':   'SH',
+  'PLD':   'SH',    'BRK.B': 'SH',
+};
+
 // ── VE Universe (same broad universe as Bounce 2.0) ───────────────────────────
 const VE_UNIVERSE = [
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
@@ -1520,49 +1603,55 @@ async function runVEAutoTrader() {
       `).get(user.user_id, sig.symbol);
       if (recentTrade) { console.log(`[VE-Bot] Cooldown active for ${sig.symbol}`); continue; }
 
-      const side   = sig.direction === 'LONG' ? 'buy' : 'sell';
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 1000) * lev;
 
-      let price = sig.price;
-      const shares = Math.max(1, Math.floor(amount / price));
+      if (sig.direction === 'LONG') {
+        // ── LONG: buy the underlying directly ───────────────────────────────
+        const price  = sig.price;
+        const shares = Math.max(1, Math.floor(amount / price));
+        const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
+        const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
+        const orderBody = {
+          symbol: sig.symbol, qty: String(shares), side: 'buy',
+          type: 'market', time_in_force: 'day', order_class: 'bracket',
+          take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice },
+        };
+        try {
+          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signal || 'VE LONG');
+          console.log(`[VE-Bot] ORDER PLACED: BUY ${shares} ${sig.symbol} @ ~$${price}`);
+        } catch (e) { console.error(`[VE-Bot] Order failed ${sig.symbol}:`, e.message); }
 
-      // SL = midpoint of consolidation range (sig.slLevel); TP = prior structure swing
-      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2)
-        : side === 'buy' ? (price * 0.985).toFixed(2) : (price * 1.015).toFixed(2);
-      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2)
-        : side === 'buy' ? (price * 1.06).toFixed(2)  : (price * 0.94).toFixed(2);
-
-      const orderBody = {
-        symbol:         sig.symbol,
-        qty:            String(shares),
-        side,
-        type:           'market',
-        time_in_force:  'day',
-        order_class:    'bracket',
-        take_profit:    { limit_price: tpPrice },
-        stop_loss:      { stop_price:  slPrice },
-      };
-
-      try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', {
-          method: 'POST',
-          body:   JSON.stringify(orderBody),
-        });
-
-        db.prepare(`
-          INSERT INTO auto_trade_log
-            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'volatility_expansion', 'open', datetime('now'))
-        `).run(user.user_id, sig.symbol, side, shares, price,
-              orderBody.take_profit?.limit_price || null,
-              orderBody.stop_loss?.stop_price    || null,
-              order.id || null,
-              sig.signal || sig.direction);
-
-        console.log(`[VE-Bot] ORDER PLACED: ${side.toUpperCase()} ${shares} ${sig.symbol} @ ~$${price} for user ${user.user_id}`);
-      } catch (e) {
-        console.error(`[VE-Bot] Order failed for ${sig.symbol}:`, e.message);
+      } else {
+        // ── SHORT: buy the corresponding inverse ETF instead of shorting ────
+        const inverseTicker = INVERSE_MAP[sig.symbol];
+        if (!inverseTicker) {
+          console.log(`[VE-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
+          continue;
+        }
+        const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
+        const invPrice = invBars?.at(-1)?.c;
+        if (!invPrice) {
+          console.log(`[VE-Bot] Could not fetch price for ${inverseTicker} — skipping`);
+          continue;
+        }
+        // Translate underlying % risk/reward to inverse ETF levels
+        const slPct = sig.slLevel ? (sig.slLevel - sig.price) / sig.price : 0.015;
+        const tpPct = sig.tpLevel ? (sig.price - sig.tpLevel) / sig.price : 0.06;
+        const invSlPrice = (invPrice * (1 - slPct)).toFixed(2);
+        const invTpPrice = (invPrice * (1 + tpPct)).toFixed(2);
+        const invShares  = Math.max(1, Math.floor(amount / invPrice));
+        const orderBody  = {
+          symbol: inverseTicker, qty: String(invShares), side: 'buy',
+          type: 'market', time_in_force: 'day', order_class: 'bracket',
+          take_profit: { limit_price: invTpPrice }, stop_loss: { stop_price: invSlPrice },
+        };
+        try {
+          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, inverseTicker, invShares, invPrice, invTpPrice, invSlPrice, order.id || null, `VE SHORT via ${inverseTicker} (signal: ${sig.symbol})`);
+          console.log(`[VE-Bot] ORDER PLACED: BUY ${invShares} ${inverseTicker} (inverse of ${sig.symbol} SHORT) @ ~$${invPrice}`);
+        } catch (e) { console.error(`[VE-Bot] Order failed ${inverseTicker}:`, e.message); }
       }
     }
   }
@@ -2547,41 +2636,59 @@ async function runCTAutoTrader() {
       try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
       if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
 
-      const side   = sig.direction === 'SHORT' ? 'sell' : 'buy';
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 500) * lev;
-      const price  = sig.price;
-      const shares = Math.max(1, Math.floor(amount / price));
 
-      // SL = 1 tick outside swing high/low; TP = nearest S/R or key MA (min 2:1)
-      const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2)
-        : side === 'buy' ? (price * 0.985).toFixed(2) : (price * 1.015).toFixed(2);
-      const tpPrice = sig.target ? sig.target.toFixed(2)
-        : side === 'buy' ? (price * 1.04).toFixed(2)  : (price * 0.96).toFixed(2);
+      if (sig.direction === 'LONG') {
+        // ── LONG: buy the underlying directly ─────────────────────────────
+        const price  = sig.price;
+        const shares = Math.max(1, Math.floor(amount / price));
+        const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
+        const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);
+        const orderBody = {
+          symbol: sig.symbol, qty: String(shares), side: 'buy',
+          type: 'market', time_in_force: 'day', order_class: 'bracket',
+          take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice },
+        };
+        try {
+          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'countertrend','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signalType);
+          console.log(`[CT-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] SL=${slPrice} TP=${tpPrice}`);
+        } catch (e) { console.error(`[CT-Bot] Order failed ${sig.symbol}:`, e.message); }
 
-      const orderBody = {
-        symbol:        sig.symbol,
-        qty:           String(shares),
-        side,
-        type:          'market',
-        time_in_force: 'day',
-        order_class:   'bracket',
-        take_profit:   { limit_price: tpPrice },
-        stop_loss:     { stop_price:  slPrice },
-      };
+      } else {
+        // ── SHORT: buy the corresponding inverse ETF instead of shorting ──
+        const inverseTicker = INVERSE_MAP[sig.symbol];
+        if (!inverseTicker) {
+          console.log(`[CT-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
+          continue;
+        }
+        // Check cooldown on inverse ticker too
+        const invAlreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === inverseTicker);
+        if (invAlreadyIn) { console.log(`[CT-Bot] Already holding ${inverseTicker} — skipping`); continue; }
 
-      try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', {
-          method: 'POST', body: JSON.stringify(orderBody),
-        });
-        db.prepare(`
-          INSERT INTO auto_trade_log
-            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'countertrend', 'open', datetime('now'))
-        `).run(user.user_id, sig.symbol, side, shares, price, tpPrice, slPrice, order.id || null, sig.signalType);
-        console.log(`[CT-Bot] ORDER: ${side.toUpperCase()} ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] SL=${slPrice} TP=${tpPrice}`);
-      } catch (e) {
-        console.error(`[CT-Bot] Order failed ${sig.symbol}:`, e.message);
+        const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
+        const invPrice = invBars?.at(-1)?.c;
+        if (!invPrice) {
+          console.log(`[CT-Bot] Could not fetch price for ${inverseTicker} — skipping`);
+          continue;
+        }
+        // Translate % risk/reward from underlying signal to inverse ETF price levels
+        const slPct = sig.stopLoss ? (sig.stopLoss - sig.price) / sig.price : 0.015;
+        const tpPct = sig.target   ? (sig.price - sig.target)   / sig.price : 0.03;
+        const invSlPrice = (invPrice * (1 - slPct)).toFixed(2);
+        const invTpPrice = (invPrice * (1 + tpPct)).toFixed(2);
+        const invShares  = Math.max(1, Math.floor(amount / invPrice));
+        const orderBody  = {
+          symbol: inverseTicker, qty: String(invShares), side: 'buy',
+          type: 'market', time_in_force: 'day', order_class: 'bracket',
+          take_profit: { limit_price: invTpPrice }, stop_loss: { stop_price: invSlPrice },
+        };
+        try {
+          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'countertrend','open',datetime('now'))`).run(user.user_id, inverseTicker, invShares, invPrice, invTpPrice, invSlPrice, order.id || null, `${sig.signalType} via ${inverseTicker} (signal: ${sig.symbol})`);
+          console.log(`[CT-Bot] ORDER: BUY ${invShares} ${inverseTicker} (inverse of ${sig.symbol} SHORT) [${sig.signalType}] SL=${invSlPrice} TP=${invTpPrice}`);
+        } catch (e) { console.error(`[CT-Bot] Order failed ${inverseTicker}:`, e.message); }
       }
     }
   }

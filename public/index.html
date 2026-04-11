@@ -999,57 +999,45 @@
     <div class="at-bots-section">
       <div class="at-bots-title">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-        Automated Bot Settings
-        <span class="at-bots-sub">Bots scan every 5 min during market hours · All orders via Alpaca · SL 1.5% on all strategies</span>
+        Automated Bot Strategies
+        <span class="at-bots-sub">All 4 bots run automatically · Scan every 5 min during market hours · Connect Alpaca to activate</span>
       </div>
       <div class="at-bots-grid">
 
         <!-- Bot 1: Bounce 2.0 -->
-        <div class="at-bot-card" id="atBotBounce">
+        <div class="at-bot-card at-bot-card--always-on" id="atBotBounce">
           <div class="at-bot-head">
             <span class="at-bot-name">Bounce 2.0</span>
-            <span class="at-bot-badge" id="atBotBadge1">OFF</span>
+            <span class="at-bot-badge at-bot-badge--on">ACTIVE</span>
           </div>
-          <div class="at-bot-desc">EMA 8/21/34 · SMA 50 · Stochastic pullback · TP at swing high</div>
-          <div class="at-bot-btns">
-            <button class="at-bot-toggle" data-bot="bounce" data-enabled="0">Enable</button>
-          </div>
+          <div class="at-bot-desc">EMA 8/21/34 · SMA 50 · Stochastic pullback · TP at swing high · $30 price cap</div>
         </div>
 
         <!-- Bot 2: Volatility Expansion -->
-        <div class="at-bot-card" id="atBotVE">
+        <div class="at-bot-card at-bot-card--always-on" id="atBotVE">
           <div class="at-bot-head">
             <span class="at-bot-name">Volatility Expansion</span>
-            <span class="at-bot-badge" id="atBotBadge2">OFF</span>
+            <span class="at-bot-badge at-bot-badge--on">ACTIVE</span>
           </div>
-          <div class="at-bot-desc">ATR(14) squeeze → BB breakout · Vol surge ≥1.5× · TP at 2× ATR above entry</div>
-          <div class="at-bot-btns">
-            <button class="at-bot-toggle" data-bot="ve" data-enabled="0">Enable</button>
-          </div>
+          <div class="at-bot-desc">ATR(14) squeeze → BB breakout · Vol surge ≥1.5× · SHORT via inverse ETF · $30 price cap</div>
         </div>
 
         <!-- Bot 3: Explosive Earnings -->
-        <div class="at-bot-card" id="atBotEE">
+        <div class="at-bot-card at-bot-card--always-on" id="atBotEE">
           <div class="at-bot-head">
             <span class="at-bot-name">Explosive Earnings</span>
-            <span class="at-bot-badge" id="atBotBadge3">OFF</span>
+            <span class="at-bot-badge at-bot-badge--on">ACTIVE</span>
           </div>
-          <div class="at-bot-desc">EPS ≥15% · Rev ≥25% · Gap ≥5% · Vol ≥2× · 10 EMA entry/shakeout · TP 9%</div>
-          <div class="at-bot-btns">
-            <button class="at-bot-toggle" data-bot="ee" data-enabled="0">Enable</button>
-          </div>
+          <div class="at-bot-desc">EPS ≥15% · Rev ≥25% · Gap ≥5% · Vol ≥2× · 10 EMA entry/shakeout · TP 9% · $30 price cap</div>
         </div>
 
         <!-- Bot 4: Countertrend -->
-        <div class="at-bot-card" id="atBotCT">
+        <div class="at-bot-card at-bot-card--always-on" id="atBotCT">
           <div class="at-bot-head">
             <span class="at-bot-name">Countertrend</span>
-            <span class="at-bot-badge" id="atBotBadge4">OFF</span>
+            <span class="at-bot-badge at-bot-badge--on">ACTIVE</span>
           </div>
-          <div class="at-bot-desc">RSI extreme · S/R rejection · Engulfing/divergence · 2618 retest · TP at nearest S/R or MA</div>
-          <div class="at-bot-btns">
-            <button class="at-bot-toggle" data-bot="ct" data-enabled="0">Enable</button>
-          </div>
+          <div class="at-bot-desc">RSI extreme · S/R rejection · Engulfing/divergence · SHORT via inverse ETF · PDT-aware · $30 price cap</div>
         </div>
 
       </div><!-- /.at-bots-grid -->

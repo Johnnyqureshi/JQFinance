@@ -1542,7 +1542,7 @@ function isMarketOpen() {
 // ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
 async function runBounceAutoTrader() {
   if (!isMarketOpen()) return;
-  const users = db.prepare('SELECT user_id, investment_amount AS amount, leverage FROM auto_trade_settings WHERE enabled = 1').all();
+  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
   console.log(`[Bounce-Bot] Auto-scan for ${users.length} user(s)`);
   const now = Date.now();
@@ -1591,7 +1591,7 @@ console.log('[Bounce-Bot] Bounce 2.0 auto-trader initialized — scans every 5 m
 async function runVEAutoTrader() {
   if (!isMarketOpen()) return;
 
-  const users = db.prepare('SELECT user_id, amount, leverage FROM ve_auto_settings WHERE enabled = 1').all();
+  const users = db.prepare('SELECT DISTINCT user_id, 1000 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
 
   console.log(`[VE-Bot] Auto-scan triggered for ${users.length} user(s)`);
@@ -2118,7 +2118,7 @@ app.get('/api/ee/trade-log', requireAuth, (req, res) => {
 async function runEEAutoTrader() {
   if (!isMarketOpen()) return;
 
-  const users = db.prepare('SELECT user_id, amount, leverage FROM ee_auto_settings WHERE enabled = 1').all();
+  const users = db.prepare('SELECT DISTINCT user_id, 1000 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
 
   console.log(`[EE-Bot] Auto-scan triggered for ${users.length} user(s)`);
@@ -2611,7 +2611,7 @@ async function runCTAutoTrader() {
   const inSession = (h > 13 || (h === 13 && m >= 30)) && h < 20;
   if (!inSession) return;
 
-  const users = db.prepare('SELECT user_id, amount, leverage FROM ct_auto_settings WHERE enabled = 1').all();
+  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
 
   // Build confirmed signals using cache (5-min TTL) to avoid hammering Yahoo every 60 sec

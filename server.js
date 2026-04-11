@@ -1028,7 +1028,7 @@ async function computeBounceSignal(symbol) {
   const swingHigh   = findSwingHigh(bars, 30);
   const pullbackLow = findPullbackLow(bars, 10);
   const tpLevel = swingHigh ?? price * 1.05;
-  const slLevel = Math.max(pullbackLow ?? 0, sma50 - (sma50 * 0.001)); // closer of pullback low or just below SMA50
+  const slLevel = Math.max(pullbackLow ?? 0, sma50); // whichever is closer (higher): pullback low OR 50 SMA
 
   const riskDist   = price - slLevel;
   const rewardDist = tpLevel - price;
@@ -1455,8 +1455,8 @@ async function runBounceAutoTrader() {
       const amount = (user.amount || 500) * lev;
       const price = sig.price;
       const shares = Math.max(1, Math.floor(amount / price));
-      const slPrice = (price * 0.985).toFixed(2);
-      const tpPrice = sig.tp ? sig.tp.toFixed(2) : (price * 1.045).toFixed(2);
+      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
+      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
       const orderBody = { symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
       try {
         const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });

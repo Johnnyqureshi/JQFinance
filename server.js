@@ -1416,6 +1416,109 @@ app.delete('/api/bots/clear-log', requireAuth, (req, res) => {
   }
 });
 
+// ── POST /api/bots/simulate — dry-run all 3 strategy signal engines ───────────
+// Runs CT scan, ORB signal, and Swing (SPY/QQQ/SH) signal computations with NO
+// market-hours restriction and NO real order placement. Returns a full signal
+// report for each bot plus hypothetical position sizing from trade_settings.
+app.post('/api/bots/simulate', requireAuth, async (req, res) => {
+  try {
+    // Fetch user's trade settings for position sizing
+    const ts = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(req.session.userId)
+             || { position_mode: 'pct', position_pct: 15, position_amount: 5000, leverage: 1 };
+
+    // Try to get real equity from Alpaca; fall back to $10k placeholder
+    let equity = 10000;
+    let alpacaConnected = false;
+    try {
+      const acct = await alpacaFetch(req.session.userId, '/v2/account');
+      equity = parseFloat(acct.equity || acct.portfolio_value || 10000);
+      alpacaConnected = true;
+    } catch {}
+
+    const lev      = Math.min(3, Math.max(1, ts.leverage || 1));
+    const posValue = ts.position_mode === 'fixed'
+      ? (ts.position_amount || 5000) * lev
+      : equity * ((ts.position_pct || 15) / 100) * lev;
+
+    // ── CT: scan top 25 symbols for speed ────────────────────────────────────
+    const CT_SIM_SET = CT_UNIVERSE.slice(0, 25);
+    const ctRaw = [];
+    const SIM_CONCURRENCY = 5;
+    for (let i = 0; i < CT_SIM_SET.length; i += SIM_CONCURRENCY) {
+      const batch = CT_SIM_SET.slice(i, i + SIM_CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(s => computeCTSignal(s)));
+      settled.forEach(r => { if (r.status === 'fulfilled' && r.value) ctRaw.push(r.value); });
+    }
+    const ctConfirmed = ctRaw.filter(s => s.confirmed).sort((a, b) => (b.score || 0) - (a.score || 0));
+    const ctBest = ctConfirmed[0] || null;
+    let ctTrade = null;
+    if (ctBest) {
+      const price  = ctBest.price || 1;
+      const shares = Math.max(1, Math.floor(posValue / price));
+      const sl     = ctBest.stopLoss  ? +ctBest.stopLoss.toFixed(2)  : +(price * 0.985).toFixed(2);
+      const tp     = ctBest.target    ? +ctBest.target.toFixed(2)    : +(price * 1.04).toFixed(2);
+      ctTrade = {
+        symbol: ctBest.symbol, side: ctBest.direction === 'LONG' ? 'BUY' : 'BUY INVERSE',
+        signalType: ctBest.signalType, price: +price.toFixed(2), shares,
+        dollars: +(shares * price).toFixed(2),
+        sl, tp, score: +(ctBest.score || 0).toFixed(1),
+        rsi: ctBest.rsi != null ? +ctBest.rsi.toFixed(1) : null,
+      };
+    }
+
+    // ── ORB: force-fresh computation ─────────────────────────────────────────
+    _orbSignalTs = 0;
+    const orbSig = await computeORBSignal(5).catch(e => ({ error: e.message, confirmed: false }));
+
+    // ── Swing: SPY long, QQQ long, SH inverse ────────────────────────────────
+    const [spyR, qqqR, invR] = await Promise.allSettled([
+      computeSwingLongSignal('SPY'),
+      computeSwingLongSignal('QQQ'),
+      computeSwingInverseSignal(),
+    ]);
+    const spySig = spyR.status === 'fulfilled' ? spyR.value : { confirmed: false, error: spyR.reason?.message };
+    const qqqSig = qqqR.status === 'fulfilled' ? qqqR.value : { confirmed: false, error: qqqR.reason?.message };
+    const invSig = invR.status === 'fulfilled' ? invR.value : { confirmed: false, error: invR.reason?.message };
+
+    const swingTrades = [];
+    for (const sig of [spySig, qqqSig, invSig]) {
+      if (!sig?.confirmed) continue;
+      const price  = sig.price || 1;
+      const shares = Math.max(1, Math.floor(posValue / price));
+      swingTrades.push({
+        symbol: sig.symbol, direction: sig.direction,
+        price: +price.toFixed(2), shares,
+        dollars: +(shares * price).toFixed(2),
+        sl: sig.stopLevel, tp1: sig.tp1, tp2: sig.tp2, tp3: sig.tp3,
+      });
+    }
+
+    res.json({
+      meta: {
+        equity: +equity.toFixed(2), alpacaConnected,
+        positionValue: +posValue.toFixed(2),
+        settings: { mode: ts.position_mode, pct: ts.position_pct, fixed: ts.position_amount, leverage: lev },
+        ts: new Date().toISOString(),
+      },
+      ct: {
+        scanned: CT_SIM_SET.length,
+        confirmedCount: ctConfirmed.length,
+        topSignals: ctRaw.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 8).map(s => ({
+          symbol: s.symbol, signalType: s.signalType, direction: s.direction,
+          price: s.price ? +s.price.toFixed(2) : null, score: +(s.score || 0).toFixed(1),
+          confirmed: s.confirmed, rsi: s.rsi != null ? +s.rsi.toFixed(1) : null,
+        })),
+        bestTrade: ctTrade,
+      },
+      orb: orbSig,
+      swing: { spy: spySig, qqq: qqqSig, inverse: invSig, trades: swingTrades },
+    });
+  } catch (e) {
+    console.error('[Simulate] Error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/whale/scan — whale radar for a curated watchlist ─────────────────
 // Scans 20 high-OI symbols concurrently, returns call/put ratios, sweep flags,
 // and top concentrated strikes.  Results are served from the 15-min cache so

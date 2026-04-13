@@ -601,8 +601,191 @@ async function initTradeSettings() {
   input.addEventListener('blur',   persist);
 }
 
+// ── Strategy Simulation ───────────────────────────────────────────────────────
+const stratSim = (() => {
+  const $ = id => document.getElementById(id);
+
+  function fmtDollar(n) { return n == null ? '—' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtNum(n, d=2)  { return n == null ? '—' : Number(n).toFixed(d); }
+
+  function badge(confirmed, warn) {
+    if (warn)      return '<span class="sim-card-badge sim-badge-warn">⚡ Partial</span>';
+    if (confirmed) return '<span class="sim-card-badge sim-badge-fire">🔥 Signal!</span>';
+    return '<span class="sim-card-badge sim-badge-none">No Signal</span>';
+  }
+
+  function condPill(label, pass) {
+    return `<span class="sim-cond ${pass ? 'pass' : 'fail'}">${label}</span>`;
+  }
+
+  function renderSwingCard(sig, label) {
+    if (!sig) return `<div class="sim-card signal-no"><div class="sim-card-head"><span class="sim-card-name">${label}</span>${badge(false)}</div><div class="sim-card-fails"><div class="sim-fail-item">No data returned</div></div></div>`;
+    const ok = sig.confirmed;
+    const has = sig.cond1 != null;
+    return `<div class="sim-card ${ok ? 'signal-yes' : 'signal-no'}">
+      <div class="sim-card-head">
+        <span class="sim-card-name">Swing — ${label}</span>
+        ${badge(ok)}
+      </div>
+      ${has ? `<div class="sim-cond-list">
+        ${condPill('C1',sig.cond1)}${condPill('C2',sig.cond2)}${condPill('C3',sig.cond3)}${condPill('C4',sig.cond4)}${condPill('C5',sig.cond5)}
+      </div>` : ''}
+      ${ok && sig.trade ? `<div class="sim-card-trade">
+        <div class="sim-trade-row"><span class="sim-trade-label">Symbol</span><span class="sim-trade-val blue">${sig.trade.symbol}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Entry</span><span class="sim-trade-val">${fmtDollar(sig.trade.price)}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Shares</span><span class="sim-trade-val">${sig.trade.shares}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Position</span><span class="sim-trade-val green">${fmtDollar(sig.trade.dollars)}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Stop</span><span class="sim-trade-val red">${fmtDollar(sig.trade.sl)}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">TP1 / TP2 / TP3</span><span class="sim-trade-val">${fmtDollar(sig.trade.tp1)} / ${fmtDollar(sig.trade.tp2)} / ${fmtDollar(sig.trade.tp3)}</span></div>
+      </div>` : ''}
+      ${!ok && sig.failReasons?.length ? `<div class="sim-card-fails">${sig.failReasons.map(r => `<div class="sim-fail-item">${r}</div>`).join('')}</div>` : ''}
+    </div>`;
+  }
+
+  function renderCTCard(ct) {
+    const ok = ct.bestTrade != null;
+    const tr = ct.bestTrade;
+    return `<div class="sim-card ${ok ? 'signal-yes' : 'signal-no'}">
+      <div class="sim-card-head">
+        <span class="sim-card-name">Countertrend (CT)</span>
+        ${badge(ok)}
+      </div>
+      <div class="sim-trade-row" style="font-size:.73rem;color:#8b949e;">Scanned ${ct.scanned} symbols · ${ct.confirmedCount} confirmed</div>
+      ${ok ? `<div class="sim-card-trade">
+        <div class="sim-trade-row"><span class="sim-trade-label">Symbol</span><span class="sim-trade-val blue">${tr.symbol}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Signal</span><span class="sim-trade-val">${tr.signalType}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Direction</span><span class="sim-trade-val ${tr.side.includes('BUY') ? 'green' : 'red'}">${tr.side}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Price</span><span class="sim-trade-val">${fmtDollar(tr.price)}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Shares</span><span class="sim-trade-val">${tr.shares}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Position</span><span class="sim-trade-val green">${fmtDollar(tr.dollars)}</span></div>
+        <div class="sim-trade-row"><span class="sim-trade-label">Stop / Target</span><span class="sim-trade-val">${fmtDollar(tr.sl)} / ${fmtDollar(tr.tp)}</span></div>
+        ${tr.rsi != null ? `<div class="sim-trade-row"><span class="sim-trade-label">RSI</span><span class="sim-trade-val">${fmtNum(tr.rsi,1)}</span></div>` : ''}
+      </div>` : `<div class="sim-card-fails"><div class="sim-fail-item">No confirmed CT setup in universe</div></div>`}
+    </div>`;
+  }
+
+  function renderORBCard(orb) {
+    if (!orb) return `<div class="sim-card signal-no"><div class="sim-card-head"><span class="sim-card-name">ORB</span>${badge(false)}</div></div>`;
+    const ok = orb.confirmed;
+    const warn = !orb.confirmed && orb.breakout && orb.breakout !== 'NONE';
+    return `<div class="sim-card ${ok ? 'signal-yes' : warn ? 'signal-warn' : 'signal-no'}">
+      <div class="sim-card-head">
+        <span class="sim-card-name">ORB (Opening Range)</span>
+        ${badge(ok, warn)}
+      </div>
+      <div class="sim-card-trade">
+        <div class="sim-trade-row"><span class="sim-trade-label">SPY Breakout</span><span class="sim-trade-val ${ok || warn ? 'green' : ''}">${orb.breakout || 'NONE'}</span></div>
+        ${orb.orbHigh ? `<div class="sim-trade-row"><span class="sim-trade-label">ORB Range</span><span class="sim-trade-val">${fmtDollar(orb.orbLow)} – ${fmtDollar(orb.orbHigh)}</span></div>` : ''}
+        ${orb.vix    ? `<div class="sim-trade-row"><span class="sim-trade-label">VIX</span><span class="sim-trade-val ${orb.vix>35?'red':''}">${fmtNum(orb.vix,1)} ${orb.vixOk?'✓':'✗'}</span></div>` : ''}
+        ${orb.rsi    ? `<div class="sim-trade-row"><span class="sim-trade-label">RSI</span><span class="sim-trade-val">${fmtNum(orb.rsi,1)}</span></div>` : ''}
+        <div class="sim-trade-row"><span class="sim-trade-label">VWAP Aligned</span><span class="sim-trade-val">${orb.vwapAligned ?? '—'}</span></div>
+      </div>
+      ${orb.reason && !ok ? `<div class="sim-card-fails"><div class="sim-fail-item">${orb.reason}</div></div>` : ''}
+    </div>`;
+  }
+
+  async function run() {
+    const btn = $('stratSimBtn');
+    const loading = $('stratSimLoading');
+    const results = $('stratSimResults');
+    const meta    = $('stratSimMeta');
+    const cards   = $('stratSimCards');
+    const ctDetail= $('stratSimCTDetail');
+    const ctTbody = $('stratSimCTTbody');
+    const msgEl   = $('stratSimLoadingMsg');
+
+    btn.disabled = true;
+    loading.style.display = 'flex';
+    results.style.display = 'none';
+    ctDetail.style.display = 'none';
+
+    // Animated loading messages
+    const msgs = [
+      'Running CT signal scan across universe…',
+      'Computing ORB breakout levels…',
+      'Analysing Swing weekly charts…',
+      'Calculating hypothetical position sizes…',
+    ];
+    let mi = 0;
+    const msgTimer = setInterval(() => { msgEl.textContent = msgs[++mi % msgs.length]; }, 3000);
+
+    try {
+      const r = await fetch('/api/bots/simulate', { method: 'POST', credentials: 'include' });
+      const d = await r.json();
+      clearInterval(msgTimer);
+      if (!r.ok) throw new Error(d.error || 'Simulation failed');
+
+      const { meta: m, ct, orb, swing } = d;
+
+      // Meta bar
+      meta.innerHTML = `
+        <span>Equity: <strong>${fmtDollar(m.equity)}</strong>${!m.alpacaConnected ? ' <span style="color:#d29922">(Alpaca not connected — using $10k placeholder)</span>' : ''}</span>
+        <span>Position Value: <strong>${fmtDollar(m.positionValue)}</strong></span>
+        <span>Mode: <strong>${m.settings.mode === 'fixed' ? 'Fixed $'+m.settings.fixed : m.settings.pct+'% equity'}</strong></span>
+        <span>Leverage: <strong>${m.settings.leverage}×</strong></span>
+        <span style="margin-left:auto;color:#484f58;">Run at ${new Date(m.ts).toLocaleTimeString()}</span>
+      `;
+
+      // Attach trade objects to swing signals
+      const tradeMap = {};
+      swing.trades.forEach(t => { tradeMap[t.symbol] = t; });
+      if (swing.spy)     swing.spy.trade     = tradeMap['SPY'] || null;
+      if (swing.qqq)     swing.qqq.trade     = tradeMap['QQQ'] || null;
+      if (swing.inverse) swing.inverse.trade = tradeMap['SH']  || null;
+
+      // Build bot cards
+      cards.innerHTML = [
+        renderCTCard(ct),
+        renderORBCard(orb),
+        renderSwingCard(swing.spy,     'SPY Long'),
+        renderSwingCard(swing.qqq,     'QQQ Long'),
+        renderSwingCard(swing.inverse, 'SH Inverse'),
+      ].join('');
+
+      // CT signals table
+      if (ct.topSignals?.length) {
+        ctTbody.innerHTML = ct.topSignals.map(s => `<tr>
+          <td>${s.symbol}</td>
+          <td>${s.signalType}</td>
+          <td>${s.direction || '—'}</td>
+          <td>${fmtDollar(s.price)}</td>
+          <td>${s.rsi != null ? fmtNum(s.rsi,1) : '—'}</td>
+          <td>${fmtNum(s.score,1)}</td>
+          <td class="${s.confirmed ? 'sim-ct-confirmed' : 'sim-ct-watching'}">${s.confirmed ? '✓ Confirmed' : 'Watching'}</td>
+        </tr>`).join('');
+
+        const ctDetailBtn = document.createElement('button');
+        ctDetailBtn.className = 'sim-show-ct-btn';
+        ctDetailBtn.textContent = `▸ Show CT signals table (${ct.topSignals.length} symbols)`;
+        ctDetailBtn.onclick = () => {
+          const vis = ctDetail.style.display !== 'none';
+          ctDetail.style.display = vis ? 'none' : 'block';
+          ctDetailBtn.textContent = `${vis ? '▸' : '▾'} ${vis ? 'Show' : 'Hide'} CT signals table (${ct.topSignals.length} symbols)`;
+        };
+        cards.appendChild(ctDetailBtn);
+      }
+
+      loading.style.display = 'none';
+      results.style.display = 'block';
+    } catch (err) {
+      clearInterval(msgTimer);
+      loading.style.display = 'none';
+      cards.innerHTML = `<div style="color:#f85149;font-size:.85rem;padding:12px 0;">Simulation error: ${err.message}</div>`;
+      results.style.display = 'block';
+    }
+    btn.disabled = false;
+  }
+
+  function init() {
+    const btn = document.getElementById('stratSimBtn');
+    if (btn) btn.addEventListener('click', run);
+  }
+  return { init };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   simPanel.init();
   initBotToggles();
   initTradeSettings();
+  stratSim.init();
 });

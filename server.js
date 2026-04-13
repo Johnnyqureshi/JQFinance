@@ -23,7 +23,9 @@ console.warn = (...args) => {
 
 const app      = express();
 const PORT           = 5000;
-const MAX_TRADE_PRICE = 30; // Bot only executes LONG trades on stocks priced ≤ $30
+const MAX_TRADE_PRICE = 30;          // Bot only executes LONG trades on stocks priced ≤ $30
+const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 4 bots combined never hold more than 2 positions
+const MIN_RR_RATIO = 1.5;            // Minimum risk:reward required to enter any trade
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
 
@@ -1432,6 +1434,17 @@ app.post('/api/bots/trigger', requireAuth, async (req, res) => {
 });
 
 
+// ── DELETE /api/bots/clear-log — wipe the user's bot trade log ───────────────
+app.delete('/api/bots/clear-log', requireAuth, (req, res) => {
+  try {
+    const { changes } = db.prepare('DELETE FROM auto_trade_log WHERE user_id = ?').run(req.session.userId);
+    console.log(`[BotLog] Cleared ${changes} trade log entries for user ${req.session.userId}`);
+    res.json({ ok: true, deleted: changes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /api/whale/scan — whale radar for a curated watchlist ─────────────────
 // Scans 20 high-OI symbols concurrently, returns call/put ratios, sweep flags,
 // and top concentrated strikes.  Results are served from the 15-min cache so
@@ -2269,49 +2282,63 @@ async function runBounceAutoTrader() {
     settled.forEach(r => { if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value); });
   }
   if (!signals.length) { console.log('[Bounce-Bot] No confirmed signals.'); return; }
-  console.log(`[Bounce-Bot] ${signals.length} confirmed: ${signals.map(s => s.symbol).join(', ')}`);
+
+  // Quality gate: require minimum R:R ratio, then take only the BEST signal
+  const qualified = signals.filter(s => (s.rr || 0) >= MIN_RR_RATIO);
+  if (!qualified.length) { console.log(`[Bounce-Bot] ${signals.length} signal(s) found but none met R:R >= ${MIN_RR_RATIO} — skipping`); return; }
+  qualified.sort((a, b) => (b.rr || 0) - (a.rr || 0));
+  const best = qualified[0];
+  console.log(`[Bounce-Bot] Best signal: ${best.symbol} R:R ${best.rr} (${qualified.length} qualified of ${signals.length} total)`);
+
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
     if (!await checkPDTAllowed(user.user_id, 'Bounce-Bot')) continue;
-    for (const sig of signals) {
-      let positions = [];
-      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
-      if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
-      const recent = db.prepare(`SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='bounce' AND created_at >= datetime('now','-30 minutes')`).get(user.user_id, sig.symbol);
-      if (recent) continue;
-      const lev = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 500) * lev;
-      const price = sig.price;
-      const spyGate = await checkSPYGate(sig.symbol, price, 'long');
-      if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
-      const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
-      if (!bounceWhaleGate.allowed) { console.log(`[Bounce-Bot] Whale-Gate BLOCKED: ${bounceWhaleGate.reason}`); continue; }
-      if (bounceWhaleGate.reason) console.log(`[Bounce-Bot] Whale-Gate: ${bounceWhaleGate.reason}`);
-      const bounceDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
-      if (!bounceDPGate.allowed) { console.log(`[Bounce-Bot] DP-Gate BLOCKED: ${bounceDPGate.reason}`); continue; }
-      if (bounceDPGate.reason) console.log(`[Bounce-Bot] DP-Gate: ${bounceDPGate.reason}`);
-      // Route expensive stocks ($30+ ) to their 2×/3× leveraged proxy
-      let tradeSymbol = sig.symbol;
-      let tradePrice  = price;
-      if (price > MAX_TRADE_PRICE) {
-        const proxy = await getLeveragedProxy(sig.symbol, price);
-        if (!proxy) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
-        console.log(`[Bounce-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
-        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[Bounce-Bot] Already holding proxy ${proxy.symbol}`); continue; }
-        tradeSymbol = proxy.symbol;
-        tradePrice  = proxy.price;
-      }
-      const shares = Math.max(1, Math.floor(amount / tradePrice));
-      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
-      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.045).toFixed(2);
-      const orderBody = { symbol: tradeSymbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
-      try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
-        console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
-      } catch (e) { console.error(`[Bounce-Bot] Order failed ${tradeSymbol}:`, e.message); }
+
+    // Fetch positions once — enforce global position cap
+    let positions = [];
+    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
+      console.log(`[Bounce-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
+      continue;
     }
+    if (Array.isArray(positions) && positions.some(p => p.symbol === best.symbol)) continue;
+    const recent = db.prepare(`SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='bounce' AND created_at >= datetime('now','-30 minutes')`).get(user.user_id, best.symbol);
+    if (recent) continue;
+
+    const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+    const amount = (user.amount || 500) * lev;
+    const price  = best.price;
+    const sig    = best;
+
+    const spyGate = await checkSPYGate(sig.symbol, price, 'long');
+    if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
+    const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
+    if (!bounceWhaleGate.allowed) { console.log(`[Bounce-Bot] Whale-Gate BLOCKED: ${bounceWhaleGate.reason}`); continue; }
+    if (bounceWhaleGate.reason) console.log(`[Bounce-Bot] Whale-Gate: ${bounceWhaleGate.reason}`);
+    const bounceDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
+    if (!bounceDPGate.allowed) { console.log(`[Bounce-Bot] DP-Gate BLOCKED: ${bounceDPGate.reason}`); continue; }
+    if (bounceDPGate.reason) console.log(`[Bounce-Bot] DP-Gate: ${bounceDPGate.reason}`);
+
+    let tradeSymbol = sig.symbol;
+    let tradePrice  = price;
+    if (price > MAX_TRADE_PRICE) {
+      const proxy = await getLeveragedProxy(sig.symbol, price);
+      if (!proxy) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+      console.log(`[Bounce-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
+      if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[Bounce-Bot] Already holding proxy ${proxy.symbol}`); continue; }
+      tradeSymbol = proxy.symbol;
+      tradePrice  = proxy.price;
+    }
+    const shares  = Math.max(1, Math.floor(amount / tradePrice));
+    const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
+    const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.045).toFixed(2);
+    const orderBody = { symbol: tradeSymbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
+    try {
+      const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+      db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
+      console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''} | R:R ${sig.rr}`);
+    } catch (e) { console.error(`[Bounce-Bot] Order failed ${tradeSymbol}:`, e.message); }
   }
 }
 setInterval(runBounceAutoTrader, 5 * 60 * 1000);
@@ -2344,20 +2371,26 @@ async function runVEAutoTrader() {
   }
 
   if (!signals.length) { console.log('[VE-Bot] No confirmed signals.'); return; }
-  console.log(`[VE-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => s.symbol + ' ' + s.direction).join(', ')}`);
+
+  // Pick only the top signal by quality score to avoid over-trading
+  signals.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const bestVE = signals[0];
+  console.log(`[VE-Bot] Best signal: ${bestVE.symbol} ${bestVE.direction} score=${bestVE.score?.toFixed(2) ?? '—'} (${signals.length} total confirmed)`);
 
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
     if (!await checkPDTAllowed(user.user_id, 'VE-Bot')) continue;
 
-    for (const sig of signals) {
-      // Check for existing position to avoid duplicates
-      let positions = [];
-      try {
-        positions = await alpacaFetch(user.user_id, '/v2/positions');
-      } catch { continue; }
+    // Fetch positions once and enforce global cap
+    let positions = [];
+    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
+      console.log(`[VE-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
+      continue;
+    }
 
+    for (const sig of [bestVE]) {
       const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
       if (alreadyIn) { console.log(`[VE-Bot] Already in ${sig.symbol} — skipping`); continue; }
 
@@ -2901,17 +2934,26 @@ async function runEEAutoTrader() {
   }
 
   if (!signals.length) { console.log('[EE-Bot] No confirmed entry signals.'); return; }
-  console.log(`[EE-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => `${s.symbol} ${s.signalType}`).join(', ')}`);
+
+  // Pick only the highest-conviction signal per cycle
+  signals.sort((a, b) => (b.gapPct || 0) - (a.gapPct || 0));
+  const bestEE = signals[0];
+  console.log(`[EE-Bot] Best signal: ${bestEE.symbol} ${bestEE.signalType} (${signals.length} total confirmed)`);
 
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
     if (!await checkPDTAllowed(user.user_id, 'EE-Bot')) continue;
 
-    for (const sig of signals) {
-      let positions = [];
-      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+    // Fetch positions once and enforce global cap
+    let positions = [];
+    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
+      console.log(`[EE-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
+      continue;
+    }
 
+    for (const sig of [bestEE]) {
       const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
       if (alreadyIn) { console.log(`[EE-Bot] Already in ${sig.symbol} — skipping`); continue; }
 
@@ -3408,7 +3450,11 @@ async function runCTAutoTrader() {
     });
   }
   if (!signals.length) return;
-  console.log(`[CT-Bot] ${signals.length} confirmed signal(s): ${signals.map(s => `${s.symbol} ${s.signalType}`).join(', ')}`);
+
+  // Pick best CT signal by strength score
+  signals.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const bestCT = signals[0];
+  console.log(`[CT-Bot] Best signal: ${bestCT.symbol} ${bestCT.signalType} (${signals.length} confirmed)`);
 
   for (const user of users) {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
@@ -3416,7 +3462,15 @@ async function runCTAutoTrader() {
 
     if (!await checkPDTAllowed(user.user_id, 'CT-Bot')) continue;
 
-    for (const sig of signals) {
+    // Fetch positions once and enforce global cap
+    let positions = [];
+    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
+    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
+      console.log(`[CT-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
+      continue;
+    }
+
+    for (const sig of [bestCT]) {
       // Cooldown: 1 trade per symbol per day per strategy
       const alreadyTraded = db.prepare(
         `SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='countertrend'
@@ -3424,9 +3478,6 @@ async function runCTAutoTrader() {
       ).get(user.user_id, sig.symbol);
       if (alreadyTraded) continue;
 
-      // Skip if already holding this position
-      let positions = [];
-      try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
       if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
 
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));

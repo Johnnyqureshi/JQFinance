@@ -483,7 +483,25 @@ const simPanel = (() => {
     if (whaleTimer)  { clearInterval(whaleTimer);  whaleTimer  = null; }
   }
 
+  async function clearLog() {
+    const btn = document.getElementById('atClearLog');
+    if (!confirm('Clear all bot trade log entries? This cannot be undone.')) return;
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/api/bots/clear-log', { method: 'DELETE' }).then(r => r.json());
+      if (res.ok) {
+        const tbody = document.getElementById('atSimTradesTbody');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="at-sim-empty">Log cleared (${res.deleted} entries removed)</td></tr>`;
+      }
+    } catch (e) {
+      console.warn('[simPanel] clear-log error:', e.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function init() {
+    document.getElementById('atClearLog')?.addEventListener('click', clearLog);
     // Auto-start when Trading Desk tab becomes active
     document.addEventListener('pageChanged', (e) => {
       if (e.detail?.page === 'trading') {

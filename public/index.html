@@ -893,7 +893,10 @@
       </div>
 
       <!-- Recent trades table -->
-      <div class="at-sim-section-label">Recent Bot Trades (last 10)</div>
+      <div class="at-sim-section-label" style="display:flex;align-items:center;gap:10px;">
+        Recent Bot Trades (last 10)
+        <button id="atClearLog" class="at-clear-log-btn" title="Clear trade log">✕ Clear Log</button>
+      </div>
       <div class="at-sim-trades-wrap">
         <table class="at-sim-trades-table" id="atSimTradesTable">
           <thead><tr>

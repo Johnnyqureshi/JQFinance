@@ -7874,6 +7874,21 @@ option { background: var(--card); }
 .at-clear-log-btn:hover { background: #1a0a0a; border-color: #f85149; }
 .at-clear-log-btn:disabled { opacity: .4; cursor: default; }
 
+.at-close-all-btn {
+  font-size: .67rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #3d1f1f;
+  color: #f85149;
+  border-radius: 5px;
+  padding: 2px 9px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background .15s, border-color .15s;
+}
+.at-close-all-btn:hover { background: #1a0a0a; border-color: #f85149; }
+.at-close-all-btn:disabled { opacity: .4; cursor: default; }
+
 .at-whale-bias-bull { color: #3fb950; font-weight: 700; }
 .at-whale-bias-bear { color: #f85149; font-weight: 700; }
 .at-whale-bias-mixed { color: #d29922; font-weight: 700; }

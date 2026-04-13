@@ -982,10 +982,26 @@ app.get('/api/alpaca/positions', requireAuth, async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Recent orders
+// Pending orders only (not order history — only shows new/partially_filled)
 app.get('/api/alpaca/orders', requireAuth, async (req, res) => {
-  try { res.json(await alpacaFetch(req.session.userId, '/v2/orders?limit=20&status=all')); }
+  try { res.json(await alpacaFetch(req.session.userId, '/v2/orders?limit=50&status=open')); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Close ALL open positions at market price
+app.delete('/api/alpaca/positions', requireAuth, async (req, res) => {
+  try {
+    const result = await alpacaFetch(req.session.userId, '/v2/positions', { method: 'DELETE' });
+    res.json({ ok: true, result });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Public SPY gate levels — no auth needed (cached server-side)
+app.get('/api/spy-levels', async (req, res) => {
+  try {
+    const lvl = await getSPYLevels();
+    res.json(lvl ?? { floor: null, maxPain: null, roof: null, expiry: null });
+  } catch (e) { res.json({ floor: null, maxPain: null, roof: null, expiry: null }); }
 });
 
 // Place order (market with optional TP/SL bracket)

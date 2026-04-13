@@ -165,7 +165,24 @@ const alpacaTrader = (() => {
     });
   }
 
-  // ── Recent orders ──────────────────────────────────────────────────────────
+  // ── Close ALL positions ─────────────────────────────────────────────────────
+  async function closeAllPositions() {
+    const btn = $('atCloseAllPos');
+    if (!confirm('Close ALL open positions at market price? This cannot be undone.')) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
+    try {
+      const r = await apiFetch('/api/alpaca/positions', { method: 'DELETE' });
+      if (r.ok !== false) {
+        setTimeout(() => { loadPositions(); loadAccount(); }, 1500);
+      }
+    } catch (e) {
+      alert('Could not close positions: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '✕ Close All'; }
+    }
+  }
+
+  // ── Pending orders ──────────────────────────────────────────────────────────
   async function loadOrders() {
     try {
       const orders = await apiFetch('/api/alpaca/orders');
@@ -179,7 +196,7 @@ const alpacaTrader = (() => {
     const body = $('atOrdersBody');
     if (!body) return;
     const recent = orders.slice(0, 12);
-    if (!recent.length) { body.innerHTML = '<div class="at-empty">No recent orders</div>'; return; }
+    if (!recent.length) { body.innerHTML = '<div class="at-empty">No pending orders</div>'; return; }
 
     body.innerHTML = recent.map(o => {
       const filled   = parseFloat(o.filled_avg_price ?? 0);
@@ -309,6 +326,7 @@ const alpacaTrader = (() => {
 
     $('atRefreshPos')?.addEventListener('click', () => { loadPositions(); loadAccount(); });
     $('atRefreshOrders')?.addEventListener('click', loadOrders);
+    $('atCloseAllPos')?.addEventListener('click', closeAllPositions);
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -371,14 +389,15 @@ const simPanel = (() => {
 
   async function loadStatus() {
     try {
-      const data = await fetch('/api/bots/status').then(r => r.json());
+      // SPY levels use a public endpoint — no auth required, always works
+      fetch('/api/spy-levels').then(r => r.json()).then(lvl => {
+        document.getElementById('atSimFloor').textContent   = lvl?.floor   != null ? fmt$(lvl.floor)   : 'Loading…';
+        document.getElementById('atSimMaxPain').textContent = lvl?.maxPain != null ? fmt$(lvl.maxPain) : 'Loading…';
+        document.getElementById('atSimRoof').textContent    = lvl?.roof    != null ? fmt$(lvl.roof)    : 'Loading…';
+        document.getElementById('atSimExpiry').textContent  = lvl?.expiry  || 'Loading…';
+      }).catch(() => {});
 
-      // SPY gate levels
-      const lvl = data.spyLevels;
-      document.getElementById('atSimFloor').textContent   = lvl?.floor   != null ? fmt$(lvl.floor)   : '—';
-      document.getElementById('atSimMaxPain').textContent = lvl?.maxPain != null ? fmt$(lvl.maxPain) : '—';
-      document.getElementById('atSimRoof').textContent    = lvl?.roof    != null ? fmt$(lvl.roof)    : '—';
-      document.getElementById('atSimExpiry').textContent  = lvl?.expiry  || '—';
+      const data = await fetch('/api/bots/status').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
 
       // PDT guard
       const p = data.pdt;

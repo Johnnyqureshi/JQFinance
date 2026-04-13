@@ -7717,21 +7717,33 @@ option { background: var(--card); }
   color: #c9d1d9;
   letter-spacing: .03em;
 }
-.at-sim-actions { display: flex; gap: 10px; }
-.at-sim-refresh-btn, .at-sim-trigger-btn {
-  font-size: .78rem;
-  font-weight: 600;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: opacity .15s;
+/* Auto-refresh live badge */
+.at-sim-auto-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .72rem;
+  color: #8b949e;
+  letter-spacing: .02em;
 }
-.at-sim-refresh-btn  { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
-.at-sim-trigger-btn  { background: #1f6feb; color: #fff; }
-.at-sim-refresh-btn:hover  { opacity: .8; }
-.at-sim-trigger-btn:hover  { opacity: .85; }
-.at-sim-trigger-btn:disabled { opacity: .45; cursor: default; }
+.at-sim-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 0 0 rgba(63,185,80,.5);
+  animation: simPulse 2s infinite;
+  flex-shrink: 0;
+}
+@keyframes simPulse {
+  0%   { box-shadow: 0 0 0 0   rgba(63,185,80,.5); }
+  70%  { box-shadow: 0 0 0 7px rgba(63,185,80,0);  }
+  100% { box-shadow: 0 0 0 0   rgba(63,185,80,0);  }
+}
+.at-sim-last-refresh {
+  font-size: .68rem;
+  color: #484f58;
+}
 
 .at-sim-section-label {
   font-size: .68rem;
@@ -7812,8 +7824,6 @@ option { background: var(--card); }
   font-size: .76rem;
   color: #6e7681;
 }
-.at-sim-trigger-msg { color: #3fb950; font-weight: 600; }
-.at-sim-trigger-msg.err { color: #f85149; }
 
 /* trades table */
 .at-sim-trades-wrap { overflow-x: auto; margin-top: 8px; }
@@ -7849,22 +7859,6 @@ option { background: var(--card); }
   .at-sim-spy-cell, .at-sim-pdt-cell { min-width: unset; }
 }
 
-/* Whale radar button inside section label */
-.at-sim-section-label { display: flex; align-items: center; gap: 10px; }
-.at-sim-whale-btn {
-  font-size: .68rem;
-  font-weight: 600;
-  background: #161b22;
-  border: 1px solid #30363d;
-  color: #58a6ff;
-  border-radius: 5px;
-  padding: 3px 10px;
-  cursor: pointer;
-  margin-left: auto;
-  transition: background .15s;
-}
-.at-sim-whale-btn:hover { background: #21262d; }
-.at-sim-whale-btn:disabled { opacity: .45; cursor: default; }
 .at-whale-bias-bull { color: #3fb950; font-weight: 700; }
 .at-whale-bias-bear { color: #f85149; font-weight: 700; }
 .at-whale-bias-mixed { color: #d29922; font-weight: 700; }

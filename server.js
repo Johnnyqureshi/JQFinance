@@ -1957,31 +1957,44 @@ const SPY_LEVELS_TTL = 30 * 60 * 1000; // refresh every 30 minutes
 async function fetchSPYLevels() {
   try {
     const base = await yf.options('SPY');
-    // Pick the nearest upcoming expiry — SPY now has Mon/Wed/Fri expirations,
-    // so we simply take the smallest timestamp that is >= today (start of day UTC).
-    const todayMidnightTs = Math.floor(new Date().setUTCHours(0,0,0,0) / 1000);
-    const upcoming = (base.expirationDates || []).filter(ts => ts >= todayMidnightTs);
-    const expiryTs = upcoming.length ? upcoming[0] : (base.expirationDates?.[0] ?? todayMidnightTs);
-    const chain = await yf.options('SPY', { date: expiryTs });
+    // Yahoo Finance returns expirationDates as Unix timestamps.
+    // Some versions return seconds, others milliseconds — normalise to seconds.
+    const normTs = (ts) => ts > 1e10 ? Math.floor(ts / 1000) : ts;
+    const todayMidnightSec = Math.floor(new Date().setUTCHours(0,0,0,0) / 1000);
+    const rawDates  = (base.expirationDates || []).map(normTs);
+    const upcoming  = rawDates.filter(ts => ts >= todayMidnightSec);
+    const expiryTs  = upcoming.length ? upcoming[0] : (rawDates[0] ?? todayMidnightSec);
+    // Pass the date as a JS Date object to avoid any seconds/ms ambiguity
+    const chain = await yf.options('SPY', { date: new Date(expiryTs * 1000) });
     const calls = chain.options?.[0]?.calls ?? [];
     const puts  = chain.options?.[0]?.puts  ?? [];
 
-    // ROOF  = call strike with highest open interest
-    const roof  = calls.reduce((b, c) => (c.openInterest||0) > (b.openInterest||0) ? c : b, { openInterest:0, strike:0 }).strike;
-    // FLOOR = put  strike with highest open interest
-    const floor = puts.reduce( (b, p) => (p.openInterest||0) > (b.openInterest||0) ? p : b, { openInterest:0, strike:0 }).strike;
+    // ROOF  = call strike with highest open interest (skip zero-OI entries)
+    const validCalls = calls.filter(c => (c.openInterest||0) > 0);
+    const validPuts  = puts.filter(p => (p.openInterest||0) > 0);
+    const roofEntry  = validCalls.reduce((b, c) => c.openInterest > b.openInterest ? c : b, validCalls[0] ?? null);
+    const floorEntry = validPuts.reduce( (b, p) => p.openInterest > b.openInterest ? p : b, validPuts[0] ?? null);
+    const roof  = roofEntry  ? roofEntry.strike  : null;
+    const floor = floorEntry ? floorEntry.strike : null;
 
-    // MAX PAIN = strike that minimises total intrinsic payout to all option holders
-    const strikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a-b);
-    let minPain = Infinity, maxPain = strikes[Math.floor(strikes.length/2)] ?? 0;
+    // MAX PAIN = strike minimising total intrinsic payout to all option holders
+    const allCalls  = calls.filter(c => c.strike != null);
+    const allPuts   = puts.filter(p => p.strike  != null);
+    const strikes   = [...new Set([...allCalls.map(c => c.strike), ...allPuts.map(p => p.strike)])].sort((a,b) => a-b);
+    let minPain = Infinity, maxPain = strikes[Math.floor(strikes.length/2)] ?? null;
     for (const s of strikes) {
       const pain =
-        calls.reduce((sum,c) => c.strike < s ? sum+(s-c.strike)*(c.openInterest||0) : sum, 0) +
-        puts.reduce( (sum,p) => p.strike > s ? sum+(p.strike-s)*(p.openInterest||0) : sum, 0);
+        allCalls.reduce((sum,c) => c.strike < s ? sum+(s-c.strike)*(c.openInterest||0) : sum, 0) +
+        allPuts.reduce( (sum,p) => p.strike > s ? sum+(p.strike-s)*(p.openInterest||0) : sum, 0);
       if (pain < minPain) { minPain = pain; maxPain = s; }
     }
-    const expiry = new Date(expiryTs*1000).toISOString().slice(0,10);
-    return { floor, maxPain, roof, expiry };
+
+    // Human-readable expiry e.g. "Mon Apr 14"
+    const expiryDate   = new Date(expiryTs * 1000);
+    const expiry = expiryDate.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
+
+    console.log(`[SPY-Gate] FLOOR: $${floor}  MAX PAIN: $${maxPain}  ROOF: $${roof}  (exp ${expiry})`);
+    return { floor, maxPain, roof, expiry, calls: validCalls.length, puts: validPuts.length };
   } catch(e) {
     console.error('[SPY-Gate] Options fetch failed:', e.message);
     return null;

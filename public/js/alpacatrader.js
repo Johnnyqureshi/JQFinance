@@ -344,130 +344,99 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 // for every user who has Alpaca credentials connected, scanning the full
 // MASTER_UNIVERSE every 5 minutes during market hours.
 
-// ── Simulator Status Panel ────────────────────────────────────────────────────
+// ── Simulator Status Panel (fully automatic — no manual buttons) ──────────────
 const simPanel = (() => {
   const BOT_LABELS = {
-    bounce: 'Bounce 2.0',
-    volatility_expansion: 'VE',
-    explosive_earnings: 'EE',
-    countertrend: 'CT'
+    bounce: 'Bounce 2.0', volatility_expansion: 'VE',
+    explosive_earnings: 'EE', countertrend: 'CT'
   };
+  const STATUS_INTERVAL  = 60  * 1000;  // refresh status every 60 s
+  const WHALE_INTERVAL   = 5 * 60 * 1000; // refresh whale data every 5 min
+  let statusTimer = null;
+  let whaleTimer  = null;
+  let isVisible   = false;
 
-  function fmt$(n) { return n != null ? '$' + parseFloat(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'; }
+  function fmt$(n) {
+    if (n == null) return '—';
+    return '$' + parseFloat(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
   function fmtTime(iso) {
     if (!iso) return '—';
     const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
     return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   }
+  function nowStr() {
+    return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  }
 
-  async function load() {
-    const btn = document.getElementById('atSimRefresh');
-    if (btn) btn.disabled = true;
+  async function loadStatus() {
     try {
       const data = await fetch('/api/bots/status').then(r => r.json());
 
-      // SPY gate
+      // SPY gate levels
       const lvl = data.spyLevels;
-      document.getElementById('atSimFloor').textContent   = lvl ? fmt$(lvl.floor)   : 'N/A';
-      document.getElementById('atSimMaxPain').textContent = lvl ? fmt$(lvl.maxPain) : 'N/A';
-      document.getElementById('atSimRoof').textContent    = lvl ? fmt$(lvl.roof)    : 'N/A';
-      document.getElementById('atSimExpiry').textContent  = lvl ? lvl.expiry        : 'N/A';
+      document.getElementById('atSimFloor').textContent   = lvl?.floor   != null ? fmt$(lvl.floor)   : '—';
+      document.getElementById('atSimMaxPain').textContent = lvl?.maxPain != null ? fmt$(lvl.maxPain) : '—';
+      document.getElementById('atSimRoof').textContent    = lvl?.roof    != null ? fmt$(lvl.roof)    : '—';
+      document.getElementById('atSimExpiry').textContent  = lvl?.expiry  || '—';
 
-      // PDT
+      // PDT guard
       const p = data.pdt;
       const dtEl = document.getElementById('atSimDtCount');
       const eqEl = document.getElementById('atSimEquity');
       const stEl = document.getElementById('atSimPdtStatus');
       const rnEl = document.getElementById('atSimPdtReason');
-      dtEl.textContent = p.daytradeCount != null ? `${p.daytradeCount} / 3` : '—';
-      eqEl.textContent = p.equity != null ? fmt$(p.equity) : '—';
-      stEl.textContent = p.allowed ? 'ALLOWED' : 'BLOCKED';
-      stEl.className   = 'at-sim-pdt-val ' + (p.allowed ? 'at-sim-pdt-allowed' : 'at-sim-pdt-blocked');
-      rnEl.textContent = p.reason || '—';
+      if (dtEl) dtEl.textContent = p.daytradeCount != null ? `${p.daytradeCount} / 3` : '—';
+      if (eqEl) eqEl.textContent = p.equity        != null ? fmt$(p.equity)           : '—';
+      if (stEl) { stEl.textContent = p.allowed ? 'ALLOWED' : 'BLOCKED'; stEl.className = 'at-sim-pdt-val ' + (p.allowed ? 'at-sim-pdt-allowed' : 'at-sim-pdt-blocked'); }
+      if (rnEl) rnEl.textContent = p.reason || '—';
 
-      // Universe size
+      // Universe + last-refresh stamp
       const uEl = document.getElementById('atSimUniverseSize');
       if (uEl) uEl.textContent = `Scanning ${data.universeSize} symbols`;
+      const lrEl = document.getElementById('atSimLastRefresh');
+      if (lrEl) lrEl.textContent = `Last updated ${nowStr()}`;
 
-      // Trades table
+      // Auto-badge label
+      const lbl = document.getElementById('atSimAutoLabel');
+      if (lbl) lbl.textContent = 'Live — updates every 60s';
+
+      // Recent bot trades
       const tbody = document.getElementById('atSimTradesTbody');
       if (tbody) {
-        if (!data.recentTrades || !data.recentTrades.length) {
+        if (!data.recentTrades?.length) {
           tbody.innerHTML = `<tr><td colspan="7" class="at-sim-empty">No bot trades on record yet</td></tr>`;
         } else {
           tbody.innerHTML = data.recentTrades.map(t => `
             <tr>
               <td><strong>${t.symbol}</strong></td>
               <td>${BOT_LABELS[t.strategy] || t.strategy}</td>
-              <td>${(t.side || '').toUpperCase()}</td>
+              <td>${(t.side||'').toUpperCase()}</td>
               <td>${t.shares != null ? parseFloat(t.shares).toFixed(0) : '—'}</td>
               <td>${fmt$(t.entry_price)}</td>
-              <td class="${t.status === 'open' ? 'at-sim-status-open' : 'at-sim-status-closed'}">${(t.status || '').toUpperCase()}</td>
+              <td class="${t.status==='open'?'at-sim-status-open':'at-sim-status-closed'}">${(t.status||'').toUpperCase()}</td>
               <td>${fmtTime(t.created_at)}</td>
             </tr>`).join('');
         }
       }
     } catch (e) {
-      console.warn('[simPanel] load error:', e.message);
-    } finally {
-      if (btn) btn.disabled = false;
+      console.warn('[simPanel] status load error:', e.message);
     }
   }
 
-  async function trigger() {
-    const btn = document.getElementById('atSimTrigger');
-    const msg = document.getElementById('atSimTriggerMsg');
-    if (btn) btn.disabled = true;
-    if (msg) { msg.textContent = 'Triggering…'; msg.className = 'at-sim-trigger-msg'; }
-    try {
-      const data = await fetch('/api/bots/trigger', { method: 'POST' }).then(r => r.json());
-      if (msg) {
-        msg.textContent = data.message || (data.ok ? 'Scan cycle started!' : 'Could not trigger');
-        msg.className   = 'at-sim-trigger-msg' + (data.ok ? '' : ' err');
-      }
-      if (data.ok) setTimeout(load, 5000); // refresh trade log after 5 s
-    } catch (e) {
-      if (msg) { msg.textContent = 'Request failed'; msg.className = 'at-sim-trigger-msg err'; }
-    } finally {
-      if (btn) setTimeout(() => { btn.disabled = false; }, 3000);
-    }
-  }
-
-  function init() {
-    document.getElementById('atSimRefresh')?.addEventListener('click', load);
-    document.getElementById('atSimTrigger')?.addEventListener('click', trigger);
-    // Auto-load when trading desk tab becomes active
-    document.addEventListener('pageChanged', (e) => {
-      if (e.detail?.page === 'trading') load();
-    });
-    // Also load on DOMContentLoaded if already on trading page
-    const tradingPage = document.getElementById('page-trading');
-    if (tradingPage && tradingPage.classList.contains('active')) load();
-  }
-
-  return { init, load };
-})();
-
-document.addEventListener('DOMContentLoaded', () => simPanel.init());
-
-// ── Whale Radar ────────────────────────────────────────────────────────────────
-const whaleRadar = (() => {
+  // ── Whale Radar (embedded — runs on same panel) ───────────────────────────
   const BIAS_CLASS = {
-    BULLISH: 'at-whale-bias-bull', BEARISH: 'at-whale-bias-bear',
-    MIXED: 'at-whale-bias-mixed', NEUTRAL: 'at-whale-bias-neutral'
+    BULLISH:'at-whale-bias-bull', BEARISH:'at-whale-bias-bear',
+    MIXED:'at-whale-bias-mixed',  NEUTRAL:'at-whale-bias-neutral'
   };
-  function fmtOI(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'K' : String(n||'—'); }
+  function fmtOI(n) { return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n||'—'); }
 
-  async function load() {
-    const btn  = document.getElementById('atWhaleLoad');
-    const wrap = document.getElementById('atWhaleWrap');
-    const tbody= document.getElementById('atWhaleTbody');
-    if (btn) btn.disabled = true;
-    if (btn) btn.textContent = 'Loading…';
-    if (wrap) wrap.style.display = '';
+  async function loadWhale() {
+    const tbody = document.getElementById('atWhaleTbody');
+    if (!tbody) return;
     try {
       const data = await fetch('/api/whale/scan').then(r => r.json());
-      if (!data.symbols || !data.symbols.length) {
+      if (!data.symbols?.length) {
         tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">No options data available right now</td></tr>`;
         return;
       }
@@ -476,9 +445,9 @@ const whaleRadar = (() => {
         const sweepTxt  = w.callSweep && w.putSweep ? '🐋 BOTH'
                         : w.callSweep ? '🐋 CALL' : w.putSweep ? '🐋 PUT' : '—';
         const sweepCls  = (w.callSweep || w.putSweep) ? 'at-whale-sweep' : '';
-        const dp = w.dp;
+        const dp   = w.dp;
         const fmtP = v => v != null ? '$'+parseFloat(v).toFixed(2) : '—';
-        const hvnStr = dp && dp.hvn ? dp.hvn.map(v => '$'+parseFloat(v).toFixed(2)).join(' · ') : '—';
+        const hvnStr = dp?.hvn ? dp.hvn.map(v=>'$'+parseFloat(v).toFixed(2)).join(' · ') : '—';
         return `<tr>
           <td><strong>${w.symbol}</strong></td>
           <td class="${biasClass}">${w.bias}</td>
@@ -489,24 +458,50 @@ const whaleRadar = (() => {
           <td>$${w.topCallStrike||'—'}</td>
           <td>$${w.topPutStrike||'—'}</td>
           <td class="${sweepCls}">${sweepTxt}</td>
-          <td style="color:#58a6ff">${dp ? fmtP(dp.poc) : '—'}</td>
-          <td style="color:#3fb950">${dp ? fmtP(dp.vah) : '—'}</td>
-          <td style="color:#f85149">${dp ? fmtP(dp.val) : '—'}</td>
+          <td style="color:#58a6ff">${dp?fmtP(dp.poc):'—'}</td>
+          <td style="color:#3fb950">${dp?fmtP(dp.vah):'—'}</td>
+          <td style="color:#f85149">${dp?fmtP(dp.val):'—'}</td>
           <td style="color:#8b949e;font-size:.7rem">${hvnStr}</td>
           <td>${w.expiry||'—'}</td>
         </tr>`;
       }).join('');
-    } catch(e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">Failed to load whale data</td></tr>`;
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh Whale Data'; }
+    } catch (e) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">Whale data temporarily unavailable</td></tr>`;
     }
   }
 
-  function init() {
-    document.getElementById('atWhaleLoad')?.addEventListener('click', load);
+  function startTimers() {
+    if (statusTimer) return; // already running
+    loadStatus();
+    loadWhale();
+    statusTimer = setInterval(loadStatus, STATUS_INTERVAL);
+    whaleTimer  = setInterval(loadWhale,  WHALE_INTERVAL);
   }
-  return { init, load };
+
+  function stopTimers() {
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    if (whaleTimer)  { clearInterval(whaleTimer);  whaleTimer  = null; }
+  }
+
+  function init() {
+    // Auto-start when Trading Desk tab becomes active
+    document.addEventListener('pageChanged', (e) => {
+      if (e.detail?.page === 'trading') {
+        isVisible = true;
+        startTimers();
+      } else {
+        isVisible = false;
+        stopTimers(); // pause fetches when tab not visible
+      }
+    });
+    // If already on trading page when JS loads
+    if (document.getElementById('page-trading')?.classList.contains('active')) {
+      isVisible = true;
+      startTimers();
+    }
+  }
+
+  return { init, loadStatus, loadWhale };
 })();
 
-document.addEventListener('DOMContentLoaded', () => whaleRadar.init());
+document.addEventListener('DOMContentLoaded', () => simPanel.init());

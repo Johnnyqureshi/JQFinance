@@ -823,10 +823,10 @@
     <!-- ── Simulator Test Panel ───────────────────────────────────────────── -->
     <div class="at-sim-panel" id="atSimPanel">
       <div class="at-sim-header">
-        <span class="at-sim-title">Simulator Status</span>
-        <div class="at-sim-actions">
-          <button class="at-sim-refresh-btn" id="atSimRefresh">↻ Refresh</button>
-          <button class="at-sim-trigger-btn" id="atSimTrigger">▶ Trigger Scan Now</button>
+        <span class="at-sim-title">Live Bot Status</span>
+        <div class="at-sim-auto-badge" id="atSimAutoBadge">
+          <span class="at-sim-pulse"></span>
+          <span id="atSimAutoLabel">Auto-refreshing…</span>
         </div>
       </div>
 
@@ -871,18 +871,15 @@
         </div>
       </div>
 
-      <!-- Universe + trigger message -->
+      <!-- Universe size -->
       <div class="at-sim-meta">
         <span id="atSimUniverseSize"></span>
-        <span id="atSimTriggerMsg" class="at-sim-trigger-msg"></span>
+        <span id="atSimLastRefresh" class="at-sim-last-refresh"></span>
       </div>
 
       <!-- Whale Radar -->
-      <div class="at-sim-section-label">
-        Whale Radar — Options OI Analysis
-        <button class="at-sim-whale-btn" id="atWhaleLoad">Load Whale Data</button>
-      </div>
-      <div class="at-sim-trades-wrap" id="atWhaleWrap" style="display:none">
+      <div class="at-sim-section-label">Whale Radar — Options OI &amp; Dark Pool Levels</div>
+      <div class="at-sim-trades-wrap" id="atWhaleWrap">
         <table class="at-sim-trades-table" id="atWhaleTable">
           <thead><tr>
             <th>Symbol</th><th>Bias</th><th>Call/Put</th><th>Put/Call</th>
@@ -891,7 +888,7 @@
             <th>DP — POC</th><th>DP — VAH</th><th>DP — VAL</th><th>HVNs</th>
             <th>Expiry</th>
           </tr></thead>
-          <tbody id="atWhaleTbody"><tr><td colspan="14" class="at-sim-empty">Click "Load Whale Data" to fetch options OI &amp; dark pool levels</td></tr></tbody>
+          <tbody id="atWhaleTbody"><tr><td colspan="14" class="at-sim-empty">Loading whale &amp; dark pool data…</td></tr></tbody>
         </table>
       </div>
 

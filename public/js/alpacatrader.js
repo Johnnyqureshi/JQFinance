@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 const simPanel = (() => {
   const BOT_LABELS = {
     bounce: 'Bounce 2.0', volatility_expansion: 'VE',
-    explosive_earnings: 'EE', countertrend: 'CT', momentum: 'Momentum'
+    explosive_earnings: 'EE', countertrend: 'CT', momentum: 'Momentum', orb: 'ORB'
   };
   const STATUS_INTERVAL  = 60  * 1000;  // refresh status every 60 s
   const WHALE_INTERVAL   = 5 * 60 * 1000; // refresh whale data every 5 min

@@ -24,7 +24,7 @@ console.warn = (...args) => {
 const app      = express();
 const PORT           = 5000;
 const MAX_TRADE_PRICE = 30;          // Bot only executes LONG trades on stocks priced ≤ $30
-const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 4 bots combined never hold more than 2 positions
+const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 6 bots combined never hold more than 2 positions
 const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter any trade (raised for quality)
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
@@ -151,6 +151,40 @@ db.prepare(`
     enabled  INTEGER DEFAULT 0,
     amount   REAL    DEFAULT 1000.0,
     leverage INTEGER DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
+
+// ── ORB session log — one row per user per trading day ────────────────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS orb_session_log (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    trade_date          TEXT    NOT NULL,
+    orb_type            TEXT    NOT NULL DEFAULT '5min',
+    orb_high            REAL,
+    orb_low             REAL,
+    range_width_pct     REAL,
+    valid_range         INTEGER DEFAULT 0,
+    breakout_direction  TEXT    DEFAULT 'NONE',
+    breakout_price      REAL,
+    volume_confirmed    INTEGER DEFAULT 0,
+    vwap_aligned        INTEGER DEFAULT 0,
+    rsi_ok              INTEGER DEFAULT 0,
+    vix_ok              INTEGER DEFAULT 0,
+    mwf_ok              INTEGER DEFAULT 0,
+    all_filters_passed  INTEGER DEFAULT 0,
+    trade_taken         INTEGER DEFAULT 0,
+    entry_price         REAL,
+    stop_price          REAL,
+    target_price        REAL,
+    trade_symbol        TEXT,
+    shares              INTEGER,
+    alpaca_order_id     TEXT,
+    result              TEXT    DEFAULT 'OPEN',
+    notes               TEXT,
+    created_at          TEXT    DEFAULT (datetime('now')),
+    UNIQUE(user_id, trade_date),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
 `).run();
@@ -1723,6 +1757,208 @@ async function computeMomentumSignal(symbol) {
     signal: `MOMENTUM ${dayChange.toFixed(1)}% · ${volRatio.toFixed(1)}x vol`,
     error: null,
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ORB (OPENING RANGE BREAKOUT) — Strategy 6
+// Monitors SPY using 1-min FMP intraday bars.
+//  • 5-min ORB  window: 9:30–9:35 ET  (first candle — 0DTE edge)
+//  • 60-min ORB window: 9:30–10:30 ET (directional swing confirmation)
+// Default: 5-min ORB. All filters must pass before execution.
+// One trade per day per user. Proxied via SPXL (long) / SPXS (short) → ≤$30.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Fetch 1-min or 5-min intraday bars for today from FMP (newest→oldest, reversed)
+async function fetchFMPIntraday(symbol, interval = '1min') {
+  if (!FMP_KEY) return null;
+  const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
+  const url = `https://financialmodelingprep.com/api/v3/historical-chart/${interval}/${symbol}?from=${today}&to=${today}&apikey=${FMP_KEY}`;
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'JohnnyFinance/1.0' } });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) return null;
+    // FMP returns newest first — reverse to chronological order
+    return data.reverse().map(b => ({
+      t: b.date,    // "2024-01-15 09:30:00"
+      o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume || 0,
+    }));
+  } catch (e) { console.error('[ORB] FMP fetch error:', e.message); return null; }
+}
+
+// Parse "YYYY-MM-DD HH:MM:SS" → minutes since midnight ET
+function fmpTimeToMins(dateStr) {
+  const timePart = dateStr.split(' ')[1] || '';
+  const [h, m]   = timePart.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Compute VWAP from array of bars (typical price × volume cumulative)
+function calcVWAP(bars) {
+  let cumPV = 0, cumVol = 0;
+  for (const b of bars) {
+    const typical = (b.h + b.l + b.c) / 3;
+    cumPV  += typical * (b.v || 0);
+    cumVol += (b.v || 0);
+  }
+  return cumVol > 0 ? cumPV / cumVol : null;
+}
+
+let _orbSignalCache = null;
+let _orbSignalTs    = 0;
+const ORB_SIGNAL_TTL = 60 * 1000; // re-compute at most once per minute
+
+async function computeORBSignal(orbWindowMins = 5) {
+  const now = Date.now();
+  if (_orbSignalCache && now - _orbSignalTs < ORB_SIGNAL_TTL) return _orbSignalCache;
+
+  const et      = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day     = et.getDay();  // 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri
+  const today   = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
+  const curMins = et.getHours() * 60 + et.getMinutes();
+
+  // MWF filter — statistically strongest ORB days
+  const isMWF = [1, 3, 5].includes(day);
+
+  // ── Fetch VIX to check excessive volatility ───────────────────────────────
+  let vix = null;
+  try {
+    const vixBars = await fetchOHLCV('^VIX', 2);
+    vix = vixBars?.at(-1)?.c ?? null;
+  } catch (_) {}
+  const vixOk = vix === null || vix <= 35; // skip if VIX > 35
+
+  // ── Fetch 1-min intraday bars for SPY ────────────────────────────────────
+  const bars = await fetchFMPIntraday('SPY', '1min');
+  const base = {
+    today, isMWF, vix: vix ? +vix.toFixed(2) : null, vixOk,
+    confirmed: false, breakout: 'NONE', orbHigh: null, orbLow: null,
+    orbWindowMins,
+  };
+
+  if (!bars || bars.length < 5) {
+    const result = { ...base, reason: 'Insufficient intraday data from FMP' };
+    _orbSignalCache = result; _orbSignalTs = now;
+    return result;
+  }
+
+  // ── Opening range: 9:30 ET = 570 min, window end = 570 + orbWindowMins ──
+  const ORB_START = 570;
+  const ORB_END   = ORB_START + orbWindowMins;
+
+  const orbBars = bars.filter(b => {
+    const m = fmpTimeToMins(b.t);
+    return m >= ORB_START && m < ORB_END;
+  });
+
+  const postOrbBars = bars.filter(b => fmpTimeToMins(b.t) >= ORB_END);
+
+  if (orbBars.length === 0) {
+    const result = { ...base, reason: `ORB window (${orbWindowMins}-min) not yet complete` };
+    _orbSignalCache = result; _orbSignalTs = now;
+    return result;
+  }
+
+  const orbHigh = Math.max(...orbBars.map(b => b.h));
+  const orbLow  = Math.min(...orbBars.map(b => b.l));
+  const orbMid  = (orbHigh + orbLow) / 2;
+  const rangeWidthPct = orbLow > 0 ? ((orbHigh - orbLow) / orbLow) * 100 : 0;
+  const validRange    = rangeWidthPct >= 0.2;
+
+  // ── VWAP from all bars up to current moment ───────────────────────────────
+  const vwap = calcVWAP(bars);
+
+  // ── RSI(14) on close prices ───────────────────────────────────────────────
+  const closes = bars.map(b => b.c);
+  let rsi = 50;
+  try { rsi = calcRSI(closes, 14); } catch (_) {}
+
+  // ── Volume: compare latest bar to 20-bar rolling average ─────────────────
+  const recentVols = bars.slice(-21, -1).map(b => b.v || 0);
+  const avgVol20   = recentVols.length > 0 ? recentVols.reduce((a, b) => a + b, 0) / recentVols.length : 0;
+  const latestBar  = bars.at(-1);
+  const curVol     = latestBar.v || 0;
+  const hasVolume  = avgVol20 > 0 && curVol > avgVol20;
+
+  // ── Breakout detection — only on candles AFTER the ORB window ─────────────
+  // A breakout requires a full CANDLE CLOSE above orbHigh or below orbLow.
+  // Wicks do not count. Check most recent post-ORB bar.
+  let breakout = 'NONE';
+  let breakoutBar = null;
+
+  if (postOrbBars.length > 0) {
+    const latest = postOrbBars.at(-1);
+    if (latest.c > orbHigh)  { breakout = 'BULLISH'; breakoutBar = latest; }
+    if (latest.c < orbLow)   { breakout = 'BEARISH'; breakoutBar = latest; }
+  }
+
+  // ── False breakout check — did price re-enter the range within 2 candles? ─
+  let fakeout = false;
+  if (breakout !== 'NONE' && postOrbBars.length >= 2) {
+    // Check the 2 bars just before the latest bar
+    const recentPost = postOrbBars.slice(-3, -1);
+    const alreadyBroken = recentPost.some(b =>
+      (breakout === 'BULLISH' && b.c > orbHigh) || (breakout === 'BEARISH' && b.c < orbLow)
+    );
+    if (alreadyBroken) {
+      // ORB broke before — check if any intermediate bar re-entered the range
+      fakeout = recentPost.some(b => b.c >= orbLow && b.c <= orbHigh);
+    }
+  }
+
+  const price        = latestBar.c;
+  const vwapAligned  = breakout === 'NONE' ? null
+    : breakout === 'BULLISH' ? price > (vwap ?? price)
+    : price < (vwap ?? price);
+  const rsiOk        = breakout === 'NONE' ? null
+    : breakout === 'BULLISH' ? rsi <= 75
+    : rsi >= 25;
+
+  const failReasons = [];
+  if (!isMWF)      failReasons.push('Not Mon/Wed/Fri');
+  if (!validRange) failReasons.push(`Range ${rangeWidthPct.toFixed(3)}% < 0.2%`);
+  if (!vixOk)      failReasons.push(`VIX ${vix} > 35`);
+  if (breakout === 'NONE') failReasons.push('No breakout yet');
+  if (breakout !== 'NONE') {
+    if (!hasVolume)    failReasons.push('Volume below 20-bar avg');
+    if (!vwapAligned)  failReasons.push('VWAP misaligned');
+    if (!rsiOk)        failReasons.push(`RSI ${rsi.toFixed(1)} in extreme zone`);
+    if (fakeout)       failReasons.push('False breakout — price re-entered range');
+  }
+
+  const allFiltersPassed = isMWF && validRange && vixOk && breakout !== 'NONE'
+    && hasVolume && vwapAligned && rsiOk && !fakeout;
+
+  // ── Risk/reward levels ────────────────────────────────────────────────────
+  const rangeWidth = orbHigh - orbLow;
+  const slLevel    = +orbMid.toFixed(2); // stop = 50% of ORB (midpoint)
+  const tpLevel    = breakout === 'BULLISH'
+    ? +(orbHigh + rangeWidth * 1.5).toFixed(2)   // primary: 1.5× range beyond breakout
+    : +(orbLow  - rangeWidth * 1.5).toFixed(2);
+
+  const result = {
+    today, isMWF, vix: vix ? +vix.toFixed(2) : null, vixOk,
+    orbHigh: +orbHigh.toFixed(2), orbLow: +orbLow.toFixed(2), orbMid: +orbMid.toFixed(2),
+    rangeWidthPct: +rangeWidthPct.toFixed(3), validRange,
+    price: +price.toFixed(2), vwap: vwap ? +vwap.toFixed(2) : null,
+    rsi: +rsi.toFixed(1), rsiOk,
+    hasVolume, vwapAligned, fakeout, breakout,
+    orbWindowMins, orbBarsCount: orbBars.length, postOrbBarsCount: postOrbBars.length,
+    allFiltersPassed,
+    failReasons,
+    confirmed: allFiltersPassed,
+    direction: breakout !== 'NONE' ? breakout : null,
+    slLevel, tpLevel,
+    signal: allFiltersPassed
+      ? `ORB ${breakout} · ${rangeWidthPct.toFixed(3)}% range · RSI ${rsi.toFixed(1)} · VIX ${vix?.toFixed(1) ?? '—'}`
+      : failReasons.length ? `SKIP — ${failReasons.join(', ')}` : 'Monitoring…',
+    reason: failReasons.length ? failReasons.join(', ') : null,
+  };
+
+  _orbSignalCache = result;
+  _orbSignalTs    = now;
+  return result;
 }
 
 // ── Inverse ETF Map ────────────────────────────────────────────────────────────
@@ -3824,6 +4060,258 @@ async function runMomentumAutoTrader() {
 // Scans every 5 minutes — faster cadence than VE/CT because momentum windows close quickly
 setInterval(runMomentumAutoTrader, 5 * 60 * 1000);
 console.log('[Momentum-Bot] Momentum/Gap-and-Go auto-trader initialized — scans every 5 min during market hours');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER
+// SPY-only strategy. Runs every 2 minutes starting at 9:35 ET.
+// Uses FMP 1-min bars to detect confirmed candle-close breakouts.
+// SPXL = proxy for BULLISH ORB (3× leveraged SPY long, usually ≤ $30)
+// SPXS = proxy for BEARISH ORB (3× leveraged SPY short, usually ≤ $30)
+// One trade per day per user. Session is logged to orb_session_log for review.
+// ══════════════════════════════════════════════════════════════════════════════
+const ORB_LONG_PROXY  = 'SPXL'; // 3× Direxion Daily S&P 500 Bull (buy for BULLISH ORB)
+const ORB_SHORT_PROXY = 'SPXS'; // 3× Direxion Daily S&P 500 Bear  (buy for BEARISH ORB)
+
+async function runORBAutoTrader() {
+  if (!isMarketOpen()) return;
+
+  // ORB window = 9:30–9:35 ET. Don't scan until window is confirmed closed + 1 bar buffer.
+  const et      = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const curMins = et.getHours() * 60 + et.getMinutes();
+  if (curMins < 576) return; // wait until 9:36 ET so ORB bars are fully settled
+
+  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
+  if (!users.length) return;
+
+  const sig = await computeORBSignal(5); // 5-min ORB window
+  const today = sig.today;
+
+  // Log what we see even when no trade is taken (for session log completeness)
+  console.log(`[ORB-Bot] ${today} | Range: $${sig.orbHigh ?? '—'}/$${sig.orbLow ?? '—'} (${sig.rangeWidthPct ?? '—'}%) | Breakout: ${sig.breakout} | Filters: ${sig.confirmed ? 'ALL PASS' : (sig.failReasons?.join(', ') || 'pending')}`);
+
+  if (!sig.confirmed) return;
+
+  for (const user of users) {
+    const creds = getAlpacaCreds(user.user_id);
+    if (!creds) continue;
+
+    // One trade per day per user — check session log
+    const sessionRow = db.prepare(`SELECT * FROM orb_session_log WHERE user_id = ? AND trade_date = ?`).get(user.user_id, today);
+    if (sessionRow?.trade_taken) {
+      console.log(`[ORB-Bot] User ${user.user_id} already traded today — skipping`);
+      continue;
+    }
+
+    if (!acquireBotLock(user.user_id)) {
+      console.log(`[ORB-Bot] User ${user.user_id} locked by another bot — skipping`);
+      continue;
+    }
+    try {
+      if (!await checkPDTAllowed(user.user_id, 'ORB-Bot')) continue;
+
+      const slots = await getOpenSlots(user.user_id, 'ORB-Bot');
+      if (!slots || slots.available <= 0) continue;
+
+      // Choose proxy ETF based on ORB direction
+      const proxySymbol = sig.direction === 'BULLISH' ? ORB_LONG_PROXY : ORB_SHORT_PROXY;
+      const proxySide   = 'buy'; // always buying (SPXL for long exposure, SPXS for short)
+
+      // Check we don't already hold the proxy
+      const positions = slots.positions;
+      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === proxySymbol);
+      if (alreadyIn) {
+        console.log(`[ORB-Bot] Already holding ${proxySymbol} — skipping`);
+        continue;
+      }
+
+      // ORB has its own superior SPY-specific filters (VWAP, RSI, VIX, candle-close
+      // confirmation, MWF, fakeout check). The SPY options gate (max pain / floor / roof)
+      // would conflict with valid breakout setups (e.g. bullish ORB when SPY > max pain
+      // but still far below the roof). Skip SPY-Gate; run Whale + Dark Pool gates.
+      const whaleGate = await checkWhaleGate('SPY', sig.direction);
+      if (!whaleGate.allowed) {
+        console.log(`[ORB-Bot] Whale-Gate BLOCKED: ${whaleGate.reason}`);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Whale-Gate blocked: ${whaleGate.reason}` });
+        continue;
+      }
+
+      const dpGate = await checkDarkPoolGate('SPY', sig.price, sig.direction);
+      if (!dpGate.allowed) {
+        console.log(`[ORB-Bot] DP-Gate BLOCKED: ${dpGate.reason}`);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `DP-Gate blocked: ${dpGate.reason}` });
+        continue;
+      }
+
+      // Fetch live proxy price
+      const proxyBars = await fetchOHLCV(proxySymbol, 2).catch(() => null);
+      const proxyPrice = proxyBars?.at(-1)?.c;
+      if (!proxyPrice) {
+        console.log(`[ORB-Bot] Could not fetch price for ${proxySymbol} — skipping`);
+        continue;
+      }
+      if (proxyPrice > MAX_TRADE_PRICE) {
+        console.log(`[ORB-Bot] ${proxySymbol} @ $${proxyPrice} above $${MAX_TRADE_PRICE} cap — skipping`);
+        continue;
+      }
+
+      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 500) * lev;
+      const shares = Math.max(1, Math.floor(amount / proxyPrice));
+
+      // Translate SPY SL/TP percentages to proxy price levels
+      // ORB SL is at range midpoint (orbMid), TP is 1.5× range width beyond breakout
+      const slPctOfSpy = sig.direction === 'BULLISH'
+        ? (sig.price - sig.slLevel) / sig.price
+        : (sig.slLevel - sig.price) / sig.price;
+      const tpPctOfSpy = sig.direction === 'BULLISH'
+        ? (sig.tpLevel - sig.price) / sig.price
+        : (sig.price - sig.tpLevel) / sig.price;
+
+      // SPXL/SPXS are 3× leveraged — scale risk/reward by 3
+      const leverageFactor = 3;
+      const proxySL = (proxyPrice * (1 - slPctOfSpy * leverageFactor)).toFixed(2);
+      const proxyTP = (proxyPrice * (1 + tpPctOfSpy * leverageFactor)).toFixed(2);
+
+      // Max loss cap: 1.5% of account equity
+      let account = null;
+      try { account = await alpacaFetch(user.user_id, '/v2/account'); } catch(_) {}
+      if (account) {
+        const equity   = parseFloat(account.equity || 0);
+        const maxLoss  = equity * 0.015;
+        const tradeLoss = shares * (proxyPrice - parseFloat(proxySL));
+        if (tradeLoss > maxLoss) {
+          const cappedShares = Math.max(1, Math.floor(maxLoss / (proxyPrice - parseFloat(proxySL))));
+          console.log(`[ORB-Bot] Capping shares ${shares} → ${cappedShares} (1.5% equity loss limit: $${maxLoss.toFixed(0)})`);
+          Object.assign({ shares: cappedShares });
+        }
+      }
+
+      const orderBody = {
+        symbol:        proxySymbol,
+        qty:           String(shares),
+        side:          proxySide,
+        type:          'market',
+        time_in_force: 'day',
+        order_class:   'bracket',
+        take_profit:   { limit_price: proxyTP },
+        stop_loss:     { stop_price:  proxySL },
+      };
+
+      try {
+        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+        const orderId = order.id || null;
+
+        // Log to auto_trade_log (shows in Recent Bot Trades)
+        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'orb','open',datetime('now'))`).run(
+          user.user_id, proxySymbol, shares, proxyPrice, proxyTP, proxySL, orderId,
+          `ORB ${sig.direction} via ${proxySymbol} (SPY range $${sig.orbHigh}/$${sig.orbLow})`
+        );
+
+        // Log to ORB session log
+        upsertORBSessionLog(user.user_id, today, sig, {
+          trade_taken: 1, entry_price: proxyPrice, stop_price: parseFloat(proxySL),
+          target_price: parseFloat(proxyTP), trade_symbol: proxySymbol,
+          shares, alpaca_order_id: orderId, result: 'OPEN',
+          notes: `${proxySymbol} proxy · ${shares} shares @ $${proxyPrice} | SPY ORB ${sig.direction}`,
+        });
+
+        console.log(`[ORB-Bot] ✓ ORDER: BUY ${shares} ${proxySymbol} @ ~$${proxyPrice} (ORB ${sig.direction} · SPY ${sig.orbHigh}/${sig.orbLow}) SL=${proxySL} TP=${proxyTP}`);
+      } catch (e) {
+        console.error(`[ORB-Bot] Order failed for ${proxySymbol}:`, e.message);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Order error: ${e.message}` });
+      }
+    } finally {
+      releaseBotLock(user.user_id);
+    }
+  }
+}
+
+// Helper: upsert the ORB session log row for today
+function upsertORBSessionLog(userId, tradeDate, sig, overrides = {}) {
+  const base = {
+    user_id:            userId,
+    trade_date:         tradeDate,
+    orb_type:           '5min',
+    orb_high:           sig.orbHigh   ?? null,
+    orb_low:            sig.orbLow    ?? null,
+    range_width_pct:    sig.rangeWidthPct ?? null,
+    valid_range:        sig.validRange ? 1 : 0,
+    breakout_direction: sig.breakout  ?? 'NONE',
+    breakout_price:     sig.price     ?? null,
+    volume_confirmed:   sig.hasVolume ? 1 : 0,
+    vwap_aligned:       sig.vwapAligned ? 1 : 0,
+    rsi_ok:             sig.rsiOk     ? 1 : 0,
+    vix_ok:             sig.vixOk     ? 1 : 0,
+    mwf_ok:             sig.isMWF     ? 1 : 0,
+    all_filters_passed: sig.confirmed  ? 1 : 0,
+    trade_taken:        0,
+    result:             'OPEN',
+    notes:              sig.failReasons?.join(', ') || null,
+  };
+  const row = { ...base, ...overrides };
+  db.prepare(`
+    INSERT INTO orb_session_log
+      (user_id, trade_date, orb_type, orb_high, orb_low, range_width_pct, valid_range,
+       breakout_direction, breakout_price, volume_confirmed, vwap_aligned, rsi_ok, vix_ok,
+       mwf_ok, all_filters_passed, trade_taken, entry_price, stop_price, target_price,
+       trade_symbol, shares, alpaca_order_id, result, notes)
+    VALUES
+      (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id, trade_date) DO UPDATE SET
+      orb_high=excluded.orb_high, orb_low=excluded.orb_low,
+      range_width_pct=excluded.range_width_pct, valid_range=excluded.valid_range,
+      breakout_direction=excluded.breakout_direction, breakout_price=excluded.breakout_price,
+      volume_confirmed=excluded.volume_confirmed, vwap_aligned=excluded.vwap_aligned,
+      rsi_ok=excluded.rsi_ok, vix_ok=excluded.vix_ok, mwf_ok=excluded.mwf_ok,
+      all_filters_passed=excluded.all_filters_passed,
+      trade_taken=CASE WHEN excluded.trade_taken=1 THEN 1 ELSE orb_session_log.trade_taken END,
+      entry_price=COALESCE(excluded.entry_price, orb_session_log.entry_price),
+      stop_price=COALESCE(excluded.stop_price, orb_session_log.stop_price),
+      target_price=COALESCE(excluded.target_price, orb_session_log.target_price),
+      trade_symbol=COALESCE(excluded.trade_symbol, orb_session_log.trade_symbol),
+      shares=COALESCE(excluded.shares, orb_session_log.shares),
+      alpaca_order_id=COALESCE(excluded.alpaca_order_id, orb_session_log.alpaca_order_id),
+      result=COALESCE(excluded.result, orb_session_log.result),
+      notes=COALESCE(excluded.notes, orb_session_log.notes)
+  `).run(
+    row.user_id, row.trade_date, row.orb_type, row.orb_high, row.orb_low,
+    row.range_width_pct, row.valid_range, row.breakout_direction, row.breakout_price,
+    row.volume_confirmed, row.vwap_aligned, row.rsi_ok, row.vix_ok, row.mwf_ok,
+    row.all_filters_passed, row.trade_taken, row.entry_price ?? null,
+    row.stop_price ?? null, row.target_price ?? null, row.trade_symbol ?? null,
+    row.shares ?? null, row.alpaca_order_id ?? null, row.result, row.notes
+  );
+}
+
+// ── GET /api/orb-log — recent ORB session log (last 20 sessions) ──────────────
+app.get('/api/orb-log', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT trade_date, orb_type, orb_high, orb_low, range_width_pct, valid_range,
+             breakout_direction, volume_confirmed, vwap_aligned, rsi_ok, vix_ok, mwf_ok,
+             all_filters_passed, trade_taken, entry_price, stop_price, target_price,
+             trade_symbol, shares, result, notes, created_at
+      FROM orb_session_log
+      WHERE user_id = ?
+      ORDER BY trade_date DESC
+      LIMIT 20
+    `).all(req.session.userId);
+    res.json({ sessions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/orb-signal — live ORB signal state for the dashboard ─────────────
+app.get('/api/orb-signal', requireAuth, async (req, res) => {
+  try {
+    _orbSignalTs = 0; // force fresh computation
+    const sig = await computeORBSignal(5);
+    res.json(sig);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ORB scans every 2 minutes — tight enough to catch breakouts shortly after they form
+setInterval(runORBAutoTrader, 2 * 60 * 1000);
+console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, MWF only)');
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Johnny Qureshi Finance on :${PORT}`);

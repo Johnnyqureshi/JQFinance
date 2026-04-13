@@ -1857,8 +1857,8 @@ async function computeORBSignal(orbWindowMins = 5) {
   const today   = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
   const curMins = et.getHours() * 60 + et.getMinutes();
 
-  // MWF filter — statistically strongest ORB days
-  const isMWF = [1, 3, 5].includes(day);
+  // Weekday filter — trade Mon–Fri (PDT rules enforced per trade)
+  const isMWF = day >= 1 && day <= 5; // renamed kept for compatibility
 
   // ── Fetch VIX to check excessive volatility ───────────────────────────────
   let vix = null;
@@ -1955,7 +1955,7 @@ async function computeORBSignal(orbWindowMins = 5) {
     : rsi >= 25;
 
   const failReasons = [];
-  if (!isMWF)      failReasons.push('Not Mon/Wed/Fri');
+  if (!isMWF)      failReasons.push('Not a weekday (Mon–Fri)');
   if (!validRange) failReasons.push(`Range ${rangeWidthPct.toFixed(3)}% < 0.2%`);
   if (!vixOk)      failReasons.push(`VIX ${vix} > 35`);
   if (breakout === 'NONE') failReasons.push('No breakout yet');
@@ -4426,7 +4426,7 @@ app.get('/api/orb-signal', requireAuth, async (req, res) => {
 setInterval(runORBAutoTrader,   2 * 60 * 1000);
 // RSI-75 exit monitor runs every 2 minutes throughout the session
 setInterval(monitorORBRSIExit, 2 * 60 * 1000);
-console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, MWF only) · RSI-75 exit monitor active');
+console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, Mon–Fri) · RSI-75 exit monitor active · PDT-aware');
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Johnny Qureshi Finance on :${PORT}`);

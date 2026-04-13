@@ -628,36 +628,32 @@ app.get('/api/signal/:symbol', async (req, res) => {
   const sym = req.params.symbol?.toUpperCase().trim();
   if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
   try {
-    const sig = await computeBounceSignal(sym);
-    if (!sig || sig.error) return res.json({ ok: false, error: sig?.error || 'Insufficient data' });
-
-    const confirmed = sig.confirmed;
-    const condsMet  = [sig.cond1, sig.cond2, sig.cond3, sig.cond4].filter(Boolean).length;
-    const signal    = confirmed ? 'BUY' : condsMet >= 2 ? 'WATCH' : 'HOLD';
-    const confidence = confirmed ? 78 : condsMet >= 3 ? 62 : condsMet >= 2 ? 45 : 30;
-
+    const bars = await fetchOHLCV(sym, 60);
+    if (!bars || bars.length < 20) return res.json({ ok: false, error: 'Insufficient data' });
+    const closes = bars.map(b => b.c);
+    const price   = closes.at(-1);
+    const ema21   = calcEMA(closes, 21);
+    const sma50   = calcSMA(closes, 50);
+    let rsi14 = 50;
+    try { rsi14 = +calcRSI(closes, 14).toFixed(1); } catch (_) {}
+    const aboveEma = price > ema21;
+    const aboveSma = price > sma50;
+    const rsiOk    = rsi14 < 70 && rsi14 > 30;
+    const condsMet = [aboveEma, aboveSma, rsiOk].filter(Boolean).length;
+    const signal    = condsMet === 3 ? 'BUY' : condsMet === 2 ? 'WATCH' : 'HOLD';
+    const confidence = condsMet === 3 ? 72 : condsMet === 2 ? 48 : 30;
     const reasons = [];
-    if (sig.cond1) reasons.push('Uptrend stack confirmed (8/21/34 EMA > 50 SMA)');
-    if (sig.cond2) reasons.push('Price in pullback zone (between EMA 8 and SMA 50)');
-    if (sig.cond3) reasons.push('Stochastic oversold — momentum reset in progress');
-    if (sig.cond4) reasons.push('Entry trigger fired — close above prior bar high');
-
+    if (aboveEma) reasons.push('Price above 21 EMA (short-term trend up)');
+    if (aboveSma) reasons.push('Price above 50 SMA (medium-term trend up)');
+    if (rsiOk)    reasons.push(`RSI ${rsi14} — momentum neutral/healthy`);
     res.json({
       ok: true,
       symbol: sym,
       signal: {
-        signal,
-        confidence,
-        reasons,
-        price:    sig.price,
-        tpLevel:  sig.tpLevel,
-        slLevel:  sig.slLevel,
-        rr:       sig.rr,
-        stochK:   sig.stochK,
-        ema8:     sig.ema8,
-        sma50:    sig.sma50,
-        confirmed,
-        zoneStr: confirmed ? 'Bounce 2.0 confirmed setup' : condsMet >= 2 ? 'Partial setup — monitoring' : 'No active setup',
+        signal, confidence, reasons,
+        price, ema8: ema21, sma50,
+        confirmed: condsMet === 3,
+        zoneStr: condsMet === 3 ? 'Trend aligned — all conditions met' : condsMet === 2 ? 'Partial setup — monitoring' : 'No active setup',
       },
       regime: { regime: 'NEUTRAL', label: 'Market Neutral' },
     });
@@ -1204,68 +1200,7 @@ async function fetchOHLCV(symbol, limit = 120) {
   return bars.slice(-limit);
 }
 
-async function computeBounceSignal(symbol) {
-  const bars = await fetchOHLCV(symbol, 120);
-  if (!bars || bars.length < 60) return { symbol, error: 'Insufficient data', confirmed: false };
 
-  const closes = bars.map(b => b.c);
-  const cur    = bars.at(-1);
-  const prev   = bars.at(-2);
-
-  const ema8  = calcEMA(closes, 8);
-  const ema21 = calcEMA(closes, 21);
-  const ema34 = calcEMA(closes, 34);
-  const sma50 = calcSMA(closes, 50);
-  const stoch = calcStochastic(bars, 8, 3, 3);
-
-  if (!ema8 || !ema21 || !ema34 || !sma50 || !stoch) {
-    return { symbol, error: 'Indicator error', confirmed: false };
-  }
-
-  const price   = cur.c;
-  const prevHigh = prev.h;
-  const { pctK, pctD } = stoch;
-
-  // ── 4 Conditions ────────────────────────────────────────────────────────────
-  const cond1 = ema8 > ema21 && ema21 > ema34 && ema34 > sma50;  // uptrend stack
-  const cond2 = price <= ema8 && price >= sma50;                  // in pullback zone
-  const cond3 = pctK < 40;                                        // stoch oversold
-  const cond4 = price > prevHigh;                                  // close above prev bar high
-
-  const confirmed = cond1 && cond2 && cond3 && cond4;
-
-  // ── TP / SL ──────────────────────────────────────────────────────────────────
-  const swingHigh   = findSwingHigh(bars, 30);
-  const pullbackLow = findPullbackLow(bars, 10);
-  const tpLevel = swingHigh ?? price * 1.05;
-  const slLevel = Math.max(pullbackLow ?? 0, sma50); // whichever is closer (higher): pullback low OR 50 SMA
-
-  const riskDist   = price - slLevel;
-  const rewardDist = tpLevel - price;
-  const rr = riskDist > 0 ? rewardDist / riskDist : 0;
-
-  return {
-    symbol,
-    price:    +price.toFixed(4),
-    ema8:     +ema8.toFixed(4),
-    ema21:    +ema21.toFixed(4),
-    ema34:    +ema34.toFixed(4),
-    sma50:    +sma50.toFixed(4),
-    stochK:   +pctK.toFixed(2),
-    stochD:   +pctD.toFixed(2),
-    prevHigh: +prevHigh.toFixed(4),
-    cond1,
-    cond2,
-    cond3,
-    cond4,
-    confirmed,
-    tpLevel:  +tpLevel.toFixed(4),
-    slLevel:  +slLevel.toFixed(4),
-    rr:       +rr.toFixed(2),
-    date:     cur.t,
-    error:    null,
-  };
-}
 
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
 // ── Master scan universe — all 4 bots use this list ───────────────────────────
@@ -1357,79 +1292,8 @@ const MASTER_UNIVERSE = [
   // ── User-added ─────────────────────────────────────────────────────────────
   'ADBG','GLND','USAR','ZSX','DOGD','AVS','BABO','KMLI','NBIG','NBIZ','LLYX','BRKU',
 ];
-const BOUNCE_UNIVERSE = MASTER_UNIVERSE;
-
-// GET /api/bounce-signal/:symbol
-app.get('/api/bounce-signal/:symbol', async (req, res) => {
-  const sym = req.params.symbol.toUpperCase();
-  try {
-    const signal = await computeBounceSignal(sym);
-    res.json(signal);
-  } catch (e) {
-    res.status(500).json({ symbol: sym, error: e.message, confirmed: false });
-  }
-});
-
-// GET /api/bounce-scan?symbols=AAPL,TSLA,... (omit for full universe)
-const _bounceCache = new Map(); // sym -> { data, ts }
-const BOUNCE_TTL   = 5 * 60 * 1000; // 5 min cache per symbol
-
-app.get('/api/bounce-scan', async (req, res) => {
-  let syms = req.query.symbols
-    ? req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
-    : BOUNCE_UNIVERSE;
-  syms = [...new Set(syms)].slice(0, 80);
-
-  const now = Date.now();
-  const BATCH = 8;
-  const results = [];
-
-  for (let i = 0; i < syms.length; i += BATCH) {
-    const batch = syms.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _bounceCache.get(sym);
-      if (cached && now - cached.ts < BOUNCE_TTL) return cached.data;
-      const sig = await computeBounceSignal(sym);
-      _bounceCache.set(sym, { data: sig, ts: now });
-      return sig;
-    }));
-    settled.forEach((r, idx) => {
-      if (r.status === 'fulfilled') results.push(r.value);
-      else results.push({ symbol: batch[idx], error: r.reason?.message || 'Failed', confirmed: false });
-    });
-  }
-
-  results.sort((a, b) => {
-    if (a.confirmed && !b.confirmed) return -1;
-    if (!a.confirmed && b.confirmed) return 1;
-    return (b.rr || 0) - (a.rr || 0);
-  });
-
-  res.json({
-    ok: true,
-    total: results.length,
-    confirmed: results.filter(r => r.confirmed).length,
-    results,
-    scannedAt: new Date().toISOString(),
-  });
-});
 
 
-// ── GET/PUT /api/bounce/auto-settings ─────────────────────────────────────────
-app.get('/api/bounce/auto-settings', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM auto_trade_settings WHERE user_id = ?').get(req.session.userId);
-  res.json(row ? { enabled: row.enabled, amount: row.investment_amount, leverage: row.leverage } : { enabled: 0, amount: 500, leverage: 1 });
-});
-
-app.put('/api/bounce/auto-settings', requireAuth, (req, res) => {
-  const { enabled, amount, leverage } = req.body;
-  db.prepare(`
-    INSERT INTO auto_trade_settings (user_id, enabled, investment_amount, leverage)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, investment_amount=excluded.investment_amount, leverage=excluded.leverage
-  `).run(req.session.userId, enabled ? 1 : 0, amount || 500, leverage || 1);
-  res.json({ ok: true });
-});
 
 // ── GET /api/bots/status — SPY gate + PDT state for the logged-in user ────────
 app.get('/api/bots/status', requireAuth, async (req, res) => {
@@ -1480,7 +1344,7 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
 });
 
 // ── Bot toggle helpers ─────────────────────────────────────────────────────────
-const BOT_NAMES = ['bounce','volatility_expansion','explosive_earnings','countertrend','momentum','orb'];
+const BOT_NAMES = ['countertrend','orb','swing'];
 
 function isBotEnabled(userId, botName) {
   const row = db.prepare('SELECT enabled FROM bot_toggles WHERE user_id=? AND bot_name=?').get(userId, botName);
@@ -1511,12 +1375,10 @@ app.post('/api/bots/toggle', requireAuth, (req, res) => {
 app.post('/api/bots/trigger', requireAuth, async (req, res) => {
   if (!isMarketOpen()) return res.json({ ok: false, message: 'Market is closed — bots only trade during market hours (9:30–16:00 ET Mon–Fri).' });
   res.json({ ok: true, message: 'Scan cycle triggered — check the trade log in a few seconds.' });
-  // Run all 4 bots concurrently (non-blocking to the HTTP response)
+  // Run active bots concurrently (non-blocking to the HTTP response)
   Promise.allSettled([
-    runBounceAutoTrader(),
-    runVEAutoTrader(),
-    runEEAutoTrader(),
-    runCTAutoTrader()
+    runCTAutoTrader(),
+    runSwingAutoTrader()
   ]).then(results => {
     const errs = results.filter(r => r.status === 'rejected').map(r => r.reason?.message);
     if (errs.length) console.warn('[Trigger] Bot errors:', errs.join('; '));
@@ -1644,158 +1506,6 @@ function calcBBWidthSeries(closes, period = 20, mult = 2, lookback = 20) {
     widths.push(w);
   }
   return widths.filter(v => v !== null);
-}
-
-// ── Volatility Expansion Signal Computation ───────────────────────────────────
-async function computeVESignal(symbol) {
-  const bars = await fetchOHLCV(symbol, 150);
-  if (!bars || bars.length < 60) return { symbol, error: 'Insufficient data', direction: null, confirmed: false };
-
-  const closes  = bars.map(b => b.c);
-  const volumes = bars.map(b => b.v || 0);
-  const cur     = bars.at(-1);
-
-  // ── ATR series and 20-period ATR average ──────────────────────────────────
-  const atrSeries = calcATRSeries(bars, 14);
-  const curATR    = atrSeries.at(-1);
-  if (!curATR) return { symbol, error: 'ATR error', direction: null, confirmed: false };
-
-  const recentATRs = atrSeries.slice(-20).filter(v => v !== null);
-  const atrAvg20   = recentATRs.reduce((a, b) => a + b, 0) / recentATRs.length;
-
-  // ── Count consecutive recent bars where ATR < avg (contraction) ───────────
-  let contractionBars = 0;
-  for (let i = atrSeries.length - 1; i >= 0; i--) {
-    if (atrSeries[i] !== null && atrSeries[i] < atrAvg20) contractionBars++;
-    else break;
-  }
-  const hasContraction = contractionBars >= 5;
-
-  // ── Bollinger Band width — current and lookback ───────────────────────────
-  const bbCur  = calcBBWidth(closes, 20, 2);
-  if (!bbCur)  return { symbol, error: 'BB error', direction: null, confirmed: false };
-
-  const bbWidths   = calcBBWidthSeries(closes, 20, 2, 21);
-  const minWidth20 = Math.min(...bbWidths);
-  const isSqueezed = bbCur.width <= minWidth20 * 1.15;  // within 15% of the 20-bar minimum
-
-  // ── Consolidation range (highest high / lowest low during contraction) ────
-  const contractionWindow = Math.max(contractionBars, 5);
-  const rangeBars  = bars.slice(-contractionWindow);
-  const rangeHigh  = Math.max(...rangeBars.map(b => b.h));
-  const rangeLow   = Math.min(...rangeBars.map(b => b.l));
-  const rangeMid   = (rangeHigh + rangeLow) / 2;
-
-  // ── Volume surge ──────────────────────────────────────────────────────────
-  const avgVol20   = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
-  const curVol     = cur.v || 0;
-  const volRatio   = avgVol20 > 0 ? curVol / avgVol20 : 0;
-  const hasVolSurge = volRatio >= 1.5;
-
-  // ── Entry triggers ────────────────────────────────────────────────────────
-  const price      = cur.c;
-  const longTrig   = price > rangeHigh && hasVolSurge;
-  const shortTrig  = price < rangeLow  && hasVolSurge;
-  const confirmed  = (longTrig || shortTrig) && hasContraction && isSqueezed;
-  const direction  = confirmed ? (longTrig ? 'LONG' : 'SHORT') : null;
-
-  // ── Stop loss ─────────────────────────────────────────────────────────────
-  const slLong  = rangeMid;
-  const slShort = rangeMid;
-  const sl      = direction === 'LONG' ? slLong : direction === 'SHORT' ? slShort : rangeMid;
-
-  // Risk/Reward — TP is previous structure high (Long) / low (Short)
-  const swingTP = direction === 'LONG'
-    ? Math.max(...bars.slice(-40, -contractionWindow).map(b => b.h) || [price * 1.06])
-    : Math.min(...bars.slice(-40, -contractionWindow).map(b => b.l) || [price * 0.94]);
-  const tpLevel = swingTP || (direction === 'LONG' ? price * 1.06 : price * 0.94);
-
-  const riskDist   = direction === 'LONG'  ? price - sl : sl - price;
-  const rewardDist = direction === 'LONG'  ? tpLevel - price : price - tpLevel;
-  const rr         = riskDist > 0 ? +(rewardDist / riskDist).toFixed(2) : 0;
-
-  return {
-    symbol,
-    price:           +price.toFixed(4),
-    atr:             +curATR.toFixed(4),
-    atrAvg20:        +atrAvg20.toFixed(4),
-    atrRatio:        +(curATR / atrAvg20).toFixed(3),
-    contractionBars,
-    hasContraction,
-    bbWidth:         +bbCur.width.toFixed(3),
-    bbSMA:           +bbCur.sma.toFixed(4),
-    bbUpper:         +bbCur.upper.toFixed(4),
-    bbLower:         +bbCur.lower.toFixed(4),
-    bbMinWidth20:    +minWidth20.toFixed(3),
-    isSqueezed,
-    rangeHigh:       +rangeHigh.toFixed(4),
-    rangeLow:        +rangeLow.toFixed(4),
-    rangeMid:        +rangeMid.toFixed(4),
-    volRatio:        +volRatio.toFixed(2),
-    hasVolSurge,
-    direction,
-    confirmed,
-    signal:          confirmed ? `VOLATILITY EXPANSION CONFIRMED — ${direction}` : null,
-    slLevel:         +sl.toFixed(4),
-    tpLevel:         +tpLevel.toFixed(4),
-    rr,
-    date:            cur.t,
-    error:           null,
-  };
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MOMENTUM / GAP-AND-GO SIGNAL — Strategy 5
-// Fires when a stock is up ≥3% today on ≥1.5× average volume (daily bars).
-// Unlike VE (requires squeeze) or Bounce (requires oversold), this catches
-// pure price strength: strong directional trend days like tariff-pause surges.
-// ══════════════════════════════════════════════════════════════════════════════
-async function computeMomentumSignal(symbol) {
-  const bars = await fetchOHLCV(symbol, 30);
-  if (!bars || bars.length < 10) return { symbol, confirmed: false, error: 'Insufficient data' };
-
-  const cur  = bars.at(-1); // today (live intraday bar)
-  const prev = bars.at(-2); // yesterday
-  const price     = cur.c;
-  const prevClose = prev.c;
-  if (!price || !prevClose || price <= 0) return { symbol, confirmed: false };
-
-  const dayChange = (price - prevClose) / prevClose * 100;
-
-  // 10-day average volume (excludes today)
-  const avgVol10 = bars.slice(-11, -1).reduce((a, b) => a + (b.v || 0), 0) / 10;
-  const volRatio = avgVol10 > 0 ? (cur.v || 0) / avgVol10 : 0;
-
-  // Score: used to rank signals — bigger move on bigger volume wins
-  const score = Math.abs(dayChange) * volRatio;
-
-  const isUpDay  = dayChange >= 3;    // ≥3% intraday gain
-  const hasVol   = volRatio >= 1.5;   // ≥1.5× average volume (institutional participation)
-
-  if (!isUpDay || !hasVol) return { symbol, confirmed: false, dayChange: +dayChange.toFixed(2), volRatio: +volRatio.toFixed(2) };
-
-  // SL = 3% below today's open (stop out if momentum reverses intraday)
-  const slLevel  = +(cur.o * 0.97).toFixed(4);
-  const riskDist = price - slLevel;
-  if (riskDist <= 0) return { symbol, confirmed: false };
-
-  const tpLevel = +(price + riskDist * 2.0).toFixed(4); // 2:1 R:R minimum
-  const rr      = +(( tpLevel - price ) / riskDist).toFixed(2);
-
-  return {
-    symbol,
-    price:     +price.toFixed(4),
-    dayChange: +dayChange.toFixed(2),
-    volRatio:  +volRatio.toFixed(2),
-    score,
-    confirmed: true,
-    direction: 'LONG',
-    slLevel,
-    tpLevel,
-    rr,
-    signal: `MOMENTUM ${dayChange.toFixed(1)}% · ${volRatio.toFixed(1)}x vol`,
-    error: null,
-  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2216,85 +1926,7 @@ async function getLeveragedProxy(symbol, price) {
   } catch { return null; }
 }
 
-// ── VE Universe (same broad universe as Bounce 2.0) ───────────────────────────
-const VE_UNIVERSE = MASTER_UNIVERSE;
 
-// ── VE signal cache ────────────────────────────────────────────────────────────
-const _veCache = new Map();
-const VE_TTL   = 5 * 60 * 1000;
-
-// ── GET /api/ve/signal/:symbol ────────────────────────────────────────────────
-app.get('/api/ve/signal/:symbol', async (req, res) => {
-  const sym = req.params.symbol.toUpperCase();
-  try {
-    const sig = await computeVESignal(sym);
-    res.json(sig);
-  } catch (e) {
-    res.status(500).json({ symbol: sym, error: e.message, confirmed: false });
-  }
-});
-
-// ── GET /api/ve/scan?symbols=... ──────────────────────────────────────────────
-app.get('/api/ve/scan', async (req, res) => {
-  let syms = req.query.symbols
-    ? req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
-    : VE_UNIVERSE;
-  syms = [...new Set(syms)].slice(0, 80);
-
-  const now   = Date.now();
-  const BATCH = 6;
-  const results = [];
-
-  for (let i = 0; i < syms.length; i += BATCH) {
-    const batch   = syms.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _veCache.get(sym);
-      if (cached && now - cached.ts < VE_TTL) return cached.data;
-      const sig = await computeVESignal(sym);
-      _veCache.set(sym, { data: sig, ts: now });
-      return sig;
-    }));
-    settled.forEach((r, idx) => {
-      if (r.status === 'fulfilled') results.push(r.value);
-      else results.push({ symbol: batch[idx], error: r.reason?.message || 'Failed', confirmed: false });
-    });
-  }
-
-  results.sort((a, b) => {
-    if (a.confirmed && !b.confirmed) return -1;
-    if (!a.confirmed && b.confirmed) return 1;
-    const aScore = (a.hasContraction ? 1 : 0) + (a.isSqueezed ? 1 : 0) + (a.hasVolSurge ? 1 : 0);
-    const bScore = (b.hasContraction ? 1 : 0) + (b.isSqueezed ? 1 : 0) + (b.hasVolSurge ? 1 : 0);
-    return bScore - aScore;
-  });
-
-  res.json({
-    ok: true,
-    total: results.length,
-    confirmed: results.filter(r => r.confirmed).length,
-    results,
-    scannedAt: new Date().toISOString(),
-  });
-});
-
-// ── GET /api/ve/auto-settings ─────────────────────────────────────────────────
-app.get('/api/ve/auto-settings', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM ve_auto_settings WHERE user_id = ?').get(req.session.userId);
-  res.json(row || { enabled: 0, amount: 1000, leverage: 1 });
-});
-
-// ── PUT /api/ve/auto-settings ─────────────────────────────────────────────────
-app.put('/api/ve/auto-settings', requireAuth, (req, res) => {
-  const { enabled, amount, leverage } = req.body || {};
-  db.prepare(`
-    INSERT INTO ve_auto_settings (user_id, enabled, amount, leverage)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, amount = excluded.amount, leverage = excluded.leverage
-  `).run(req.session.userId, enabled ? 1 : 0, +amount || 1000, +leverage || 1);
-  res.json({ ok: true });
-});
-
-// ── Server-side VE Auto-Trader ────────────────────────────────────────────────
 // Runs every 5 minutes during regular US market hours (9:35 AM – 3:50 PM ET Mon-Fri)
 function isMarketOpen() {
   const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -2644,260 +2276,9 @@ async function getOpenSlots(userId, botName) {
   return { available, positions: Array.isArray(positions) ? positions : [], openOrders };
 }
 
-// ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
-async function runBounceAutoTrader() {
-  if (!isMarketOpen()) return;
-  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
-  if (!users.length) return;
-  console.log(`[Bounce-Bot] Auto-scan for ${users.length} user(s)`);
-  const now = Date.now();
-  const signals = [];
-  for (let i = 0; i < BOUNCE_UNIVERSE.length; i += 8) {
-    const batch = BOUNCE_UNIVERSE.slice(i, i + 8);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _bounceCache.get(sym);
-      if (cached && now - cached.ts < BOUNCE_TTL) return cached.data;
-      const sig = await computeBounceSignal(sym);
-      _bounceCache.set(sym, { data: sig, ts: now });
-      return sig;
-    }));
-    settled.forEach(r => { if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value); });
-  }
-  if (!signals.length) { console.log('[Bounce-Bot] No confirmed signals.'); return; }
-
-  // Quality gate: require minimum R:R ratio, then take only the BEST signal
-  const qualified = signals.filter(s => (s.rr || 0) >= MIN_RR_RATIO);
-  if (!qualified.length) { console.log(`[Bounce-Bot] ${signals.length} signal(s) found but none met R:R >= ${MIN_RR_RATIO} — skipping`); return; }
-  qualified.sort((a, b) => (b.rr || 0) - (a.rr || 0));
-  const best = qualified[0];
-  console.log(`[Bounce-Bot] Best signal: ${best.symbol} R:R ${best.rr} (${qualified.length} qualified of ${signals.length} total)`);
-
-  for (const user of users) {
-    const creds = getAlpacaCreds(user.user_id);
-    if (!creds) continue;
-    if (!isBotEnabled(user.user_id, 'bounce')) { console.log(`[Bounce-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
-    if (!acquireBotLock(user.user_id)) { console.log(`[Bounce-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
-    try {
-    if (!await checkPDTAllowed(user.user_id, 'Bounce-Bot')) continue;
-
-    // Count positions + pending bracket orders toward slot cap
-    const slots = await getOpenSlots(user.user_id, 'Bounce-Bot');
-    if (!slots || slots.available <= 0) continue;
-    const positions = slots.positions;
-
-    if (positions.some(p => p.symbol === best.symbol)) continue;
-    const recent = db.prepare(`SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='bounce' AND created_at >= datetime('now','-30 minutes')`).get(user.user_id, best.symbol);
-    if (recent) continue;
-
-    const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-    const amount = (user.amount || 500) * lev;
-    const price  = best.price;
-    const sig    = best;
-
-    const spyGate = await checkSPYGate(sig.symbol, price, 'long');
-    if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
-    const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
-    if (!bounceWhaleGate.allowed) { console.log(`[Bounce-Bot] Whale-Gate BLOCKED: ${bounceWhaleGate.reason}`); continue; }
-    if (bounceWhaleGate.reason) console.log(`[Bounce-Bot] Whale-Gate: ${bounceWhaleGate.reason}`);
-    const bounceDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
-    if (!bounceDPGate.allowed) { console.log(`[Bounce-Bot] DP-Gate BLOCKED: ${bounceDPGate.reason}`); continue; }
-    if (bounceDPGate.reason) console.log(`[Bounce-Bot] DP-Gate: ${bounceDPGate.reason}`);
-
-    let tradeSymbol = sig.symbol;
-    let tradePrice  = price;
-    if (price > MAX_TRADE_PRICE) {
-      const proxy = await getLeveragedProxy(sig.symbol, price);
-      if (!proxy) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
-      console.log(`[Bounce-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
-      if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[Bounce-Bot] Already holding proxy ${proxy.symbol}`); continue; }
-      tradeSymbol = proxy.symbol;
-      tradePrice  = proxy.price;
-    }
-    const shares  = Math.max(1, Math.floor(amount / tradePrice));
-    const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
-    const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.045).toFixed(2);
-    const orderBody = { symbol: tradeSymbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
-    try {
-      const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-      db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
-      console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''} | R:R ${sig.rr}`);
-    } catch (e) { console.error(`[Bounce-Bot] Order failed ${tradeSymbol}:`, e.message); }
-    } finally { releaseBotLock(user.user_id); }
-  }
-}
-setInterval(runBounceAutoTrader, 5 * 60 * 1000);
-console.log('[Bounce-Bot] Bounce 2.0 auto-trader initialized — scans every 5 min during market hours');
-
-async function runVEAutoTrader() {
-  if (!isMarketOpen()) return;
-
-  const users = db.prepare('SELECT DISTINCT user_id, 1000 AS amount, 1 AS leverage FROM alpaca_creds').all();
-  if (!users.length) return;
-
-  console.log(`[VE-Bot] Auto-scan triggered for ${users.length} user(s)`);
-
-  // Scan universe with a focused batch
-  const now = Date.now();
-  const universe = VE_UNIVERSE; // full master universe — no slice cap
-  const BATCH = 6;
-  const signals = [];
-
-  for (let i = 0; i < universe.length; i += BATCH) {
-    const batch   = universe.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _veCache.get(sym);
-      if (cached && now - cached.ts < VE_TTL) return cached.data;
-      const sig = await computeVESignal(sym);
-      _veCache.set(sym, { data: sig, ts: Date.now() });
-      return sig;
-    }));
-    settled.forEach(r => { if (r.status === 'fulfilled' && r.value.confirmed) signals.push(r.value); });
-  }
-
-  if (!signals.length) { console.log('[VE-Bot] No confirmed signals.'); return; }
-
-  // Pick only the top signal by quality score to avoid over-trading
-  signals.sort((a, b) => (b.score || 0) - (a.score || 0));
-  const bestVE = signals[0];
-  console.log(`[VE-Bot] Best signal: ${bestVE.symbol} ${bestVE.direction} score=${bestVE.score?.toFixed(2) ?? '—'} (${signals.length} total confirmed)`);
-
-  for (const user of users) {
-    const creds = getAlpacaCreds(user.user_id);
-    if (!creds) continue;
-    if (!isBotEnabled(user.user_id, 'volatility_expansion')) { console.log(`[VE-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
-    if (!acquireBotLock(user.user_id)) { console.log(`[VE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
-    try {
-    if (!await checkPDTAllowed(user.user_id, 'VE-Bot')) continue;
-
-    // Count positions + pending bracket orders toward slot cap
-    const slots = await getOpenSlots(user.user_id, 'VE-Bot');
-    if (!slots || slots.available <= 0) continue;
-    const positions = slots.positions;
-
-    for (const sig of [bestVE]) {
-      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
-      if (alreadyIn) { console.log(`[VE-Bot] Already in ${sig.symbol} — skipping`); continue; }
-
-      // Check for recent trade in this symbol (30-min cooldown)
-      const recentTrade = db.prepare(`
-        SELECT id FROM auto_trade_log
-        WHERE user_id = ? AND symbol = ? AND strategy = 'volatility_expansion'
-        AND created_at >= datetime('now', '-30 minutes')
-      `).get(user.user_id, sig.symbol);
-      if (recentTrade) { console.log(`[VE-Bot] Cooldown active for ${sig.symbol}`); continue; }
-
-      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 1000) * lev;
-
-      if (sig.direction === 'LONG') {
-        // ── LONG: buy the underlying directly ───────────────────────────────
-        const price  = sig.price;
-        const veSpyGate = await checkSPYGate(sig.symbol, price, 'long');
-        if (!veSpyGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED: ${veSpyGate.reason}`); continue; }
-        const veLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
-        if (!veLongWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED: ${veLongWhaleGate.reason}`); continue; }
-        if (veLongWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate: ${veLongWhaleGate.reason}`);
-        const veLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
-        if (!veLongDPGate.allowed) { console.log(`[VE-Bot] DP-Gate BLOCKED: ${veLongDPGate.reason}`); continue; }
-        if (veLongDPGate.reason) console.log(`[VE-Bot] DP-Gate: ${veLongDPGate.reason}`);
-        // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
-        let tradeSymbol = sig.symbol;
-        let tradePrice  = price;
-        if (price > MAX_TRADE_PRICE) {
-          const proxy = await getLeveragedProxy(sig.symbol, price);
-          if (!proxy) { console.log(`[VE-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
-          console.log(`[VE-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
-          if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[VE-Bot] Already holding proxy ${proxy.symbol}`); continue; }
-          tradeSymbol = proxy.symbol;
-          tradePrice  = proxy.price;
-        }
-        const shares = Math.max(1, Math.floor(amount / tradePrice));
-        const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
-        const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.06).toFixed(2);
-        const orderBody = {
-          symbol: tradeSymbol, qty: String(shares), side: 'buy',
-          type: 'market', time_in_force: 'day', order_class: 'bracket',
-          take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice },
-        };
-        try {
-          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'VE LONG');
-          console.log(`[VE-Bot] ORDER PLACED: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
-        } catch (e) { console.error(`[VE-Bot] Order failed ${tradeSymbol}:`, e.message); }
-
-      } else {
-        // ── SHORT: buy the corresponding inverse ETF instead of shorting ────
-        const inverseTicker = INVERSE_MAP[sig.symbol];
-        if (!inverseTicker) {
-          console.log(`[VE-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
-          continue;
-        }
-        // SPY gate for short bias (uses underlying price, not inverse ETF price)
-        const veShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
-        if (!veShortGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED short: ${veShortGate.reason}`); continue; }
-        const veShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
-        if (!veShortWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED short: ${veShortWhaleGate.reason}`); continue; }
-        if (veShortWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate short: ${veShortWhaleGate.reason}`);
-        const veShortDPGate = await checkDarkPoolGate(sig.symbol, sig.price, 'SHORT');
-        if (!veShortDPGate.allowed) { console.log(`[VE-Bot] DP-Gate BLOCKED short: ${veShortDPGate.reason}`); continue; }
-        if (veShortDPGate.reason) console.log(`[VE-Bot] DP-Gate short: ${veShortDPGate.reason}`);
-        const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
-        const invPrice = invBars?.at(-1)?.c;
-        if (!invPrice) {
-          console.log(`[VE-Bot] Could not fetch price for ${inverseTicker} — skipping`);
-          continue;
-        }
-        // Translate underlying % risk/reward to inverse ETF levels
-        const slPct = sig.slLevel ? (sig.slLevel - sig.price) / sig.price : 0.015;
-        const tpPct = sig.tpLevel ? (sig.price - sig.tpLevel) / sig.price : 0.06;
-        const invSlPrice = (invPrice * (1 - slPct)).toFixed(2);
-        const invTpPrice = (invPrice * (1 + tpPct)).toFixed(2);
-        const invShares  = Math.max(1, Math.floor(amount / invPrice));
-        const orderBody  = {
-          symbol: inverseTicker, qty: String(invShares), side: 'buy',
-          type: 'market', time_in_force: 'day', order_class: 'bracket',
-          take_profit: { limit_price: invTpPrice }, stop_loss: { stop_price: invSlPrice },
-        };
-        try {
-          const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, inverseTicker, invShares, invPrice, invTpPrice, invSlPrice, order.id || null, `VE SHORT via ${inverseTicker} (signal: ${sig.symbol})`);
-          console.log(`[VE-Bot] ORDER PLACED: BUY ${invShares} ${inverseTicker} (inverse of ${sig.symbol} SHORT) @ ~$${invPrice}`);
-        } catch (e) { console.error(`[VE-Bot] Order failed ${inverseTicker}:`, e.message); }
-      }
-    }
-    } finally { releaseBotLock(user.user_id); }
-  }
-}
-
-// ── GET /api/ve/trade-log ─────────────────────────────────────────────────────
-app.get('/api/ve/trade-log', requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT * FROM auto_trade_log
-    WHERE user_id = ? AND strategy = 'volatility_expansion'
-    ORDER BY created_at DESC LIMIT 50
-  `).all(req.session.userId);
-  res.json(rows);
-});
-
-// ── Start VE auto-trader interval ─────────────────────────────────────────────
-setInterval(runVEAutoTrader, 5 * 60 * 1000); // every 5 minutes
-console.log('[VE-Bot] Auto-trader engine initialized — scans every 5 min during market hours');
 
 
-// ══════════════════════════════════════════════════════════════════════════════
-// EXPLOSIVE EARNINGS SETUP — Strategy 3
-// ══════════════════════════════════════════════════════════════════════════════
 
-// ── EE auto-trade settings table ──────────────────────────────────────────────
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS ee_auto_settings (
-    user_id  INTEGER PRIMARY KEY,
-    enabled  INTEGER DEFAULT 0,
-    amount   REAL    DEFAULT 1000.0,
-    leverage INTEGER DEFAULT 1,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )
-`).run();
 
 // ── FMP helpers ───────────────────────────────────────────────────────────────
 const FMP_BASE = 'https://financialmodelingprep.com/api';
@@ -2962,460 +2343,7 @@ function detectEarningsBarIdx(bars, fiscalQuarterEndDate) {
 }
 
 // ── Explosive Earnings Signal Computation ─────────────────────────────────────
-async function computeEESignal(symbol) {
-  const base = {
-    symbol, confirmed: false, signalType: null, earningsDate: null,
-    hasRecentEarnings: false, dataSource: 'yahoo',
-    epsSurprisePct: null, revenueGrowthPct: null, analystTarget: null,
-    shortFloat: null, shortSqueezePotential: false,
-    passEPS: false, passRevenue: false,
-    gapPct: null, volRatio: null, resistance: null,
-    resistanceBroken: false, passGap: false, passVolume: false, passResistance: false,
-    price: null, ema10: null, ema10Distance: null, nearEMA10: false, stopLoss: null,
-  };
 
-  // 1. Fetch Yahoo Finance fundamentals + price bars in parallel;
-  //    also try FMP as a premium supplement (fails gracefully if key invalid)
-  const [yfData, fmpSurprises, fmpIncome, fmpTarget, fmpShortFloat, bars] = await Promise.all([
-    fetchYahooEarningsFundamentals(symbol),
-    fmpGet(`/v3/earnings-surprises/${symbol}`).catch(() => null),
-    fmpGet(`/v3/income-statement/${symbol}?period=quarter&limit=5`).catch(() => null),
-    fmpGet(`/v3/price-target-consensus?symbol=${symbol}`).catch(() => null),
-    fmpGet(`/v4/short-float?symbol=${symbol}`).catch(() => null),
-    fetchOHLCV(symbol, 150),
-  ]);
-
-  if (!bars || bars.length < 30) return { ...base, error: 'Insufficient price data' };
-  base.price = bars.at(-1).c;
-
-  // ── 2. Resolve earnings date ───────────────────────────────────────────────
-  // Prefer FMP (gives exact announcement date), fall back to Yahoo quarterly end + heuristic
-  let earningsDate = null;
-  let epsSurprisePct = null;
-
-  const fmpEps = Array.isArray(fmpSurprises) ? fmpSurprises[0] : null;
-  if (fmpEps?.date) {
-    // FMP has exact announcement date
-    earningsDate = fmpEps.date;
-    base.dataSource = 'fmp';
-    if (fmpEps.actualEarningResult != null && fmpEps.estimatedEarning != null && fmpEps.estimatedEarning !== 0) {
-      epsSurprisePct = ((fmpEps.actualEarningResult - fmpEps.estimatedEarning) / Math.abs(fmpEps.estimatedEarning)) * 100;
-    }
-  } else {
-    // Use Yahoo Finance earningsHistory — quarter field = fiscal quarter END date
-    const yfHist = yfData?.earningsHistory?.history;
-    const lastQ  = yfHist?.length ? yfHist[yfHist.length - 1] : null;
-    if (!lastQ) return { ...base, error: 'No earnings history available' };
-
-    const fiscalQEnd = lastQ.quarter instanceof Date
-      ? lastQ.quarter.toISOString().slice(0, 10)
-      : String(lastQ.quarter).slice(0, 10);
-
-    epsSurprisePct = lastQ.surprisePercent != null ? lastQ.surprisePercent * 100 : null;
-
-    // Detect actual announcement bar from volume spike
-    const detectedIdx = detectEarningsBarIdx(bars, fiscalQEnd);
-    if (detectedIdx > 0) {
-      earningsDate = bars[detectedIdx].t;
-    } else {
-      // Estimate: fiscal quarter end + ~30 days (typical announcement lag)
-      const estMs = new Date(fiscalQEnd).getTime() + 30 * 86400000;
-      const estDate = new Date(estMs).toISOString().slice(0, 10);
-      // Find closest bar
-      const closeIdx = bars.findIndex(b => b.t >= estDate);
-      if (closeIdx > 0) earningsDate = bars[closeIdx].t;
-    }
-  }
-
-  if (!earningsDate) return { ...base, error: 'Could not determine earnings date' };
-
-  const ageDays = (Date.now() - new Date(earningsDate).getTime()) / 86400000;
-  if (ageDays > 90) return { ...base, error: `Last earnings ~${Math.round(ageDays)}d ago — outside 90-day window` };
-
-  base.hasRecentEarnings = true;
-  base.earningsDate = earningsDate;
-
-  // ── 3. EPS Surprise % ─────────────────────────────────────────────────────
-  // Prefer FMP if available (more accurate), else Yahoo surprise %
-  if (epsSurprisePct != null) {
-    base.epsSurprisePct = epsSurprisePct;
-    base.passEPS        = base.epsSurprisePct >= 15;
-  }
-
-  // ── 4. Revenue Growth YoY ─────────────────────────────────────────────────
-  // FMP quarterly income (preferred) → Yahoo annual income (fallback)
-  if (Array.isArray(fmpIncome) && fmpIncome.length >= 2) {
-    const curQ  = fmpIncome[0];
-    const cmpQ  = fmpIncome.length >= 5 ? fmpIncome[4] : fmpIncome[1];
-    if (curQ?.revenue && cmpQ?.revenue > 0) {
-      base.revenueGrowthPct = ((curQ.revenue - cmpQ.revenue) / cmpQ.revenue) * 100;
-      base.passRevenue      = base.revenueGrowthPct >= 25;
-    }
-  } else {
-    // Yahoo annual income — YoY comparison (most recent 2 years)
-    const annualStmts = yfData?.incomeStatementHistory?.incomeStatementHistory;
-    if (Array.isArray(annualStmts) && annualStmts.length >= 2) {
-      const cur  = annualStmts[0];
-      const prev = annualStmts[1];
-      if (cur?.totalRevenue && prev?.totalRevenue > 0) {
-        base.revenueGrowthPct = ((cur.totalRevenue - prev.totalRevenue) / prev.totalRevenue) * 100;
-        base.passRevenue      = base.revenueGrowthPct >= 25;
-      }
-    }
-  }
-
-  // ── 5. Analyst target (FMP premium) ───────────────────────────────────────
-  const pt = Array.isArray(fmpTarget) ? fmpTarget[0] : fmpTarget;
-  base.analystTarget = pt?.targetConsensus ?? pt?.priceTarget ?? null;
-
-  // ── 6. Short float (FMP premium) ──────────────────────────────────────────
-  if (Array.isArray(fmpShortFloat) && fmpShortFloat[0]) {
-    base.shortFloat           = fmpShortFloat[0].shortFloat ?? null;
-    base.shortSqueezePotential = (base.shortFloat || 0) > 10;
-  }
-
-  // ── 7. Find earnings day bar ───────────────────────────────────────────────
-  const earningsIdx = bars.findIndex(b => b.t >= earningsDate);
-  if (earningsIdx < 1) return { ...base, error: 'No price bar found for earnings date' };
-  const earningsBar = bars[earningsIdx];
-  const prevBarE    = bars[earningsIdx - 1];
-
-  // ── 8. Gap % on earnings day ───────────────────────────────────────────────
-  if (earningsBar.o != null && prevBarE.c != null) {
-    base.gapPct  = ((earningsBar.o - prevBarE.c) / prevBarE.c) * 100;
-    base.passGap = base.gapPct >= 5;
-  }
-
-  // ── 9. Volume vs 20-day pre-earnings average ───────────────────────────────
-  const preSlice  = bars.slice(Math.max(0, earningsIdx - 20), earningsIdx);
-  const avgVol    = preSlice.length ? preSlice.reduce((a, b) => a + (b.v || 0), 0) / preSlice.length : 0;
-  base.volRatio   = avgVol > 0 ? (earningsBar.v || 0) / avgVol : null;
-  base.passVolume = (base.volRatio || 0) >= 2;
-
-  // ── 10. 3-month resistance (highest high in 63 bars before earnings) ───────
-  const resBars         = bars.slice(Math.max(0, earningsIdx - 63), earningsIdx);
-  base.resistance       = resBars.length ? Math.max(...resBars.map(b => b.h)) : null;
-  base.resistanceBroken = base.resistance != null && earningsBar.c > base.resistance;
-  base.passResistance   = base.resistanceBroken;
-
-  // ── 11. 10 EMA on full bar series ─────────────────────────────────────────
-  const closes    = bars.map(b => b.c);
-  const ema10Ser  = calcEMASeries(closes, 10);
-  base.ema10      = ema10Ser.at(-1);
-  if (base.ema10 && base.price) {
-    base.ema10Distance = ((base.price - base.ema10) / base.ema10) * 100;
-  }
-  base.nearEMA10 = Math.abs(base.ema10Distance ?? 999) <= 2;
-
-  // ── 12. Post-earnings entry trigger detection ──────────────────────────────
-  const postBars = bars.slice(earningsIdx + 1);
-  const postEMAs = ema10Ser.slice(earningsIdx + 1);
-
-  if (postBars.length >= 1) {
-    const lastBar   = bars.at(-1);
-    const prevBar2  = bars.at(-2);
-    const lastEMA10 = ema10Ser.at(-1);
-
-    // ENTRY_ZONE: price consolidating near 10 EMA, close above prev bar high
-    if (base.nearEMA10 && prevBar2 && lastBar.c > prevBar2.h) {
-      base.signalType = 'ENTRY_ZONE';
-    }
-
-    // SHAKEOUT_ENTRY: prev bar dipped below 10 EMA, this bar reclaims above EMA
-    if (postBars.length >= 2) {
-      const n          = postBars.length;
-      const pb         = postBars[n - 2];
-      const pema       = postEMAs[n - 2];
-      const shakeoutDip = pb && pema != null && pb.l < pema;
-      const reclaim     = lastEMA10 != null && lastBar.c > lastEMA10;
-      if (shakeoutDip && reclaim) base.signalType = 'SHAKEOUT_ENTRY';
-    }
-
-    // WATCHING: gap + volume confirmed but no entry trigger yet
-    if (!base.signalType && base.passGap && base.passVolume) base.signalType = 'WATCHING';
-  }
-
-  // ── 13. Stop loss (3% below entry per strategy rules) ────────────────────
-  if (base.price) base.stopLoss = +(base.price * 0.97).toFixed(2);
-
-  // ── 14. Human-readable signal flag strings ────────────────────────────────
-  base.signal = base.signalType === 'ENTRY_ZONE'    ? 'EXPLOSIVE EARNINGS SETUP — ENTRY ZONE'
-    : base.signalType === 'SHAKEOUT_ENTRY'           ? 'SHAKEOUT ENTRY OPPORTUNITY'
-    : null;
-
-  // ── 15. Confirmed flag ────────────────────────────────────────────────────
-  // Requires: EPS ≥15% + Revenue growth ≥25% + gap ≥5% + vol ≥2× + resistance broken + entry trigger
-  const hasFundamental  = base.epsSurprisePct != null && base.revenueGrowthPct != null;
-  const fundamentalPass = hasFundamental ? (base.passEPS && base.passRevenue) : false;
-  base.confirmed = fundamentalPass && base.passGap && base.passVolume && base.passResistance
-    && (base.signalType === 'ENTRY_ZONE' || base.signalType === 'SHAKEOUT_ENTRY');
-
-  return base;
-}
-
-// ── Fetch recent earnings from FMP calendar (default EE scan universe) ─────────
-async function fetchRecentEarningsSymbols() {
-  // Try FMP calendar first (exact announcement dates)
-  const today = new Date();
-  const from  = new Date(today); from.setDate(from.getDate() - 30);
-  const fmt   = d => d.toISOString().slice(0, 10);
-  const data  = await fmpGet(`/v3/earning_calendar?from=${fmt(from)}&to=${fmt(today)}`).catch(() => null);
-  if (Array.isArray(data) && data.length) {
-    const seen = new Set();
-    const syms = [];
-    for (const item of data) {
-      if (!item.symbol || seen.has(item.symbol) || item.symbol.includes('.') || item.symbol.length > 5) continue;
-      seen.add(item.symbol);
-      syms.push(item.symbol);
-      if (syms.length >= 50) break;
-    }
-    if (syms.length) return syms;
-  }
-
-  // FMP failed — return a curated list of high-volume earners likely to have
-  // reported earnings in the last 60 days (banks in early Q, tech mid-Q, etc.)
-  return [
-    // Q1 2026 early reporters (banks, financials)
-    'JPM','BAC','WFC','GS','MS','C','BLK','USB','PNC',
-    // Large-cap tech (report mid-Q)
-    'MSFT','GOOGL','META','AMZN','AAPL','NVDA','AMD','TSLA','NFLX',
-    // Growth / AI
-    'SNOW','CRWD','DDOG','PANW','NET','S','MDB','ZS',
-    // Consumer / Retail
-    'AMZN','COST','TGT','WMT','HD','LOW',
-    // Healthcare
-    'LLY','ABBV','REGN','MRNA','PFE',
-  ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-}
-
-// ── EE cache ──────────────────────────────────────────────────────────────────
-const _eeCache = new Map();
-const EE_TTL   = 10 * 60 * 1000; // 10 min (FMP calls are heavy)
-
-// ── GET /api/ee/signal/:symbol ────────────────────────────────────────────────
-app.get('/api/ee/signal/:symbol', async (req, res) => {
-  const sym = req.params.symbol.toUpperCase();
-  try {
-    const cached = _eeCache.get(sym);
-    if (cached && Date.now() - cached.ts < EE_TTL) return res.json(cached.data);
-    const sig = await computeEESignal(sym);
-    _eeCache.set(sym, { data: sig, ts: Date.now() });
-    res.json(sig);
-  } catch (e) {
-    res.status(500).json({ symbol: sym, error: e.message, confirmed: false });
-  }
-});
-
-// ── GET /api/ee/scan?symbols=AAPL,TSLA,... ────────────────────────────────────
-app.get('/api/ee/scan', async (req, res) => {
-  let syms;
-  if (req.query.symbols) {
-    syms = req.query.symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-  } else {
-    // Try to get symbols that recently had earnings from FMP
-    const earningsSyms = await fetchRecentEarningsSymbols();
-    syms = earningsSyms || MASTER_UNIVERSE;
-  }
-  syms = [...new Set(syms)].slice(0, 80);
-
-  const now    = Date.now();
-  const BATCH  = 4; // small batch — each symbol makes 4 FMP calls
-  const results = [];
-
-  for (let i = 0; i < syms.length; i += BATCH) {
-    const batch   = syms.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _eeCache.get(sym);
-      if (cached && now - cached.ts < EE_TTL) return cached.data;
-      const sig = await computeEESignal(sym);
-      _eeCache.set(sym, { data: sig, ts: Date.now() });
-      return sig;
-    }));
-    settled.forEach((r, idx) => {
-      if (r.status === 'fulfilled') results.push(r.value);
-      else results.push({ symbol: batch[idx], error: r.reason?.message || 'Failed', confirmed: false });
-    });
-    // Small pause between FMP batches to respect rate limits
-    if (i + BATCH < syms.length) await new Promise(r => setTimeout(r, 300));
-  }
-
-  // Sort: ENTRY_ZONE first, then SHAKEOUT, WATCHING, rest
-  const order = { ENTRY_ZONE: 0, SHAKEOUT_ENTRY: 1, WATCHING: 2 };
-  results.sort((a, b) => {
-    const oa = order[a.signalType] ?? 9;
-    const ob = order[b.signalType] ?? 9;
-    if (oa !== ob) return oa - ob;
-    return (b.gapPct || 0) - (a.gapPct || 0);
-  });
-
-  res.json({
-    ok: true,
-    total: results.length,
-    confirmed: results.filter(r => r.confirmed).length,
-    entryZone: results.filter(r => r.signalType === 'ENTRY_ZONE').length,
-    shakeout:  results.filter(r => r.signalType === 'SHAKEOUT_ENTRY').length,
-    watching:  results.filter(r => r.signalType === 'WATCHING').length,
-    results,
-    scannedAt: new Date().toISOString(),
-  });
-});
-
-// ── GET/PUT /api/ee/auto-settings ─────────────────────────────────────────────
-app.get('/api/ee/auto-settings', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM ee_auto_settings WHERE user_id = ?').get(req.session.userId);
-  res.json({ enabled: !!(row?.enabled), amount: row?.amount || 1000, leverage: row?.leverage || 1 });
-});
-
-app.put('/api/ee/auto-settings', requireAuth, (req, res) => {
-  const { enabled, amount, leverage } = req.body || {};
-  db.prepare(`
-    INSERT INTO ee_auto_settings (user_id, enabled, amount, leverage)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET
-      enabled  = excluded.enabled,
-      amount   = excluded.amount,
-      leverage = excluded.leverage
-  `).run(req.session.userId, enabled ? 1 : 0, +amount || 1000, +leverage || 1);
-  res.json({ ok: true });
-});
-
-// ── GET /api/ee/trade-log ─────────────────────────────────────────────────────
-app.get('/api/ee/trade-log', requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT * FROM auto_trade_log
-    WHERE user_id = ? AND strategy = 'explosive_earnings'
-    ORDER BY created_at DESC LIMIT 50
-  `).all(req.session.userId);
-  res.json(rows);
-});
-
-// ── Server-side EE Auto-Trader ─────────────────────────────────────────────────
-async function runEEAutoTrader() {
-  if (!isMarketOpen()) return;
-
-  const users = db.prepare('SELECT DISTINCT user_id, 1000 AS amount, 1 AS leverage FROM alpaca_creds').all();
-  if (!users.length) return;
-
-  console.log(`[EE-Bot] Auto-scan triggered for ${users.length} user(s)`);
-
-  const now     = Date.now();
-  const earningSyms = await fetchRecentEarningsSymbols().catch(() => null) || MASTER_UNIVERSE;
-  const BATCH   = 4;
-  const signals = [];
-
-  for (let i = 0; i < earningSyms.length; i += BATCH) {
-    const batch   = earningSyms.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _eeCache.get(sym);
-      if (cached && now - cached.ts < EE_TTL) return cached.data;
-      const sig = await computeEESignal(sym);
-      _eeCache.set(sym, { data: sig, ts: Date.now() });
-      return sig;
-    }));
-    settled.forEach(r => {
-      if (r.status === 'fulfilled' && r.value.confirmed) signals.push(r.value);
-    });
-    if (i + BATCH < earningSyms.length) await new Promise(r => setTimeout(r, 300));
-  }
-
-  if (!signals.length) { console.log('[EE-Bot] No confirmed entry signals.'); return; }
-
-  // Pick only the highest-conviction signal per cycle
-  signals.sort((a, b) => (b.gapPct || 0) - (a.gapPct || 0));
-  const bestEE = signals[0];
-  console.log(`[EE-Bot] Best signal: ${bestEE.symbol} ${bestEE.signalType} (${signals.length} total confirmed)`);
-
-  for (const user of users) {
-    const creds = getAlpacaCreds(user.user_id);
-    if (!creds) continue;
-    if (!isBotEnabled(user.user_id, 'explosive_earnings')) { console.log(`[EE-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
-    if (!acquireBotLock(user.user_id)) { console.log(`[EE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
-    try {
-    if (!await checkPDTAllowed(user.user_id, 'EE-Bot')) continue;
-
-    // Count positions + pending bracket orders toward slot cap
-    const slots = await getOpenSlots(user.user_id, 'EE-Bot');
-    if (!slots || slots.available <= 0) continue;
-    const positions = slots.positions;
-
-    for (const sig of [bestEE]) {
-      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
-      if (alreadyIn) { console.log(`[EE-Bot] Already in ${sig.symbol} — skipping`); continue; }
-
-      const recentTrade = db.prepare(`
-        SELECT id FROM auto_trade_log
-        WHERE user_id = ? AND symbol = ? AND strategy = 'explosive_earnings'
-        AND created_at >= datetime('now', '-60 minutes')
-      `).get(user.user_id, sig.symbol);
-      if (recentTrade) { console.log(`[EE-Bot] Cooldown active for ${sig.symbol}`); continue; }
-
-      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 1000) * lev;
-      const price  = sig.price;
-      const eeSpyGate = await checkSPYGate(sig.symbol, price, 'long');
-      if (!eeSpyGate.allowed) { console.log(`[EE-Bot] SPY-Gate BLOCKED: ${eeSpyGate.reason}`); continue; }
-      const eeWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
-      if (!eeWhaleGate.allowed) { console.log(`[EE-Bot] Whale-Gate BLOCKED: ${eeWhaleGate.reason}`); continue; }
-      if (eeWhaleGate.reason) console.log(`[EE-Bot] Whale-Gate: ${eeWhaleGate.reason}`);
-      const eeDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
-      if (!eeDPGate.allowed) { console.log(`[EE-Bot] DP-Gate BLOCKED: ${eeDPGate.reason}`); continue; }
-      if (eeDPGate.reason) console.log(`[EE-Bot] DP-Gate: ${eeDPGate.reason}`);
-      // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
-      let tradeSymbol = sig.symbol;
-      let tradePrice  = price;
-      if (price > MAX_TRADE_PRICE) {
-        const proxy = await getLeveragedProxy(sig.symbol, price);
-        if (!proxy) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
-        console.log(`[EE-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
-        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[EE-Bot] Already holding proxy ${proxy.symbol}`); continue; }
-        tradeSymbol = proxy.symbol;
-        tradePrice  = proxy.price;
-      }
-      const shares = Math.max(1, Math.floor(amount / tradePrice));
-      // SL = 3% below entry; TP = 9% above (3:1 R/R on 3% SL)
-      const slPrice = (tradePrice * 0.97).toFixed(2);
-      const tpPrice = (tradePrice * 1.09).toFixed(2);
-
-      const orderBody = {
-        symbol:        tradeSymbol,
-        qty:           String(shares),
-        side:          'buy',
-        type:          'market',
-        time_in_force: 'day',
-        order_class:   'bracket',
-        take_profit:   { limit_price: tpPrice },
-        stop_loss:     { stop_price: slPrice },
-      };
-
-      try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', {
-          method: 'POST',
-          body:   JSON.stringify(orderBody),
-        });
-
-        db.prepare(`
-          INSERT INTO auto_trade_log
-            (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
-          VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, 'explosive_earnings', 'open', datetime('now'))
-        `).run(
-          user.user_id, tradeSymbol, shares, tradePrice,
-          tpPrice, slPrice,
-          order.id || null,
-          sig.signalType
-        );
-
-        console.log(`[EE-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice} [${sig.signalType}]${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
-      } catch (e) {
-        console.error(`[EE-Bot] Order failed ${tradeSymbol}:`, e.message);
-      }
-    }
-    } finally { releaseBotLock(user.user_id); }
-  }
-}
-
-// ── Start EE auto-trader interval ─────────────────────────────────────────────
-setInterval(runEEAutoTrader, 5 * 60 * 1000);
-console.log('[EE-Bot] Explosive Earnings auto-trader initialized — scans every 5 min during market hours');
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3957,153 +2885,341 @@ setInterval(runCTAutoTrader, 60 * 1000);
 console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 60 sec during market hours');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// BOT 5 — MOMENTUM / GAP-AND-GO AUTO-TRADER
-// Catches strong directional moves (≥3% intraday on ≥1.5× avg volume) that
-// VE, Bounce, EE, and CT all miss:
-//   • VE   requires squeeze + ATR contraction first (trending days never squeeze)
-//   • Bounce requires RSI/Stoch oversold (trending up stocks are never oversold)
-//   • EE   only fires on earnings days
-//   • CT   tries to short strong moves — wrong direction on trend days
-// Runs every 5 minutes; all gates (SPY, Whale, Dark Pool, PDT, slot cap) apply.
+// SWING TRADING BOT — Weekly/Daily Chart Strategy
+// Minimum hold: 5 trading days. No day trading. Weekly candle confirmation only.
+// Instruments: SPY / QQQ (long bottom signal) | SH / SPXS (inverse top signal)
+// Entry: Limit order Monday morning. Size: 15% of account equity.
+// Exit: TP1 33% @ 21w EMA → TP2 33% @ 50w SMA → TP3 34% @ prior high / +8%
+// Trailing stop: breakeven after TP1, moves to TP1 after TP2.
 // ══════════════════════════════════════════════════════════════════════════════
-const _momentumCache = new Map();
-const MOMENTUM_CACHE_TTL = 2 * 60 * 1000; // 2-min signal cache to cap API calls
 
-async function runMomentumAutoTrader() {
-  if (!isMarketOpen()) return;
-  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
-  if (!users.length) return;
-  console.log(`[Momentum-Bot] Scan triggered — checking MASTER_UNIVERSE (${MASTER_UNIVERSE.length} symbols)`);
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS swing_trade_log (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          INTEGER NOT NULL,
+    symbol           TEXT    NOT NULL,
+    direction        TEXT    NOT NULL,
+    entry_price      REAL,
+    shares           INTEGER,
+    shares_remaining INTEGER,
+    alpaca_order_id  TEXT,
+    stop_level       REAL,
+    trailing_stop    REAL,
+    tp1_price        REAL,
+    tp2_price        REAL,
+    tp3_price        REAL,
+    phase            TEXT DEFAULT 'open',
+    signal_date      TEXT,
+    notes            TEXT,
+    created_at       TEXT DEFAULT (datetime('now')),
+    closed_at        TEXT
+  )
+`).run();
 
-  const now     = Date.now();
-  const signals = [];
-  const universe = MASTER_UNIVERSE;
+// ── Helper: group daily OHLCV bars into weekly bars (ISO Mon–Fri) ─────────────
+function groupDailyToWeekly(dailyBars) {
+  const weeks = {};
+  for (const bar of dailyBars) {
+    const d   = new Date((bar.t || '').includes('T') ? bar.t : bar.t + 'T00:00:00Z');
+    const day = d.getUTCDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const mon  = new Date(d);
+    mon.setUTCDate(d.getUTCDate() + diff);
+    const key = `${mon.getUTCFullYear()}-${String(mon.getUTCMonth()+1).padStart(2,'0')}-${String(mon.getUTCDate()).padStart(2,'0')}`;
+    if (!weeks[key]) {
+      weeks[key] = { t: key, o: bar.o, h: bar.h, l: bar.l, c: bar.c, v: bar.v || 0 };
+    } else {
+      const w = weeks[key];
+      w.h = Math.max(w.h, bar.h);
+      w.l = Math.min(w.l, bar.l);
+      w.c = bar.c;
+      w.v += bar.v || 0;
+    }
+  }
+  return Object.values(weeks).sort((a, b) => a.t.localeCompare(b.t));
+}
 
-  // Scan in batches of 8 (parallel, cached) to avoid rate limits
-  for (let i = 0; i < universe.length; i += 8) {
-    const batch = universe.slice(i, i + 8);
-    const settled = await Promise.allSettled(batch.map(async sym => {
-      const cached = _momentumCache.get(sym);
-      if (cached && now - cached.ts < MOMENTUM_CACHE_TTL) return cached.data;
-      const sig = await computeMomentumSignal(sym).catch(() => null);
-      _momentumCache.set(sym, { data: sig, ts: now });
-      return sig;
-    }));
-    settled.forEach(r => {
-      if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value);
+// ── Swing Long Signal (BOTTOM) — 5 conditions on weekly + daily ───────────────
+async function computeSwingLongSignal(symbol) {
+  const daily = await fetchOHLCV(symbol, 350).catch(() => null);
+  if (!daily || daily.length < 100) return { symbol, confirmed: false, error: 'Insufficient data' };
+
+  const weekly  = groupDailyToWeekly(daily);
+  if (weekly.length < 30) return { symbol, confirmed: false, error: 'Insufficient weekly data' };
+
+  const wCloses  = weekly.map(b => b.c);
+  const wVolumes = weekly.map(b => b.v);
+  const curW     = weekly.at(-1);
+  const price    = curW.c;
+
+  // Use longest available window (200 bars ideal; fall back to what we have)
+  const win200 = Math.min(200, wCloses.length - 1);
+  const win50  = Math.min(50,  wCloses.length - 1);
+  const win21  = Math.min(21,  wCloses.length - 1);
+
+  const ref200 = calcSMA(wCloses, win200);
+  const sma50w = calcSMA(wCloses, win50);
+  const ema21w = calcEMA(wCloses, win21);
+
+  // Cond 1: Price within 2% of 200w SMA/EMA
+  const pct200 = Math.abs(price - ref200) / ref200 * 100;
+  const cond1  = pct200 <= 2;
+
+  // Cond 2: Weekly RSI 30–45, hooking upward
+  let wRSI = 50, prevWRSI = 50;
+  try {
+    const rs = calcRSISeries(wCloses, 14);
+    wRSI = rs.at(-1); prevWRSI = rs.at(-2);
+  } catch (_) {}
+  const cond2 = wRSI >= 30 && wRSI <= 45 && wRSI > prevWRSI;
+
+  // Cond 3: Daily bullish engulfing or hammer, closing above 200d SMA
+  const dCloses = daily.map(b => b.c);
+  const sma200d = calcSMA(dCloses, Math.min(200, dCloses.length - 1));
+  const d0 = daily.at(-1), d1 = daily.at(-2);
+  const isBullEngulf = d0.c > d0.o && d0.c > d1.o && d0.o < d1.c && d0.c > sma200d;
+  const isHammer     = d0.c > d0.o && (d0.h - d0.c) / Math.max(0.001, d0.h - d0.l) < 0.3 && d0.c > sma200d;
+  const cond3 = isBullEngulf || isHammer;
+
+  // Cond 4: 50w SMA > 200w SMA (secular uptrend — correction, not breakdown)
+  const cond4 = sma50w > ref200;
+
+  // Cond 5: Weekly volume ≥ 10-week average
+  const vol10avg = wVolumes.slice(-11, -1).reduce((a, b) => a + b, 0) / 10;
+  const cond5    = curW.v >= vol10avg;
+
+  const confirmed = cond1 && cond2 && cond3 && cond4 && cond5;
+
+  // Swing high for TP3 (highest close over last 52 weeks)
+  const priorHigh = Math.max(...wCloses.slice(-52));
+  const tp1 = +ema21w.toFixed(2);
+  const tp2 = +sma50w.toFixed(2);
+  const tp3 = priorHigh > price ? +priorHigh.toFixed(2) : +(price * 1.08).toFixed(2);
+
+  return {
+    symbol, confirmed, direction: 'LONG',
+    price: +price.toFixed(2), ref200: +ref200.toFixed(2),
+    sma50w: +sma50w.toFixed(2), ema21w, wRSI: +wRSI.toFixed(1), pct200: +pct200.toFixed(2),
+    cond1, cond2, cond3, cond4, cond5,
+    stopLevel: +(ref200 * 0.97).toFixed(2),
+    tp1, tp2, tp3,
+    failReasons: [
+      !cond1 && `Price ${pct200.toFixed(1)}% from 200w SMA (need ≤2%)`,
+      !cond2 && `Weekly RSI ${wRSI.toFixed(1)} not in 30–45 range or not hooking up`,
+      !cond3 && 'No bullish daily candle (engulfing/hammer) above 200d SMA',
+      !cond4 && '50w SMA below 200w SMA — secular uptrend broken',
+      !cond5 && 'Volume below 10-week average',
+    ].filter(Boolean),
+  };
+}
+
+// ── Swing Inverse Signal (TOP) — 5 conditions, buys SH (1× inverse SPY) ──────
+async function computeSwingInverseSignal() {
+  const daily = await fetchOHLCV('SPY', 350).catch(() => null);
+  if (!daily || daily.length < 100) return { symbol: 'SH', confirmed: false, error: 'Insufficient data' };
+
+  const weekly   = groupDailyToWeekly(daily);
+  if (weekly.length < 30) return { symbol: 'SH', confirmed: false, error: 'Insufficient weekly data' };
+
+  const wCloses  = weekly.map(b => b.c);
+  const wVolumes = weekly.map(b => b.v);
+  const curW     = weekly.at(-1);
+  const prevW    = weekly.at(-2);
+  const price    = curW.c;
+
+  const win200 = Math.min(200, wCloses.length - 1);
+  const ref200 = calcSMA(wCloses, win200);
+  const ema21w = calcEMA(wCloses, Math.min(21, wCloses.length - 1));
+  const sma50w = calcSMA(wCloses, Math.min(50, wCloses.length - 1));
+
+  const ema8ser  = calcEMASeries(wCloses, Math.min(8,  wCloses.length - 2));
+  const ema21ser = calcEMASeries(wCloses, Math.min(21, wCloses.length - 2));
+
+  // Cond 1: SPY >10% above 200w SMA (extended / euphoric)
+  const pct200 = (price - ref200) / ref200 * 100;
+  const cond1  = pct200 > 10;
+
+  // Cond 2: 8 EMA crossed below 21 EMA on weekly (macro momentum shift)
+  const c8 = ema8ser.at(-1), c21 = ema21ser.at(-1);
+  const p8 = ema8ser.at(-2), p21 = ema21ser.at(-2);
+  const cond2 = c8 < c21 && p8 >= p21;
+
+  // Cond 3: RSI was above 70, now rolled below 70 (overbought exit)
+  let wRSI = 50, prevWRSI = 50;
+  try {
+    const rs = calcRSISeries(wCloses, 14);
+    wRSI = rs.at(-1); prevWRSI = rs.at(-2);
+  } catch (_) {}
+  const cond3 = prevWRSI > 70 && wRSI < 70;
+
+  // Cond 4: Bearish weekly candle (shooting star, bearish engulfing, dark cloud)
+  const body     = Math.abs(curW.c - curW.o);
+  const upWick   = curW.h - Math.max(curW.o, curW.c);
+  const isStar   = curW.c < curW.o && upWick > body * 2;
+  const isBearE  = curW.c < curW.o && curW.o > prevW.c && curW.c < prevW.o;
+  const isDCloud = curW.c < curW.o && curW.o > prevW.h && curW.c < (prevW.o + prevW.c) / 2;
+  const cond4    = isStar || isBearE || isDCloud;
+
+  // Cond 5: Weekly volume ≥ 10-week average
+  const vol10avg = wVolumes.slice(-11, -1).reduce((a, b) => a + b, 0) / 10;
+  const cond5    = curW.v >= vol10avg;
+
+  const confirmed = cond1 && cond2 && cond3 && cond4 && cond5;
+
+  // SH moves inversely: its TP levels are where SPY finds support (going down)
+  const tp1 = +ema21w.toFixed(2); // SPY 21w EMA
+  const tp2 = +sma50w.toFixed(2); // SPY 50w SMA
+  const tp3 = +ref200.toFixed(2); // SPY 200w SMA — ultimate magnet
+
+  const shQuote = await yfChartQuote('SH').catch(() => null);
+  const shPrice = shQuote?.price ?? 35;
+
+  return {
+    symbol: 'SH', confirmed, direction: 'INVERSE',
+    price: +shPrice.toFixed(2), spyPrice: +price.toFixed(2),
+    ref200: +ref200.toFixed(2), pct200: +pct200.toFixed(2), wRSI: +wRSI.toFixed(1),
+    cond1, cond2, cond3, cond4, cond5,
+    stopLevel: +(curW.h * 1.02).toFixed(2), // SL: SPY weekly close 2% above rejection high
+    tp1, tp2, tp3,
+    failReasons: [
+      !cond1 && `SPY only ${pct200.toFixed(1)}% above 200w SMA (need >10%)`,
+      !cond2 && 'No 8 EMA / 21 EMA bearish cross on weekly chart',
+      !cond3 && `RSI ${wRSI.toFixed(1)} — no rollover from overbought (>70)`,
+      !cond4 && 'No bearish reversal candle this week',
+      !cond5 && 'Volume below 10-week average',
+    ].filter(Boolean),
+  };
+}
+
+// ── Entry execution ───────────────────────────────────────────────────────────
+async function executeSwingEntry(userId, sig) {
+  try {
+    const existing = db.prepare(`SELECT id FROM swing_trade_log WHERE user_id=? AND phase NOT IN ('closed') AND direction=?`).get(userId, sig.direction);
+    if (existing) { console.log(`[Swing-Bot] Already have open ${sig.direction} swing — skipping`); return; }
+
+    const account  = await alpacaFetch(userId, '/v2/account');
+    const equity   = parseFloat(account.equity || account.portfolio_value || 0);
+    if (equity <= 0) return;
+
+    const posValue = equity * 0.15;
+    const price    = sig.price;
+    if (!price || price <= 0) return;
+    const shares   = Math.max(1, Math.floor(posValue / price));
+
+    console.log(`[Swing-Bot] Placing ${sig.direction} limit order: ${sig.symbol} × ${shares} @ $${price.toFixed(2)} | SL=$${sig.stopLevel} | TP1=$${sig.tp1} TP2=$${sig.tp2} TP3=$${sig.tp3}`);
+
+    const order = await alpacaFetch(userId, '/v2/orders', {
+      method: 'POST',
+      body: JSON.stringify({ symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'limit', time_in_force: 'day', limit_price: price.toFixed(2) }),
     });
-  }
 
-  if (!signals.length) {
-    console.log('[Momentum-Bot] No momentum signals found this cycle.');
-    return;
-  }
+    db.prepare(`
+      INSERT INTO swing_trade_log (user_id, symbol, direction, entry_price, shares, shares_remaining, alpaca_order_id, stop_level, trailing_stop, tp1_price, tp2_price, tp3_price, signal_date, notes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,date('now'),?)
+    `).run(userId, sig.symbol, sig.direction, price, shares, shares, order.id || null, sig.stopLevel, sig.stopLevel, sig.tp1, sig.tp2, sig.tp3, `${sig.direction} | All 5 weekly conditions confirmed`);
 
-  // Best signal = highest dayChange × volRatio score
-  signals.sort((a, b) => (b.score || 0) - (a.score || 0));
-  const best = signals[0];
-  console.log(`[Momentum-Bot] Best signal: ${best.symbol} +${best.dayChange}% · ${best.volRatio}x vol (score=${best.score?.toFixed(1)}) — ${signals.length} total confirmed`);
+    console.log(`[Swing-Bot] ✓ Limit order placed: ${sig.symbol} × ${shares} @ $${price.toFixed(2)}`);
+  } catch (e) {
+    console.error(`[Swing-Bot] Entry failed for ${sig.symbol}:`, e.message);
+  }
+}
+
+// ── Swing Auto-Trader — Monday-only entry, fires hourly ──────────────────────
+async function runSwingAutoTrader() {
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  if (et.getDay() !== 1) return; // Monday only — wait for weekly candle confirmation
+  if (!isMarketOpen()) return;
+
+  const users = db.prepare('SELECT DISTINCT user_id FROM alpaca_creds').all();
+  if (!users.length) return;
+
+  const [spyR, qqqR, invR] = await Promise.allSettled([
+    computeSwingLongSignal('SPY'),
+    computeSwingLongSignal('QQQ'),
+    computeSwingInverseSignal(),
+  ]);
+  const spySig = spyR.status === 'fulfilled' ? spyR.value : null;
+  const qqqSig = qqqR.status === 'fulfilled' ? qqqR.value : null;
+  const invSig = invR.status === 'fulfilled' ? invR.value : null;
+
+  const longSig = spySig?.confirmed ? spySig : qqqSig?.confirmed ? qqqSig : null;
+  const shortSig = invSig?.confirmed ? invSig : null;
+
+  console.log(`[Swing-Bot] Monday scan | SPY long: ${spySig?.confirmed||false} (${spySig?.failReasons?.length ? spySig.failReasons[0] : 'all pass'}) | QQQ long: ${qqqSig?.confirmed||false} | Inverse: ${shortSig?.confirmed||false}`);
 
   for (const user of users) {
-    const creds = getAlpacaCreds(user.user_id);
-    if (!creds) continue;
-    if (!isBotEnabled(user.user_id, 'momentum')) { console.log(`[Momentum-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
-    if (!acquireBotLock(user.user_id)) {
-      console.log(`[Momentum-Bot] User ${user.user_id} locked by another bot — skipping`);
-      continue;
-    }
+    if (!getAlpacaCreds(user.user_id)) continue;
+    if (!isBotEnabled(user.user_id, 'swing')) continue;
+    if (longSig)  await executeSwingEntry(user.user_id, longSig);
+    if (shortSig && !longSig) await executeSwingEntry(user.user_id, shortSig);
+  }
+}
+
+// ── Swing TP Monitor — runs every 15 min, checks TP1/TP2/TP3 levels ──────────
+async function monitorSwingTPs() {
+  if (!isMarketOpen()) return;
+  const openTrades = db.prepare(`SELECT * FROM swing_trade_log WHERE phase NOT IN ('closed')`).all();
+  if (!openTrades.length) return;
+
+  for (const trade of openTrades) {
     try {
-      if (!await checkPDTAllowed(user.user_id, 'Momentum-Bot')) continue;
+      const q = await yfChartQuote(trade.symbol).catch(() => null);
+      if (!q?.price) continue;
+      const price     = q.price;
+      const sharesLeft = trade.shares_remaining || trade.shares;
+      if (sharesLeft <= 0) continue;
 
-      const slots = await getOpenSlots(user.user_id, 'Momentum-Bot');
-      if (!slots || slots.available <= 0) continue;
-      const positions = slots.positions;
-
-      // Already holding this symbol?
-      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === best.symbol);
-      if (alreadyIn) { console.log(`[Momentum-Bot] Already holding ${best.symbol} — skipping`); continue; }
-
-      // 30-min per-symbol cooldown
-      const recentTrade = db.prepare(`
-        SELECT id FROM auto_trade_log
-        WHERE user_id = ? AND symbol = ? AND strategy = 'momentum'
-        AND created_at >= datetime('now', '-30 minutes')
-      `).get(user.user_id, best.symbol);
-      if (recentTrade) { console.log(`[Momentum-Bot] Cooldown active for ${best.symbol}`); continue; }
-
-      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 500) * lev;
-
-      // Gates
-      const spyGate = await checkSPYGate(best.symbol, best.price, 'long');
-      if (!spyGate.allowed) { console.log(`[Momentum-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
-
-      const whaleGate = await checkWhaleGate(best.symbol, 'LONG');
-      if (!whaleGate.allowed) { console.log(`[Momentum-Bot] Whale-Gate BLOCKED: ${whaleGate.reason}`); continue; }
-      if (whaleGate.reason) console.log(`[Momentum-Bot] Whale-Gate: ${whaleGate.reason}`);
-
-      const dpGate = await checkDarkPoolGate(best.symbol, best.price, 'LONG');
-      if (!dpGate.allowed) { console.log(`[Momentum-Bot] DP-Gate BLOCKED: ${dpGate.reason}`); continue; }
-      if (dpGate.reason) console.log(`[Momentum-Bot] DP-Gate: ${dpGate.reason}`);
-
-      // $30 price cap → proxy routing
-      let tradeSymbol = best.symbol;
-      let tradePrice  = best.price;
-      let slPrice     = best.slLevel.toFixed(2);
-      let tpPrice     = best.tpLevel.toFixed(2);
-
-      if (tradePrice > MAX_TRADE_PRICE) {
-        const proxy = await getLeveragedProxy(best.symbol, tradePrice);
-        if (!proxy) {
-          console.log(`[Momentum-Bot] SKIP ${best.symbol} @ $${tradePrice} — above $${MAX_TRADE_PRICE} cap, no proxy found`);
-          continue;
-        }
-        console.log(`[Momentum-Bot] ${best.symbol} @ $${tradePrice} → proxy ${proxy.symbol} @ $${proxy.price}`);
-        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) {
-          console.log(`[Momentum-Bot] Already holding proxy ${proxy.symbol} — skipping`);
-          continue;
-        }
-        tradeSymbol = proxy.symbol;
-        tradePrice  = proxy.price;
-        // Translate SL/TP % to proxy price
-        const slPct = (best.price - best.slLevel) / best.price;
-        const tpPct = (best.tpLevel - best.price) / best.price;
-        slPrice = (tradePrice * (1 - slPct)).toFixed(2);
-        tpPrice = (tradePrice * (1 + tpPct)).toFixed(2);
+      // ── Stop loss ──────────────────────────────────────────────────────────
+      if (price <= trade.trailing_stop) {
+        console.log(`[Swing-Bot] Stop hit: ${trade.symbol} $${price.toFixed(2)} ≤ stop $${trade.trailing_stop} — closing`);
+        try {
+          await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
+          db.prepare(`UPDATE swing_trade_log SET phase='closed', closed_at=datetime('now'), notes=notes||' | STOP $'||? WHERE id=?`).run(price.toFixed(2), trade.id);
+        } catch (e) { console.error('[Swing-Bot] Stop close error:', e.message); }
+        continue;
       }
 
-      const shares    = Math.max(1, Math.floor(amount / tradePrice));
-      const orderBody = {
-        symbol:         tradeSymbol,
-        qty:            String(shares),
-        side:           'buy',
-        type:           'market',
-        time_in_force:  'day',
-        order_class:    'bracket',
-        take_profit:    { limit_price: tpPrice },
-        stop_loss:      { stop_price:  slPrice },
-      };
-
-      try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'momentum','open',datetime('now'))`).run(
-          user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice,
-          order.id || null,
-          best.signal + (tradeSymbol !== best.symbol ? ` (proxy for ${best.symbol})` : '')
-        );
-        console.log(`[Momentum-Bot] ✓ ORDER BUY ${shares} ${tradeSymbol} ~$${tradePrice} | +${best.dayChange}% · ${best.volRatio}x vol | SL=${slPrice} TP=${tpPrice}${tradeSymbol !== best.symbol ? ` (proxy for ${best.symbol})` : ''}`);
-      } catch (e) {
-        console.error(`[Momentum-Bot] Order failed for ${tradeSymbol}:`, e.message);
+      // ── TP1: 21w EMA — trim 33%, trail stop to breakeven ──────────────────
+      if (trade.phase === 'open' && price >= trade.tp1_price) {
+        const sellQty  = Math.max(1, Math.floor(sharesLeft * 0.33));
+        const newStop  = trade.entry_price;
+        console.log(`[Swing-Bot] TP1 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp1_price} — selling ${sellQty} shares, stop → breakeven $${newStop}`);
+        try {
+          await alpacaFetch(trade.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: trade.symbol, qty: String(sellQty), side: 'sell', type: 'market', time_in_force: 'day' }) });
+          db.prepare(`UPDATE swing_trade_log SET phase='tp1_hit', shares_remaining=?, trailing_stop=?, notes=notes||' | TP1 $'||? WHERE id=?`).run(sharesLeft - sellQty, newStop, price.toFixed(2), trade.id);
+        } catch (e) { console.error('[Swing-Bot] TP1 trim error:', e.message); }
+        continue;
       }
-    } finally {
-      releaseBotLock(user.user_id);
+
+      // ── TP2: 50w SMA — trim another 33%, trail stop to TP1 ───────────────
+      if (trade.phase === 'tp1_hit' && price >= trade.tp2_price) {
+        const sellQty = Math.max(1, Math.floor(sharesLeft * 0.50));
+        const newStop = trade.tp1_price;
+        console.log(`[Swing-Bot] TP2 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp2_price} — selling ${sellQty} shares, stop → TP1 $${newStop}`);
+        try {
+          await alpacaFetch(trade.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: trade.symbol, qty: String(sellQty), side: 'sell', type: 'market', time_in_force: 'day' }) });
+          db.prepare(`UPDATE swing_trade_log SET phase='tp2_hit', shares_remaining=?, trailing_stop=?, notes=notes||' | TP2 $'||? WHERE id=?`).run(sharesLeft - sellQty, newStop, price.toFixed(2), trade.id);
+        } catch (e) { console.error('[Swing-Bot] TP2 trim error:', e.message); }
+        continue;
+      }
+
+      // ── TP3: prior swing high / +8% — exit final 34% ─────────────────────
+      if (trade.phase === 'tp2_hit' && price >= trade.tp3_price) {
+        console.log(`[Swing-Bot] TP3 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp3_price} — full exit`);
+        try {
+          await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
+          db.prepare(`UPDATE swing_trade_log SET phase='closed', shares_remaining=0, closed_at=datetime('now'), notes=notes||' | TP3 $'||? WHERE id=?`).run(price.toFixed(2), trade.id);
+        } catch (e) { console.error('[Swing-Bot] TP3 close error:', e.message); }
+      }
+    } catch (e) {
+      console.error(`[Swing-Bot] Monitor error trade ${trade.id}:`, e.message);
     }
   }
 }
 
-// Scans every 5 minutes — faster cadence than VE/CT because momentum windows close quickly
-setInterval(runMomentumAutoTrader, 5 * 60 * 1000);
-console.log('[Momentum-Bot] Momentum/Gap-and-Go auto-trader initialized — scans every 5 min during market hours');
+setInterval(runSwingAutoTrader, 60 * 60 * 1000);  // hourly — Monday gate inside
+setInterval(monitorSwingTPs,   15 * 60 * 1000);   // TP/stop check every 15 min
+console.log('[Swing-Bot] Swing auto-trader initialized — Monday entry (weekly confirmation) · SPY/QQQ long + SH inverse · TP1/TP2/TP3 trimming · Trailing stop');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER

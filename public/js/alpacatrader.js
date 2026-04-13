@@ -365,8 +365,7 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 // ── Simulator Status Panel (fully automatic — no manual buttons) ──────────────
 const simPanel = (() => {
   const BOT_LABELS = {
-    bounce: 'Bounce 2.0', volatility_expansion: 'VE',
-    explosive_earnings: 'EE', countertrend: 'CT', momentum: 'Momentum', orb: 'ORB'
+    countertrend: 'CT', orb: 'ORB', swing: 'Swing'
   };
   const STATUS_INTERVAL  = 60  * 1000;  // refresh status every 60 s
   const WHALE_INTERVAL   = 5 * 60 * 1000; // refresh whale data every 5 min

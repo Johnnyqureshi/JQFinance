@@ -778,50 +778,24 @@
       <div class="at-bots-title">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
         Automated Bot Strategies
-        <span class="at-bots-sub">All 6 bots run automatically · Scan every 2–5 min during market hours · Connect Alpaca to activate</span>
+        <span class="at-bots-sub">3 active bots · Swing (weekly), CT, and ORB run automatically · Connect Alpaca to activate</span>
       </div>
       <div class="at-bots-grid">
 
-        <!-- Bot 1: Bounce 2.0 -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotBounce">
+        <!-- Bot 1: Swing Trading -->
+        <div class="at-bot-card at-bot-card--always-on" id="atBotSwing">
           <div class="at-bot-head">
-            <span class="at-bot-name">Bounce 2.0</span>
-            <label class="bot-toggle" title="Enable / disable Bounce 2.0">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="bounce" checked>
+            <span class="at-bot-name">Swing <span style="font-weight:400;font-size:0.75em;opacity:0.7">Weekly / Daily</span></span>
+            <label class="bot-toggle" title="Enable / disable Swing bot">
+              <input type="checkbox" class="bot-toggle-cb" data-bot="swing" checked>
               <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
               <span class="bot-toggle-label">ON</span>
             </label>
           </div>
-          <div class="at-bot-desc">EMA 8/21/34 · SMA 50 · Stochastic pullback · TP at swing high · $30 price cap</div>
+          <div class="at-bot-desc">Weekly chart signals only · Long: SPY/QQQ near 200w SMA · Inverse: SH when SPY extended · 5-condition entry · TP1/TP2/TP3 @ 21w EMA / 50w SMA / swing high · Min 5-day hold · Monday entry</div>
         </div>
 
-        <!-- Bot 2: Volatility Expansion -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotVE">
-          <div class="at-bot-head">
-            <span class="at-bot-name">Volatility Expansion</span>
-            <label class="bot-toggle" title="Enable / disable Volatility Expansion">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="volatility_expansion" checked>
-              <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
-              <span class="bot-toggle-label">ON</span>
-            </label>
-          </div>
-          <div class="at-bot-desc">ATR(14) squeeze → BB breakout · Vol surge ≥1.5× · SHORT via inverse ETF · $30 price cap</div>
-        </div>
-
-        <!-- Bot 3: Explosive Earnings -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotEE">
-          <div class="at-bot-head">
-            <span class="at-bot-name">Explosive Earnings</span>
-            <label class="bot-toggle" title="Enable / disable Explosive Earnings">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="explosive_earnings" checked>
-              <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
-              <span class="bot-toggle-label">ON</span>
-            </label>
-          </div>
-          <div class="at-bot-desc">EPS ≥15% · Rev ≥25% · Gap ≥5% · Vol ≥2× · 10 EMA entry/shakeout · TP 9% · $30 price cap</div>
-        </div>
-
-        <!-- Bot 4: Countertrend -->
+        <!-- Bot 2: Countertrend -->
         <div class="at-bot-card at-bot-card--always-on" id="atBotCT">
           <div class="at-bot-head">
             <span class="at-bot-name">Countertrend</span>
@@ -834,20 +808,7 @@
           <div class="at-bot-desc">RSI extreme · S/R rejection · Engulfing/divergence · SHORT via inverse ETF · PDT-aware · $30 price cap</div>
         </div>
 
-        <!-- Bot 5: Momentum / Gap-and-Go -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotMomentum">
-          <div class="at-bot-head">
-            <span class="at-bot-name">Momentum</span>
-            <label class="bot-toggle" title="Enable / disable Momentum">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="momentum" checked>
-              <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
-              <span class="bot-toggle-label">ON</span>
-            </label>
-          </div>
-          <div class="at-bot-desc">Gap-and-go · ≥3% intraday move · ≥1.5× avg vol · SL 3% below open · 2:1 R:R · $30 price cap</div>
-        </div>
-
-        <!-- Bot 6: ORB -->
+        <!-- Bot 3: ORB -->
         <div class="at-bot-card at-bot-card--always-on" id="atBotORB">
           <div class="at-bot-head">
             <span class="at-bot-name">ORB <span style="font-weight:400;font-size:0.75em;opacity:0.7">Opening Range Breakout</span></span>

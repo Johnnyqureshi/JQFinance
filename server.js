@@ -1707,19 +1707,16 @@ function isMarketOpen() {
 let _spyLevels     = null;
 let _spyLevelsTs   = 0;
 let _spyLoggedDate = '';
-const SPY_LEVELS_TTL = 60 * 60 * 1000; // refresh every hour
+const SPY_LEVELS_TTL = 30 * 60 * 1000; // refresh every 30 minutes
 
 async function fetchSPYLevels() {
   try {
     const base = await yf.options('SPY');
-    // Nearest Friday expiry
-    const d = new Date(); d.setUTCHours(0,0,0,0);
-    const daysToFri = (5 - d.getUTCDay() + 7) % 7 || 7;
-    const fridayTs  = Math.floor((d.getTime() + daysToFri * 86400000) / 1000);
-    const expiryTs  = (base.expirationDates || []).reduce((best, ts) =>
-      Math.abs(ts - fridayTs) < Math.abs(best - fridayTs) ? ts : best,
-      base.expirationDates?.[0] ?? fridayTs
-    );
+    // Pick the nearest upcoming expiry — SPY now has Mon/Wed/Fri expirations,
+    // so we simply take the smallest timestamp that is >= today (start of day UTC).
+    const todayMidnightTs = Math.floor(new Date().setUTCHours(0,0,0,0) / 1000);
+    const upcoming = (base.expirationDates || []).filter(ts => ts >= todayMidnightTs);
+    const expiryTs = upcoming.length ? upcoming[0] : (base.expirationDates?.[0] ?? todayMidnightTs);
     const chain = await yf.options('SPY', { date: expiryTs });
     const calls = chain.options?.[0]?.calls ?? [];
     const puts  = chain.options?.[0]?.puts  ?? [];

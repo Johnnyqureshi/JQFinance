@@ -4348,43 +4348,115 @@ async function runORBAutoTrader() {
   }
 }
 
-// ── RSI-75 Take-Profit Monitor — checks open ORB positions every 2 minutes ────
-// When the held symbol's RSI(14) reaches ≥ 75, submit a market sell to lock gains.
-// This runs on all open ORB trades (both BULLISH momentum picks and BEARISH inverse ETFs).
+// ── Per-trade trailing state (in-memory; survives restarts via fresh peak detection) ──
+// { peakPrice: number, partialDone: boolean }
+const orbTrailingState = new Map();
+
+// ── Full-exit helper ─────────────────────────────────────────────────────────
+async function sellAllORBPosition(trade, rsi, today, reason) {
+  await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
+  db.prepare(`UPDATE auto_trade_log SET status='closed', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
+    .run(reason, trade.id);
+  db.prepare(`UPDATE orb_session_log SET result='WIN', notes=notes||' | '||? WHERE user_id=? AND trade_date=?`)
+    .run(reason, trade.user_id, today);
+  orbTrailingState.delete(trade.id);
+  console.log(`[ORB-Bot] ✓ Full exit: ${trade.symbol} — ${reason}`);
+}
+
+// ── ORB Exit Monitor — runs every 2 min ──────────────────────────────────────
+// Three-phase exit strategy:
+//   Phase 1 — RSI > 65  : 1% trailing stop armed. Sells 100% if price ≤ 99% of peak.
+//   Phase 2 — RSI ≥ 75  : Sell 85% of shares at market. Let 15% run.
+//   Phase 3 — after partial: 1% trailing stop on remaining 15% until pullback.
 async function monitorORBRSIExit() {
   if (!isMarketOpen()) return;
   const openTrades = db.prepare(`
-    SELECT id, user_id, symbol, entry_price FROM auto_trade_log
+    SELECT id, user_id, symbol, entry_price, shares FROM auto_trade_log
     WHERE strategy = 'orb' AND status = 'open'
   `).all();
   if (!openTrades.length) return;
 
+  const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
+
   for (const trade of openTrades) {
     try {
+      // ── Get RSI from daily bars ────────────────────────────────────────────
       const bars = await fetchOHLCV(trade.symbol, 30).catch(() => null);
       if (!bars || bars.length < 15) continue;
-      const closes = bars.map(b => b.c);
       let rsi = 50;
-      try { rsi = calcRSI(closes, 14); } catch (_) {}
+      try { rsi = calcRSI(bars.map(b => b.c), 14); } catch (_) {}
 
-      if (rsi < 75) continue; // not at target yet
+      // ── Get live position from Alpaca (current price + real qty) ──────────
+      let position = null;
+      try { position = await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`); } catch (_) {}
+      if (!position) continue;
 
-      console.log(`[ORB-Bot] RSI ${rsi.toFixed(1)} ≥ 75 on ${trade.symbol} — submitting market sell (RSI-75 take profit)`);
-      try {
-        await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
-        db.prepare(`UPDATE auto_trade_log SET status='closed', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
-          .run(`RSI-75 exit (RSI=${rsi.toFixed(1)})`, trade.id);
-        // Mark the session as WIN
-        const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
-        db.prepare(`UPDATE orb_session_log SET result='WIN', notes=notes||' | RSI-75 exit @ RSI '||? WHERE user_id=? AND trade_date=?`)
-          .run(rsi.toFixed(1), trade.user_id, today);
-        console.log(`[ORB-Bot] ✓ RSI-75 exit complete: sold ${trade.symbol} (RSI=${rsi.toFixed(1)})`);
-      } catch (e) {
-        console.error(`[ORB-Bot] RSI-75 exit failed for ${trade.symbol}:`, e.message);
+      const currentPrice = parseFloat(position.current_price ?? position.avg_entry_price ?? trade.entry_price);
+      const currentQty   = parseInt(position.qty ?? 0);
+
+      if (currentQty <= 0) {
+        // Closed externally (bracket SL hit, manual close, etc.)
+        db.prepare(`UPDATE auto_trade_log SET status='closed', exit_reason='closed_externally', closed_at=datetime('now') WHERE id=?`).run(trade.id);
+        orbTrailingState.delete(trade.id);
+        console.log(`[ORB-Bot] ${trade.symbol} position is gone externally — marking closed`);
+        continue;
       }
+
+      // ── Initialise or update trailing peak ────────────────────────────────
+      if (!orbTrailingState.has(trade.id)) {
+        orbTrailingState.set(trade.id, { peakPrice: currentPrice, partialDone: false });
+      }
+      const state = orbTrailingState.get(trade.id);
+      if (currentPrice > state.peakPrice) state.peakPrice = currentPrice;
+
+      const trailStop = +(state.peakPrice * 0.99).toFixed(4); // 1% below peak
+
+      console.log(`[ORB-Bot] ${trade.symbol} RSI=${rsi.toFixed(1)} | price=$${currentPrice} | peak=$${state.peakPrice.toFixed(2)} | trail=$${trailStop.toFixed(2)} | qty=${currentQty} | partial=${state.partialDone}`);
+
+      // ── PHASE 2: RSI ≥ 75 — sell 85%, let 15% run ────────────────────────
+      if (rsi >= 75 && !state.partialDone) {
+        const sellQty = Math.max(1, Math.floor(currentQty * 0.85));
+        if (sellQty >= currentQty) {
+          // Rounding left nothing — just close everything
+          await sellAllORBPosition(trade, rsi, today, `RSI-75 full exit (RSI=${rsi.toFixed(1)})`);
+          continue;
+        }
+        console.log(`[ORB-Bot] RSI ${rsi.toFixed(1)} ≥ 75 on ${trade.symbol} — selling ${sellQty}/${currentQty} shares (85% partial). Keeping ${currentQty - sellQty} shares with 1% trail @ $${trailStop.toFixed(2)}`);
+        try {
+          await alpacaFetch(trade.user_id, '/v2/orders', {
+            method: 'POST',
+            body: JSON.stringify({ symbol: trade.symbol, qty: String(sellQty), side: 'sell', type: 'market', time_in_force: 'day' }),
+          });
+          state.partialDone = true;
+          db.prepare(`UPDATE orb_session_log SET notes=notes||? WHERE user_id=? AND trade_date=?`)
+            .run(` | RSI-75 partial 85% sold @ $${currentPrice.toFixed(2)} RSI=${rsi.toFixed(1)}`, trade.user_id, today);
+          console.log(`[ORB-Bot] ✓ Partial exit done: ${sellQty} ${trade.symbol} sold. ${currentQty - sellQty} shares running with 1% trailing stop.`);
+        } catch (e) {
+          console.error(`[ORB-Bot] Partial exit failed for ${trade.symbol}:`, e.message);
+        }
+        continue;
+      }
+
+      // ── PHASE 1 + 3: RSI > 65 → trailing stop active ─────────────────────
+      // (Phase 1 = before partial, Phase 3 = after partial — same 1% trail logic)
+      if (rsi > 65) {
+        if (currentPrice <= trailStop) {
+          const phaseLabel = state.partialDone
+            ? `1% trail on final 15% (RSI=${rsi.toFixed(1)}, peak=$${state.peakPrice.toFixed(2)})`
+            : `1% trailing stop (RSI=${rsi.toFixed(1)}, peak=$${state.peakPrice.toFixed(2)})`;
+          console.log(`[ORB-Bot] Trail stop hit on ${trade.symbol}: $${currentPrice} ≤ $${trailStop.toFixed(2)} — selling all remaining ${currentQty} shares`);
+          try {
+            await sellAllORBPosition(trade, rsi, today, phaseLabel);
+          } catch (e) {
+            console.error(`[ORB-Bot] Trail stop exit failed for ${trade.symbol}:`, e.message);
+          }
+        }
+        // else: still climbing — hold and wait for next 2-min check
+      }
+
     } catch (e) {
-      console.error(`[ORB-Bot] RSI monitor error for trade ${trade.id}:`, e.message);
+      console.error(`[ORB-Bot] Monitor error for trade ${trade.id}:`, e.message);
     }
   }
 }

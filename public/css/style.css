@@ -7694,3 +7694,157 @@ option { background: var(--card); }
   .nsc-filter-bar { flex-direction: column; align-items: flex-start; }
   .nsc-finp       { width: 120px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Simulator Status Panel
+   ══════════════════════════════════════════════════════════════════════════════ */
+.at-sim-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 20px 24px 24px;
+  margin-top: 24px;
+}
+.at-sim-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.at-sim-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #c9d1d9;
+  letter-spacing: .03em;
+}
+.at-sim-actions { display: flex; gap: 10px; }
+.at-sim-refresh-btn, .at-sim-trigger-btn {
+  font-size: .78rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.at-sim-refresh-btn  { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+.at-sim-trigger-btn  { background: #1f6feb; color: #fff; }
+.at-sim-refresh-btn:hover  { opacity: .8; }
+.at-sim-trigger-btn:hover  { opacity: .85; }
+.at-sim-trigger-btn:disabled { opacity: .45; cursor: default; }
+
+.at-sim-section-label {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #8b949e;
+  margin: 16px 0 8px;
+}
+
+/* SPY gate row */
+.at-sim-spy-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.at-sim-spy-cell {
+  flex: 1;
+  min-width: 100px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.at-sim-spy-label {
+  font-size: .65rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #6e7681;
+}
+.at-sim-spy-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #58a6ff;
+  font-variant-numeric: tabular-nums;
+}
+.at-sim-spy-expiry { font-size: .85rem; color: #8b949e; }
+
+/* PDT row */
+.at-sim-pdt-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.at-sim-pdt-cell {
+  flex: 1;
+  min-width: 120px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.at-sim-pdt-reason {
+  flex: 2;
+  font-size: .78rem;
+  color: #8b949e;
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+}
+.at-sim-pdt-label { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: #6e7681; }
+.at-sim-pdt-val   { font-size: 1rem; font-weight: 700; color: #c9d1d9; font-variant-numeric: tabular-nums; }
+.at-sim-pdt-allowed  { color: #3fb950; }
+.at-sim-pdt-blocked  { color: #f85149; }
+
+/* meta row */
+.at-sim-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 14px 0 0;
+  font-size: .76rem;
+  color: #6e7681;
+}
+.at-sim-trigger-msg { color: #3fb950; font-weight: 600; }
+.at-sim-trigger-msg.err { color: #f85149; }
+
+/* trades table */
+.at-sim-trades-wrap { overflow-x: auto; margin-top: 8px; }
+.at-sim-trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+.at-sim-trades-table th {
+  background: #0d1117;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: .65rem;
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  text-align: left;
+  white-space: nowrap;
+}
+.at-sim-trades-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  color: #c9d1d9;
+  white-space: nowrap;
+}
+.at-sim-trades-table tr:hover td { background: #1c2128; }
+.at-sim-empty { color: #6e7681; font-style: italic; text-align: center; padding: 18px !important; }
+.at-sim-status-open  { color: #d29922; }
+.at-sim-status-closed { color: #3fb950; }
+
+@media (max-width: 768px) {
+  .at-sim-spy-row, .at-sim-pdt-row { flex-direction: column; }
+  .at-sim-spy-cell, .at-sim-pdt-cell { min-width: unset; }
+}

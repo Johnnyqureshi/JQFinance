@@ -820,6 +820,76 @@
       </div><!-- /.at-bots-grid -->
     </div><!-- /.at-bots-section -->
 
+    <!-- ── Simulator Test Panel ───────────────────────────────────────────── -->
+    <div class="at-sim-panel" id="atSimPanel">
+      <div class="at-sim-header">
+        <span class="at-sim-title">Simulator Status</span>
+        <div class="at-sim-actions">
+          <button class="at-sim-refresh-btn" id="atSimRefresh">↻ Refresh</button>
+          <button class="at-sim-trigger-btn" id="atSimTrigger">▶ Trigger Scan Now</button>
+        </div>
+      </div>
+
+      <!-- SPY Gate row -->
+      <div class="at-sim-section-label">SPY Options Gate</div>
+      <div class="at-sim-spy-row" id="atSimSpyRow">
+        <div class="at-sim-spy-cell">
+          <span class="at-sim-spy-label">FLOOR</span>
+          <span class="at-sim-spy-val" id="atSimFloor">—</span>
+        </div>
+        <div class="at-sim-spy-cell">
+          <span class="at-sim-spy-label">MAX PAIN</span>
+          <span class="at-sim-spy-val" id="atSimMaxPain">—</span>
+        </div>
+        <div class="at-sim-spy-cell">
+          <span class="at-sim-spy-label">ROOF</span>
+          <span class="at-sim-spy-val" id="atSimRoof">—</span>
+        </div>
+        <div class="at-sim-spy-cell">
+          <span class="at-sim-spy-label">EXPIRY</span>
+          <span class="at-sim-spy-val at-sim-spy-expiry" id="atSimExpiry">—</span>
+        </div>
+      </div>
+
+      <!-- PDT row -->
+      <div class="at-sim-section-label">Pattern Day Trade Guard</div>
+      <div class="at-sim-pdt-row" id="atSimPdtRow">
+        <div class="at-sim-pdt-cell">
+          <span class="at-sim-pdt-label">Day Trades Used</span>
+          <span class="at-sim-pdt-val" id="atSimDtCount">—</span>
+        </div>
+        <div class="at-sim-pdt-cell">
+          <span class="at-sim-pdt-label">Equity</span>
+          <span class="at-sim-pdt-val" id="atSimEquity">—</span>
+        </div>
+        <div class="at-sim-pdt-cell">
+          <span class="at-sim-pdt-label">Status</span>
+          <span class="at-sim-pdt-val" id="atSimPdtStatus">—</span>
+        </div>
+        <div class="at-sim-pdt-cell at-sim-pdt-reason">
+          <span id="atSimPdtReason">—</span>
+        </div>
+      </div>
+
+      <!-- Universe + trigger message -->
+      <div class="at-sim-meta">
+        <span id="atSimUniverseSize"></span>
+        <span id="atSimTriggerMsg" class="at-sim-trigger-msg"></span>
+      </div>
+
+      <!-- Recent trades table -->
+      <div class="at-sim-section-label">Recent Bot Trades (last 10)</div>
+      <div class="at-sim-trades-wrap">
+        <table class="at-sim-trades-table" id="atSimTradesTable">
+          <thead><tr>
+            <th>Symbol</th><th>Bot</th><th>Side</th><th>Shares</th>
+            <th>Entry $</th><th>Status</th><th>Time</th>
+          </tr></thead>
+          <tbody id="atSimTradesTbody"><tr><td colspan="7" class="at-sim-empty">No trades yet — connect Alpaca to activate bots</td></tr></tbody>
+        </table>
+      </div>
+    </div><!-- /.at-sim-panel -->
+
   </div><!-- /.at-page -->
 </div><!-- /.page#page-trading -->
 

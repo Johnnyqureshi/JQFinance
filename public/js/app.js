@@ -133,7 +133,8 @@ function goPage(page) {
   if (page==='markets')   loadMarkets();
   if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); }
   if (page==='scanner')   scanner.open();
-  if (page==='trading')   alpacaTrader.open();
+  if (page==='trading')   { alpacaTrader.open(); if (typeof simPanel !== 'undefined') simPanel.load(); }
+  document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────

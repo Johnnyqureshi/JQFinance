@@ -343,3 +343,109 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 // All 4 bots are always active — no toggle needed. They run automatically
 // for every user who has Alpaca credentials connected, scanning the full
 // MASTER_UNIVERSE every 5 minutes during market hours.
+
+// ── Simulator Status Panel ────────────────────────────────────────────────────
+const simPanel = (() => {
+  const BOT_LABELS = {
+    bounce: 'Bounce 2.0',
+    volatility_expansion: 'VE',
+    explosive_earnings: 'EE',
+    countertrend: 'CT'
+  };
+
+  function fmt$(n) { return n != null ? '$' + parseFloat(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'; }
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  async function load() {
+    const btn = document.getElementById('atSimRefresh');
+    if (btn) btn.disabled = true;
+    try {
+      const data = await fetch('/api/bots/status').then(r => r.json());
+
+      // SPY gate
+      const lvl = data.spyLevels;
+      document.getElementById('atSimFloor').textContent   = lvl ? fmt$(lvl.floor)   : 'N/A';
+      document.getElementById('atSimMaxPain').textContent = lvl ? fmt$(lvl.maxPain) : 'N/A';
+      document.getElementById('atSimRoof').textContent    = lvl ? fmt$(lvl.roof)    : 'N/A';
+      document.getElementById('atSimExpiry').textContent  = lvl ? lvl.expiry        : 'N/A';
+
+      // PDT
+      const p = data.pdt;
+      const dtEl = document.getElementById('atSimDtCount');
+      const eqEl = document.getElementById('atSimEquity');
+      const stEl = document.getElementById('atSimPdtStatus');
+      const rnEl = document.getElementById('atSimPdtReason');
+      dtEl.textContent = p.daytradeCount != null ? `${p.daytradeCount} / 3` : '—';
+      eqEl.textContent = p.equity != null ? fmt$(p.equity) : '—';
+      stEl.textContent = p.allowed ? 'ALLOWED' : 'BLOCKED';
+      stEl.className   = 'at-sim-pdt-val ' + (p.allowed ? 'at-sim-pdt-allowed' : 'at-sim-pdt-blocked');
+      rnEl.textContent = p.reason || '—';
+
+      // Universe size
+      const uEl = document.getElementById('atSimUniverseSize');
+      if (uEl) uEl.textContent = `Scanning ${data.universeSize} symbols`;
+
+      // Trades table
+      const tbody = document.getElementById('atSimTradesTbody');
+      if (tbody) {
+        if (!data.recentTrades || !data.recentTrades.length) {
+          tbody.innerHTML = `<tr><td colspan="7" class="at-sim-empty">No bot trades on record yet</td></tr>`;
+        } else {
+          tbody.innerHTML = data.recentTrades.map(t => `
+            <tr>
+              <td><strong>${t.symbol}</strong></td>
+              <td>${BOT_LABELS[t.strategy] || t.strategy}</td>
+              <td>${(t.side || '').toUpperCase()}</td>
+              <td>${t.shares != null ? parseFloat(t.shares).toFixed(0) : '—'}</td>
+              <td>${fmt$(t.entry_price)}</td>
+              <td class="${t.status === 'open' ? 'at-sim-status-open' : 'at-sim-status-closed'}">${(t.status || '').toUpperCase()}</td>
+              <td>${fmtTime(t.created_at)}</td>
+            </tr>`).join('');
+        }
+      }
+    } catch (e) {
+      console.warn('[simPanel] load error:', e.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function trigger() {
+    const btn = document.getElementById('atSimTrigger');
+    const msg = document.getElementById('atSimTriggerMsg');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.textContent = 'Triggering…'; msg.className = 'at-sim-trigger-msg'; }
+    try {
+      const data = await fetch('/api/bots/trigger', { method: 'POST' }).then(r => r.json());
+      if (msg) {
+        msg.textContent = data.message || (data.ok ? 'Scan cycle started!' : 'Could not trigger');
+        msg.className   = 'at-sim-trigger-msg' + (data.ok ? '' : ' err');
+      }
+      if (data.ok) setTimeout(load, 5000); // refresh trade log after 5 s
+    } catch (e) {
+      if (msg) { msg.textContent = 'Request failed'; msg.className = 'at-sim-trigger-msg err'; }
+    } finally {
+      if (btn) setTimeout(() => { btn.disabled = false; }, 3000);
+    }
+  }
+
+  function init() {
+    document.getElementById('atSimRefresh')?.addEventListener('click', load);
+    document.getElementById('atSimTrigger')?.addEventListener('click', trigger);
+    // Auto-load when trading desk tab becomes active
+    document.addEventListener('pageChanged', (e) => {
+      if (e.detail?.page === 'trading') load();
+    });
+    // Also load on DOMContentLoaded if already on trading page
+    const tradingPage = document.getElementById('page-trading');
+    if (tradingPage && tradingPage.classList.contains('active')) load();
+  }
+
+  return { init, load };
+})();
+
+document.addEventListener('DOMContentLoaded', () => simPanel.init());

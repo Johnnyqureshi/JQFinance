@@ -1366,6 +1366,71 @@ app.put('/api/bounce/auto-settings', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── GET /api/bots/status — SPY gate + PDT state for the logged-in user ────────
+app.get('/api/bots/status', requireAuth, async (req, res) => {
+  try {
+    const spyLevels = await getSPYLevels();
+
+    let account = null, pdtAllowed = true, pdtReason = '';
+    try {
+      account = await alpacaFetch(req.session.userId, '/v2/account');
+      const equity   = parseFloat(account.equity || 0);
+      const dtCount  = parseInt(account.daytrade_count || 0, 10);
+      const isPDT    = !!account.pattern_day_trader;
+      if (isPDT && equity < 25000) {
+        pdtAllowed = false;
+        pdtReason  = `Account is PDT-flagged with equity $${equity.toFixed(0)} < $25,000`;
+      } else if (!isPDT && dtCount >= 3) {
+        pdtAllowed = false;
+        pdtReason  = `${dtCount}/3 day-trades used in rolling 5-day window`;
+      } else {
+        pdtReason = isPDT
+          ? `PDT account — equity $${equity.toFixed(0)} ≥ $25,000 — unlimited day trades`
+          : `${dtCount}/3 day-trades used — ${3 - dtCount} remaining today`;
+      }
+    } catch (e) {
+      pdtReason = 'Could not fetch Alpaca account — not connected?';
+    }
+
+    // Latest trade logs per bot (last 10 across all strategies)
+    const recentTrades = db.prepare(
+      `SELECT symbol, strategy, side, shares, entry_price, status, created_at
+       FROM auto_trade_log WHERE user_id = ?
+       ORDER BY created_at DESC LIMIT 10`
+    ).all(req.session.userId);
+
+    res.json({
+      universeSize: MASTER_UNIVERSE.length,
+      spyLevels,
+      pdt: { allowed: pdtAllowed, reason: pdtReason,
+             daytradeCount: account ? parseInt(account.daytrade_count || 0) : null,
+             equity: account ? parseFloat(account.equity || 0) : null,
+             patternDayTrader: account ? !!account.pattern_day_trader : null },
+      recentTrades,
+      timestamp: new Date().toISOString()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/bots/trigger — manually fire one scan cycle on all 4 bots ──────
+app.post('/api/bots/trigger', requireAuth, async (req, res) => {
+  if (!isMarketOpen()) return res.json({ ok: false, message: 'Market is closed — bots only trade during market hours (9:30–16:00 ET Mon–Fri).' });
+  res.json({ ok: true, message: 'Scan cycle triggered — check the trade log in a few seconds.' });
+  // Run all 4 bots concurrently (non-blocking to the HTTP response)
+  Promise.allSettled([
+    runBounceAutoTrader(),
+    runVEAutoTrader(),
+    runEEAutoTrader(),
+    runCTAutoTrader()
+  ]).then(results => {
+    const errs = results.filter(r => r.status === 'rejected').map(r => r.reason?.message);
+    if (errs.length) console.warn('[Trigger] Bot errors:', errs.join('; '));
+    else console.log('[Trigger] Manual scan cycle complete.');
+  });
+});
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VOLATILITY EXPANSION STRATEGY ENGINE
@@ -1823,6 +1888,32 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
+// ── Shared PDT guard ────────────────────────────────────────────────────────
+// Pattern Day Trader rule: ≥3 same-day round-trips in a rolling 5-day window
+// on a margin account with equity < $25,000 triggers PDT status.
+// We block any NEW entry if: account is PDT-flagged with equity < $25k,
+//   OR account is approaching the limit (daytrade_count >= 3, not yet flagged).
+async function checkPDTAllowed(userId, botName) {
+  try {
+    const acct = await alpacaFetch(userId, '/v2/account');
+    const equity    = parseFloat(acct.equity || 0);
+    const dtCount   = parseInt(acct.daytrade_count || 0, 10);
+    const isPDT     = !!acct.pattern_day_trader;
+    if (isPDT && equity < 25000) {
+      console.log(`[${botName}] PDT flagged — equity $${equity.toFixed(0)} < $25,000 — skipping user ${userId}`);
+      return false;
+    }
+    if (!isPDT && dtCount >= 3) {
+      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades in rolling 5 days for user ${userId} — skipping`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn(`[${botName}] Could not fetch account for PDT check (user ${userId}):`, e.message);
+    return true; // allow on fetch error — don't block all trading on API hiccup
+  }
+}
+
 // ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
 async function runBounceAutoTrader() {
   if (!isMarketOpen()) return;
@@ -1847,6 +1938,7 @@ async function runBounceAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!await checkPDTAllowed(user.user_id, 'Bounce-Bot')) continue;
     for (const sig of signals) {
       let positions = [];
       try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
@@ -1906,6 +1998,7 @@ async function runVEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!await checkPDTAllowed(user.user_id, 'VE-Bot')) continue;
 
     for (const sig of signals) {
       // Check for existing position to avoid duplicates
@@ -2440,6 +2533,7 @@ async function runEEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!await checkPDTAllowed(user.user_id, 'EE-Bot')) continue;
 
     for (const sig of signals) {
       let positions = [];
@@ -2932,17 +3026,7 @@ async function runCTAutoTrader() {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
     if (!creds) continue;
 
-    // ── PDT compliance: skip if account has ≥3 day-trades in rolling 5 days ──
-    try {
-      const acct = await alpacaFetch(user.user_id, '/v2/account');
-      const daytradeCount = parseInt(acct.daytrade_count ?? acct.daytrading_buying_power != null ? acct.daytrade_count : 0, 10);
-      if (!acct.pattern_day_trader && daytradeCount >= 3) {
-        console.log(`[CT-Bot] PDT limit reached for user ${user.user_id} (${daytradeCount} day-trades) — skipping`);
-        continue;
-      }
-    } catch (e) {
-      console.warn(`[CT-Bot] Could not fetch account for PDT check (user ${user.user_id}):`, e.message);
-    }
+    if (!await checkPDTAllowed(user.user_id, 'CT-Bot')) continue;
 
     for (const sig of signals) {
       // Cooldown: 1 trade per symbol per day per strategy

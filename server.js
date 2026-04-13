@@ -1447,6 +1447,7 @@ app.get('/api/whale/scan', requireAuth, async (req, res) => {
       WHALE_RADAR_SYMBOLS.map(async sym => {
         const w = await detectWhaleSignal(sym);
         if (!w) return null;
+        const dp = await detectDarkPoolLevels(sym);
         return {
           symbol: sym,
           callPutRatio: parseFloat(w.callPutRatio.toFixed(2)),
@@ -1461,7 +1462,8 @@ app.get('/api/whale/scan', requireAuth, async (req, res) => {
           bias: w.bullish && !w.bearish ? 'BULLISH'
               : w.bearish && !w.bullish ? 'BEARISH'
               : w.bullish && w.bearish  ? 'MIXED'
-              : 'NEUTRAL'
+              : 'NEUTRAL',
+          dp: dp ? { poc: dp.poc, vah: dp.vah, val: dp.val, hvn: dp.hvn } : null
         };
       })
     );
@@ -2007,6 +2009,95 @@ async function checkWhaleGate(symbol, direction) {
   return { allowed: true, reason: '' };
 }
 
+// ── Dark Pool Level Detection (Volume Profile Analysis) ──────────────────────
+// Approximates institutional dark-pool accumulation/distribution zones by
+// building a volume profile from the last 30 daily bars:
+//   • POC  (Point of Control) — price bucket with the most volume traded
+//   • VAH  (Value Area High)  — upper bound of the 70% volume zone
+//   • VAL  (Value Area Low)   — lower bound of the 70% volume zone
+//   • HVNs (High Volume Nodes) — top 3 price buckets by volume
+// These levels act like dark-pool "footprints" — prices where large block
+// trades settled and where institutions are likely to defend or distribute.
+const _dpCache = new Map();
+const DP_TTL   = 30 * 60 * 1000; // 30-minute cache (daily levels are stable)
+const DP_BUCKET = 0.50;           // $0.50 price buckets
+
+async function detectDarkPoolLevels(symbol) {
+  const now    = Date.now();
+  const cached = _dpCache.get(symbol);
+  if (cached && now - cached.ts < DP_TTL) return cached.data;
+  try {
+    const bars = await fetchOHLCV(symbol, 30);
+    if (!bars || bars.length < 10) { _dpCache.set(symbol, { data: null, ts: now }); return null; }
+
+    // Build volume profile: bucket = round(typicalPrice / 0.50) * 0.50
+    const profile = {};
+    for (const bar of bars) {
+      const tp  = (bar.h + bar.l + bar.c) / 3;
+      const bkt = (Math.round(tp / DP_BUCKET) * DP_BUCKET).toFixed(2);
+      profile[bkt] = (profile[bkt] || 0) + (bar.v || 0);
+    }
+    const nodes = Object.entries(profile)
+      .map(([p, v]) => ({ price: parseFloat(p), vol: v }))
+      .sort((a, b) => b.vol - a.vol);
+    if (!nodes.length) { _dpCache.set(symbol, { data: null, ts: now }); return null; }
+
+    // POC = single highest-volume node
+    const poc = nodes[0].price;
+
+    // Value Area = nodes that together account for 70% of total volume
+    const totalVol = nodes.reduce((s, n) => s + n.vol, 0);
+    let acc = 0;
+    const vaNodes = [];
+    for (const n of nodes) {
+      acc += n.vol;
+      vaNodes.push(n.price);
+      if (acc >= totalVol * 0.70) break;
+    }
+    const vah = parseFloat(Math.max(...vaNodes).toFixed(2));
+    const val = parseFloat(Math.min(...vaNodes).toFixed(2));
+
+    // High Volume Nodes = top 3 price levels by volume (sorted ascending)
+    const hvn = nodes.slice(0, 3).map(n => n.price).sort((a, b) => a - b);
+
+    const result = { poc, vah, val, hvn };
+    _dpCache.set(symbol, { data: result, ts: now });
+    return result;
+  } catch (e) {
+    _dpCache.set(symbol, { data: null, ts: now });
+    return null;
+  }
+}
+
+// Returns { allowed: bool, reason: string }
+// direction = 'LONG' | 'SHORT'
+// Block rules:
+//   LONG  blocked if price > VAH * 1.03 (chasing above institutional zone)
+//   SHORT blocked if price < VAL * 0.97 (oversold below institutional zone)
+// Confirmation logged if price is near POC / VAL (long) or VAH (short).
+async function checkDarkPoolGate(symbol, price, direction) {
+  const dp = await detectDarkPoolLevels(symbol);
+  if (!dp) return { allowed: true, reason: 'no DP data' };
+  const { poc, vah, val } = dp;
+  const prox = price * 0.008; // 0.8% proximity window
+
+  if (direction === 'LONG') {
+    if (price > vah * 1.03)
+      return { allowed: false, reason: `DP: price $${price.toFixed(2)} is >3% above VAH $${vah} — chasing above dark pool zone` };
+    const label = Math.abs(price - poc) <= prox ? `near POC $${poc}`
+                : Math.abs(price - val) <= prox ? `near VAL $${val}` : '';
+    return { allowed: true, reason: label ? `DP LONG confirmed — ${label}` : '' };
+  }
+  if (direction === 'SHORT') {
+    if (price < val * 0.97)
+      return { allowed: false, reason: `DP: price $${price.toFixed(2)} is >3% below VAL $${val} — oversold below dark pool zone` };
+    const label = Math.abs(price - poc) <= prox ? `near POC $${poc}`
+                : Math.abs(price - vah) <= prox ? `near VAH $${vah}` : '';
+    return { allowed: true, reason: label ? `DP SHORT confirmed — ${label}` : '' };
+  }
+  return { allowed: true, reason: '' };
+}
+
 // ── Shared PDT guard ────────────────────────────────────────────────────────
 // Pattern Day Trader rule: ≥3 same-day round-trips in a rolling 5-day window
 // on a margin account with equity < $25,000 triggers PDT status.
@@ -2073,6 +2164,9 @@ async function runBounceAutoTrader() {
       const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
       if (!bounceWhaleGate.allowed) { console.log(`[Bounce-Bot] Whale-Gate BLOCKED: ${bounceWhaleGate.reason}`); continue; }
       if (bounceWhaleGate.reason) console.log(`[Bounce-Bot] Whale-Gate: ${bounceWhaleGate.reason}`);
+      const bounceDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
+      if (!bounceDPGate.allowed) { console.log(`[Bounce-Bot] DP-Gate BLOCKED: ${bounceDPGate.reason}`); continue; }
+      if (bounceDPGate.reason) console.log(`[Bounce-Bot] DP-Gate: ${bounceDPGate.reason}`);
       const shares = Math.max(1, Math.floor(amount / price));
       const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
       const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
@@ -2152,6 +2246,9 @@ async function runVEAutoTrader() {
         const veLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
         if (!veLongWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED: ${veLongWhaleGate.reason}`); continue; }
         if (veLongWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate: ${veLongWhaleGate.reason}`);
+        const veLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
+        if (!veLongDPGate.allowed) { console.log(`[VE-Bot] DP-Gate BLOCKED: ${veLongDPGate.reason}`); continue; }
+        if (veLongDPGate.reason) console.log(`[VE-Bot] DP-Gate: ${veLongDPGate.reason}`);
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
@@ -2179,6 +2276,9 @@ async function runVEAutoTrader() {
         const veShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
         if (!veShortWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED short: ${veShortWhaleGate.reason}`); continue; }
         if (veShortWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate short: ${veShortWhaleGate.reason}`);
+        const veShortDPGate = await checkDarkPoolGate(sig.symbol, sig.price, 'SHORT');
+        if (!veShortDPGate.allowed) { console.log(`[VE-Bot] DP-Gate BLOCKED short: ${veShortDPGate.reason}`); continue; }
+        if (veShortDPGate.reason) console.log(`[VE-Bot] DP-Gate short: ${veShortDPGate.reason}`);
         const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
         const invPrice = invBars?.at(-1)?.c;
         if (!invPrice) {
@@ -2686,6 +2786,9 @@ async function runEEAutoTrader() {
       const eeWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
       if (!eeWhaleGate.allowed) { console.log(`[EE-Bot] Whale-Gate BLOCKED: ${eeWhaleGate.reason}`); continue; }
       if (eeWhaleGate.reason) console.log(`[EE-Bot] Whale-Gate: ${eeWhaleGate.reason}`);
+      const eeDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
+      if (!eeDPGate.allowed) { console.log(`[EE-Bot] DP-Gate BLOCKED: ${eeDPGate.reason}`); continue; }
+      if (eeDPGate.reason) console.log(`[EE-Bot] DP-Gate: ${eeDPGate.reason}`);
       const shares = Math.max(1, Math.floor(amount / price));
 
       // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
@@ -3184,6 +3287,9 @@ async function runCTAutoTrader() {
         const ctLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
         if (!ctLongWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED: ${ctLongWhaleGate.reason}`); continue; }
         if (ctLongWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate: ${ctLongWhaleGate.reason}`);
+        const ctLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
+        if (!ctLongDPGate.allowed) { console.log(`[CT-Bot] DP-Gate BLOCKED: ${ctLongDPGate.reason}`); continue; }
+        if (ctLongDPGate.reason) console.log(`[CT-Bot] DP-Gate: ${ctLongDPGate.reason}`);
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);
@@ -3211,6 +3317,9 @@ async function runCTAutoTrader() {
         const ctShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
         if (!ctShortWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED short: ${ctShortWhaleGate.reason}`); continue; }
         if (ctShortWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate short: ${ctShortWhaleGate.reason}`);
+        const ctShortDPGate = await checkDarkPoolGate(sig.symbol, sig.price, 'SHORT');
+        if (!ctShortDPGate.allowed) { console.log(`[CT-Bot] DP-Gate BLOCKED short: ${ctShortDPGate.reason}`); continue; }
+        if (ctShortDPGate.reason) console.log(`[CT-Bot] DP-Gate short: ${ctShortDPGate.reason}`);
         // Check cooldown on inverse ticker too
         const invAlreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === inverseTicker);
         if (invAlreadyIn) { console.log(`[CT-Bot] Already holding ${inverseTicker} — skipping`); continue; }

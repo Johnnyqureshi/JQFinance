@@ -468,7 +468,7 @@ const whaleRadar = (() => {
     try {
       const data = await fetch('/api/whale/scan').then(r => r.json());
       if (!data.symbols || !data.symbols.length) {
-        tbody.innerHTML = `<tr><td colspan="10" class="at-sim-empty">No options data available right now</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">No options data available right now</td></tr>`;
         return;
       }
       tbody.innerHTML = data.symbols.map(w => {
@@ -476,6 +476,9 @@ const whaleRadar = (() => {
         const sweepTxt  = w.callSweep && w.putSweep ? '🐋 BOTH'
                         : w.callSweep ? '🐋 CALL' : w.putSweep ? '🐋 PUT' : '—';
         const sweepCls  = (w.callSweep || w.putSweep) ? 'at-whale-sweep' : '';
+        const dp = w.dp;
+        const fmtP = v => v != null ? '$'+parseFloat(v).toFixed(2) : '—';
+        const hvnStr = dp && dp.hvn ? dp.hvn.map(v => '$'+parseFloat(v).toFixed(2)).join(' · ') : '—';
         return `<tr>
           <td><strong>${w.symbol}</strong></td>
           <td class="${biasClass}">${w.bias}</td>
@@ -486,11 +489,15 @@ const whaleRadar = (() => {
           <td>$${w.topCallStrike||'—'}</td>
           <td>$${w.topPutStrike||'—'}</td>
           <td class="${sweepCls}">${sweepTxt}</td>
+          <td style="color:#58a6ff">${dp ? fmtP(dp.poc) : '—'}</td>
+          <td style="color:#3fb950">${dp ? fmtP(dp.vah) : '—'}</td>
+          <td style="color:#f85149">${dp ? fmtP(dp.val) : '—'}</td>
+          <td style="color:#8b949e;font-size:.7rem">${hvnStr}</td>
           <td>${w.expiry||'—'}</td>
         </tr>`;
       }).join('');
     } catch(e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="at-sim-empty">Failed to load whale data</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">Failed to load whale data</td></tr>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh Whale Data'; }
     }

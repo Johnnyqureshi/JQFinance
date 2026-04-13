@@ -1957,44 +1957,47 @@ const SPY_LEVELS_TTL = 30 * 60 * 1000; // refresh every 30 minutes
 async function fetchSPYLevels() {
   try {
     const base = await yf.options('SPY');
-    // Yahoo Finance returns expirationDates as Unix timestamps.
-    // Some versions return seconds, others milliseconds — normalise to seconds.
-    const normTs = (ts) => ts > 1e10 ? Math.floor(ts / 1000) : ts;
-    const todayMidnightSec = Math.floor(new Date().setUTCHours(0,0,0,0) / 1000);
-    const rawDates  = (base.expirationDates || []).map(normTs);
-    const upcoming  = rawDates.filter(ts => ts >= todayMidnightSec);
-    const expiryTs  = upcoming.length ? upcoming[0] : (rawDates[0] ?? todayMidnightSec);
-    // Pass the date as a JS Date object to avoid any seconds/ms ambiguity
-    const chain = await yf.options('SPY', { date: new Date(expiryTs * 1000) });
+    // yahoo-finance2 v3 returns expirationDates as Date objects
+    const dates = (base.expirationDates || []).map(d => new Date(d));
+    const now   = new Date(); now.setUTCHours(0,0,0,0);
+
+    // Prefer the nearest upcoming FRIDAY — it has the deepest open interest.
+    // Fall back to any upcoming date if no Friday is available.
+    const upcoming = dates.filter(d => d >= now);
+    const fridays  = upcoming.filter(d => d.getUTCDay() === 5);
+    const target   = fridays.length ? fridays[0] : (upcoming.length ? upcoming[0] : dates[0]);
+    if (!target) { console.error('[SPY-Gate] No expiry dates returned'); return null; }
+
+    const chain = await yf.options('SPY', { date: target });
     const calls = chain.options?.[0]?.calls ?? [];
     const puts  = chain.options?.[0]?.puts  ?? [];
 
-    // ROOF  = call strike with highest open interest (skip zero-OI entries)
+    // Filter to contracts that have open interest
     const validCalls = calls.filter(c => (c.openInterest||0) > 0);
     const validPuts  = puts.filter(p => (p.openInterest||0) > 0);
-    const roofEntry  = validCalls.reduce((b, c) => c.openInterest > b.openInterest ? c : b, validCalls[0] ?? null);
-    const floorEntry = validPuts.reduce( (b, p) => p.openInterest > b.openInterest ? p : b, validPuts[0] ?? null);
-    const roof  = roofEntry  ? roofEntry.strike  : null;
-    const floor = floorEntry ? floorEntry.strike : null;
 
-    // MAX PAIN = strike minimising total intrinsic payout to all option holders
-    const allCalls  = calls.filter(c => c.strike != null);
-    const allPuts   = puts.filter(p => p.strike  != null);
-    const strikes   = [...new Set([...allCalls.map(c => c.strike), ...allPuts.map(p => p.strike)])].sort((a,b) => a-b);
+    // ROOF  = call strike with highest open interest
+    const roofEntry  = validCalls.sort((a,b) => (b.openInterest||0)-(a.openInterest||0))[0] ?? null;
+    // FLOOR = put  strike with highest open interest
+    const floorEntry = validPuts.sort( (a,b) => (b.openInterest||0)-(a.openInterest||0))[0] ?? null;
+    const roof  = roofEntry?.strike  ?? null;
+    const floor = floorEntry?.strike ?? null;
+
+    // MAX PAIN = strike that minimises total intrinsic payout to all option holders
+    const strikes = [...new Set([...calls.map(c=>c.strike), ...puts.map(p=>p.strike)])].filter(s=>s!=null).sort((a,b)=>a-b);
     let minPain = Infinity, maxPain = strikes[Math.floor(strikes.length/2)] ?? null;
     for (const s of strikes) {
       const pain =
-        allCalls.reduce((sum,c) => c.strike < s ? sum+(s-c.strike)*(c.openInterest||0) : sum, 0) +
-        allPuts.reduce( (sum,p) => p.strike > s ? sum+(p.strike-s)*(p.openInterest||0) : sum, 0);
+        calls.reduce((sum,c) => c.strike < s ? sum+(s-c.strike)*(c.openInterest||0) : sum, 0) +
+        puts.reduce( (sum,p) => p.strike > s ? sum+(p.strike-s)*(p.openInterest||0) : sum, 0);
       if (pain < minPain) { minPain = pain; maxPain = s; }
     }
 
-    // Human-readable expiry e.g. "Mon Apr 14"
-    const expiryDate   = new Date(expiryTs * 1000);
-    const expiry = expiryDate.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
+    // Human-readable expiry e.g. "Fri Apr 17"
+    const expiry = target.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
 
-    console.log(`[SPY-Gate] FLOOR: $${floor}  MAX PAIN: $${maxPain}  ROOF: $${roof}  (exp ${expiry})`);
-    return { floor, maxPain, roof, expiry, calls: validCalls.length, puts: validPuts.length };
+    console.log(`[SPY-Gate] FLOOR: $${floor}  MAX PAIN: $${maxPain}  ROOF: $${roof}  (exp ${expiry})  [${validCalls.length}C / ${validPuts.length}P with OI]`);
+    return { floor, maxPain, roof, expiry };
   } catch(e) {
     console.error('[SPY-Gate] Options fetch failed:', e.message);
     return null;
@@ -3516,4 +3519,13 @@ async function runCTAutoTrader() {
 setInterval(runCTAutoTrader, 60 * 1000);
 console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 60 sec during market hours');
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Johnny Qureshi Finance on :${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Johnny Qureshi Finance on :${PORT}`);
+  // Pre-load SPY levels immediately at startup so data is ready before market open
+  getSPYLevels().then(lvl => {
+    if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);
+    else     console.warn('[SPY-Gate] Startup pre-load returned no data — will retry on first request');
+  });
+  // Refresh SPY levels every 30 min so they stay current through the trading day
+  setInterval(() => getSPYLevels(), 30 * 60 * 1000);
+});

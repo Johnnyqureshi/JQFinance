@@ -389,26 +389,7 @@ const simPanel = (() => {
 
   async function loadStatus() {
     try {
-      // SPY levels use a public endpoint — no auth required, always works
-      fetch('/api/spy-levels').then(r => r.json()).then(lvl => {
-        document.getElementById('atSimFloor').textContent   = lvl?.floor   != null ? fmt$(lvl.floor)   : 'Loading…';
-        document.getElementById('atSimMaxPain').textContent = lvl?.maxPain != null ? fmt$(lvl.maxPain) : 'Loading…';
-        document.getElementById('atSimRoof').textContent    = lvl?.roof    != null ? fmt$(lvl.roof)    : 'Loading…';
-        document.getElementById('atSimExpiry').textContent  = lvl?.expiry  || 'Loading…';
-      }).catch(() => {});
-
       const data = await fetch('/api/bots/status').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
-
-      // PDT guard
-      const p = data.pdt;
-      const dtEl = document.getElementById('atSimDtCount');
-      const eqEl = document.getElementById('atSimEquity');
-      const stEl = document.getElementById('atSimPdtStatus');
-      const rnEl = document.getElementById('atSimPdtReason');
-      if (dtEl) dtEl.textContent = p.daytradeCount != null ? `${p.daytradeCount} / 3` : '—';
-      if (eqEl) eqEl.textContent = p.equity        != null ? fmt$(p.equity)           : '—';
-      if (stEl) { stEl.textContent = p.allowed ? 'ALLOWED' : 'BLOCKED'; stEl.className = 'at-sim-pdt-val ' + (p.allowed ? 'at-sim-pdt-allowed' : 'at-sim-pdt-blocked'); }
-      if (rnEl) rnEl.textContent = p.reason || '—';
 
       // Universe + last-refresh stamp
       const uEl = document.getElementById('atSimUniverseSize');
@@ -443,58 +424,12 @@ const simPanel = (() => {
     }
   }
 
-  // ── Whale Radar (embedded — runs on same panel) ───────────────────────────
-  const BIAS_CLASS = {
-    BULLISH:'at-whale-bias-bull', BEARISH:'at-whale-bias-bear',
-    MIXED:'at-whale-bias-mixed',  NEUTRAL:'at-whale-bias-neutral'
-  };
-  function fmtOI(n) { return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n||'—'); }
-
-  async function loadWhale() {
-    const tbody = document.getElementById('atWhaleTbody');
-    if (!tbody) return;
-    try {
-      const data = await fetch('/api/whale/scan').then(r => r.json());
-      if (!data.symbols?.length) {
-        tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">No options data available right now</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = data.symbols.map(w => {
-        const biasClass = BIAS_CLASS[w.bias] || '';
-        const sweepTxt  = w.callSweep && w.putSweep ? '🐋 BOTH'
-                        : w.callSweep ? '🐋 CALL' : w.putSweep ? '🐋 PUT' : '—';
-        const sweepCls  = (w.callSweep || w.putSweep) ? 'at-whale-sweep' : '';
-        const dp   = w.dp;
-        const fmtP = v => v != null ? '$'+parseFloat(v).toFixed(2) : '—';
-        const hvnStr = dp?.hvn ? dp.hvn.map(v=>'$'+parseFloat(v).toFixed(2)).join(' · ') : '—';
-        return `<tr>
-          <td><strong>${w.symbol}</strong></td>
-          <td class="${biasClass}">${w.bias}</td>
-          <td>${w.callPutRatio.toFixed(2)}</td>
-          <td>${w.putCallRatio.toFixed(2)}</td>
-          <td>${fmtOI(w.totalCallOI)}</td>
-          <td>${fmtOI(w.totalPutOI)}</td>
-          <td>$${w.topCallStrike||'—'}</td>
-          <td>$${w.topPutStrike||'—'}</td>
-          <td class="${sweepCls}">${sweepTxt}</td>
-          <td style="color:#58a6ff">${dp?fmtP(dp.poc):'—'}</td>
-          <td style="color:#3fb950">${dp?fmtP(dp.vah):'—'}</td>
-          <td style="color:#f85149">${dp?fmtP(dp.val):'—'}</td>
-          <td style="color:#8b949e;font-size:.7rem">${hvnStr}</td>
-          <td>${w.expiry||'—'}</td>
-        </tr>`;
-      }).join('');
-    } catch (e) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="14" class="at-sim-empty">Whale data temporarily unavailable</td></tr>`;
-    }
-  }
+  async function loadWhale() { /* data used by bots server-side only — no UI */ }
 
   function startTimers() {
-    if (statusTimer) return; // already running
+    if (statusTimer) return;
     loadStatus();
-    loadWhale();
     statusTimer = setInterval(loadStatus, STATUS_INTERVAL);
-    whaleTimer  = setInterval(loadWhale,  WHALE_INTERVAL);
   }
 
   function stopTimers() {

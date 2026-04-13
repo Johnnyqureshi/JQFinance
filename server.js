@@ -1261,6 +1261,18 @@ const MASTER_UNIVERSE = [
   // ── Small-cap leveraged / inverse (Russell 2000) ────────────────────────────
   // URTY = 3x long IWM | SRTY = 3x inverse IWM
   'URTY','SRTY',
+  // ── Cannabis — high-volume momentum, typically <$5 ─────────────────────────
+  'TLRY','SNDL','CGC','ACB','CRON',
+  // ── EV / clean-energy penny stocks ──────────────────────────────────────────
+  'WKHS','GOEV','MULN','NKLA',
+  // ── Biotech penny stocks (<$5, active short-term momentum) ──────────────────
+  'BNGO','OCGN','SENS','APLT','CRBP','ABVC',
+  // ── Tech / meme penny stocks ────────────────────────────────────────────────
+  'MVIS','BB','NOK','AMC','ATER','XELA','HOLO','VERB',
+  // ── Shipping / energy penny stocks ──────────────────────────────────────────
+  'IMPP','INDO','FFIE',
+  // ── Crypto-adjacent penny miners ────────────────────────────────────────────
+  'BTBT','CIFR','SLNH',
   // ── Large-cap value / defensives ───────────────────────────────────────────
   'BRK.B','V','MA','UNH','JNJ','PG','HD','MRK','COST','WMT','KO','PEP',
   'TMO','ORCL','CRM','CSCO','ACN','MCD','LIN','ADBE','ABT','DHR','NKE',

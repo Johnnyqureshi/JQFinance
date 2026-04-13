@@ -25,7 +25,7 @@ const app      = express();
 const PORT           = 5000;
 const MAX_TRADE_PRICE = 30;          // Bot only executes LONG trades on stocks priced ≤ $30
 const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 4 bots combined never hold more than 2 positions
-const MIN_RR_RATIO = 1.5;            // Minimum risk:reward required to enter any trade
+const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter any trade (raised for quality)
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
 
@@ -2253,29 +2253,64 @@ async function checkDarkPoolGate(symbol, price, direction) {
 }
 
 // ── Shared PDT guard ────────────────────────────────────────────────────────
-// Pattern Day Trader rule: ≥3 same-day round-trips in a rolling 5-day window
+// Pattern Day Trader rule: ≥4 same-day round-trips in a rolling 5-day window
 // on a margin account with equity < $25,000 triggers PDT status.
-// We block any NEW entry if: account is PDT-flagged with equity < $25k,
-//   OR account is approaching the limit (daytrade_count >= 3, not yet flagged).
+// We block any NEW entry conservatively at daytrade_count >= 2 (1-trade buffer)
+// to prevent accidentally crossing the 4-trade threshold if 2 bots fire at once.
 async function checkPDTAllowed(userId, botName) {
   try {
-    const acct = await alpacaFetch(userId, '/v2/account');
-    const equity    = parseFloat(acct.equity || 0);
-    const dtCount   = parseInt(acct.daytrade_count || 0, 10);
-    const isPDT     = !!acct.pattern_day_trader;
+    const acct    = await alpacaFetch(userId, '/v2/account');
+    const equity  = parseFloat(acct.equity || 0);
+    const dtCount = parseInt(acct.daytrade_count || 0, 10);
+    const isPDT   = !!acct.pattern_day_trader;
     if (isPDT && equity < 25000) {
-      console.log(`[${botName}] PDT flagged — equity $${equity.toFixed(0)} < $25,000 — skipping user ${userId}`);
+      console.log(`[${botName}] PDT flagged — equity $${equity.toFixed(0)} < $25,000 — blocked`);
       return false;
     }
-    if (!isPDT && dtCount >= 3) {
-      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades in rolling 5 days for user ${userId} — skipping`);
+    // Block at 2 used (not 3) — conservative 1-trade buffer prevents race conditions
+    if (!isPDT && dtCount >= 2) {
+      console.log(`[${botName}] PDT guard — ${dtCount}/2 day-trade threshold reached for user ${userId} — blocked`);
       return false;
     }
     return true;
   } catch (e) {
     console.warn(`[${botName}] Could not fetch account for PDT check (user ${userId}):`, e.message);
-    return true; // allow on fetch error — don't block all trading on API hiccup
+    return false; // block on fetch error — safety first
   }
+}
+
+// ── Cross-bot execution lock ─────────────────────────────────────────────────
+// Prevents two bots from simultaneously executing for the same user.
+// Lock expires after 90 seconds to avoid permanent deadlock on unexpected errors.
+const _botLock = new Map(); // userId -> lock acquired timestamp
+function acquireBotLock(userId) {
+  const uid = String(userId);
+  const now = Date.now();
+  const ts  = _botLock.get(uid);
+  if (ts && now - ts < 90_000) return false; // locked by another bot
+  _botLock.set(uid, now);
+  return true;
+}
+function releaseBotLock(userId) { _botLock.delete(String(userId)); }
+
+// ── Slot counter: positions + pending bracket orders ─────────────────────────
+// Each open position = 1 slot. Each pending parent bracket order (not yet filled)
+// = 1 slot. Bracket child legs (TP limit / SL stop) have legs=[] and don't count.
+async function getOpenSlots(userId, botName) {
+  let positions = [], openOrders = [];
+  try { positions = await alpacaFetch(userId, '/v2/positions'); } catch { return null; }
+  try {
+    const allOpen = await alpacaFetch(userId, '/v2/orders?status=open&limit=50');
+    // Only parent bracket orders have a non-empty legs array
+    openOrders = Array.isArray(allOpen)
+      ? allOpen.filter(o => Array.isArray(o.legs) && o.legs.length > 0)
+      : [];
+  } catch { /* positions-only fallback */ }
+  const used      = (Array.isArray(positions) ? positions.length : 0) + openOrders.length;
+  const available = Math.max(0, MAX_CONCURRENT_POSITIONS - used);
+  if (available <= 0)
+    console.log(`[${botName}] Slot cap: ${positions.length} pos + ${openOrders.length} pending orders = ${used}/${MAX_CONCURRENT_POSITIONS}`);
+  return { available, positions: Array.isArray(positions) ? positions : [], openOrders };
 }
 
 // ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
@@ -2309,16 +2344,16 @@ async function runBounceAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!acquireBotLock(user.user_id)) { console.log(`[Bounce-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
+    try {
     if (!await checkPDTAllowed(user.user_id, 'Bounce-Bot')) continue;
 
-    // Fetch positions once — enforce global position cap
-    let positions = [];
-    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
-    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
-      console.log(`[Bounce-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
-      continue;
-    }
-    if (Array.isArray(positions) && positions.some(p => p.symbol === best.symbol)) continue;
+    // Count positions + pending bracket orders toward slot cap
+    const slots = await getOpenSlots(user.user_id, 'Bounce-Bot');
+    if (!slots || slots.available <= 0) continue;
+    const positions = slots.positions;
+
+    if (positions.some(p => p.symbol === best.symbol)) continue;
     const recent = db.prepare(`SELECT id FROM auto_trade_log WHERE user_id=? AND symbol=? AND strategy='bounce' AND created_at >= datetime('now','-30 minutes')`).get(user.user_id, best.symbol);
     if (recent) continue;
 
@@ -2355,6 +2390,7 @@ async function runBounceAutoTrader() {
       db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
       console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''} | R:R ${sig.rr}`);
     } catch (e) { console.error(`[Bounce-Bot] Order failed ${tradeSymbol}:`, e.message); }
+    } finally { releaseBotLock(user.user_id); }
   }
 }
 setInterval(runBounceAutoTrader, 5 * 60 * 1000);
@@ -2396,15 +2432,14 @@ async function runVEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!acquireBotLock(user.user_id)) { console.log(`[VE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
+    try {
     if (!await checkPDTAllowed(user.user_id, 'VE-Bot')) continue;
 
-    // Fetch positions once and enforce global cap
-    let positions = [];
-    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
-    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
-      console.log(`[VE-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
-      continue;
-    }
+    // Count positions + pending bracket orders toward slot cap
+    const slots = await getOpenSlots(user.user_id, 'VE-Bot');
+    if (!slots || slots.available <= 0) continue;
+    const positions = slots.positions;
 
     for (const sig of [bestVE]) {
       const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
@@ -2497,6 +2532,7 @@ async function runVEAutoTrader() {
         } catch (e) { console.error(`[VE-Bot] Order failed ${inverseTicker}:`, e.message); }
       }
     }
+    } finally { releaseBotLock(user.user_id); }
   }
 }
 
@@ -2959,15 +2995,14 @@ async function runEEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!acquireBotLock(user.user_id)) { console.log(`[EE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
+    try {
     if (!await checkPDTAllowed(user.user_id, 'EE-Bot')) continue;
 
-    // Fetch positions once and enforce global cap
-    let positions = [];
-    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
-    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
-      console.log(`[EE-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
-      continue;
-    }
+    // Count positions + pending bracket orders toward slot cap
+    const slots = await getOpenSlots(user.user_id, 'EE-Bot');
+    if (!slots || slots.available <= 0) continue;
+    const positions = slots.positions;
 
     for (const sig of [bestEE]) {
       const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol);
@@ -3040,6 +3075,7 @@ async function runEEAutoTrader() {
         console.error(`[EE-Bot] Order failed ${tradeSymbol}:`, e.message);
       }
     }
+    } finally { releaseBotLock(user.user_id); }
   }
 }
 
@@ -3475,16 +3511,14 @@ async function runCTAutoTrader() {
   for (const user of users) {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
     if (!creds) continue;
-
+    if (!acquireBotLock(user.user_id)) { console.log(`[CT-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
+    try {
     if (!await checkPDTAllowed(user.user_id, 'CT-Bot')) continue;
 
-    // Fetch positions once and enforce global cap
-    let positions = [];
-    try { positions = await alpacaFetch(user.user_id, '/v2/positions'); } catch { continue; }
-    if (Array.isArray(positions) && positions.length >= MAX_CONCURRENT_POSITIONS) {
-      console.log(`[CT-Bot] Position cap hit (${positions.length}/${MAX_CONCURRENT_POSITIONS}) — skipping`);
-      continue;
-    }
+    // Count positions + pending bracket orders toward slot cap
+    const slots = await getOpenSlots(user.user_id, 'CT-Bot');
+    if (!slots || slots.available <= 0) continue;
+    const positions = slots.positions;
 
     for (const sig of [bestCT]) {
       // Cooldown: 1 trade per symbol per day per strategy
@@ -3579,6 +3613,7 @@ async function runCTAutoTrader() {
         } catch (e) { console.error(`[CT-Bot] Order failed ${inverseTicker}:`, e.message); }
       }
     }
+    } finally { releaseBotLock(user.user_id); }
   }
 }
 

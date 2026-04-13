@@ -1698,6 +1698,108 @@ function isMarketOpen() {
   return day >= 1 && day <= 5 && mins >= 575 && mins < 950; // 9:35–3:50 ET
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// SPY OPTIONS PRE-TRADE GATE
+// Mandatory before any SPY trade: identifies Floor (highest put OI), Roof
+// (highest call OI), and Max Pain (strike where most options expire worthless).
+// Every morning prints: SPY FLOOR: $___  |  MAX PAIN: $___  |  ROOF: $___
+// ══════════════════════════════════════════════════════════════════════════════
+let _spyLevels     = null;
+let _spyLevelsTs   = 0;
+let _spyLoggedDate = '';
+const SPY_LEVELS_TTL = 60 * 60 * 1000; // refresh every hour
+
+async function fetchSPYLevels() {
+  try {
+    const base = await yf.options('SPY');
+    // Nearest Friday expiry
+    const d = new Date(); d.setUTCHours(0,0,0,0);
+    const daysToFri = (5 - d.getUTCDay() + 7) % 7 || 7;
+    const fridayTs  = Math.floor((d.getTime() + daysToFri * 86400000) / 1000);
+    const expiryTs  = (base.expirationDates || []).reduce((best, ts) =>
+      Math.abs(ts - fridayTs) < Math.abs(best - fridayTs) ? ts : best,
+      base.expirationDates?.[0] ?? fridayTs
+    );
+    const chain = await yf.options('SPY', { date: expiryTs });
+    const calls = chain.options?.[0]?.calls ?? [];
+    const puts  = chain.options?.[0]?.puts  ?? [];
+
+    // ROOF  = call strike with highest open interest
+    const roof  = calls.reduce((b, c) => (c.openInterest||0) > (b.openInterest||0) ? c : b, { openInterest:0, strike:0 }).strike;
+    // FLOOR = put  strike with highest open interest
+    const floor = puts.reduce( (b, p) => (p.openInterest||0) > (b.openInterest||0) ? p : b, { openInterest:0, strike:0 }).strike;
+
+    // MAX PAIN = strike that minimises total intrinsic payout to all option holders
+    const strikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a-b);
+    let minPain = Infinity, maxPain = strikes[Math.floor(strikes.length/2)] ?? 0;
+    for (const s of strikes) {
+      const pain =
+        calls.reduce((sum,c) => c.strike < s ? sum+(s-c.strike)*(c.openInterest||0) : sum, 0) +
+        puts.reduce( (sum,p) => p.strike > s ? sum+(p.strike-s)*(p.openInterest||0) : sum, 0);
+      if (pain < minPain) { minPain = pain; maxPain = s; }
+    }
+    const expiry = new Date(expiryTs*1000).toISOString().slice(0,10);
+    return { floor, maxPain, roof, expiry };
+  } catch(e) {
+    console.error('[SPY-Gate] Options fetch failed:', e.message);
+    return null;
+  }
+}
+
+async function getSPYLevels() {
+  const now = Date.now();
+  if (_spyLevels && now - _spyLevelsTs < SPY_LEVELS_TTL) return _spyLevels;
+  const fresh = await fetchSPYLevels();
+  if (fresh) { _spyLevels = fresh; _spyLevelsTs = now; }
+  return _spyLevels;
+}
+
+function logSPYLevels(levels) {
+  if (!levels) return;
+  const today = new Date().toISOString().slice(0,10);
+  if (_spyLoggedDate === today) return;
+  _spyLoggedDate = today;
+  console.log('\n[SPY-Gate] ═══════════════════════════════════════════════════════');
+  console.log(`[SPY-Gate] SPY FLOOR: $${levels.floor}  |  MAX PAIN: $${levels.maxPain}  |  ROOF: $${levels.roof}  (exp ${levels.expiry})`);
+  console.log('[SPY-Gate] ═══════════════════════════════════════════════════════\n');
+}
+
+// Returns { allowed: boolean, reason: string }
+// side = 'long' (buying SPY) | 'short' (buying SH / inverse ETF)
+async function checkSPYGate(symbol, price, side = 'long') {
+  if (symbol !== 'SPY') return { allowed: true, reason: '' };
+  const levels = await getSPYLevels();
+  if (!levels) {
+    console.warn('[SPY-Gate] No options data — proceeding without gate');
+    return { allowed: true, reason: 'no options data' };
+  }
+  logSPYLevels(levels);
+  const { floor, maxPain, roof } = levels;
+  const PROX = 0.75; // "at a level" = within $0.75
+
+  if (side === 'long') {
+    if (price >= roof - PROX)  return { allowed: false, reason: `SPY $${price} AT/ABOVE ROOF $${roof} — no long` };
+    if (price <= floor + PROX) return { allowed: false, reason: `SPY $${price} AT/BELOW FLOOR $${floor} — expect bounce, no forced long` };
+    if (price > maxPain)       return { allowed: false, reason: `SPY $${price} ABOVE MAX PAIN $${maxPain} — bias SHORT, skipping long` };
+    return { allowed: true,  reason: `SPY $${price} below max pain $${maxPain} — LONG bias confirmed` };
+  }
+  // side === 'short' (buying inverse ETF)
+  if (price <= floor + PROX) return { allowed: false, reason: `SPY $${price} AT/BELOW FLOOR $${floor} — expect bounce, no short` };
+  if (price < maxPain)       return { allowed: false, reason: `SPY $${price} BELOW MAX PAIN $${maxPain} — bias LONG, skipping short` };
+  return { allowed: true, reason: `SPY $${price} above max pain $${maxPain} — SHORT bias confirmed` };
+}
+
+// Every morning at 9:28–9:32 ET, fetch and print the levels
+setInterval(async () => {
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  if (et.getDay() < 1 || et.getDay() > 5) return;
+  const mins = et.getHours()*60 + et.getMinutes();
+  if (mins >= 568 && mins <= 572) { // 9:28–9:32 AM ET
+    const levels = await getSPYLevels();
+    logSPYLevels(levels);
+  }
+}, 60 * 1000);
+
 // ── Server-side Bounce 2.0 Auto-Trader (runs after isMarketOpen is defined) ────
 async function runBounceAutoTrader() {
   if (!isMarketOpen()) return;
@@ -1732,6 +1834,8 @@ async function runBounceAutoTrader() {
       const amount = (user.amount || 500) * lev;
       const price = sig.price;
       if (price > MAX_TRADE_PRICE) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
+      const spyGate = await checkSPYGate(sig.symbol, price, 'long');
+      if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
       const shares = Math.max(1, Math.floor(amount / price));
       const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
       const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
@@ -1805,6 +1909,8 @@ async function runVEAutoTrader() {
         // ── LONG: buy the underlying directly ───────────────────────────────
         const price  = sig.price;
         if (price > MAX_TRADE_PRICE) { console.log(`[VE-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
+        const veSpyGate = await checkSPYGate(sig.symbol, price, 'long');
+        if (!veSpyGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED: ${veSpyGate.reason}`); continue; }
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
@@ -1826,6 +1932,9 @@ async function runVEAutoTrader() {
           console.log(`[VE-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
           continue;
         }
+        // SPY gate for short bias (uses underlying price, not inverse ETF price)
+        const veShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
+        if (!veShortGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED short: ${veShortGate.reason}`); continue; }
         const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
         const invPrice = invBars?.at(-1)?.c;
         if (!invPrice) {
@@ -2327,6 +2436,8 @@ async function runEEAutoTrader() {
       const amount = (user.amount || 1000) * lev;
       const price  = sig.price;
       if (price > MAX_TRADE_PRICE) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
+      const eeSpyGate = await checkSPYGate(sig.symbol, price, 'long');
+      if (!eeSpyGate.allowed) { console.log(`[EE-Bot] SPY-Gate BLOCKED: ${eeSpyGate.reason}`); continue; }
       const shares = Math.max(1, Math.floor(amount / price));
 
       // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
@@ -2830,6 +2941,8 @@ async function runCTAutoTrader() {
         // ── LONG: buy the underlying directly ─────────────────────────────
         const price  = sig.price;
         if (price > MAX_TRADE_PRICE) { console.log(`[CT-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
+        const ctSpyGate = await checkSPYGate(sig.symbol, price, 'long');
+        if (!ctSpyGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED: ${ctSpyGate.reason}`); continue; }
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);
@@ -2851,6 +2964,9 @@ async function runCTAutoTrader() {
           console.log(`[CT-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
           continue;
         }
+        // SPY gate for short bias
+        const ctShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
+        if (!ctShortGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED short: ${ctShortGate.reason}`); continue; }
         // Check cooldown on inverse ticker too
         const invAlreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === inverseTicker);
         if (invAlreadyIn) { console.log(`[CT-Bot] Already holding ${inverseTicker} — skipping`); continue; }

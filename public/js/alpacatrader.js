@@ -449,3 +449,57 @@ const simPanel = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', () => simPanel.init());
+
+// ── Whale Radar ────────────────────────────────────────────────────────────────
+const whaleRadar = (() => {
+  const BIAS_CLASS = {
+    BULLISH: 'at-whale-bias-bull', BEARISH: 'at-whale-bias-bear',
+    MIXED: 'at-whale-bias-mixed', NEUTRAL: 'at-whale-bias-neutral'
+  };
+  function fmtOI(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'K' : String(n||'—'); }
+
+  async function load() {
+    const btn  = document.getElementById('atWhaleLoad');
+    const wrap = document.getElementById('atWhaleWrap');
+    const tbody= document.getElementById('atWhaleTbody');
+    if (btn) btn.disabled = true;
+    if (btn) btn.textContent = 'Loading…';
+    if (wrap) wrap.style.display = '';
+    try {
+      const data = await fetch('/api/whale/scan').then(r => r.json());
+      if (!data.symbols || !data.symbols.length) {
+        tbody.innerHTML = `<tr><td colspan="10" class="at-sim-empty">No options data available right now</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = data.symbols.map(w => {
+        const biasClass = BIAS_CLASS[w.bias] || '';
+        const sweepTxt  = w.callSweep && w.putSweep ? '🐋 BOTH'
+                        : w.callSweep ? '🐋 CALL' : w.putSweep ? '🐋 PUT' : '—';
+        const sweepCls  = (w.callSweep || w.putSweep) ? 'at-whale-sweep' : '';
+        return `<tr>
+          <td><strong>${w.symbol}</strong></td>
+          <td class="${biasClass}">${w.bias}</td>
+          <td>${w.callPutRatio.toFixed(2)}</td>
+          <td>${w.putCallRatio.toFixed(2)}</td>
+          <td>${fmtOI(w.totalCallOI)}</td>
+          <td>${fmtOI(w.totalPutOI)}</td>
+          <td>$${w.topCallStrike||'—'}</td>
+          <td>$${w.topPutStrike||'—'}</td>
+          <td class="${sweepCls}">${sweepTxt}</td>
+          <td>${w.expiry||'—'}</td>
+        </tr>`;
+      }).join('');
+    } catch(e) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="at-sim-empty">Failed to load whale data</td></tr>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh Whale Data'; }
+    }
+  }
+
+  function init() {
+    document.getElementById('atWhaleLoad')?.addEventListener('click', load);
+  }
+  return { init, load };
+})();
+
+document.addEventListener('DOMContentLoaded', () => whaleRadar.init());

@@ -877,6 +877,22 @@
         <span id="atSimTriggerMsg" class="at-sim-trigger-msg"></span>
       </div>
 
+      <!-- Whale Radar -->
+      <div class="at-sim-section-label">
+        Whale Radar — Options OI Analysis
+        <button class="at-sim-whale-btn" id="atWhaleLoad">Load Whale Data</button>
+      </div>
+      <div class="at-sim-trades-wrap" id="atWhaleWrap" style="display:none">
+        <table class="at-sim-trades-table" id="atWhaleTable">
+          <thead><tr>
+            <th>Symbol</th><th>Bias</th><th>Call/Put</th><th>Put/Call</th>
+            <th>Total Call OI</th><th>Total Put OI</th>
+            <th>Top Call $</th><th>Top Put $</th><th>Sweep</th><th>Expiry</th>
+          </tr></thead>
+          <tbody id="atWhaleTbody"><tr><td colspan="10" class="at-sim-empty">Click "Load Whale Data" to fetch options OI</td></tr></tbody>
+        </table>
+      </div>
+
       <!-- Recent trades table -->
       <div class="at-sim-section-label">Recent Bot Trades (last 10)</div>
       <div class="at-sim-trades-wrap">

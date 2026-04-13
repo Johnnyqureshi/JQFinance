@@ -1432,6 +1432,49 @@ app.post('/api/bots/trigger', requireAuth, async (req, res) => {
 });
 
 
+// ── GET /api/whale/scan — whale radar for a curated watchlist ─────────────────
+// Scans 20 high-OI symbols concurrently, returns call/put ratios, sweep flags,
+// and top concentrated strikes.  Results are served from the 15-min cache so
+// repeated calls are instant.
+const WHALE_RADAR_SYMBOLS = [
+  'SPY','QQQ','NVDA','TSLA','AAPL','AMD','META','AMZN','GOOGL','MSFT',
+  'PLTR','MSTR','COIN','HOOD','MARA','SOFI','RIVN','NIO','AMC','GME'
+];
+
+app.get('/api/whale/scan', requireAuth, async (req, res) => {
+  try {
+    const results = await Promise.allSettled(
+      WHALE_RADAR_SYMBOLS.map(async sym => {
+        const w = await detectWhaleSignal(sym);
+        if (!w) return null;
+        return {
+          symbol: sym,
+          callPutRatio: parseFloat(w.callPutRatio.toFixed(2)),
+          putCallRatio: parseFloat(w.putCallRatio.toFixed(2)),
+          totalCallOI: w.totalCallOI,
+          totalPutOI: w.totalPutOI,
+          callSweep: w.callSweep,
+          putSweep: w.putSweep,
+          topCallStrike: w.topCallStrike,
+          topPutStrike: w.topPutStrike,
+          expiry: w.expiry,
+          bias: w.bullish && !w.bearish ? 'BULLISH'
+              : w.bearish && !w.bullish ? 'BEARISH'
+              : w.bullish && w.bearish  ? 'MIXED'
+              : 'NEUTRAL'
+        };
+      })
+    );
+    const data = results
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value)
+      .sort((a, b) => b.totalCallOI + b.totalPutOI - (a.totalCallOI + a.totalPutOI));
+    res.json({ symbols: data, scannedAt: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // VOLATILITY EXPANSION STRATEGY ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1888,6 +1931,82 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
+// ── Whale Activity Detection (Options OI Analysis) ──────────────────────────
+// Detects institutional / "whale" positioning by analysing the front-month
+// options chain for a symbol.  We look at:
+//   1. Call/Put OI ratio  — overall directional bias
+//   2. Concentrated sweeps — any single strike with OI > 3× the avg strike OI
+//      (signals a large block order was placed there)
+// Cache: 15-minute TTL per symbol to avoid hammering Yahoo Finance.
+const _whaleCache = new Map();
+const WHALE_TTL   = 15 * 60 * 1000;
+
+async function detectWhaleSignal(symbol) {
+  const now    = Date.now();
+  const cached = _whaleCache.get(symbol);
+  if (cached && now - cached.ts < WHALE_TTL) return cached.data;
+  try {
+    const base   = await yf.options(symbol);
+    const today  = Math.floor(new Date().setUTCHours(0,0,0,0) / 1000);
+    const upcoming = (base.expirationDates || []).filter(ts => ts >= today);
+    if (!upcoming.length) { _whaleCache.set(symbol, { data: null, ts: now }); return null; }
+    const chain  = await yf.options(symbol, { date: upcoming[0] });
+    const calls  = chain.options?.[0]?.calls ?? [];
+    const puts   = chain.options?.[0]?.puts  ?? [];
+    const totalCallOI = calls.reduce((s, c) => s + (c.openInterest || 0), 0);
+    const totalPutOI  = puts.reduce( (s, p) => s + (p.openInterest || 0), 0);
+    if (!totalCallOI && !totalPutOI) { _whaleCache.set(symbol, { data: null, ts: now }); return null; }
+    const callPutRatio = totalPutOI  > 0 ? totalCallOI / totalPutOI : 99;
+    const putCallRatio = totalCallOI > 0 ? totalPutOI  / totalCallOI : 99;
+    // Sweep detection: any strike with OI > 3× the average OI for that side
+    const avgCallOI  = totalCallOI / Math.max(calls.length, 1);
+    const avgPutOI   = totalPutOI  / Math.max(puts.length, 1);
+    const callSweep  = calls.some(c => (c.openInterest || 0) > avgCallOI * 3);
+    const putSweep   = puts.some( p => (p.openInterest || 0) > avgPutOI  * 3);
+    // Top concentrated strikes (for logging)
+    const topCall = calls.reduce((b, c) => (c.openInterest||0) > (b.openInterest||0) ? c : b, { openInterest:0, strike:0 });
+    const topPut  = puts.reduce( (b, p) => (p.openInterest||0) > (b.openInterest||0) ? p : b, { openInterest:0, strike:0 });
+    const expiry  = new Date(upcoming[0] * 1000).toISOString().slice(0, 10);
+    const result  = {
+      totalCallOI, totalPutOI, callPutRatio, putCallRatio,
+      callSweep, putSweep, expiry,
+      topCallStrike: topCall.strike, topPutStrike: topPut.strike,
+      bullish: callPutRatio > 1.5 || callSweep,
+      bearish: putCallRatio > 1.5 || putSweep
+    };
+    _whaleCache.set(symbol, { data: result, ts: now });
+    return result;
+  } catch (e) {
+    _whaleCache.set(symbol, { data: null, ts: now });
+    return null;
+  }
+}
+
+// Returns { allowed: bool, reason: string }
+// direction = 'LONG' | 'SHORT'
+// SPY is already handled by the SPY options gate — skip duplicate analysis.
+async function checkWhaleGate(symbol, direction) {
+  if (symbol === 'SPY') return { allowed: true, reason: '' }; // SPY gate handles this
+  const whale = await detectWhaleSignal(symbol);
+  if (!whale) return { allowed: true, reason: 'no options data' };
+  const { callPutRatio, putCallRatio, callSweep, putSweep } = whale;
+  if (direction === 'LONG') {
+    if (putCallRatio >= 2.0)
+      return { allowed: false, reason: `Whale BEARISH — put/call ${putCallRatio.toFixed(2)}:1 on ${symbol}` };
+    if (putSweep && !callSweep && putCallRatio > 1.5)
+      return { allowed: false, reason: `Whale PUT sweep on ${symbol} — skipping LONG` };
+    return { allowed: true, reason: callPutRatio >= 1.5 ? `Whale BULLISH (call/put ${callPutRatio.toFixed(2)})` : '' };
+  }
+  if (direction === 'SHORT') {
+    if (callPutRatio >= 2.0)
+      return { allowed: false, reason: `Whale BULLISH — call/put ${callPutRatio.toFixed(2)}:1 on ${symbol}` };
+    if (callSweep && !putSweep && callPutRatio > 1.5)
+      return { allowed: false, reason: `Whale CALL sweep on ${symbol} — skipping SHORT` };
+    return { allowed: true, reason: putCallRatio >= 1.5 ? `Whale BEARISH (put/call ${putCallRatio.toFixed(2)})` : '' };
+  }
+  return { allowed: true, reason: '' };
+}
+
 // ── Shared PDT guard ────────────────────────────────────────────────────────
 // Pattern Day Trader rule: ≥3 same-day round-trips in a rolling 5-day window
 // on a margin account with equity < $25,000 triggers PDT status.
@@ -1951,6 +2070,9 @@ async function runBounceAutoTrader() {
       if (price > MAX_TRADE_PRICE) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const spyGate = await checkSPYGate(sig.symbol, price, 'long');
       if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
+      const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
+      if (!bounceWhaleGate.allowed) { console.log(`[Bounce-Bot] Whale-Gate BLOCKED: ${bounceWhaleGate.reason}`); continue; }
+      if (bounceWhaleGate.reason) console.log(`[Bounce-Bot] Whale-Gate: ${bounceWhaleGate.reason}`);
       const shares = Math.max(1, Math.floor(amount / price));
       const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
       const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
@@ -2027,6 +2149,9 @@ async function runVEAutoTrader() {
         if (price > MAX_TRADE_PRICE) { console.log(`[VE-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const veSpyGate = await checkSPYGate(sig.symbol, price, 'long');
         if (!veSpyGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED: ${veSpyGate.reason}`); continue; }
+        const veLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
+        if (!veLongWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED: ${veLongWhaleGate.reason}`); continue; }
+        if (veLongWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate: ${veLongWhaleGate.reason}`);
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
@@ -2051,6 +2176,9 @@ async function runVEAutoTrader() {
         // SPY gate for short bias (uses underlying price, not inverse ETF price)
         const veShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
         if (!veShortGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED short: ${veShortGate.reason}`); continue; }
+        const veShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
+        if (!veShortWhaleGate.allowed) { console.log(`[VE-Bot] Whale-Gate BLOCKED short: ${veShortWhaleGate.reason}`); continue; }
+        if (veShortWhaleGate.reason) console.log(`[VE-Bot] Whale-Gate short: ${veShortWhaleGate.reason}`);
         const invBars = await fetchOHLCV(inverseTicker, 2).catch(() => null);
         const invPrice = invBars?.at(-1)?.c;
         if (!invPrice) {
@@ -2555,6 +2683,9 @@ async function runEEAutoTrader() {
       if (price > MAX_TRADE_PRICE) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const eeSpyGate = await checkSPYGate(sig.symbol, price, 'long');
       if (!eeSpyGate.allowed) { console.log(`[EE-Bot] SPY-Gate BLOCKED: ${eeSpyGate.reason}`); continue; }
+      const eeWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
+      if (!eeWhaleGate.allowed) { console.log(`[EE-Bot] Whale-Gate BLOCKED: ${eeWhaleGate.reason}`); continue; }
+      if (eeWhaleGate.reason) console.log(`[EE-Bot] Whale-Gate: ${eeWhaleGate.reason}`);
       const shares = Math.max(1, Math.floor(amount / price));
 
       // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
@@ -3050,6 +3181,9 @@ async function runCTAutoTrader() {
         if (price > MAX_TRADE_PRICE) { console.log(`[CT-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const ctSpyGate = await checkSPYGate(sig.symbol, price, 'long');
         if (!ctSpyGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED: ${ctSpyGate.reason}`); continue; }
+        const ctLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
+        if (!ctLongWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED: ${ctLongWhaleGate.reason}`); continue; }
+        if (ctLongWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate: ${ctLongWhaleGate.reason}`);
         const shares = Math.max(1, Math.floor(amount / price));
         const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
         const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);
@@ -3074,6 +3208,9 @@ async function runCTAutoTrader() {
         // SPY gate for short bias
         const ctShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
         if (!ctShortGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED short: ${ctShortGate.reason}`); continue; }
+        const ctShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
+        if (!ctShortWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED short: ${ctShortWhaleGate.reason}`); continue; }
+        if (ctShortWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate short: ${ctShortWhaleGate.reason}`);
         // Check cooldown on inverse ticker too
         const invAlreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === inverseTicker);
         if (invAlreadyIn) { console.log(`[CT-Bot] Already holding ${inverseTicker} — skipping`); continue; }

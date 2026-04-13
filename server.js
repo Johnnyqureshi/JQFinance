@@ -1309,6 +1309,8 @@ const MASTER_UNIVERSE = [
   'WIF','POPCAT','MOODENG','PENGU','FLOKI','SHIB','BONK','PEPE',
   // ── Smaller / emerging tokens ──────────────────────────────────────────────
   'WLFI','AVNT','XPL','SKR','ZORA','XCN','MEW','CC',
+  // ── User-added ─────────────────────────────────────────────────────────────
+  'ADBG','GLND',
 ];
 const BOUNCE_UNIVERSE = MASTER_UNIVERSE;
 
@@ -2267,9 +2269,9 @@ async function checkPDTAllowed(userId, botName) {
       console.log(`[${botName}] PDT flagged — equity $${equity.toFixed(0)} < $25,000 — blocked`);
       return false;
     }
-    // Block at 2 used (not 3) — conservative 1-trade buffer prevents race conditions
-    if (!isPDT && dtCount >= 2) {
-      console.log(`[${botName}] PDT guard — ${dtCount}/2 day-trade threshold reached for user ${userId} — blocked`);
+    // Block at 3 used — the cross-bot lock prevents concurrent races so we use the natural limit
+    if (!isPDT && dtCount >= 3) {
+      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades used (rolling 5-day) for user ${userId} — blocked`);
       return false;
     }
     return true;

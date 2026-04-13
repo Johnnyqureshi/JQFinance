@@ -4199,6 +4199,23 @@ async function runORBAutoTrader() {
     try {
       if (!await checkPDTAllowed(user.user_id, 'ORB-Bot')) continue;
 
+      // ── ORB PDT-caution guard: if ≥3 winning ORB trades in the last 5 ──────
+      // calendar days, rest until that window rolls off to protect day-trade
+      // count from creeping toward the PDT 3-trade limit.
+      {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 5);
+        const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+        const { cnt: recentWins } = db.prepare(`
+          SELECT COUNT(*) AS cnt FROM orb_session_log
+          WHERE user_id=? AND trade_taken=1 AND result='WIN' AND trade_date >= ?
+        `).get(user.user_id, cutoffStr);
+        if (recentWins >= 3) {
+          console.log(`[ORB-Bot] User ${user.user_id} has ${recentWins} ORB wins in last 5 days — resting to preserve PDT headroom`);
+          continue;
+        }
+      }
+
       const slots = await getOpenSlots(user.user_id, 'ORB-Bot');
       if (!slots || slots.available <= 0) continue;
       const positions   = slots.positions;

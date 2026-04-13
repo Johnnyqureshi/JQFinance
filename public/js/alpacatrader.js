@@ -538,7 +538,8 @@ const simPanel = (() => {
     }
   }
 
-  return { init, loadStatus, loadWhale };
+  function load() { loadStatus(); loadWhale(); }
+  return { init, load, loadStatus, loadWhale };
 })();
 
 document.addEventListener('DOMContentLoaded', () => simPanel.init());

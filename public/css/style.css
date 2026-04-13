@@ -7311,13 +7311,24 @@ option { background: var(--card); }
 .at-bots-sub         { font-weight: 400; font-size: 0.72rem; color: #484f58; text-transform: none; letter-spacing: 0; margin-left: 6px; }
 .at-bots-grid        { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 
-.at-bot-card              { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; }
+.at-bot-card              { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; transition: border-color .2s, opacity .2s; }
 .at-bot-card--always-on   { border-color: #3fb95033; }
+.at-bot-card--disabled    { opacity: .5; border-color: #30363d !important; }
 .at-bot-head              { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .at-bot-name              { font-size: 0.85rem; font-weight: 700; color: #e6edf3; }
 .at-bot-badge             { padding: 2px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; background: #30363d; color: #8b949e; }
 .at-bot-badge--on         { background: #3fb95022; color: #3fb950; }
 .at-bot-desc              { font-size: 0.72rem; color: #8b949e; line-height: 1.4; }
+
+/* ── Bot toggle switch ── */
+.bot-toggle               { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.bot-toggle-cb            { position: absolute; opacity: 0; width: 0; height: 0; }
+.bot-toggle-track         { position: relative; width: 34px; height: 18px; border-radius: 9px; background: #30363d; transition: background .2s; flex-shrink: 0; }
+.bot-toggle-cb:checked + .bot-toggle-track { background: #3fb950; }
+.bot-toggle-thumb         { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left .18s; }
+.bot-toggle-cb:checked + .bot-toggle-track .bot-toggle-thumb { left: 19px; }
+.bot-toggle-label         { font-size: 0.65rem; font-weight: 700; color: #8b949e; width: 22px; transition: color .2s; }
+.bot-toggle-cb:checked ~ .bot-toggle-label { color: #3fb950; }
 .at-bot-fields       { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .at-bot-lbl          { display: flex; flex-direction: column; gap: 3px; font-size: 0.7rem; color: #8b949e; }
 .at-bot-inp          { background: #0d1117; border: 1px solid #30363d; border-radius: 5px; color: #e6edf3; padding: 5px 8px; font-size: 0.8rem; width: 90px; outline: none; font-family: 'DM Mono', monospace; }

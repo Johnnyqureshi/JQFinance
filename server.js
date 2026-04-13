@@ -155,6 +155,17 @@ db.prepare(`
   )
 `).run();
 
+// ── Bot toggles — per-user on/off state for each of the 6 bots ───────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS bot_toggles (
+    user_id  INTEGER NOT NULL,
+    bot_name TEXT    NOT NULL,
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, bot_name),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
+
 // ── ORB session log — one row per user per trading day ────────────────────────
 db.prepare(`
   CREATE TABLE IF NOT EXISTS orb_session_log (
@@ -1468,6 +1479,34 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
   }
 });
 
+// ── Bot toggle helpers ─────────────────────────────────────────────────────────
+const BOT_NAMES = ['bounce','volatility_expansion','explosive_earnings','countertrend','momentum','orb'];
+
+function isBotEnabled(userId, botName) {
+  const row = db.prepare('SELECT enabled FROM bot_toggles WHERE user_id=? AND bot_name=?').get(userId, botName);
+  return row ? !!row.enabled : true; // default ON if no row exists yet
+}
+
+// GET /api/bots/toggles — returns { bounce: true, volatility_expansion: false, … }
+app.get('/api/bots/toggles', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT bot_name, enabled FROM bot_toggles WHERE user_id=?').all(req.session.userId);
+  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, true])); // default all ON
+  rows.forEach(r => { map[r.bot_name] = !!r.enabled; });
+  res.json(map);
+});
+
+// POST /api/bots/toggle — body: { bot: 'bounce', enabled: true/false }
+app.post('/api/bots/toggle', requireAuth, (req, res) => {
+  const { bot, enabled } = req.body;
+  if (!BOT_NAMES.includes(bot)) return res.status(400).json({ error: 'Unknown bot name' });
+  db.prepare(`
+    INSERT INTO bot_toggles (user_id, bot_name, enabled) VALUES (?,?,?)
+    ON CONFLICT(user_id, bot_name) DO UPDATE SET enabled=excluded.enabled
+  `).run(req.session.userId, bot, enabled ? 1 : 0);
+  console.log(`[Bot-Toggle] User ${req.session.userId} set ${bot} → ${enabled ? 'ON' : 'OFF'}`);
+  res.json({ ok: true, bot, enabled: !!enabled });
+});
+
 // ── POST /api/bots/trigger — manually fire one scan cycle on all 4 bots ──────
 app.post('/api/bots/trigger', requireAuth, async (req, res) => {
   if (!isMarketOpen()) return res.json({ ok: false, message: 'Market is closed — bots only trade during market hours (9:30–16:00 ET Mon–Fri).' });
@@ -2636,6 +2675,7 @@ async function runBounceAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'bounce')) { console.log(`[Bounce-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) { console.log(`[Bounce-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
     try {
     if (!await checkPDTAllowed(user.user_id, 'Bounce-Bot')) continue;
@@ -2724,6 +2764,7 @@ async function runVEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'volatility_expansion')) { console.log(`[VE-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) { console.log(`[VE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
     try {
     if (!await checkPDTAllowed(user.user_id, 'VE-Bot')) continue;
@@ -3287,6 +3328,7 @@ async function runEEAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'explosive_earnings')) { console.log(`[EE-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) { console.log(`[EE-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
     try {
     if (!await checkPDTAllowed(user.user_id, 'EE-Bot')) continue;
@@ -3803,6 +3845,7 @@ async function runCTAutoTrader() {
   for (const user of users) {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'countertrend')) { console.log(`[CT-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) { console.log(`[CT-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }
     try {
     if (!await checkPDTAllowed(user.user_id, 'CT-Bot')) continue;
@@ -3964,6 +4007,7 @@ async function runMomentumAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'momentum')) { console.log(`[Momentum-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) {
       console.log(`[Momentum-Bot] User ${user.user_id} locked by another bot — skipping`);
       continue;
@@ -4139,6 +4183,7 @@ async function runORBAutoTrader() {
   for (const user of users) {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
+    if (!isBotEnabled(user.user_id, 'orb')) { console.log(`[ORB-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
 
     // One trade per day per user
     const sessionRow = db.prepare(`SELECT * FROM orb_session_log WHERE user_id = ? AND trade_date = ?`).get(user.user_id, today);

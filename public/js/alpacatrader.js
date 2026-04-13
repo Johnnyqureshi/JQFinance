@@ -477,4 +477,54 @@ const simPanel = (() => {
   return { init, load, loadStatus, loadWhale };
 })();
 
-document.addEventListener('DOMContentLoaded', () => simPanel.init());
+// ── Bot toggle switches ────────────────────────────────────────────────────────
+async function initBotToggles() {
+  const checkboxes = document.querySelectorAll('.bot-toggle-cb');
+  if (!checkboxes.length) return;
+
+  // Load saved states from server
+  try {
+    const states = await fetch('/api/bots/toggles').then(r => r.json());
+    checkboxes.forEach(cb => {
+      const bot = cb.dataset.bot;
+      if (bot && states[bot] !== undefined) {
+        cb.checked = states[bot];
+        updateToggleUI(cb);
+      }
+    });
+  } catch (e) {
+    console.warn('[bot-toggles] Could not load toggle states:', e.message);
+  }
+
+  // Wire up change handlers
+  checkboxes.forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const bot     = cb.dataset.bot;
+      const enabled = cb.checked;
+      updateToggleUI(cb);
+      try {
+        await fetch('/api/bots/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bot, enabled })
+        });
+      } catch (e) {
+        console.warn('[bot-toggles] Toggle save failed:', e.message);
+        cb.checked = !enabled; // revert on failure
+        updateToggleUI(cb);
+      }
+    });
+  });
+}
+
+function updateToggleUI(cb) {
+  const label = cb.closest('.bot-toggle')?.querySelector('.bot-toggle-label');
+  if (label) label.textContent = cb.checked ? 'ON' : 'OFF';
+  const card  = cb.closest('.at-bot-card');
+  if (card) card.classList.toggle('at-bot-card--disabled', !cb.checked);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  simPanel.init();
+  initBotToggles();
+});

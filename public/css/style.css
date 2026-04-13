@@ -7320,6 +7320,21 @@ option { background: var(--card); }
 .at-bot-badge--on         { background: #3fb95022; color: #3fb950; }
 .at-bot-desc              { font-size: 0.72rem; color: #8b949e; line-height: 1.4; }
 
+/* ── Swing bot position-size settings row ── */
+.swing-settings-row       { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid #21262d; }
+.swing-settings-label     { font-size: 0.7rem; color: #8b949e; white-space: nowrap; }
+.swing-settings-mode      { display: flex; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.swing-mode-btn           { background: none; border: none; padding: 3px 9px; font-size: 0.68rem; color: #8b949e; cursor: pointer; transition: background .15s, color .15s; white-space: nowrap; }
+.swing-mode-btn.active    { background: #388bfd22; color: #58a6ff; }
+.swing-mode-btn:hover:not(.active) { background: #21262d; color: #c9d1d9; }
+.swing-settings-input-wrap { display: flex; align-items: center; gap: 3px; }
+.swing-input-prefix        { font-size: 0.72rem; color: #8b949e; }
+.swing-position-input      { width: 72px; background: #0d1117; border: 1px solid #30363d; border-radius: 5px; color: #e6edf3; padding: 3px 7px; font-size: 0.75rem; outline: none; }
+.swing-position-input:focus { border-color: #388bfd; }
+.swing-save-btn            { padding: 3px 12px; background: #388bfd; border: none; border-radius: 5px; color: #fff; font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+.swing-save-btn:hover      { background: #58a6ff; }
+.swing-save-status         { font-size: 0.68rem; color: #3fb950; min-width: 40px; }
+
 /* ── Bot toggle switch ── */
 .bot-toggle               { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .bot-toggle-cb            { position: absolute; opacity: 0; width: 0; height: 0; }

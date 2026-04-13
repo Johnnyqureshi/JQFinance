@@ -523,7 +523,66 @@ function updateToggleUI(cb) {
   if (card) card.classList.toggle('at-bot-card--disabled', !cb.checked);
 }
 
+// ── Swing position-size settings ─────────────────────────────────────────────
+async function initSwingSettings() {
+  const row      = document.getElementById('swingSettingsRow');
+  if (!row) return;
+
+  const btnPct   = document.getElementById('swingBtnPct');
+  const btnFixed = document.getElementById('swingBtnFixed');
+  const prefix   = document.getElementById('swingInputPrefix');
+  const input    = document.getElementById('swingPositionValue');
+  const saveBtn  = document.getElementById('swingSaveBtn');
+  const status   = document.getElementById('swingSaveStatus');
+
+  let currentMode = 'pct';
+
+  function setMode(mode) {
+    currentMode = mode;
+    btnPct.classList.toggle('active', mode === 'pct');
+    btnFixed.classList.toggle('active', mode === 'fixed');
+    prefix.textContent = mode === 'pct' ? '%' : '$';
+    input.step  = mode === 'pct' ? '1' : '100';
+    input.min   = mode === 'pct' ? '1' : '1';
+  }
+
+  // Load current settings from server
+  try {
+    const data = await fetch('/api/swing/settings', { credentials: 'include' }).then(r => r.json());
+    setMode(data.position_mode || 'pct');
+    input.value = data.position_mode === 'fixed'
+      ? (data.position_amount || 5000)
+      : (data.position_pct || 15);
+  } catch (_) {}
+
+  btnPct.addEventListener('click',   () => setMode('pct'));
+  btnFixed.addEventListener('click', () => setMode('fixed'));
+
+  saveBtn.addEventListener('click', async () => {
+    const val = parseFloat(input.value);
+    if (!val || val <= 0) { status.textContent = 'Invalid'; return; }
+    status.textContent = '…';
+    try {
+      await fetch('/api/swing/settings', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          position_mode:   currentMode,
+          position_pct:    currentMode === 'pct'   ? val : 15,
+          position_amount: currentMode === 'fixed' ? val : 5000,
+        }),
+      });
+      status.textContent = 'Saved ✓';
+      setTimeout(() => { status.textContent = ''; }, 2500);
+    } catch (e) {
+      status.textContent = 'Error';
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   simPanel.init();
   initBotToggles();
+  initSwingSettings();
 });

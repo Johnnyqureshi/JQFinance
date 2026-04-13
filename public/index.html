@@ -793,6 +793,19 @@
             </label>
           </div>
           <div class="at-bot-desc">Weekly chart signals only · Long: SPY/QQQ near 200w SMA · Inverse: SH when SPY extended · 5-condition entry · TP1/TP2/TP3 @ 21w EMA / 50w SMA / swing high · Min 5-day hold · Monday entry</div>
+          <div class="swing-settings-row" id="swingSettingsRow">
+            <span class="swing-settings-label">Position size</span>
+            <div class="swing-settings-mode" id="swingModeToggle">
+              <button class="swing-mode-btn active" data-mode="pct" id="swingBtnPct">% of equity</button>
+              <button class="swing-mode-btn" data-mode="fixed" id="swingBtnFixed">Fixed $</button>
+            </div>
+            <div class="swing-settings-input-wrap">
+              <span class="swing-input-prefix" id="swingInputPrefix">%</span>
+              <input type="number" id="swingPositionValue" class="swing-position-input" min="1" step="1" value="15" title="Position size">
+            </div>
+            <button class="swing-save-btn" id="swingSaveBtn">Save</button>
+            <span class="swing-save-status" id="swingSaveStatus"></span>
+          </div>
         </div>
 
         <!-- Bot 2: Countertrend -->

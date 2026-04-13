@@ -523,47 +523,49 @@ function updateToggleUI(cb) {
   if (card) card.classList.toggle('at-bot-card--disabled', !cb.checked);
 }
 
-// ── Swing position-size settings ─────────────────────────────────────────────
-async function initSwingSettings() {
-  const row      = document.getElementById('swingSettingsRow');
-  if (!row) return;
+// ── Global Trading Settings module ───────────────────────────────────────────
+async function initTradeSettings() {
+  const mod = document.getElementById('tradeSettingsModule');
+  if (!mod) return;
 
-  const btnPct   = document.getElementById('swingBtnPct');
-  const btnFixed = document.getElementById('swingBtnFixed');
-  const prefix   = document.getElementById('swingInputPrefix');
-  const input    = document.getElementById('swingPositionValue');
-  const saveBtn  = document.getElementById('swingSaveBtn');
-  const status   = document.getElementById('swingSaveStatus');
+  const btnPct    = document.getElementById('tsBtnPct');
+  const btnFixed  = document.getElementById('tsBtnFixed');
+  const prefix    = document.getElementById('tsInputPrefix');
+  const input     = document.getElementById('tsPositionValue');
+  const levGroup  = document.getElementById('tsLevGroup');
+  const savedBadge = document.getElementById('tsSavedBadge');
 
   let currentMode = 'pct';
+  let currentLev  = 1;
+  let saveTimer   = null;
 
   function setMode(mode) {
     currentMode = mode;
     btnPct.classList.toggle('active', mode === 'pct');
     btnFixed.classList.toggle('active', mode === 'fixed');
     prefix.textContent = mode === 'pct' ? '%' : '$';
-    input.step  = mode === 'pct' ? '1' : '100';
-    input.min   = mode === 'pct' ? '1' : '1';
+    input.step = mode === 'pct' ? '1'   : '100';
+    input.min  = mode === 'pct' ? '1'   : '1';
+    input.placeholder = mode === 'pct' ? '15' : '5000';
   }
 
-  // Load current settings from server
-  try {
-    const data = await fetch('/api/swing/settings', { credentials: 'include' }).then(r => r.json());
-    setMode(data.position_mode || 'pct');
-    input.value = data.position_mode === 'fixed'
-      ? (data.position_amount || 5000)
-      : (data.position_pct || 15);
-  } catch (_) {}
+  function setLev(lev) {
+    currentLev = lev;
+    levGroup.querySelectorAll('.ts-lev-btn').forEach(b => b.classList.toggle('active', +b.dataset.lev === lev));
+  }
 
-  btnPct.addEventListener('click',   () => setMode('pct'));
-  btnFixed.addEventListener('click', () => setMode('fixed'));
+  function flashSaved() {
+    savedBadge.textContent = 'Auto-saved ✓';
+    savedBadge.classList.add('visible');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => savedBadge.classList.remove('visible'), 2200);
+  }
 
-  saveBtn.addEventListener('click', async () => {
+  async function persist() {
     const val = parseFloat(input.value);
-    if (!val || val <= 0) { status.textContent = 'Invalid'; return; }
-    status.textContent = '…';
+    if (!val || val <= 0) return;
     try {
-      await fetch('/api/swing/settings', {
+      await fetch('/api/trade-settings', {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -571,18 +573,36 @@ async function initSwingSettings() {
           position_mode:   currentMode,
           position_pct:    currentMode === 'pct'   ? val : 15,
           position_amount: currentMode === 'fixed' ? val : 5000,
+          leverage:        currentLev,
         }),
       });
-      status.textContent = 'Saved ✓';
-      setTimeout(() => { status.textContent = ''; }, 2500);
-    } catch (e) {
-      status.textContent = 'Error';
-    }
+      flashSaved();
+    } catch (_) {}
+  }
+
+  // Load current settings from server
+  try {
+    const data = await fetch('/api/trade-settings', { credentials: 'include' }).then(r => r.json());
+    setMode(data.position_mode || 'pct');
+    setLev(data.leverage || 1);
+    input.value = data.position_mode === 'fixed'
+      ? (data.position_amount || 5000)
+      : (data.position_pct    || 15);
+  } catch (_) {}
+
+  btnPct.addEventListener('click',   () => { setMode('pct');   persist(); });
+  btnFixed.addEventListener('click', () => { setMode('fixed'); persist(); });
+
+  levGroup.querySelectorAll('.ts-lev-btn').forEach(btn => {
+    btn.addEventListener('click', () => { setLev(+btn.dataset.lev); persist(); });
   });
+
+  input.addEventListener('change', persist);
+  input.addEventListener('blur',   persist);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   simPanel.init();
   initBotToggles();
-  initSwingSettings();
+  initTradeSettings();
 });

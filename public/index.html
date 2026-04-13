@@ -780,6 +780,40 @@
         Automated Bot Strategies
         <span class="at-bots-sub">3 active bots · Swing (weekly), CT, and ORB run automatically · Connect Alpaca to activate</span>
       </div>
+      <!-- ── Global Trading Settings module ──────────────────────────────── -->
+      <div class="ts-module" id="tradeSettingsModule">
+        <div class="ts-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          Trading Settings
+          <span class="ts-saved" id="tsSavedBadge"></span>
+        </div>
+        <div class="ts-rows">
+          <!-- Position Size -->
+          <div class="ts-row">
+            <span class="ts-label">Position size</span>
+            <div class="ts-mode-group">
+              <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% of equity</button>
+              <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
+            </div>
+            <div class="ts-input-wrap">
+              <span class="ts-input-prefix" id="tsInputPrefix">%</span>
+              <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size">
+            </div>
+          </div>
+          <!-- Leverage -->
+          <div class="ts-row">
+            <span class="ts-label">Leverage</span>
+            <div class="ts-lev-group" id="tsLevGroup">
+              <button class="ts-lev-btn active" data-lev="1">1×</button>
+              <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
+              <button class="ts-lev-btn" data-lev="2">2×</button>
+              <button class="ts-lev-btn" data-lev="3">3×</button>
+            </div>
+            <span class="ts-lev-note">Applies to all bot position values</span>
+          </div>
+        </div>
+      </div>
+
       <div class="at-bots-grid">
 
         <!-- Bot 1: Swing Trading -->
@@ -793,19 +827,6 @@
             </label>
           </div>
           <div class="at-bot-desc">Weekly chart signals only · Long: SPY/QQQ near 200w SMA · Inverse: SH when SPY extended · 5-condition entry · TP1/TP2/TP3 @ 21w EMA / 50w SMA / swing high · Min 5-day hold · Monday entry</div>
-          <div class="swing-settings-row" id="swingSettingsRow">
-            <span class="swing-settings-label">Position size</span>
-            <div class="swing-settings-mode" id="swingModeToggle">
-              <button class="swing-mode-btn active" data-mode="pct" id="swingBtnPct">% of equity</button>
-              <button class="swing-mode-btn" data-mode="fixed" id="swingBtnFixed">Fixed $</button>
-            </div>
-            <div class="swing-settings-input-wrap">
-              <span class="swing-input-prefix" id="swingInputPrefix">%</span>
-              <input type="number" id="swingPositionValue" class="swing-position-input" min="1" step="1" value="15" title="Position size">
-            </div>
-            <button class="swing-save-btn" id="swingSaveBtn">Save</button>
-            <span class="swing-save-status" id="swingSaveStatus"></span>
-          </div>
         </div>
 
         <!-- Bot 2: Countertrend -->

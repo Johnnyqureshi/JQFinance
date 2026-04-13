@@ -2916,33 +2916,41 @@ db.prepare(`
   )
 `).run();
 
-// ── Swing settings (position sizing) ─────────────────────────────────────────
+// ── Global trading settings (position size + leverage) ───────────────────────
 db.prepare(`
-  CREATE TABLE IF NOT EXISTS swing_auto_settings (
-    user_id        INTEGER PRIMARY KEY,
-    position_mode  TEXT NOT NULL DEFAULT 'pct',   -- 'pct' or 'fixed'
-    position_pct   REAL NOT NULL DEFAULT 15,       -- % of account equity
-    position_amount REAL NOT NULL DEFAULT 5000     -- fixed $ amount
+  CREATE TABLE IF NOT EXISTS trade_settings (
+    user_id         INTEGER PRIMARY KEY,
+    position_mode   TEXT NOT NULL DEFAULT 'pct',
+    position_pct    REAL NOT NULL DEFAULT 15,
+    position_amount REAL NOT NULL DEFAULT 5000,
+    leverage        REAL NOT NULL DEFAULT 1
   )
 `).run();
+// Migrate old per-bot table if present (no-op if already done)
+try { db.prepare(`INSERT OR IGNORE INTO trade_settings (user_id,position_mode,position_pct,position_amount) SELECT user_id,position_mode,position_pct,position_amount FROM swing_auto_settings`).run(); } catch(_) {}
 
-// ── GET /api/swing/settings ───────────────────────────────────────────────────
-app.get('/api/swing/settings', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM swing_auto_settings WHERE user_id=?').get(req.session.userId);
-  res.json(row || { position_mode: 'pct', position_pct: 15, position_amount: 5000 });
+// ── GET /api/trade-settings ───────────────────────────────────────────────────
+app.get('/api/trade-settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(req.session.userId);
+  res.json(row || { position_mode: 'pct', position_pct: 15, position_amount: 5000, leverage: 1 });
 });
 
-// ── PUT /api/swing/settings ───────────────────────────────────────────────────
-app.put('/api/swing/settings', requireAuth, (req, res) => {
-  const { position_mode, position_pct, position_amount } = req.body;
+// ── PUT /api/trade-settings ───────────────────────────────────────────────────
+app.put('/api/trade-settings', requireAuth, (req, res) => {
+  const { position_mode, position_pct, position_amount, leverage } = req.body;
   const mode = position_mode === 'fixed' ? 'fixed' : 'pct';
   const pct  = Math.max(1, Math.min(100, parseFloat(position_pct)  || 15));
   const amt  = Math.max(1, parseFloat(position_amount) || 5000);
+  const lev  = Math.max(1, Math.min(4, parseFloat(leverage) || 1));
   db.prepare(`
-    INSERT INTO swing_auto_settings (user_id, position_mode, position_pct, position_amount)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET position_mode=excluded.position_mode, position_pct=excluded.position_pct, position_amount=excluded.position_amount
-  `).run(req.session.userId, mode, pct, amt);
+    INSERT INTO trade_settings (user_id, position_mode, position_pct, position_amount, leverage)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      position_mode=excluded.position_mode,
+      position_pct=excluded.position_pct,
+      position_amount=excluded.position_amount,
+      leverage=excluded.leverage
+  `).run(req.session.userId, mode, pct, amt, lev);
   res.json({ ok: true });
 });
 
@@ -3131,11 +3139,11 @@ async function executeSwingEntry(userId, sig) {
     const equity   = parseFloat(account.equity || account.portfolio_value || 0);
     if (equity <= 0) return;
 
-    const swingSetting = db.prepare('SELECT * FROM swing_auto_settings WHERE user_id=?').get(userId)
-                      || { position_mode: 'pct', position_pct: 15, position_amount: 5000 };
-    const posValue = swingSetting.position_mode === 'fixed'
-      ? swingSetting.position_amount
-      : equity * (swingSetting.position_pct / 100);
+    const ts = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(userId)
+             || { position_mode: 'pct', position_pct: 15, position_amount: 5000, leverage: 1 };
+    const posValue = ts.position_mode === 'fixed'
+      ? ts.position_amount
+      : equity * (ts.position_pct / 100);
     const price    = sig.price;
     if (!price || price <= 0) return;
     const shares   = Math.max(1, Math.floor(posValue / price));

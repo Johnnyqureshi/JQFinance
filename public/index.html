@@ -90,9 +90,32 @@
     </div>
     <div class="nav-user" id="navUser" style="display:none">
       <span class="nav-username" id="navUsername"></span>
-      <button class="nav-logout" id="navLogout" title="Sign out">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      <button class="nav-icon-btn" id="navChangePw" title="Change password">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </button>
+      <button class="nav-logout nav-icon-btn" id="navLogout" title="Sign out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="cpw-overlay" id="cpwOverlay" style="display:none">
+      <div class="cpw-modal">
+        <div class="cpw-header">
+          <span class="cpw-title">Change Password</span>
+          <button class="cpw-close" id="cpwClose">✕</button>
+        </div>
+        <div class="cpw-body">
+          <label class="cpw-label">Current Password</label>
+          <input type="password" class="cpw-input" id="cpwCurrent" placeholder="Enter current password" autocomplete="current-password">
+          <label class="cpw-label">New Password</label>
+          <input type="password" class="cpw-input" id="cpwNew" placeholder="Min 6 characters" autocomplete="new-password">
+          <label class="cpw-label">Confirm New Password</label>
+          <input type="password" class="cpw-input" id="cpwConfirm" placeholder="Repeat new password" autocomplete="new-password">
+          <div class="cpw-error" id="cpwError"></div>
+          <button class="cpw-submit" id="cpwSubmit">Update Password</button>
+        </div>
+      </div>
     </div>
     <div class="nav-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>

@@ -1220,6 +1220,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     showAuthOverlay();
   });
 
+  // Change Password modal
+  const cpwOverlay = $('cpwOverlay');
+  $('navChangePw')?.addEventListener('click', () => {
+    $('cpwCurrent').value = '';
+    $('cpwNew').value = '';
+    $('cpwConfirm').value = '';
+    $('cpwError').textContent = '';
+    $('cpwSubmit').disabled = false;
+    $('cpwSubmit').textContent = 'Update Password';
+    cpwOverlay.style.display = 'flex';
+    setTimeout(() => $('cpwCurrent').focus(), 80);
+  });
+  $('cpwClose')?.addEventListener('click', () => { cpwOverlay.style.display = 'none'; });
+  cpwOverlay?.addEventListener('click', e => { if (e.target === cpwOverlay) cpwOverlay.style.display = 'none'; });
+  $('cpwSubmit')?.addEventListener('click', async () => {
+    const cur = $('cpwCurrent').value;
+    const nw  = $('cpwNew').value;
+    const cf  = $('cpwConfirm').value;
+    const errEl = $('cpwError');
+    errEl.textContent = '';
+    if (!cur || !nw || !cf) { errEl.textContent = 'All fields are required.'; return; }
+    if (nw.length < 6)       { errEl.textContent = 'New password must be at least 6 characters.'; return; }
+    if (nw !== cf)           { errEl.textContent = 'New passwords do not match.'; return; }
+    const btn = $('cpwSubmit');
+    btn.disabled = true; btn.textContent = 'Updating…';
+    try {
+      const r = await fetch('/api/auth/change-password', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: cur, newPassword: nw }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        errEl.style.color = '#3fb950';
+        errEl.textContent = 'Password updated successfully!';
+        setTimeout(() => { cpwOverlay.style.display = 'none'; errEl.style.color = ''; }, 1800);
+      } else {
+        errEl.textContent = data.error || 'Update failed.';
+        btn.disabled = false; btn.textContent = 'Update Password';
+      }
+    } catch { errEl.textContent = 'Network error — please try again.'; btn.disabled = false; btn.textContent = 'Update Password'; }
+  });
+
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
 

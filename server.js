@@ -281,6 +281,24 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
 // Logout
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
+  // NOTE: alpaca_creds are intentionally NOT deleted on logout.
+  // They persist in the DB so the bot keeps running and reconnects automatically on next login.
+});
+
+// Change Password
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword)
+    return res.status(400).json({ error: 'Both current and new password are required.' });
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.userId);
+  if (!user) return res.status(401).json({ error: 'User not found.' });
+  const ok = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
+  const hash = await bcrypt.hash(newPassword, 10);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.session.userId);
+  res.json({ ok: true });
 });
 
 // Current user

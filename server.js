@@ -4065,12 +4065,57 @@ console.log('[Momentum-Bot] Momentum/Gap-and-Go auto-trader initialized — scan
 // BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER
 // SPY-only strategy. Runs every 2 minutes starting at 9:35 ET.
 // Uses FMP 1-min bars to detect confirmed candle-close breakouts.
-// SPXL = proxy for BULLISH ORB (3× leveraged SPY long, usually ≤ $30)
-// SPXS = proxy for BEARISH ORB (3× leveraged SPY short, usually ≤ $30)
+// BULLISH ORB → buy cheapest MASTER_UNIVERSE stock with positive momentum today
+// BEARISH ORB → buy cheapest inverse ETF from MASTER_UNIVERSE
+// Take profit: RSI ≥ 75 on the position (monitored every 2 min). Bracket order
+// carries a generous 18% ceiling as emergency fallback only.
 // One trade per day per user. Session is logged to orb_session_log for review.
 // ══════════════════════════════════════════════════════════════════════════════
-const ORB_LONG_PROXY  = 'SPXL'; // 3× Direxion Daily S&P 500 Bull (buy for BULLISH ORB)
-const ORB_SHORT_PROXY = 'SPXS'; // 3× Direxion Daily S&P 500 Bear  (buy for BEARISH ORB)
+
+// All inverse/short ETFs present in MASTER_UNIVERSE — used by BEARISH ORB picker
+const ORB_INVERSE_ETF_SET = new Set([
+  'SQQQ','QID','AAPD','AMDD','AMZD','PLTD','QQQD','NVD','NVDQ','MSTZ','TSLZ','TSDD',
+  'SBIT','TZA','SPXS','SOXS','TECS','FAZ','ERY','LABD','DUST','JDST',
+  'AIBD','TSXD','DRIP','DXD','SRTY','BIS',
+  'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
+]);
+
+// Batch-fetch prices + today's % change for a pool of symbols
+// Returns array of { symbol, price, change } sorted by price ascending
+async function fetchOrbCandidatePrices(symbols) {
+  const results = [];
+  for (let i = 0; i < symbols.length; i += 10) {
+    const batch = symbols.slice(i, i + 10);
+    const settled = await Promise.allSettled(batch.map(s => yfChartQuote(s).catch(() => null)));
+    settled.forEach(r => {
+      if (r.status !== 'fulfilled' || !r.value) return;
+      const q = r.value;
+      if (!q.price || q.price <= 0 || q.price > MAX_TRADE_PRICE) return;
+      results.push({ symbol: q.symbol, price: q.price, change: q.changesPercentage ?? 0 });
+    });
+  }
+  results.sort((a, b) => a.price - b.price); // cheapest first
+  return results;
+}
+
+// Find the cheapest stock with positive momentum for BULLISH ORB
+async function findCheapestBullishCandidate(heldSymbols) {
+  // Use non-inverse MASTER_UNIVERSE symbols only
+  const pool = MASTER_UNIVERSE.filter(s => !ORB_INVERSE_ETF_SET.has(s));
+  const candidates = await fetchOrbCandidatePrices(pool);
+  // Pick cheapest with positive day change that we don't already hold
+  return candidates.find(c => c.change > 0 && !heldSymbols.has(c.symbol)) ?? null;
+}
+
+// Find the cheapest inverse ETF with positive day change for BEARISH ORB
+// (inverse ETFs move UP when market falls, so change > 0 confirms bearish day)
+async function findCheapestBearishCandidate(heldSymbols) {
+  const pool = [...ORB_INVERSE_ETF_SET].filter(s => MASTER_UNIVERSE.includes(s));
+  const candidates = await fetchOrbCandidatePrices(pool);
+  // Prefer positive change (inverse going up = market falling); fallback to any cheap inverse
+  const withMomentum = candidates.find(c => c.change > 0 && !heldSymbols.has(c.symbol));
+  return withMomentum ?? candidates.find(c => !heldSymbols.has(c.symbol)) ?? null;
+}
 
 async function runORBAutoTrader() {
   if (!isMarketOpen()) return;
@@ -4083,7 +4128,7 @@ async function runORBAutoTrader() {
   const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
 
-  const sig = await computeORBSignal(5); // 5-min ORB window
+  const sig   = await computeORBSignal(5); // 5-min ORB window
   const today = sig.today;
 
   // Log what we see even when no trade is taken (for session log completeness)
@@ -4095,7 +4140,7 @@ async function runORBAutoTrader() {
     const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
 
-    // One trade per day per user — check session log
+    // One trade per day per user
     const sessionRow = db.prepare(`SELECT * FROM orb_session_log WHERE user_id = ? AND trade_date = ?`).get(user.user_id, today);
     if (sessionRow?.trade_taken) {
       console.log(`[ORB-Bot] User ${user.user_id} already traded today — skipping`);
@@ -4111,117 +4156,140 @@ async function runORBAutoTrader() {
 
       const slots = await getOpenSlots(user.user_id, 'ORB-Bot');
       if (!slots || slots.available <= 0) continue;
+      const positions   = slots.positions;
+      const heldSymbols = new Set(Array.isArray(positions) ? positions.map(p => p.symbol) : []);
 
-      // Choose proxy ETF based on ORB direction
-      const proxySymbol = sig.direction === 'BULLISH' ? ORB_LONG_PROXY : ORB_SHORT_PROXY;
-      const proxySide   = 'buy'; // always buying (SPXL for long exposure, SPXS for short)
+      // ── Find candidate stock (cheapest with momentum or inverse) ──────────
+      let candidate;
+      if (sig.direction === 'BULLISH') {
+        console.log(`[ORB-Bot] BULLISH breakout — scanning for cheapest momentum stock…`);
+        candidate = await findCheapestBullishCandidate(heldSymbols);
+      } else {
+        console.log(`[ORB-Bot] BEARISH breakout — scanning for cheapest inverse ETF…`);
+        candidate = await findCheapestBearishCandidate(heldSymbols);
+      }
 
-      // Check we don't already hold the proxy
-      const positions = slots.positions;
-      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === proxySymbol);
-      if (alreadyIn) {
-        console.log(`[ORB-Bot] Already holding ${proxySymbol} — skipping`);
+      if (!candidate) {
+        console.log(`[ORB-Bot] No eligible candidate found (all held or above $${MAX_TRADE_PRICE}) — skipping`);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: 'No eligible candidate found' });
         continue;
       }
 
-      // ORB has its own superior SPY-specific filters (VWAP, RSI, VIX, candle-close
-      // confirmation, MWF, fakeout check). The SPY options gate (max pain / floor / roof)
-      // would conflict with valid breakout setups (e.g. bullish ORB when SPY > max pain
-      // but still far below the roof). Skip SPY-Gate; run Whale + Dark Pool gates.
-      const whaleGate = await checkWhaleGate('SPY', sig.direction);
+      console.log(`[ORB-Bot] Candidate: ${candidate.symbol} @ $${candidate.price.toFixed(2)} (${candidate.change > 0 ? '+' : ''}${candidate.change.toFixed(2)}%)`);
+
+      // ── Whale + Dark Pool gates on the candidate symbol ────────────────────
+      const direction = sig.direction === 'BULLISH' ? 'LONG' : 'SHORT';
+      const whaleGate = await checkWhaleGate(candidate.symbol, direction);
       if (!whaleGate.allowed) {
-        console.log(`[ORB-Bot] Whale-Gate BLOCKED: ${whaleGate.reason}`);
-        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Whale-Gate blocked: ${whaleGate.reason}` });
+        console.log(`[ORB-Bot] Whale-Gate BLOCKED ${candidate.symbol}: ${whaleGate.reason}`);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Whale-Gate blocked ${candidate.symbol}` });
         continue;
       }
 
-      const dpGate = await checkDarkPoolGate('SPY', sig.price, sig.direction);
+      const dpGate = await checkDarkPoolGate(candidate.symbol, candidate.price, direction);
       if (!dpGate.allowed) {
-        console.log(`[ORB-Bot] DP-Gate BLOCKED: ${dpGate.reason}`);
-        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `DP-Gate blocked: ${dpGate.reason}` });
+        console.log(`[ORB-Bot] DP-Gate BLOCKED ${candidate.symbol}: ${dpGate.reason}`);
+        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `DP-Gate blocked ${candidate.symbol}` });
         continue;
       }
 
-      // Fetch live proxy price
-      const proxyBars = await fetchOHLCV(proxySymbol, 2).catch(() => null);
-      const proxyPrice = proxyBars?.at(-1)?.c;
-      if (!proxyPrice) {
-        console.log(`[ORB-Bot] Could not fetch price for ${proxySymbol} — skipping`);
-        continue;
-      }
-      if (proxyPrice > MAX_TRADE_PRICE) {
-        console.log(`[ORB-Bot] ${proxySymbol} @ $${proxyPrice} above $${MAX_TRADE_PRICE} cap — skipping`);
-        continue;
-      }
-
+      // ── Position sizing ───────────────────────────────────────────────────
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 500) * lev;
-      const shares = Math.max(1, Math.floor(amount / proxyPrice));
+      let   shares = Math.max(1, Math.floor(amount / candidate.price));
 
-      // Translate SPY SL/TP percentages to proxy price levels
-      // ORB SL is at range midpoint (orbMid), TP is 1.5× range width beyond breakout
-      const slPctOfSpy = sig.direction === 'BULLISH'
-        ? (sig.price - sig.slLevel) / sig.price
-        : (sig.slLevel - sig.price) / sig.price;
-      const tpPctOfSpy = sig.direction === 'BULLISH'
-        ? (sig.tpLevel - sig.price) / sig.price
-        : (sig.price - sig.tpLevel) / sig.price;
-
-      // SPXL/SPXS are 3× leveraged — scale risk/reward by 3
-      const leverageFactor = 3;
-      const proxySL = (proxyPrice * (1 - slPctOfSpy * leverageFactor)).toFixed(2);
-      const proxyTP = (proxyPrice * (1 + tpPctOfSpy * leverageFactor)).toFixed(2);
+      // SL = 5% below entry; TP = emergency ceiling 18% above (RSI 75 monitor exits first)
+      const slPrice = (candidate.price * 0.95).toFixed(2);
+      const tpPrice = (candidate.price * 1.18).toFixed(2);
 
       // Max loss cap: 1.5% of account equity
-      let account = null;
-      try { account = await alpacaFetch(user.user_id, '/v2/account'); } catch(_) {}
-      if (account) {
-        const equity   = parseFloat(account.equity || 0);
-        const maxLoss  = equity * 0.015;
-        const tradeLoss = shares * (proxyPrice - parseFloat(proxySL));
-        if (tradeLoss > maxLoss) {
-          const cappedShares = Math.max(1, Math.floor(maxLoss / (proxyPrice - parseFloat(proxySL))));
-          console.log(`[ORB-Bot] Capping shares ${shares} → ${cappedShares} (1.5% equity loss limit: $${maxLoss.toFixed(0)})`);
-          Object.assign({ shares: cappedShares });
+      try {
+        const acct = await alpacaFetch(user.user_id, '/v2/account');
+        const equity  = parseFloat(acct.equity || 0);
+        const maxLoss = equity * 0.015;
+        const riskPerShare = candidate.price * 0.05; // 5% SL distance
+        if (riskPerShare > 0 && shares * riskPerShare > maxLoss) {
+          shares = Math.max(1, Math.floor(maxLoss / riskPerShare));
+          console.log(`[ORB-Bot] Capped to ${shares} shares (1.5% equity limit $${maxLoss.toFixed(0)})`);
         }
-      }
+      } catch (_) {}
 
       const orderBody = {
-        symbol:        proxySymbol,
+        symbol:        candidate.symbol,
         qty:           String(shares),
-        side:          proxySide,
+        side:          'buy',
         type:          'market',
         time_in_force: 'day',
         order_class:   'bracket',
-        take_profit:   { limit_price: proxyTP },
-        stop_loss:     { stop_price:  proxySL },
+        take_profit:   { limit_price: tpPrice },
+        stop_loss:     { stop_price:  slPrice },
       };
 
       try {
-        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+        const order   = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
         const orderId = order.id || null;
 
-        // Log to auto_trade_log (shows in Recent Bot Trades)
         db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'orb','open',datetime('now'))`).run(
-          user.user_id, proxySymbol, shares, proxyPrice, proxyTP, proxySL, orderId,
-          `ORB ${sig.direction} via ${proxySymbol} (SPY range $${sig.orbHigh}/$${sig.orbLow})`
+          user.user_id, candidate.symbol, shares, candidate.price, tpPrice, slPrice, orderId,
+          `ORB ${sig.direction} · ${candidate.symbol} $${candidate.price.toFixed(2)} · SPY range $${sig.orbHigh}/$${sig.orbLow} · RSI-75 exit`
         );
 
-        // Log to ORB session log
         upsertORBSessionLog(user.user_id, today, sig, {
-          trade_taken: 1, entry_price: proxyPrice, stop_price: parseFloat(proxySL),
-          target_price: parseFloat(proxyTP), trade_symbol: proxySymbol,
-          shares, alpaca_order_id: orderId, result: 'OPEN',
-          notes: `${proxySymbol} proxy · ${shares} shares @ $${proxyPrice} | SPY ORB ${sig.direction}`,
+          trade_taken: 1, entry_price: candidate.price,
+          stop_price: parseFloat(slPrice), target_price: parseFloat(tpPrice),
+          trade_symbol: candidate.symbol, shares, alpaca_order_id: orderId,
+          result: 'OPEN',
+          notes: `${candidate.symbol} @ $${candidate.price.toFixed(2)} (${candidate.change > 0 ? '+' : ''}${candidate.change.toFixed(2)}%) · ORB ${sig.direction} · RSI-75 exit active`,
         });
 
-        console.log(`[ORB-Bot] ✓ ORDER: BUY ${shares} ${proxySymbol} @ ~$${proxyPrice} (ORB ${sig.direction} · SPY ${sig.orbHigh}/${sig.orbLow}) SL=${proxySL} TP=${proxyTP}`);
+        console.log(`[ORB-Bot] ✓ ORDER: BUY ${shares} ${candidate.symbol} @ ~$${candidate.price.toFixed(2)} | ORB ${sig.direction} · SL=${slPrice} · TP=${tpPrice} (RSI-75 dynamic exit active)`);
       } catch (e) {
-        console.error(`[ORB-Bot] Order failed for ${proxySymbol}:`, e.message);
+        console.error(`[ORB-Bot] Order failed for ${candidate.symbol}:`, e.message);
         upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Order error: ${e.message}` });
       }
     } finally {
       releaseBotLock(user.user_id);
+    }
+  }
+}
+
+// ── RSI-75 Take-Profit Monitor — checks open ORB positions every 2 minutes ────
+// When the held symbol's RSI(14) reaches ≥ 75, submit a market sell to lock gains.
+// This runs on all open ORB trades (both BULLISH momentum picks and BEARISH inverse ETFs).
+async function monitorORBRSIExit() {
+  if (!isMarketOpen()) return;
+  const openTrades = db.prepare(`
+    SELECT id, user_id, symbol, entry_price FROM auto_trade_log
+    WHERE strategy = 'orb' AND status = 'open'
+  `).all();
+  if (!openTrades.length) return;
+
+  for (const trade of openTrades) {
+    try {
+      const bars = await fetchOHLCV(trade.symbol, 30).catch(() => null);
+      if (!bars || bars.length < 15) continue;
+      const closes = bars.map(b => b.c);
+      let rsi = 50;
+      try { rsi = calcRSI(closes, 14); } catch (_) {}
+
+      if (rsi < 75) continue; // not at target yet
+
+      console.log(`[ORB-Bot] RSI ${rsi.toFixed(1)} ≥ 75 on ${trade.symbol} — submitting market sell (RSI-75 take profit)`);
+      try {
+        await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
+        db.prepare(`UPDATE auto_trade_log SET status='closed', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
+          .run(`RSI-75 exit (RSI=${rsi.toFixed(1)})`, trade.id);
+        // Mark the session as WIN
+        const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
+        db.prepare(`UPDATE orb_session_log SET result='WIN', notes=notes||' | RSI-75 exit @ RSI '||? WHERE user_id=? AND trade_date=?`)
+          .run(rsi.toFixed(1), trade.user_id, today);
+        console.log(`[ORB-Bot] ✓ RSI-75 exit complete: sold ${trade.symbol} (RSI=${rsi.toFixed(1)})`);
+      } catch (e) {
+        console.error(`[ORB-Bot] RSI-75 exit failed for ${trade.symbol}:`, e.message);
+      }
+    } catch (e) {
+      console.error(`[ORB-Bot] RSI monitor error for trade ${trade.id}:`, e.message);
     }
   }
 }
@@ -4310,8 +4378,10 @@ app.get('/api/orb-signal', requireAuth, async (req, res) => {
 });
 
 // ORB scans every 2 minutes — tight enough to catch breakouts shortly after they form
-setInterval(runORBAutoTrader, 2 * 60 * 1000);
-console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, MWF only)');
+setInterval(runORBAutoTrader,   2 * 60 * 1000);
+// RSI-75 exit monitor runs every 2 minutes throughout the session
+setInterval(monitorORBRSIExit, 2 * 60 * 1000);
+console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, MWF only) · RSI-75 exit monitor active');
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Johnny Qureshi Finance on :${PORT}`);

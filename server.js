@@ -1245,8 +1245,22 @@ const MASTER_UNIVERSE = [
   'LAC',
   // ── Cloud / cyber ──────────────────────────────────────────────────────────
   'CRWD','S','PANW','SNOW','DDOG','TWLO','MDB','ZS','NET',
-  // ── Biotech / pharma ───────────────────────────────────────────────────────
+  // ── Biotech / pharma (large cap) ───────────────────────────────────────────
   'MRNA','BNTX','PFE','ABBV','LLY','REGN',
+  // ── Biotech / genomics (high-beta small & mid cap, mostly <$25) ────────────
+  'NVAX','RXRX','BEAM','EDIT','CRSP','NTLA','FATE','SGMO','NKTR',
+  'TGTX','IMVT','DNLI','ARDX','SANA','GERN','AGEN','IOVA','PRAX','ACAD',
+  // ── Digital health / medical devices ───────────────────────────────────────
+  'TDOC','HIMS','DOCS','NVCR','TMDX','NVRO','PTON',
+  // ── High-volume small caps (<$25) ──────────────────────────────────────────
+  'IONQ','RKLB','ASTS','JOBY','LUNR','GSAT','CLOV','OPEN','SPWR',
+  // ── Biotech & healthcare ETFs (base + leveraged bull/bear) ─────────────────
+  // XBI = SPDR S&P Biotech | IBB = iShares Biotech | ARKG = ARK Genomic
+  // BIB = 2x long IBB | BIS = 2x short IBB | CURE = 3x Healthcare bull
+  'XBI','IBB','ARKG','BIB','BIS','CURE',
+  // ── Small-cap leveraged / inverse (Russell 2000) ────────────────────────────
+  // URTY = 3x long IWM | SRTY = 3x inverse IWM
+  'URTY','SRTY',
   // ── Large-cap value / defensives ───────────────────────────────────────────
   'BRK.B','V','MA','UNH','JNJ','PG','HD','MRK','COST','WMT','KO','PEP',
   'TMO','ORCL','CRM','CSCO','ACN','MCD','LIN','ADBE','ABT','DHR','NKE',

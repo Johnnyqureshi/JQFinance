@@ -4124,41 +4124,74 @@ const ORB_INVERSE_ETF_SET = new Set([
   'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
 ]);
 
-// Batch-fetch prices + today's % change for a pool of symbols
-// Returns array of { symbol, price, change } sorted by price ascending
+// Batch-fetch prices, % change, volume, and momentum score for a pool of symbols
 async function fetchOrbCandidatePrices(symbols) {
   const results = [];
   for (let i = 0; i < symbols.length; i += 10) {
-    const batch = symbols.slice(i, i + 10);
+    const batch   = symbols.slice(i, i + 10);
     const settled = await Promise.allSettled(batch.map(s => yfChartQuote(s).catch(() => null)));
     settled.forEach(r => {
       if (r.status !== 'fulfilled' || !r.value) return;
       const q = r.value;
       if (!q.price || q.price <= 0 || q.price > MAX_TRADE_PRICE) return;
-      results.push({ symbol: q.symbol, price: q.price, change: q.changesPercentage ?? 0 });
+      const changePct = q.changesPercentage ?? 0;
+      const volume    = q.volume    ?? 0;
+      const avgVolume = q.avgVolume ?? 0;
+      const relVol    = avgVolume > 0 ? +(volume / avgVolume).toFixed(2) : null;
+      // Momentum score: % gain × relative-volume surge — identical to Momentum bot scoring
+      const score     = relVol != null ? +(changePct * relVol).toFixed(3) : changePct;
+      results.push({ symbol: q.symbol, price: q.price, change: changePct, volume, avgVolume, relVol, score });
     });
   }
-  results.sort((a, b) => a.price - b.price); // cheapest first
   return results;
 }
 
-// Find the cheapest stock with positive momentum for BULLISH ORB
+// ── ORB bullish candidate: highest-momentum cheap stock (pre-market pumper) ──
+// Ranks by score = change% × relVol so a stock up 10% on 3× volume beats
+// one up 1% on 5× volume. ADBG-style gap-and-rockets rise to the top.
+// Tiers:  1) change ≥ 3% AND relVol ≥ 1.5  (confirmed pre-market surge)
+//         2) change ≥ 1% AND relVol ≥ 1.0   (modest momentum)
+//         3) any positive change              (last resort)
 async function findCheapestBullishCandidate(heldSymbols) {
-  // Use non-inverse MASTER_UNIVERSE symbols only
   const pool = MASTER_UNIVERSE.filter(s => !ORB_INVERSE_ETF_SET.has(s));
-  const candidates = await fetchOrbCandidatePrices(pool);
-  // Pick cheapest with positive day change that we don't already hold
-  return candidates.find(c => c.change > 0 && !heldSymbols.has(c.symbol)) ?? null;
+  const all  = await fetchOrbCandidatePrices(pool);
+  const avail = all.filter(c => !heldSymbols.has(c.symbol) && c.change > 0);
+
+  // Sort each tier by score DESC (best momentum first), not by price
+  const tier1 = avail.filter(c => c.change >= 3 && (c.relVol ?? 0) >= 1.5)
+                      .sort((a, b) => b.score - a.score);
+  if (tier1.length) {
+    console.log(`[ORB-Bot] Bullish tier-1 candidates: ${tier1.slice(0,5).map(c=>`${c.symbol}(+${c.change.toFixed(1)}% ${c.relVol}×vol)`).join(', ')}`);
+    return tier1[0];
+  }
+
+  const tier2 = avail.filter(c => c.change >= 1 && (c.relVol ?? 0) >= 1.0)
+                      .sort((a, b) => b.score - a.score);
+  if (tier2.length) {
+    console.log(`[ORB-Bot] Bullish tier-2 candidates: ${tier2.slice(0,5).map(c=>`${c.symbol}(+${c.change.toFixed(1)}% ${c.relVol}×vol)`).join(', ')}`);
+    return tier2[0];
+  }
+
+  // Last-resort: any positive, sorted by score
+  const tier3 = avail.sort((a, b) => b.score - a.score);
+  if (tier3.length) console.log(`[ORB-Bot] Bullish tier-3 (last resort): ${tier3[0].symbol} +${tier3[0].change.toFixed(1)}%`);
+  return tier3[0] ?? null;
 }
 
-// Find the cheapest inverse ETF with positive day change for BEARISH ORB
-// (inverse ETFs move UP when market falls, so change > 0 confirms bearish day)
+// ── ORB bearish candidate: highest-momentum inverse ETF (market collapse play) ─
 async function findCheapestBearishCandidate(heldSymbols) {
-  const pool = [...ORB_INVERSE_ETF_SET].filter(s => MASTER_UNIVERSE.includes(s));
-  const candidates = await fetchOrbCandidatePrices(pool);
-  // Prefer positive change (inverse going up = market falling); fallback to any cheap inverse
-  const withMomentum = candidates.find(c => c.change > 0 && !heldSymbols.has(c.symbol));
-  return withMomentum ?? candidates.find(c => !heldSymbols.has(c.symbol)) ?? null;
+  const pool  = [...ORB_INVERSE_ETF_SET].filter(s => MASTER_UNIVERSE.includes(s));
+  const all   = await fetchOrbCandidatePrices(pool);
+  const avail = all.filter(c => !heldSymbols.has(c.symbol));
+
+  // Prefer those already rising (inverse ETF up = market falling), ranked by score
+  const rising = avail.filter(c => c.change > 0).sort((a, b) => b.score - a.score);
+  if (rising.length) {
+    console.log(`[ORB-Bot] Bearish candidates: ${rising.slice(0,5).map(c=>`${c.symbol}(+${c.change.toFixed(1)}%)`).join(', ')}`);
+    return rising[0];
+  }
+  // Fallback: any available inverse, cheapest first (bearish signal is from SPY, not ETF change)
+  return avail.sort((a, b) => a.price - b.price)[0] ?? null;
 }
 
 async function runORBAutoTrader() {

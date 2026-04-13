@@ -1212,14 +1212,14 @@ const MASTER_UNIVERSE = [
   // ── High-beta / crypto adjacent ────────────────────────────────────────────
   'HOOD','SOFI','MARA','RIOT','CLSK','CORZ','HUT','BITF','IREN','BMNR','SMCL','PMAX',
   // ── Leveraged long ETFs ────────────────────────────────────────────────────
-  'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS',
-  'TSLL','NVDX','AMDL','PLTG','HOOG','NVDG','MSFU',
+  'TQQQ','SOXL','SPXL','TECL','LABU','UPRO','TNA','FAS','ERX','UDOW',
+  'TSLL','NVDX','NVDL','AMDL','PLTG','HOOG','NVDG','MSFU','AAPU','AMZU','GGLL','METU',
   // ── Major index ETFs ───────────────────────────────────────────────────────
   'SPY','QQQ','IWM','DIA','SMH','ARKK',
   // ── Inverse / short ETFs ───────────────────────────────────────────────────
-  'SQQQ','QID','AAPD','AMDD','PLTD','QQQD','NVD','NVDQ','MSTZ','TSLZ','TSDD',
+  'SQQQ','QID','AAPD','AMDD','AMZD','PLTD','QQQD','NVD','NVDQ','MSTZ','TSLZ','TSDD',
   'SBIT','TZA','SPXS','SOXS','TECS','FAZ','ERY','LABD','DUST','JDST',
-  'AIBD','TSXD','DRIP',
+  'AIBD','TSXD','DRIP','DXD',
   'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
   // ── Consumer / growth tech ─────────────────────────────────────────────────
   'NFLX','UBER','SHOP','SQ','PYPL','SNAP','PINS','RBLX','DKNG',
@@ -1744,8 +1744,117 @@ const INVERSE_MAP = {
   'UNP':   'SH',    'RTX':   'SH',    'LIN':   'SH',
   'NEE':   'SH',    'SO':    'SH',    'DUK':   'SH',
   'PLD':   'SH',    'BRK.B': 'SH',    'V':     'SH',
-  'MA':    'SH',
+  'MA':    'SH',    'MRK':   'SH',    'BKNG':  'SH',
+  'DHR':   'RXD',
+  // ── New leveraged long ETFs → their paired inverse ────────────────────────
+  'NVDL':  'NVD',   // 2× long NVDA → 2× inverse NVDA
+  'AAPU':  'AAPD',  // 2× long AAPL → inverse AAPL
+  'AMZU':  'AMZD',  // 2× long AMZN → 2× inverse AMZN
+  'GGLL':  'GGLS',  // 2× long GOOGL → 2× inverse GOOGL
+  'METU':  'TECS',  // 2× long META → inverse tech (no specific META bear ETF)
+  'UDOW':  'DXD',   // 3× long DIA → 2× inverse DIA
+  'ERX':   'ERY',   // 3× long energy → 3× inverse energy
+  // ── Biotech / genomics (small & mid cap) → LABD ───────────────────────────
+  'NVAX':  'LABD',  'RXRX':  'LABD',  'BEAM':  'LABD',
+  'EDIT':  'LABD',  'CRSP':  'LABD',  'NTLA':  'LABD',
+  'FATE':  'LABD',  'SGMO':  'LABD',  'NKTR':  'LABD',
+  'TGTX':  'LABD',  'IMVT':  'LABD',  'DNLI':  'LABD',
+  'ARDX':  'LABD',  'SANA':  'LABD',  'GERN':  'LABD',
+  'AGEN':  'LABD',  'IOVA':  'LABD',  'PRAX':  'LABD',
+  'ACAD':  'LABD',
+  // ── Digital health / medical devices ─────────────────────────────────────
+  'TDOC':  'LABD',  'HIMS':  'LABD',  'DOCS':  'LABD',
+  'NVCR':  'LABD',  'TMDX':  'LABD',  'NVRO':  'LABD',
+  'PTON':  'TECS',  // Peloton — closer to consumer tech
+  // ── High-volume small caps → SRTY (3× inverse Russell 2000) ──────────────
+  'IONQ':  'SRTY',  'RKLB':  'SRTY',  'ASTS':  'SRTY',
+  'JOBY':  'SRTY',  'LUNR':  'SRTY',  'GSAT':  'SRTY',
+  'CLOV':  'SRTY',  'OPEN':  'SRTY',  'SPWR':  'SRTY',
+  // ── Biotech & healthcare ETFs ─────────────────────────────────────────────
+  'XBI':   'LABD',  'IBB':   'LABD',  'ARKG':  'SARK',
+  'BIB':   'BIS',   'CURE':  'LABD',  'URTY':  'SRTY',
+  // ── Cannabis → SQQQ ───────────────────────────────────────────────────────
+  'TLRY':  'SQQQ',  'SNDL':  'SQQQ',  'CGC':   'SQQQ',
+  'ACB':   'SQQQ',  'CRON':  'SQQQ',
+  // ── EV / clean-energy pennies → SH ───────────────────────────────────────
+  'WKHS':  'SH',    'GOEV':  'SH',    'MULN':  'SH',    'NKLA':  'SH',
+  // ── Biotech penny stocks → LABD ──────────────────────────────────────────
+  'BNGO':  'LABD',  'OCGN':  'LABD',  'SENS':  'LABD',
+  'APLT':  'LABD',  'CRBP':  'LABD',  'ABVC':  'LABD',
+  // ── Tech / meme penny stocks → PSQ ───────────────────────────────────────
+  'MVIS':  'PSQ',   'BB':    'PSQ',   'NOK':   'PSQ',   'AMC':   'PSQ',
+  'ATER':  'PSQ',   'XELA':  'PSQ',   'HOLO':  'PSQ',   'VERB':  'PSQ',
+  // ── Shipping / energy pennies ─────────────────────────────────────────────
+  'IMPP':  'SH',    'INDO':  'SH',    'FFIE':  'PSQ',
+  // ── Crypto-adjacent penny miners → SBIT ──────────────────────────────────
+  'BTBT':  'SBIT',  'CIFR':  'SBIT',  'SLNH':  'SBIT',
+  // ── Misc symbols without previous mapping ────────────────────────────────
+  'ONDS':  'TECS',  'UUUU':  'SH',    'SMR':   'SH',
 };
+
+// ── Leveraged-proxy map ───────────────────────────────────────────────────────
+// When a LONG signal fires for a stock priced > $30, all 4 bots trade this
+// cheaper 2×/3× leveraged ETF instead of skipping the signal entirely.
+// Gates (SPY / Whale / Dark Pool) still run on the ORIGINAL underlying symbol
+// so the analysis reflects the real market. Only the order uses the proxy.
+const LEVERAGED_MAP = {
+  // ── Single-stock 2× leveraged ETFs (Direxion / T-Rex) ────────────────────
+  'NVDA':  'NVDL',  // Direxion Daily NVDA Bull 2×
+  'TSLA':  'TSLL',  // Direxion Daily TSLA Bull 2×
+  'AAPL':  'AAPU',  // Direxion Daily AAPL Bull 2×
+  'MSFT':  'MSFU',  // T-Rex 2× Long Microsoft
+  'AMZN':  'AMZU',  // Direxion Daily AMZN Bull 2×
+  'GOOGL': 'GGLL',  // Direxion Daily GOOGL Bull 2×
+  'META':  'METU',  // T-Rex 2× Long Meta Platforms
+  'AMD':   'AMDL',  // T-Rex 2× Long AMD
+  'PLTR':  'PLTG',  // T-Rex 2× Long Palantir
+  // ── Index ETFs → 3× leveraged bull ───────────────────────────────────────
+  'SPY':   'SPXL',  'QQQ':  'TQQQ',  'IWM':  'TNA',
+  'DIA':   'UDOW',  'SMH':  'SOXL',
+  // ── Expensive semis → SOXL (3× semis bull) ───────────────────────────────
+  'AVGO':  'SOXL',  'MU':   'SOXL',  'ARM':  'SOXL',
+  'AMAT':  'SOXL',  'LRCX': 'SOXL',  'KLAC': 'SOXL',
+  'QCOM':  'SOXL',  'TSM':  'SOXL',  'INTC': 'SOXL',
+  'TXN':   'SOXL',  'ADI':  'SOXL',  'SMCI': 'SOXL',
+  // ── Expensive tech (no specific single-stock ETF) → TQQQ ─────────────────
+  'NFLX':  'TQQQ',  'SHOP': 'TQQQ',  'UBER': 'TQQQ',
+  'CRM':   'TQQQ',  'ORCL': 'TQQQ',  'ADBE': 'TQQQ',
+  'INTU':  'TQQQ',  'BKNG': 'TQQQ',  'ACN':  'TQQQ',
+  'CSCO':  'TQQQ',  'IBM':  'TQQQ',
+  // ── Expensive financials → FAS (3× financials bull) ──────────────────────
+  'JPM':   'FAS',   'BAC':  'FAS',   'GS':   'FAS',
+  'MS':    'FAS',   'C':    'FAS',   'WFC':  'FAS',
+  'V':     'FAS',   'MA':   'FAS',   'AXP':  'FAS',
+  'BLK':   'FAS',   'SPGI': 'FAS',   'CME':  'FAS',
+  // ── Expensive healthcare / biotech → CURE (3× healthcare bull) ───────────
+  'UNH':   'CURE',  'LLY':  'CURE',  'REGN': 'CURE',
+  'ISRG':  'CURE',  'TMO':  'CURE',  'DHR':  'CURE',
+  'ABT':   'CURE',  'SYK':  'CURE',  'VRTX': 'CURE',
+  'AMGN':  'CURE',  'GILD': 'CURE',
+  // ── Expensive energy → ERX (3× energy bull) ──────────────────────────────
+  'XOM':   'ERX',   'CVX':  'ERX',   'COP':  'ERX',
+  // ── Expensive defensives / industrials → SPXL ────────────────────────────
+  'BRK.B': 'SPXL',  'WMT':  'SPXL',  'COST': 'SPXL',
+  'HD':    'SPXL',  'LOW':  'SPXL',  'MCD':  'SPXL',
+  'CAT':   'SPXL',  'DE':   'SPXL',  'UNP':  'SPXL',
+  'RTX':   'SPXL',  'HON':  'SPXL',  'LIN':  'SPXL',
+  'NEE':   'SPXL',  'MRK':  'SPXL',  'PG':   'SPXL',
+  'ZTS':   'SPXL',  'NKE':  'SPXL',  'PM':   'SPXL',
+};
+
+// Returns the affordable 2×/3× leveraged proxy for an expensive stock,
+// or null if the proxy itself is also > $30 or if no mapping exists.
+async function getLeveragedProxy(symbol, price) {
+  if (price <= MAX_TRADE_PRICE) return null;
+  const proxyTicker = LEVERAGED_MAP[symbol];
+  if (!proxyTicker) return null;
+  try {
+    const bars = await fetchOHLCV(proxyTicker, 2);
+    const proxyPrice = bars?.at(-1)?.c;
+    if (!proxyPrice || proxyPrice > MAX_TRADE_PRICE) return null;
+    return { symbol: proxyTicker, price: proxyPrice };
+  } catch { return null; }
+}
 
 // ── VE Universe (same broad universe as Bounce 2.0) ───────────────────────────
 const VE_UNIVERSE = MASTER_UNIVERSE;
@@ -2158,7 +2267,6 @@ async function runBounceAutoTrader() {
       const lev = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 500) * lev;
       const price = sig.price;
-      if (price > MAX_TRADE_PRICE) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const spyGate = await checkSPYGate(sig.symbol, price, 'long');
       if (!spyGate.allowed) { console.log(`[Bounce-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
       const bounceWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
@@ -2167,15 +2275,26 @@ async function runBounceAutoTrader() {
       const bounceDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
       if (!bounceDPGate.allowed) { console.log(`[Bounce-Bot] DP-Gate BLOCKED: ${bounceDPGate.reason}`); continue; }
       if (bounceDPGate.reason) console.log(`[Bounce-Bot] DP-Gate: ${bounceDPGate.reason}`);
-      const shares = Math.max(1, Math.floor(amount / price));
-      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2); // SMA50 or pullback low, whichever is closer
-      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.045).toFixed(2);
-      const orderBody = { symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
+      // Route expensive stocks ($30+ ) to their 2×/3× leveraged proxy
+      let tradeSymbol = sig.symbol;
+      let tradePrice  = price;
+      if (price > MAX_TRADE_PRICE) {
+        const proxy = await getLeveragedProxy(sig.symbol, price);
+        if (!proxy) { console.log(`[Bounce-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+        console.log(`[Bounce-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
+        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[Bounce-Bot] Already holding proxy ${proxy.symbol}`); continue; }
+        tradeSymbol = proxy.symbol;
+        tradePrice  = proxy.price;
+      }
+      const shares = Math.max(1, Math.floor(amount / tradePrice));
+      const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
+      const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.045).toFixed(2);
+      const orderBody = { symbol: tradeSymbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day', order_class: 'bracket', take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice } };
       try {
         const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
-        console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price}`);
-      } catch (e) { console.error(`[Bounce-Bot] Order failed ${sig.symbol}:`, e.message); }
+        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'bounce','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'confirmed');
+        console.log(`[Bounce-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
+      } catch (e) { console.error(`[Bounce-Bot] Order failed ${tradeSymbol}:`, e.message); }
     }
   }
 }
@@ -2240,7 +2359,6 @@ async function runVEAutoTrader() {
       if (sig.direction === 'LONG') {
         // ── LONG: buy the underlying directly ───────────────────────────────
         const price  = sig.price;
-        if (price > MAX_TRADE_PRICE) { console.log(`[VE-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const veSpyGate = await checkSPYGate(sig.symbol, price, 'long');
         if (!veSpyGate.allowed) { console.log(`[VE-Bot] SPY-Gate BLOCKED: ${veSpyGate.reason}`); continue; }
         const veLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
@@ -2249,19 +2367,30 @@ async function runVEAutoTrader() {
         const veLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
         if (!veLongDPGate.allowed) { console.log(`[VE-Bot] DP-Gate BLOCKED: ${veLongDPGate.reason}`); continue; }
         if (veLongDPGate.reason) console.log(`[VE-Bot] DP-Gate: ${veLongDPGate.reason}`);
-        const shares = Math.max(1, Math.floor(amount / price));
-        const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (price * 0.985).toFixed(2);
-        const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (price * 1.06).toFixed(2);
+        // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
+        let tradeSymbol = sig.symbol;
+        let tradePrice  = price;
+        if (price > MAX_TRADE_PRICE) {
+          const proxy = await getLeveragedProxy(sig.symbol, price);
+          if (!proxy) { console.log(`[VE-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+          console.log(`[VE-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
+          if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[VE-Bot] Already holding proxy ${proxy.symbol}`); continue; }
+          tradeSymbol = proxy.symbol;
+          tradePrice  = proxy.price;
+        }
+        const shares = Math.max(1, Math.floor(amount / tradePrice));
+        const slPrice = sig.slLevel ? sig.slLevel.toFixed(2) : (tradePrice * 0.985).toFixed(2);
+        const tpPrice = sig.tpLevel ? sig.tpLevel.toFixed(2) : (tradePrice * 1.06).toFixed(2);
         const orderBody = {
-          symbol: sig.symbol, qty: String(shares), side: 'buy',
+          symbol: tradeSymbol, qty: String(shares), side: 'buy',
           type: 'market', time_in_force: 'day', order_class: 'bracket',
           take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice },
         };
         try {
           const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signal || 'VE LONG');
-          console.log(`[VE-Bot] ORDER PLACED: BUY ${shares} ${sig.symbol} @ ~$${price}`);
-        } catch (e) { console.error(`[VE-Bot] Order failed ${sig.symbol}:`, e.message); }
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'volatility_expansion','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signal || 'VE LONG');
+          console.log(`[VE-Bot] ORDER PLACED: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice}${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
+        } catch (e) { console.error(`[VE-Bot] Order failed ${tradeSymbol}:`, e.message); }
 
       } else {
         // ── SHORT: buy the corresponding inverse ETF instead of shorting ────
@@ -2780,7 +2909,6 @@ async function runEEAutoTrader() {
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
       const amount = (user.amount || 1000) * lev;
       const price  = sig.price;
-      if (price > MAX_TRADE_PRICE) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
       const eeSpyGate = await checkSPYGate(sig.symbol, price, 'long');
       if (!eeSpyGate.allowed) { console.log(`[EE-Bot] SPY-Gate BLOCKED: ${eeSpyGate.reason}`); continue; }
       const eeWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
@@ -2789,14 +2917,24 @@ async function runEEAutoTrader() {
       const eeDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
       if (!eeDPGate.allowed) { console.log(`[EE-Bot] DP-Gate BLOCKED: ${eeDPGate.reason}`); continue; }
       if (eeDPGate.reason) console.log(`[EE-Bot] DP-Gate: ${eeDPGate.reason}`);
-      const shares = Math.max(1, Math.floor(amount / price));
-
-      // SL = 3% below entry (per strategy rules); TP = 9% above (3:1 R/R on 3% SL)
-      const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.97).toFixed(2);
-      const tpPrice = (price * 1.09).toFixed(2);
+      // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
+      let tradeSymbol = sig.symbol;
+      let tradePrice  = price;
+      if (price > MAX_TRADE_PRICE) {
+        const proxy = await getLeveragedProxy(sig.symbol, price);
+        if (!proxy) { console.log(`[EE-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+        console.log(`[EE-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
+        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[EE-Bot] Already holding proxy ${proxy.symbol}`); continue; }
+        tradeSymbol = proxy.symbol;
+        tradePrice  = proxy.price;
+      }
+      const shares = Math.max(1, Math.floor(amount / tradePrice));
+      // SL = 3% below entry; TP = 9% above (3:1 R/R on 3% SL)
+      const slPrice = (tradePrice * 0.97).toFixed(2);
+      const tpPrice = (tradePrice * 1.09).toFixed(2);
 
       const orderBody = {
-        symbol:        sig.symbol,
+        symbol:        tradeSymbol,
         qty:           String(shares),
         side:          'buy',
         type:          'market',
@@ -2817,15 +2955,15 @@ async function runEEAutoTrader() {
             (user_id, symbol, side, shares, entry_price, tp_price, sl_price, alpaca_order_id, signal, strategy, status, created_at)
           VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, 'explosive_earnings', 'open', datetime('now'))
         `).run(
-          user.user_id, sig.symbol, shares, price,
+          user.user_id, tradeSymbol, shares, tradePrice,
           tpPrice, slPrice,
           order.id || null,
           sig.signalType
         );
 
-        console.log(`[EE-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] user=${user.user_id}`);
+        console.log(`[EE-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice} [${sig.signalType}]${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
       } catch (e) {
-        console.error(`[EE-Bot] Order failed ${sig.symbol}:`, e.message);
+        console.error(`[EE-Bot] Order failed ${tradeSymbol}:`, e.message);
       }
     }
   }
@@ -3279,9 +3417,8 @@ async function runCTAutoTrader() {
       const amount = (user.amount || 500) * lev;
 
       if (sig.direction === 'LONG') {
-        // ── LONG: buy the underlying directly ─────────────────────────────
+        // ── LONG: buy the underlying (or its leveraged proxy if > $30) ─────
         const price  = sig.price;
-        if (price > MAX_TRADE_PRICE) { console.log(`[CT-Bot] SKIP LONG ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} price cap`); continue; }
         const ctSpyGate = await checkSPYGate(sig.symbol, price, 'long');
         if (!ctSpyGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED: ${ctSpyGate.reason}`); continue; }
         const ctLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
@@ -3290,19 +3427,30 @@ async function runCTAutoTrader() {
         const ctLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
         if (!ctLongDPGate.allowed) { console.log(`[CT-Bot] DP-Gate BLOCKED: ${ctLongDPGate.reason}`); continue; }
         if (ctLongDPGate.reason) console.log(`[CT-Bot] DP-Gate: ${ctLongDPGate.reason}`);
-        const shares = Math.max(1, Math.floor(amount / price));
-        const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (price * 0.985).toFixed(2);
-        const tpPrice = sig.target   ? sig.target.toFixed(2)   : (price * 1.04).toFixed(2);
+        // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
+        let tradeSymbol = sig.symbol;
+        let tradePrice  = price;
+        if (price > MAX_TRADE_PRICE) {
+          const proxy = await getLeveragedProxy(sig.symbol, price);
+          if (!proxy) { console.log(`[CT-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+          console.log(`[CT-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
+          if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[CT-Bot] Already holding proxy ${proxy.symbol}`); continue; }
+          tradeSymbol = proxy.symbol;
+          tradePrice  = proxy.price;
+        }
+        const shares = Math.max(1, Math.floor(amount / tradePrice));
+        const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (tradePrice * 0.985).toFixed(2);
+        const tpPrice = sig.target   ? sig.target.toFixed(2)   : (tradePrice * 1.04).toFixed(2);
         const orderBody = {
-          symbol: sig.symbol, qty: String(shares), side: 'buy',
+          symbol: tradeSymbol, qty: String(shares), side: 'buy',
           type: 'market', time_in_force: 'day', order_class: 'bracket',
           take_profit: { limit_price: tpPrice }, stop_loss: { stop_price: slPrice },
         };
         try {
           const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
-          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'countertrend','open',datetime('now'))`).run(user.user_id, sig.symbol, shares, price, tpPrice, slPrice, order.id || null, sig.signalType);
-          console.log(`[CT-Bot] ORDER: BUY ${shares} ${sig.symbol} @ ~$${price} [${sig.signalType}] SL=${slPrice} TP=${tpPrice}`);
-        } catch (e) { console.error(`[CT-Bot] Order failed ${sig.symbol}:`, e.message); }
+          db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'countertrend','open',datetime('now'))`).run(user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice, order.id || null, sig.signalType);
+          console.log(`[CT-Bot] ORDER: BUY ${shares} ${tradeSymbol} @ ~$${tradePrice} [${sig.signalType}]${tradeSymbol !== sig.symbol ? ` (proxy for ${sig.symbol})` : ''}`);
+        } catch (e) { console.error(`[CT-Bot] Order failed ${tradeSymbol}:`, e.message); }
 
       } else {
         // ── SHORT: buy the corresponding inverse ETF instead of shorting ──

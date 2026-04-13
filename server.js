@@ -1671,6 +1671,60 @@ async function computeVESignal(symbol) {
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MOMENTUM / GAP-AND-GO SIGNAL — Strategy 5
+// Fires when a stock is up ≥3% today on ≥1.5× average volume (daily bars).
+// Unlike VE (requires squeeze) or Bounce (requires oversold), this catches
+// pure price strength: strong directional trend days like tariff-pause surges.
+// ══════════════════════════════════════════════════════════════════════════════
+async function computeMomentumSignal(symbol) {
+  const bars = await fetchOHLCV(symbol, 30);
+  if (!bars || bars.length < 10) return { symbol, confirmed: false, error: 'Insufficient data' };
+
+  const cur  = bars.at(-1); // today (live intraday bar)
+  const prev = bars.at(-2); // yesterday
+  const price     = cur.c;
+  const prevClose = prev.c;
+  if (!price || !prevClose || price <= 0) return { symbol, confirmed: false };
+
+  const dayChange = (price - prevClose) / prevClose * 100;
+
+  // 10-day average volume (excludes today)
+  const avgVol10 = bars.slice(-11, -1).reduce((a, b) => a + (b.v || 0), 0) / 10;
+  const volRatio = avgVol10 > 0 ? (cur.v || 0) / avgVol10 : 0;
+
+  // Score: used to rank signals — bigger move on bigger volume wins
+  const score = Math.abs(dayChange) * volRatio;
+
+  const isUpDay  = dayChange >= 3;    // ≥3% intraday gain
+  const hasVol   = volRatio >= 1.5;   // ≥1.5× average volume (institutional participation)
+
+  if (!isUpDay || !hasVol) return { symbol, confirmed: false, dayChange: +dayChange.toFixed(2), volRatio: +volRatio.toFixed(2) };
+
+  // SL = 3% below today's open (stop out if momentum reverses intraday)
+  const slLevel  = +(cur.o * 0.97).toFixed(4);
+  const riskDist = price - slLevel;
+  if (riskDist <= 0) return { symbol, confirmed: false };
+
+  const tpLevel = +(price + riskDist * 2.0).toFixed(4); // 2:1 R:R minimum
+  const rr      = +(( tpLevel - price ) / riskDist).toFixed(2);
+
+  return {
+    symbol,
+    price:     +price.toFixed(4),
+    dayChange: +dayChange.toFixed(2),
+    volRatio:  +volRatio.toFixed(2),
+    score,
+    confirmed: true,
+    direction: 'LONG',
+    slLevel,
+    tpLevel,
+    rr,
+    signal: `MOMENTUM ${dayChange.toFixed(1)}% · ${volRatio.toFixed(1)}x vol`,
+    error: null,
+  };
+}
+
 // ── Inverse ETF Map ────────────────────────────────────────────────────────────
 // For any SHORT signal, buy the corresponding inverse ETF instead of shorting.
 // Individual stocks map to their sector inverse; ETFs map to their direct inverse.
@@ -3622,6 +3676,154 @@ async function runCTAutoTrader() {
 // ── Start CT auto-trader interval — scans every 60 seconds during market hours ─
 setInterval(runCTAutoTrader, 60 * 1000);
 console.log('[CT-Bot] Countertrend auto-trader initialized — scans every 60 sec during market hours');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BOT 5 — MOMENTUM / GAP-AND-GO AUTO-TRADER
+// Catches strong directional moves (≥3% intraday on ≥1.5× avg volume) that
+// VE, Bounce, EE, and CT all miss:
+//   • VE   requires squeeze + ATR contraction first (trending days never squeeze)
+//   • Bounce requires RSI/Stoch oversold (trending up stocks are never oversold)
+//   • EE   only fires on earnings days
+//   • CT   tries to short strong moves — wrong direction on trend days
+// Runs every 5 minutes; all gates (SPY, Whale, Dark Pool, PDT, slot cap) apply.
+// ══════════════════════════════════════════════════════════════════════════════
+const _momentumCache = new Map();
+const MOMENTUM_CACHE_TTL = 2 * 60 * 1000; // 2-min signal cache to cap API calls
+
+async function runMomentumAutoTrader() {
+  if (!isMarketOpen()) return;
+  const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
+  if (!users.length) return;
+  console.log(`[Momentum-Bot] Scan triggered — checking MASTER_UNIVERSE (${MASTER_UNIVERSE.length} symbols)`);
+
+  const now     = Date.now();
+  const signals = [];
+  const universe = MASTER_UNIVERSE;
+
+  // Scan in batches of 8 (parallel, cached) to avoid rate limits
+  for (let i = 0; i < universe.length; i += 8) {
+    const batch = universe.slice(i, i + 8);
+    const settled = await Promise.allSettled(batch.map(async sym => {
+      const cached = _momentumCache.get(sym);
+      if (cached && now - cached.ts < MOMENTUM_CACHE_TTL) return cached.data;
+      const sig = await computeMomentumSignal(sym).catch(() => null);
+      _momentumCache.set(sym, { data: sig, ts: now });
+      return sig;
+    }));
+    settled.forEach(r => {
+      if (r.status === 'fulfilled' && r.value?.confirmed) signals.push(r.value);
+    });
+  }
+
+  if (!signals.length) {
+    console.log('[Momentum-Bot] No momentum signals found this cycle.');
+    return;
+  }
+
+  // Best signal = highest dayChange × volRatio score
+  signals.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const best = signals[0];
+  console.log(`[Momentum-Bot] Best signal: ${best.symbol} +${best.dayChange}% · ${best.volRatio}x vol (score=${best.score?.toFixed(1)}) — ${signals.length} total confirmed`);
+
+  for (const user of users) {
+    const creds = getAlpacaCreds(user.user_id);
+    if (!creds) continue;
+    if (!acquireBotLock(user.user_id)) {
+      console.log(`[Momentum-Bot] User ${user.user_id} locked by another bot — skipping`);
+      continue;
+    }
+    try {
+      if (!await checkPDTAllowed(user.user_id, 'Momentum-Bot')) continue;
+
+      const slots = await getOpenSlots(user.user_id, 'Momentum-Bot');
+      if (!slots || slots.available <= 0) continue;
+      const positions = slots.positions;
+
+      // Already holding this symbol?
+      const alreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === best.symbol);
+      if (alreadyIn) { console.log(`[Momentum-Bot] Already holding ${best.symbol} — skipping`); continue; }
+
+      // 30-min per-symbol cooldown
+      const recentTrade = db.prepare(`
+        SELECT id FROM auto_trade_log
+        WHERE user_id = ? AND symbol = ? AND strategy = 'momentum'
+        AND created_at >= datetime('now', '-30 minutes')
+      `).get(user.user_id, best.symbol);
+      if (recentTrade) { console.log(`[Momentum-Bot] Cooldown active for ${best.symbol}`); continue; }
+
+      const lev    = Math.min(4, Math.max(1, user.leverage || 1));
+      const amount = (user.amount || 500) * lev;
+
+      // Gates
+      const spyGate = await checkSPYGate(best.symbol, best.price, 'long');
+      if (!spyGate.allowed) { console.log(`[Momentum-Bot] SPY-Gate BLOCKED: ${spyGate.reason}`); continue; }
+
+      const whaleGate = await checkWhaleGate(best.symbol, 'LONG');
+      if (!whaleGate.allowed) { console.log(`[Momentum-Bot] Whale-Gate BLOCKED: ${whaleGate.reason}`); continue; }
+      if (whaleGate.reason) console.log(`[Momentum-Bot] Whale-Gate: ${whaleGate.reason}`);
+
+      const dpGate = await checkDarkPoolGate(best.symbol, best.price, 'LONG');
+      if (!dpGate.allowed) { console.log(`[Momentum-Bot] DP-Gate BLOCKED: ${dpGate.reason}`); continue; }
+      if (dpGate.reason) console.log(`[Momentum-Bot] DP-Gate: ${dpGate.reason}`);
+
+      // $30 price cap → proxy routing
+      let tradeSymbol = best.symbol;
+      let tradePrice  = best.price;
+      let slPrice     = best.slLevel.toFixed(2);
+      let tpPrice     = best.tpLevel.toFixed(2);
+
+      if (tradePrice > MAX_TRADE_PRICE) {
+        const proxy = await getLeveragedProxy(best.symbol, tradePrice);
+        if (!proxy) {
+          console.log(`[Momentum-Bot] SKIP ${best.symbol} @ $${tradePrice} — above $${MAX_TRADE_PRICE} cap, no proxy found`);
+          continue;
+        }
+        console.log(`[Momentum-Bot] ${best.symbol} @ $${tradePrice} → proxy ${proxy.symbol} @ $${proxy.price}`);
+        if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) {
+          console.log(`[Momentum-Bot] Already holding proxy ${proxy.symbol} — skipping`);
+          continue;
+        }
+        tradeSymbol = proxy.symbol;
+        tradePrice  = proxy.price;
+        // Translate SL/TP % to proxy price
+        const slPct = (best.price - best.slLevel) / best.price;
+        const tpPct = (best.tpLevel - best.price) / best.price;
+        slPrice = (tradePrice * (1 - slPct)).toFixed(2);
+        tpPrice = (tradePrice * (1 + tpPct)).toFixed(2);
+      }
+
+      const shares    = Math.max(1, Math.floor(amount / tradePrice));
+      const orderBody = {
+        symbol:         tradeSymbol,
+        qty:            String(shares),
+        side:           'buy',
+        type:           'market',
+        time_in_force:  'day',
+        order_class:    'bracket',
+        take_profit:    { limit_price: tpPrice },
+        stop_loss:      { stop_price:  slPrice },
+      };
+
+      try {
+        const order = await alpacaFetch(user.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) });
+        db.prepare(`INSERT INTO auto_trade_log (user_id,symbol,side,shares,entry_price,tp_price,sl_price,alpaca_order_id,signal,strategy,status,created_at) VALUES (?,?,'buy',?,?,?,?,?,?,'momentum','open',datetime('now'))`).run(
+          user.user_id, tradeSymbol, shares, tradePrice, tpPrice, slPrice,
+          order.id || null,
+          best.signal + (tradeSymbol !== best.symbol ? ` (proxy for ${best.symbol})` : '')
+        );
+        console.log(`[Momentum-Bot] ✓ ORDER BUY ${shares} ${tradeSymbol} ~$${tradePrice} | +${best.dayChange}% · ${best.volRatio}x vol | SL=${slPrice} TP=${tpPrice}${tradeSymbol !== best.symbol ? ` (proxy for ${best.symbol})` : ''}`);
+      } catch (e) {
+        console.error(`[Momentum-Bot] Order failed for ${tradeSymbol}:`, e.message);
+      }
+    } finally {
+      releaseBotLock(user.user_id);
+    }
+  }
+}
+
+// Scans every 5 minutes — faster cadence than VE/CT because momentum windows close quickly
+setInterval(runMomentumAutoTrader, 5 * 60 * 1000);
+console.log('[Momentum-Bot] Momentum/Gap-and-Go auto-trader initialized — scans every 5 min during market hours');
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Johnny Qureshi Finance on :${PORT}`);

@@ -358,7 +358,7 @@ const alpacaTrader = (() => {
 document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 
 
-// All 4 bots are always active — no toggle needed. They run automatically
+// All 5 bots are always active — no toggle needed. They run automatically
 // for every user who has Alpaca credentials connected, scanning the full
 // MASTER_UNIVERSE every 5 minutes during market hours.
 
@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 const simPanel = (() => {
   const BOT_LABELS = {
     bounce: 'Bounce 2.0', volatility_expansion: 'VE',
-    explosive_earnings: 'EE', countertrend: 'CT'
+    explosive_earnings: 'EE', countertrend: 'CT', momentum: 'Momentum'
   };
   const STATUS_INTERVAL  = 60  * 1000;  // refresh status every 60 s
   const WHALE_INTERVAL   = 5 * 60 * 1000; // refresh whale data every 5 min

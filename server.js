@@ -1310,7 +1310,7 @@ const MASTER_UNIVERSE = [
   // ── Smaller / emerging tokens ──────────────────────────────────────────────
   'WLFI','AVNT','XPL','SKR','ZORA','XCN','MEW','CC',
   // ── User-added ─────────────────────────────────────────────────────────────
-  'ADBG','GLND',
+  'ADBG','GLND','USAR','ZSX','DOGD','AVS','BABO','KMLI','NBIG','NBIZ','LLYX','BRKU',
 ];
 const BOUNCE_UNIVERSE = MASTER_UNIVERSE;
 

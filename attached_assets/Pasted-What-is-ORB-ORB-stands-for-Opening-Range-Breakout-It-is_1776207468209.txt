@@ -1,0 +1,55 @@
+What is ORB?
+
+ORB stands for Opening Range Breakout. It is one of the most widely used intraday trading strategies, built around the idea that the price range established in the first few minutes of the trading day acts as a key reference point for the rest of the session.
+
+The Core Concept
+
+When the market opens, price action is often volatile and erratic as traders react to overnight news, pre-market moves, and the morning sentiment. After that initial chaos settles, a recognizable high and low range forms — that is your opening range.
+
+Once price breaks above or below that range with conviction, it tends to continue in that direction — that is the trade.
+
+How It Works Step by Step
+
+1. Define Your Opening Range Timeframe
+
+Most common windows are the first 5, 15, or 30 minutes of the session
+The 30-minute ORB is the most widely followed
+You watch and do nothing during this window — just let the range form
+2. Identify the High and Low
+
+Mark the highest price reached during your opening range window
+Mark the lowest price reached during your opening range window
+These become your breakout levels
+3. Wait for the Breakout
+
+If price closes above the opening range high — that is a long signal
+If price closes below the opening range low — that is a short signal
+You want the breakout to happen with increased volume for confirmation
+4. Enter the Trade
+
+Enter on the candle that breaks and closes beyond the range
+Some traders enter on the break itself, others wait for a retest of the level
+5. Set Your Stop Loss (RSI 75)
+
+Long trade: stop goes below the opening range low
+Short trade (inverse stock Buy): stop goes above the opening range high
+Tighter stops can be set at the midpoint of the range
+6. Set Your Target (3% stop loss)
+
+Common approach is to project the height of the opening range as your target
+
+The opening range represents the market finding its footing
+A breakout signals that one side (buyers or sellers) has won the early battle
+Institutional traders and algorithms watch these levels heavily which creates self-fulfilling momentum
+Works well on high volume stocks and major ETFs like SPY
+Best Conditions for ORB
+
+High relative volume on the day
+A clear catalyst (earnings, news, economic data)
+Clean breakout with no choppy price action just above or below the range
+Works best on trending days — avoid on low volume choppy days
+Strong One-Liner Definition:
+
+"ORB is a strategy where you mark the high and low of the first 15 or 30 minutes of the trading day and take a trade in the direction price breaks out of that range, using the opposite end of the range as your stop and the range width projected forward as your target."
+
+Given that you trade SPY and follow momentum names, ORB pairs well with your style since SPY has clean volume and well-defined opening ranges most sessions.Once the SPY breaks out of the top green bar take a trade on a stock with cheap price and good momentum. If the breaks down under the red line take a trade on a inverse  a stock with cheap price and good momentum.

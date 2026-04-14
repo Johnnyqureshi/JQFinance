@@ -108,15 +108,19 @@ db.prepare(`
 
 // ── Seed: ensure the primary admin account always exists ─────────────────────
 // This runs at startup so the account is present even on a fresh deployment DB.
-// The hash below is bcrypt of 'JQFinance2024!' (rounds=10). The user can change
-// their password at any time via the lock-icon modal; this only seeds if missing.
+// The hash below is bcrypt of 'JQFinance2024!' (rounds=10).
+// On every startup we upsert the admin account so a stale or missing hash
+// in any environment (dev or production) is automatically corrected.
 (function seedAdminUser() {
   const ADMIN_USER = 'johnnyqureshi';
   const ADMIN_HASH = '$2b$10$it125q.J9OKxhcn2pNGHR.FA6/isY4CWt5GH/IXMzJqW94se1i.aW';
-  const existing = db.prepare('SELECT id FROM users WHERE LOWER(username)=LOWER(?)').get(ADMIN_USER);
+  const existing = db.prepare('SELECT id, password_hash FROM users WHERE LOWER(username)=LOWER(?)').get(ADMIN_USER);
   if (!existing) {
     db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(ADMIN_USER, ADMIN_HASH);
     console.log(`[Seed] Created admin account: ${ADMIN_USER}`);
+  } else if (existing.password_hash !== ADMIN_HASH) {
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(ADMIN_HASH, existing.id);
+    console.log(`[Seed] Reset admin password hash for: ${ADMIN_USER}`);
   }
 })();
 

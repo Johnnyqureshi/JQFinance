@@ -1234,25 +1234,28 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
     });
   } catch (netErr) {
     clearTimeout(timeoutId);
-    // Network error (ECONNRESET, ETIMEDOUT, aborted) — retry with exponential back-off
-    if (_attempt < MAX_ATTEMPTS - 1) {
+    // Only retry GET requests — POST/PUT/DELETE are not idempotent.
+    // Retrying an order-placement POST after a timeout could create a duplicate order.
+    const isGet = !opts.method || opts.method === 'GET';
+    if (isGet && _attempt < MAX_ATTEMPTS - 1) {
       const delay = Math.min(1000 * 2 ** _attempt, 8000);
       console.warn(`[AT] Alpaca network error on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms: ${netErr.message}`);
       await new Promise(res => setTimeout(res, delay));
       return alpacaFetch(userId, path, opts, _attempt + 1);
     }
-    throw new Error(`Alpaca unreachable after ${MAX_ATTEMPTS} attempts: ${netErr.message}`);
+    throw new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
   }
   clearTimeout(timeoutId);
-  // Rate-limit back-off: 429 → wait 2 s and retry once
-  if (r.status === 429 && _attempt < MAX_ATTEMPTS - 1) {
+  const isGet = !opts.method || opts.method === 'GET';
+  // Rate-limit back-off: 429 → wait and retry (GET only — safe to repeat)
+  if (r.status === 429 && isGet && _attempt < MAX_ATTEMPTS - 1) {
     const delay = Math.min(2000 * (_attempt + 1), 8000);
     console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
     return alpacaFetch(userId, path, opts, _attempt + 1);
   }
-  // Transient server errors (502/503/504) — retry with back-off
-  if ([502, 503, 504].includes(r.status) && _attempt < MAX_ATTEMPTS - 1) {
+  // Transient server errors (502/503/504) — retry GET requests only
+  if ([502, 503, 504].includes(r.status) && isGet && _attempt < MAX_ATTEMPTS - 1) {
     const delay = Math.min(1500 * 2 ** _attempt, 8000);
     console.warn(`[AT] Alpaca ${r.status} on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
@@ -3347,8 +3350,14 @@ async function runCTAutoTrader() {
       const amount = (user.amount || 500) * lev * ctSeason.sizeMult; // seasonal sizing adjustment
 
       if (sig.direction === 'LONG') {
-        // ── LONG: buy the underlying (or its leveraged proxy if > $30) ─────
-        const price  = sig.price;
+        // ── LONG: confirm live price before any cap check or sizing ──────────
+        // sig.price is the bar-close from signal generation (may be stale).
+        // A gap-up overnight could push a $22 signal to $45 by open.
+        const liveQ  = await fetchLiveQuote(sig.symbol, user.user_id).catch(() => null);
+        const price  = (liveQ?.price && liveQ.price > 0) ? liveQ.price : sig.price;
+        if (liveQ?.price && Math.abs(liveQ.price - sig.price) / (sig.price || 1) > 0.03) {
+          console.log(`[CT-Bot] Price drift: ${sig.symbol} signal $${sig.price.toFixed(2)} → live $${liveQ.price.toFixed(2)}`);
+        }
         const ctSpyGate = await checkSPYGate(sig.symbol, price, 'long');
         if (!ctSpyGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED: ${ctSpyGate.reason}`); continue; }
         const ctLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
@@ -3854,24 +3863,50 @@ const ORB_INVERSE_ETF_SET = new Set([
   'SH','PSQ','RWM','DOG','TBF','SJB','GLL','ZSL','SCO','SARK','GGLS','RGTZ','CORD',
 ]);
 
-// Batch-fetch prices, % change, volume, and momentum score for a pool of symbols
+// Batch-fetch prices, % change, volume, and momentum score for a pool of symbols.
+// Uses Alpaca snapshots as primary source (live, reliable on Node 20).
+// Falls back to yfChartQuote only if Alpaca returns nothing for a symbol.
 async function fetchOrbCandidatePrices(symbols) {
   const results = [];
-  for (let i = 0; i < symbols.length; i += 10) {
-    const batch   = symbols.slice(i, i + 10);
-    const settled = await Promise.allSettled(batch.map(s => yfChartQuote(s).catch(() => null)));
-    settled.forEach(r => {
-      if (r.status !== 'fulfilled' || !r.value) return;
-      const q = r.value;
-      if (!q.price || q.price <= 0 || q.price > MAX_TRADE_PRICE) return;
-      const changePct = q.changesPercentage ?? 0;
-      const volume    = q.volume    ?? 0;
-      const avgVolume = q.avgVolume ?? 0;
-      const relVol    = avgVolume > 0 ? +(volume / avgVolume).toFixed(2) : null;
-      // Momentum score: % gain × relative-volume surge — identical to Momentum bot scoring
-      const score     = relVol != null ? +(changePct * relVol).toFixed(3) : changePct;
-      results.push({ symbol: q.symbol, price: q.price, change: changePct, volume, avgVolume, relVol, score });
-    });
+  const uid = getAnyAlpacaUserId();
+
+  // Alpaca snapshots in batches of 20 (API limit)
+  const alpacaMap = {};
+  if (uid) {
+    for (let i = 0; i < symbols.length; i += 20) {
+      const batch = symbols.slice(i, i + 20);
+      const snap  = await alpacaSnapshotFetch(uid, batch).catch(() => null);
+      if (snap) Object.assign(alpacaMap, snap);
+    }
+  }
+
+  for (const sym of symbols) {
+    let price = null, changePct = 0, volume = 0, avgVolume = 0;
+
+    const s = alpacaMap[sym];
+    if (s) {
+      price      = s.latestTrade?.p ?? s.minuteBar?.c ?? s.dailyBar?.c ?? null;
+      const prev = s.prevDailyBar?.c;
+      changePct  = (price && prev && prev > 0) ? +((price - prev) / prev * 100).toFixed(3) : 0;
+      volume     = s.dailyBar?.v ?? 0;
+      // Alpaca doesn't give avgVolume directly — approximate from prevDailyBar volume
+      avgVolume  = s.prevDailyBar?.v ?? 0;
+    }
+
+    // Yahoo fallback for symbols Alpaca didn't return
+    if (!price || price <= 0) {
+      const q = await yfChartQuote(sym).catch(() => null);
+      if (!q?.price || q.price <= 0) continue;
+      price      = q.price;
+      changePct  = q.changesPercentage ?? 0;
+      volume     = q.volume    ?? 0;
+      avgVolume  = q.avgVolume ?? 0;
+    }
+
+    if (!price || price <= 0 || price > MAX_TRADE_PRICE) continue;
+    const relVol = avgVolume > 0 ? +(volume / avgVolume).toFixed(2) : null;
+    const score  = relVol != null ? +(changePct * relVol).toFixed(3) : changePct;
+    results.push({ symbol: sym, price, change: changePct, volume, avgVolume, relVol, score });
   }
   return results;
 }

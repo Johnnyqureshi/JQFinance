@@ -3,10 +3,12 @@
 const alpacaTrader = (() => {
 
   let connected     = false;
+  let reconnecting  = false;   // true while we're waiting for checkCredentials after logout
   let alpacaMode    = 'live';
   let _pollFailures = 0;
   let _keepAlive    = null;
-  const POLL_FAIL_LIMIT = 3;
+  const POLL_FAIL_LIMIT  = 3;
+  const LS_WAS_CONNECTED = 'jqf_alpaca_was_connected';
 
   const $   = id => document.getElementById(id);
   const fmt = (n, d = 2) => n == null || isNaN(n) ? '--'
@@ -72,6 +74,7 @@ const alpacaTrader = (() => {
   }
 
   // ── Connection status ──────────────────────────────────────────────────────
+  // Three states: connected (green) | reconnecting (yellow) | disconnected (red)
   function updateConnStatus() {
     const dot   = $('atConnDot');
     const txt   = $('atConnText');
@@ -87,6 +90,14 @@ const alpacaTrader = (() => {
       if (btn)   btn.textContent = 'Account Settings';
       if (chips) chips.style.display = '';
       if (place) { place.disabled = false; place.textContent = 'Place Order'; }
+    } else if (reconnecting) {
+      // Credentials exist in DB — just waiting for session to verify them
+      if (dot)   dot.className = 'at-conn-dot dot-yellow';
+      if (txt)   txt.textContent = 'Reconnecting…';
+      if (badge) { badge.textContent = 'RECONNECTING'; badge.className = 'at-mode-badge mode-paper'; }
+      if (btn)   btn.textContent = 'Account Settings';
+      if (chips) chips.style.display = 'none';
+      if (place) { place.disabled = true; place.textContent = 'Reconnecting…'; }
     } else {
       if (dot)   dot.className = 'at-conn-dot dot-red';
       if (txt)   txt.textContent = 'Not connected';
@@ -229,16 +240,30 @@ const alpacaTrader = (() => {
 
   // ── Check credentials ──────────────────────────────────────────────────────
   async function checkCredentials() {
+    // If we know the user was previously connected, show "Reconnecting…" immediately
+    // so there is never a red "Disconnected" flash between logout and re-login.
+    if (!connected && localStorage.getItem(LS_WAS_CONNECTED)) {
+      reconnecting = true;
+      updateConnStatus();
+    }
     try {
       const r = await apiFetch('/api/alpaca/credentials', { _silent: true });
       if (r.connected) {
-        connected  = true;
-        alpacaMode = r.mode || 'live';
+        reconnecting = false;
+        connected    = true;
+        alpacaMode   = r.mode || 'live';
+        localStorage.setItem(LS_WAS_CONNECTED, '1');
         updateConnStatus();
         loadAccount();
         loadPositions();
         loadOrders();
         startKeepAlive();
+      } else {
+        // No creds in DB — fully disconnected (user never connected or explicitly removed keys)
+        reconnecting = false;
+        connected    = false;
+        localStorage.removeItem(LS_WAS_CONNECTED);
+        updateConnStatus();
       }
     } catch (e) {
       if (e.message !== 'session_expired') console.warn('[AT] checkCreds:', e.message);
@@ -272,9 +297,11 @@ const alpacaTrader = (() => {
       if (r.error) throw new Error(r.error);
       const acct = await apiFetch('/api/alpaca/account');
       if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
-      connected  = true;
-      alpacaMode = r.mode || 'live';
+      connected    = true;
+      reconnecting = false;
+      alpacaMode   = r.mode || 'live';
       _pollFailures = 0;
+      localStorage.setItem(LS_WAS_CONNECTED, '1');
       hideModal();
       updateConnStatus();
       loadAccount();
@@ -287,7 +314,9 @@ const alpacaTrader = (() => {
 
   async function disconnect() {
     await apiFetch('/api/alpaca/credentials', { method: 'DELETE' });
-    connected = false;
+    connected    = false;
+    reconnecting = false;
+    localStorage.removeItem(LS_WAS_CONNECTED);
     stopKeepAlive();
     updateConnStatus();
     hideModal();
@@ -333,6 +362,9 @@ const alpacaTrader = (() => {
   function reset() {
     stopKeepAlive();
     connected = false;
+    // If credentials were previously stored, show "Reconnecting…" (yellow) instead of
+    // "Disconnected" (red). The creds are still in the DB — this is just a session logout.
+    reconnecting = !!localStorage.getItem(LS_WAS_CONNECTED);
     updateConnStatus();
   }
 

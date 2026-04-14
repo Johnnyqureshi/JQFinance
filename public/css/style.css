@@ -4110,6 +4110,12 @@ option { background: var(--card); }
 .dot-green  { background: #1dd6a3; box-shadow: 0 0 5px #1dd6a3; }
 .dot-grey   { background: #555; }
 .dot-red    { background: #ef5350; }
+.dot-yellow { background: #d29922; box-shadow: 0 0 5px #d29922; animation: dotPulseYellow 1.4s ease-in-out infinite; }
+@keyframes dotPulseYellow {
+  0%, 100% { box-shadow: 0 0 4px #d29922; opacity: 1; }
+  50%       { box-shadow: 0 0 9px #d29922; opacity: 0.7; }
+}
+.trd-conn-dot.dot-yellow { background: #d29922; box-shadow: 0 0 6px #d29922; }
 .trd-auto-toggle {
   padding: 5px 12px; border-radius: 7px; border: 1px solid var(--border);
   background: var(--surface); color: var(--text-dim);

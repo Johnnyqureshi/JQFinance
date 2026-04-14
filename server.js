@@ -113,7 +113,7 @@ db.prepare(`
 // in any environment (dev or production) is automatically corrected.
 (function seedAdminUser() {
   const ADMIN_USER = 'johnnyqureshi';
-  const ADMIN_HASH = '$2b$10$it125q.J9OKxhcn2pNGHR.FA6/isY4CWt5GH/IXMzJqW94se1i.aW';
+  const ADMIN_HASH = '$2b$10$jqVXi70VTQegfWo3GiVvi.a4fl5QGzh34.tIzRwxIYjvu33SClh.a';
   const existing = db.prepare('SELECT id, password_hash FROM users WHERE LOWER(username)=LOWER(?)').get(ADMIN_USER);
   if (!existing) {
     db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(ADMIN_USER, ADMIN_HASH);

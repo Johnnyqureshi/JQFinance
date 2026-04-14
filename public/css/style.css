@@ -7645,6 +7645,22 @@ option { background: var(--card); }
 }
 .nsc-finp:focus { border-color: #58a6ff; }
 .nsc-finp::placeholder { color: #555f6b; }
+/* Select dropdown variant */
+.nsc-fsel {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 26px;
+  cursor: pointer;
+  width: 130px;
+}
+.nsc-fsel option {
+  background: #1c2128;
+  color: #e6edf3;
+}
+.nsc-flbl[title] { cursor: help; }
 .nsc-apply-btn, .nsc-reset-btn {
   border-radius: 6px;
   padding: 7px 14px;
@@ -7809,6 +7825,7 @@ option { background: var(--card); }
   .nsc-add-input     { width: 160px; }
   .nsc-filter-bar    { gap: 8px; padding: 12px; }
   .nsc-finp          { width: 80px; }
+  .nsc-fsel          { width: 110px; }
   .nsc-table         { font-size: .75rem; }
   .nsc-table .nsc-th { padding: 8px 10px; }
   .nsc-table td      { padding: 7px 10px; }
@@ -7819,7 +7836,7 @@ option { background: var(--card); }
 @media (max-width: 480px) {
   .nsc-topbar-right .nsc-rf-lbl { display: none; }
   .nsc-filter-bar { flex-direction: column; align-items: flex-start; }
-  .nsc-finp       { width: 120px; }
+  .nsc-finp, .nsc-fsel { width: 100%; max-width: 240px; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════

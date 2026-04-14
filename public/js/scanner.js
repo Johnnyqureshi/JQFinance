@@ -175,7 +175,10 @@
   function clearFilterInputs() {
     ['nscMinPrice', 'nscMaxPrice', 'nscMinRelVol', 'nscMinChg'].forEach(id => {
       const el = $(id);
-      if (el) el.value = '';
+      if (!el) return;
+      // Works for both <select> (reset to first option) and any legacy <input>
+      if (el.tagName === 'SELECT') el.selectedIndex = 0;
+      else el.value = '';
     });
   }
 

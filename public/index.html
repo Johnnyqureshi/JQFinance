@@ -696,19 +696,57 @@
     <div class="nsc-filter-bar">
       <div class="nsc-fg">
         <label class="nsc-flbl">MIN PRICE</label>
-        <input type="number" id="nscMinPrice" class="nsc-finp" placeholder="$0" min="0" step="1">
+        <select id="nscMinPrice" class="nsc-finp nsc-fsel">
+          <option value="">Any</option>
+          <option value="1">$1+</option>
+          <option value="5">$5+</option>
+          <option value="10">$10+</option>
+          <option value="20">$20+</option>
+          <option value="50">$50+</option>
+          <option value="100">$100+</option>
+          <option value="200">$200+</option>
+          <option value="500">$500+</option>
+        </select>
       </div>
       <div class="nsc-fg">
         <label class="nsc-flbl">MAX PRICE</label>
-        <input type="number" id="nscMaxPrice" class="nsc-finp" placeholder="any" min="0" step="1">
+        <select id="nscMaxPrice" class="nsc-finp nsc-fsel">
+          <option value="">Any</option>
+          <option value="5">Under $5</option>
+          <option value="10">Under $10</option>
+          <option value="20">Under $20</option>
+          <option value="50">Under $50</option>
+          <option value="100">Under $100</option>
+          <option value="500">Under $500</option>
+          <option value="1000">Under $1,000</option>
+        </select>
       </div>
       <div class="nsc-fg">
-        <label class="nsc-flbl">MIN REL VOL</label>
-        <input type="number" id="nscMinRelVol" class="nsc-finp" placeholder="0" min="0" step="0.5">
+        <label class="nsc-flbl" title="Relative volume vs. 20-day average — 2× means twice normal activity">MIN REL VOL ⓘ</label>
+        <select id="nscMinRelVol" class="nsc-finp nsc-fsel">
+          <option value="">Any</option>
+          <option value="0.5">0.5× (Low)</option>
+          <option value="1">1× (Normal)</option>
+          <option value="1.5">1.5× (Active)</option>
+          <option value="2">2× (High)</option>
+          <option value="3">3× (Very High)</option>
+          <option value="5">5× (Extreme)</option>
+        </select>
       </div>
       <div class="nsc-fg">
-        <label class="nsc-flbl">MIN % CHG</label>
-        <input type="number" id="nscMinChg" class="nsc-finp" placeholder="any" step="0.5">
+        <label class="nsc-flbl" title="Minimum daily % change from previous close">MIN % CHG ⓘ</label>
+        <select id="nscMinChg" class="nsc-finp nsc-fsel">
+          <option value="">Any</option>
+          <option value="-10">≥ -10%</option>
+          <option value="-5">≥ -5%</option>
+          <option value="-3">≥ -3%</option>
+          <option value="0">Positive only</option>
+          <option value="1">≥ +1%</option>
+          <option value="2">≥ +2%</option>
+          <option value="3">≥ +3%</option>
+          <option value="5">≥ +5%</option>
+          <option value="10">≥ +10%</option>
+        </select>
       </div>
       <button class="nsc-apply-btn" id="nscApplyFilters">Apply</button>
       <button class="nsc-reset-btn" id="nscResetFilters">Reset</button>

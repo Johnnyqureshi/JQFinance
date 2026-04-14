@@ -416,6 +416,36 @@ async function yfChartQuote(symbol) {
   }
 }
 
+// ── GET /api/futures — near-24/5 futures + overnight proxy prices ─────────────
+// Symbols: ES=F (S&P 500), NQ=F (Nasdaq 100), YM=F (Dow), RTY=F (Russell 2000),
+//          GC=F (Gold), CL=F (Crude Oil), ZB=F (30yr Bond), VX=F (VIX futures)
+const FUTURES_SYMBOLS = ['ES=F','NQ=F','YM=F','RTY=F','GC=F','CL=F','ZB=F'];
+const FUTURES_META = {
+  'ES=F':  { label: 'S&P 500',       underlying: 'SPY'  },
+  'NQ=F':  { label: 'Nasdaq 100',    underlying: 'QQQ'  },
+  'YM=F':  { label: 'Dow Jones',     underlying: 'DIA'  },
+  'RTY=F': { label: 'Russell 2000',  underlying: 'IWM'  },
+  'GC=F':  { label: 'Gold',          underlying: null   },
+  'CL=F':  { label: 'Crude Oil',     underlying: null   },
+  'ZB=F':  { label: '30yr Treasury', underlying: 'TLT'  },
+};
+app.get('/api/futures', requireAuth, async (req, res) => {
+  try {
+    const raw = await yf.quote(FUTURES_SYMBOLS, {}, { validateResult: false });
+    const quotes = Array.isArray(raw) ? raw : [raw];
+    const out = {};
+    quotes.forEach(q => {
+      if (!q?.symbol) return;
+      const n = _normaliseQuote(q);
+      if (n) out[q.symbol] = { ...n, ...FUTURES_META[q.symbol] };
+    });
+    res.json(out);
+  } catch (e) {
+    console.error('[Futures] fetch error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/quote/:symbol ─────────────────────────────────────────────────────
 app.get('/api/quote/:symbol', async (req, res) => {
   try {

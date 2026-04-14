@@ -131,7 +131,7 @@ function goPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
-  if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); }
+  if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); futuresTracker.load(); }
   if (page==='scanner')   scanner.open();
   if (page==='trading')   { alpacaTrader.open(); if (typeof simPanel !== 'undefined') simPanel.load(); }
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
@@ -866,35 +866,74 @@ async function loadWatchlist() {
   const snaps = await api.snapshots(state.watchlist);
   tbl.innerHTML = '';
   state.watchlist.forEach(sym => {
-    const s=snaps[sym]||{};
-    const px=s.price||0, pv=s.previousClose||0, ch=px-pv, pt=pv?(ch/pv)*100:0;
+    const s = snaps[sym] || {};
+    const isExtended = s.extendedPrice != null && s.marketState && s.marketState !== 'REGULAR';
+    // During extended hours show extendedPrice; otherwise show regularClose or price
+    const displayPx = isExtended ? s.extendedPrice : (s.price || 0);
+    const pv = s.previousClose || 0;
+    // Change vs previous close regardless of session
+    const ch = displayPx && pv ? displayPx - pv : 0;
+    const pt = pv ? (ch / pv) * 100 : 0;
+
     const row = document.createElement('div');
-    row.className='wl-row';
+    row.className = 'wl-row';
+
     const symSpan = document.createElement('span');
     symSpan.className = 'wl-sym';
     symSpan.textContent = sym;
+
+    // Name + optional market-state badge
+    const nameWrap = document.createElement('span');
+    nameWrap.className = 'wl-name-wrap';
     const nameSpan = document.createElement('span');
     nameSpan.className = 'wl-name';
     nameSpan.textContent = s.name || '';
+    nameWrap.appendChild(nameSpan);
+    if (isExtended) {
+      const badge = document.createElement('span');
+      badge.className = 'wl-session-badge wl-session-' + (s.extendedType === 'PRE' ? 'pre' : 'ah');
+      badge.textContent = s.extendedType || 'EXT';
+      nameWrap.appendChild(badge);
+    } else if (s.marketState && !['REGULAR','PRE','POST','PREPRE','POSTPOST'].includes(s.marketState)) {
+      const badge = document.createElement('span');
+      badge.className = 'wl-session-badge wl-session-closed';
+      badge.textContent = 'CLOSED';
+      nameWrap.appendChild(badge);
+    }
+
+    // Price column — show extended price + regular close underneath when extended
+    const pxWrap = document.createElement('span');
+    pxWrap.className = 'wl-px-wrap';
     const pxSpan = document.createElement('span');
     pxSpan.className = 'wl-px';
-    pxSpan.textContent = px ? '$' + fmt(px) : '--';
+    pxSpan.textContent = displayPx ? '$' + fmt(displayPx) : '--';
+    pxWrap.appendChild(pxSpan);
+    if (isExtended && s.regularClose) {
+      const closeLbl = document.createElement('span');
+      closeLbl.className = 'wl-reg-close';
+      closeLbl.textContent = 'Close $' + fmt(s.regularClose);
+      pxWrap.appendChild(closeLbl);
+    }
+
     const chgSpan = document.createElement('span');
     chgSpan.className = `wl-chg ${cls(ch)}`;
     chgSpan.textContent = `${ch >= 0 ? '+' : ''}${fmt(pt)}%`;
+
     const rmBtn = document.createElement('button');
     rmBtn.className = 'wl-rm';
     rmBtn.dataset.sym = sym;
     rmBtn.title = 'Remove';
     rmBtn.textContent = '×';
+
     row.appendChild(symSpan);
-    row.appendChild(nameSpan);
-    row.appendChild(pxSpan);
+    row.appendChild(nameWrap);
+    row.appendChild(pxWrap);
     row.appendChild(chgSpan);
     row.appendChild(rmBtn);
+
     row.addEventListener('click', e => {
       if (e.target.closest('.wl-rm')) return;
-      openStock(sym, s||{symbol:sym});
+      openStock(sym, s || { symbol: sym });
     });
     row.querySelector('.wl-rm').addEventListener('click', async () => {
       await wlAPI.remove(sym);
@@ -903,6 +942,124 @@ async function loadWatchlist() {
     tbl.appendChild(row);
   });
 }
+
+// ── Futures & Overnight Tracker ───────────────────────────────────────────────
+const futuresTracker = (() => {
+  const SYMBOLS_ORDER = ['ES=F','NQ=F','YM=F','RTY=F','GC=F','CL=F','ZB=F'];
+  let refreshTimer = null;
+
+  function fmtPx(v, sym) {
+    if (v == null) return '--';
+    // Bond futures show as price (e.g. 108.50); others use comma formatting
+    return '$' + (v >= 1000 ? v.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2}) : v.toFixed(2));
+  }
+  function fmtChg(chg, pct) {
+    if (chg == null) return '';
+    const sign = chg >= 0 ? '+' : '';
+    return `${sign}${chg.toFixed(2)} (${sign}${pct != null ? pct.toFixed(2) : '0.00'}%)`;
+  }
+  function stateLabel(ms) {
+    if (!ms) return '';
+    if (ms === 'REGULAR') return 'Open';
+    if (['PRE','PREPRE'].includes(ms)) return 'Pre';
+    if (['POST','POSTPOST'].includes(ms)) return 'AH';
+    return 'Closed';
+  }
+
+  function render(data) {
+    const grid = $('futuresGrid');
+    if (!grid) return;
+    if (!data || !Object.keys(data).length) {
+      grid.innerHTML = '<div class="futures-loading" style="color:#f85149">No data available</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    SYMBOLS_ORDER.forEach(sym => {
+      const q = data[sym];
+      if (!q) return;
+      const chg = q.change;
+      const pct = q.changesPercentage;
+      const isUp = chg != null && chg >= 0;
+      const stLabel = stateLabel(q.marketState);
+
+      const card = document.createElement('div');
+      card.className = 'ft-card';
+
+      const top = document.createElement('div');
+      top.className = 'ft-card-top';
+
+      const label = document.createElement('div');
+      label.className = 'ft-label';
+      label.textContent = q.label || sym;
+
+      const stBadge = document.createElement('span');
+      stBadge.className = 'ft-state ft-state-' + (stLabel === 'Open' ? 'open' : stLabel === 'Closed' ? 'closed' : 'ext');
+      stBadge.textContent = stLabel || '—';
+
+      top.appendChild(label);
+      top.appendChild(stBadge);
+
+      const symSmall = document.createElement('div');
+      symSmall.className = 'ft-sym';
+      symSmall.textContent = sym;
+
+      const price = document.createElement('div');
+      price.className = 'ft-price';
+      price.textContent = fmtPx(q.price, sym);
+
+      const chgDiv = document.createElement('div');
+      chgDiv.className = 'ft-chg ' + (isUp ? 'up' : 'dn');
+      chgDiv.textContent = fmtChg(chg, pct);
+
+      card.appendChild(top);
+      card.appendChild(symSmall);
+      card.appendChild(price);
+      card.appendChild(chgDiv);
+
+      // Underlying ETF link
+      if (q.underlying) {
+        const link = document.createElement('button');
+        link.className = 'ft-etf-link';
+        link.textContent = '→ ' + q.underlying;
+        link.addEventListener('click', () => openStock(q.underlying));
+        card.appendChild(link);
+      }
+
+      grid.appendChild(card);
+    });
+
+    const upd = $('futuresUpdated');
+    if (upd) {
+      const now = new Date();
+      upd.textContent = 'Updated ' + now.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:true });
+    }
+  }
+
+  async function load() {
+    const grid = $('futuresGrid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="futures-loading"><div class="spinner"></div></div>';
+    try {
+      const r = await fetch('/api/futures');
+      if (!r.ok) throw new Error(r.statusText);
+      render(await r.json());
+    } catch (e) {
+      if (grid) grid.innerHTML = `<div class="futures-loading" style="color:#f85149">Failed to load — ${e.message}</div>`;
+    }
+  }
+
+  function init() {
+    load();
+    const btn = $('futuresRefresh');
+    if (btn) btn.addEventListener('click', load);
+    // Auto-refresh every 60 seconds while on the watchlist page
+    refreshTimer = setInterval(() => {
+      if (document.getElementById('page-watchlist')?.classList.contains('active')) load();
+    }, 60000);
+  }
+
+  return { init, load };
+})();
 
 // ── Sector Rotation Heatmap ────────────────────────────────────────────────────
 const SECTORS = [
@@ -1114,6 +1271,7 @@ function showApp(user) {
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
   window.jqfAgent?.show();
+  futuresTracker.init();
   // Silently restore Alpaca connection state on every login/page-load —
   // credentials live in the DB and must not require a manual tab click to reconnect.
   alpacaTrader.checkCredentials();

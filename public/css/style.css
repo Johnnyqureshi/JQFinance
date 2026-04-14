@@ -2073,7 +2073,72 @@ option { background: var(--card); }
 .cpw-submit:hover { background: #2ea043; }
 .cpw-submit:disabled { opacity: .55; cursor: default; }
 
-/* ── Sector Rotation Heatmap ─────────────────────────────────────────────────── */
+/* ── Watchlist extended-hours badges ─────────────────────────────────────── */
+.wl-name-wrap { display:flex; align-items:center; gap:6px; flex:1; min-width:0; overflow:hidden; }
+.wl-session-badge {
+  flex-shrink: 0; font-size:.6rem; font-weight:700; letter-spacing:.05em;
+  padding:2px 5px; border-radius:3px; text-transform:uppercase;
+}
+.wl-session-pre    { background:rgba(88,166,255,.18); color:#58a6ff; }
+.wl-session-ah     { background:rgba(210,153,34,.18);  color:#d29922; }
+.wl-session-closed { background:rgba(110,118,129,.15); color:#6e7681; }
+.wl-px-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:1px; margin-left:auto; }
+.wl-reg-close { font-size:.68rem; color:var(--t3); font-family:'DM Mono',monospace; }
+
+/* ── Futures & Overnight Tracker ─────────────────────────────────────────── */
+.futures-section {
+  max-width: 960px; margin: 28px auto 0; padding: 0 20px 0;
+}
+.futures-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;
+}
+.futures-header-left  { display:flex; align-items:center; gap:10px; }
+.futures-header-right { display:flex; align-items:center; gap:10px; }
+.futures-header svg   { color:#58a6ff; flex-shrink:0; }
+.futures-title        { font-size:1rem; font-weight:700; color:var(--t1); margin:0; }
+.futures-badge {
+  background:rgba(63,185,80,.15); color:#3fb950; font-size:.62rem; font-weight:700;
+  padding:2px 7px; border-radius:10px; letter-spacing:.05em;
+}
+.futures-updated { font-size:.72rem; color:var(--t3); }
+.futures-refresh {
+  background:none; border:1px solid var(--border2); border-radius:6px; color:var(--t3);
+  width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:color var(--tr), border-color var(--tr);
+}
+.futures-refresh:hover { color:var(--t1); border-color:var(--t2); }
+.futures-sub { font-size:.73rem; color:var(--t3); margin-bottom:14px; }
+.futures-loading { color:var(--t3); font-size:.82rem; padding:12px 0; }
+.futures-grid {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px;
+}
+.ft-card {
+  background:var(--card2); border:1px solid var(--border2); border-radius:10px;
+  padding:13px 14px; transition:border-color var(--tr);
+}
+.ft-card:hover { border-color:var(--t3); }
+.ft-card-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+.ft-label { font-size:.75rem; font-weight:600; color:var(--t2); }
+.ft-sym   { font-family:'DM Mono',monospace; font-size:.65rem; color:var(--t3); margin-bottom:6px; }
+.ft-price { font-family:'DM Mono',monospace; font-size:1rem; font-weight:700; color:var(--t1); }
+.ft-chg   { font-family:'DM Mono',monospace; font-size:.73rem; font-weight:600; margin-top:3px; }
+.ft-chg.up { color:var(--green); }
+.ft-chg.dn { color:var(--red);   }
+.ft-state {
+  font-size:.6rem; font-weight:700; padding:2px 5px; border-radius:3px; letter-spacing:.04em;
+}
+.ft-state-open   { background:rgba(63,185,80,.15); color:#3fb950; }
+.ft-state-closed { background:rgba(110,118,129,.15); color:#6e7681; }
+.ft-state-ext    { background:rgba(210,153,34,.18);  color:#d29922; }
+.ft-etf-link {
+  background:none; border:none; color:var(--t3); font-size:.68rem; cursor:pointer;
+  padding:0; margin-top:8px; display:block; transition:color var(--tr);
+}
+.ft-etf-link:hover { color:#58a6ff; }
+@media (max-width:600px) {
+  .futures-grid { grid-template-columns:repeat(2, 1fr); }
+}
+
 .sr-section {
   max-width: 960px;
   margin: 32px auto 0;

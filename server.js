@@ -23,7 +23,7 @@ console.warn = (...args) => {
 
 const app      = express();
 const PORT           = 5000;
-const MAX_TRADE_PRICE = 30;          // Bot only executes LONG trades on stocks priced ≤ $30
+const MAX_TRADE_PRICE = 25;          // Bot only executes trades on stocks/ETFs priced ≤ $25
 const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 6 bots combined never hold more than 2 positions
 const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter any trade (raised for quality)
 const FMP_KEY  = process.env.FMP_API_KEY;
@@ -2244,7 +2244,7 @@ const LEVERAGED_MAP = {
 };
 
 // Returns the affordable 2×/3× leveraged proxy for an expensive stock,
-// or null if the proxy itself is also > $30 or if no mapping exists.
+// or null if the proxy itself is also > $25 or if no mapping exists.
 async function getLeveragedProxy(symbol, price) {
   if (price <= MAX_TRADE_PRICE) return null;
   const proxyTicker = LEVERAGED_MAP[symbol];
@@ -3316,7 +3316,7 @@ async function runCTAutoTrader() {
         let tradePrice  = price;
         if (price > MAX_TRADE_PRICE) {
           const proxy = await getLeveragedProxy(sig.symbol, price);
-          if (!proxy) { console.log(`[CT-Bot] SKIP ${sig.symbol} @ $${price} — above $30 cap, no proxy available`); continue; }
+          if (!proxy) { console.log(`[CT-Bot] SKIP ${sig.symbol} @ $${price} — above $${MAX_TRADE_PRICE} cap, no proxy available`); continue; }
           console.log(`[CT-Bot] ${sig.symbol} @ $${price} → leveraged proxy ${proxy.symbol} @ $${proxy.price}`);
           if (Array.isArray(positions) && positions.some(p => p.symbol === proxy.symbol)) { console.log(`[CT-Bot] Already holding proxy ${proxy.symbol}`); continue; }
           tradeSymbol = proxy.symbol;
@@ -3363,6 +3363,10 @@ async function runCTAutoTrader() {
         const invPrice = invBars?.at(-1)?.c;
         if (!invPrice) {
           console.log(`[CT-Bot] Could not fetch price for ${inverseTicker} — skipping`);
+          continue;
+        }
+        if (invPrice > MAX_TRADE_PRICE) {
+          console.log(`[CT-Bot] SKIP inverse ${inverseTicker} @ $${invPrice.toFixed(2)} — exceeds $${MAX_TRADE_PRICE} cap`);
           continue;
         }
         // Translate % risk/reward from underlying signal to inverse ETF price levels

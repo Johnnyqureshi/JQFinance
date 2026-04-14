@@ -424,16 +424,39 @@ async function yfChartQuote(symbol) {
 // Uses stored user Alpaca credentials for the data feed.
 // The data API key is identical to the trading API key.
 
-async function alpacaDataFetch(userId, path) {
+async function alpacaDataFetch(userId, path, _attempt = 0) {
   try {
     const creds = getAlpacaCreds(userId);
     if (!creds) return null;
-    const r = await fetch('https://data.alpaca.markets' + path, {
-      headers: {
-        'APCA-API-KEY-ID':     creds.api_key,
-        'APCA-API-SECRET-KEY': creds.api_secret,
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 12000);
+    let r;
+    try {
+      r = await fetch('https://data.alpaca.markets' + path, {
+        signal: controller.signal,
+        headers: {
+          'APCA-API-KEY-ID':     creds.api_key,
+          'APCA-API-SECRET-KEY': creds.api_secret,
+        },
+      });
+    } catch (netErr) {
+      clearTimeout(timeoutId);
+      if (_attempt < 2) {
+        const delay = Math.min(1000 * 2 ** _attempt, 4000);
+        await new Promise(res => setTimeout(res, delay));
+        return alpacaDataFetch(userId, path, _attempt + 1);
+      }
+      return null;
+    }
+    clearTimeout(timeoutId);
+    if (r.status === 429 && _attempt < 2) {
+      await new Promise(res => setTimeout(res, 2000 * (_attempt + 1)));
+      return alpacaDataFetch(userId, path, _attempt + 1);
+    }
+    if ([502, 503, 504].includes(r.status) && _attempt < 2) {
+      await new Promise(res => setTimeout(res, 1500 * (_attempt + 1)));
+      return alpacaDataFetch(userId, path, _attempt + 1);
+    }
     if (!r.ok) return null;
     return r.json();
   } catch { return null; }
@@ -1188,26 +1211,52 @@ function getAlpacaCreds(userId) {
   return db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
 }
 
-async function alpacaFetch(userId, path, opts = {}, _retry = true) {
+async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   const creds = getAlpacaCreds(userId);
   if (!creds) throw new Error('Alpaca not connected. Please add your API credentials.');
   const base = creds.mode === 'live'
     ? 'https://api.alpaca.markets'
     : 'https://paper-api.alpaca.markets';
-  const r = await fetch(base + path, {
-    ...opts,
-    headers: {
-      'APCA-API-KEY-ID':     creds.api_key,
-      'APCA-API-SECRET-KEY': creds.api_secret,
-      'Content-Type':        'application/json',
-      ...(opts.headers || {}),
-    },
-  });
-  // Auto-retry once on 429 after 1 second back-off
-  if (r.status === 429 && _retry) {
-    console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in 1 s`);
-    await new Promise(res => setTimeout(res, 1000));
-    return alpacaFetch(userId, path, opts, false);
+  const MAX_ATTEMPTS = 4;
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), 12000); // 12-second hard timeout
+  let r;
+  try {
+    r = await fetch(base + path, {
+      ...opts,
+      signal: controller.signal,
+      headers: {
+        'APCA-API-KEY-ID':     creds.api_key,
+        'APCA-API-SECRET-KEY': creds.api_secret,
+        'Content-Type':        'application/json',
+        ...(opts.headers || {}),
+      },
+    });
+  } catch (netErr) {
+    clearTimeout(timeoutId);
+    // Network error (ECONNRESET, ETIMEDOUT, aborted) — retry with exponential back-off
+    if (_attempt < MAX_ATTEMPTS - 1) {
+      const delay = Math.min(1000 * 2 ** _attempt, 8000);
+      console.warn(`[AT] Alpaca network error on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms: ${netErr.message}`);
+      await new Promise(res => setTimeout(res, delay));
+      return alpacaFetch(userId, path, opts, _attempt + 1);
+    }
+    throw new Error(`Alpaca unreachable after ${MAX_ATTEMPTS} attempts: ${netErr.message}`);
+  }
+  clearTimeout(timeoutId);
+  // Rate-limit back-off: 429 → wait 2 s and retry once
+  if (r.status === 429 && _attempt < MAX_ATTEMPTS - 1) {
+    const delay = Math.min(2000 * (_attempt + 1), 8000);
+    console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in ${delay}ms`);
+    await new Promise(res => setTimeout(res, delay));
+    return alpacaFetch(userId, path, opts, _attempt + 1);
+  }
+  // Transient server errors (502/503/504) — retry with back-off
+  if ([502, 503, 504].includes(r.status) && _attempt < MAX_ATTEMPTS - 1) {
+    const delay = Math.min(1500 * 2 ** _attempt, 8000);
+    console.warn(`[AT] Alpaca ${r.status} on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms`);
+    await new Promise(res => setTimeout(res, delay));
+    return alpacaFetch(userId, path, opts, _attempt + 1);
   }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
@@ -1531,16 +1580,15 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
       const equity   = parseFloat(account.equity || 0);
       const dtCount  = parseInt(account.daytrade_count || 0, 10);
       const isPDT    = !!account.pattern_day_trader;
-      if (isPDT && equity < 25000) {
+      // SEC/FINRA 2025: accounts ≥ $25k have unlimited day-trades;
+      // sub-$25k accounts (PDT-flagged or not) may use up to 3 per rolling 5-day window.
+      if (equity >= 25000) {
+        pdtReason = `Equity $${equity.toFixed(0)} ≥ $25,000 — unlimited day trades`;
+      } else if (dtCount >= 3) {
         pdtAllowed = false;
-        pdtReason  = `Account is PDT-flagged with equity $${equity.toFixed(0)} < $25,000`;
-      } else if (!isPDT && dtCount >= 3) {
-        pdtAllowed = false;
-        pdtReason  = `${dtCount}/3 day-trades used in rolling 5-day window`;
+        pdtReason  = `${dtCount}/3 day-trades used in rolling 5-day window (sub-$25k limit)`;
       } else {
-        pdtReason = isPDT
-          ? `PDT account — equity $${equity.toFixed(0)} ≥ $25,000 — unlimited day trades`
-          : `${dtCount}/3 day-trades used — ${3 - dtCount} remaining today`;
+        pdtReason = `${dtCount}/3 day-trades used — ${3 - dtCount} remaining this window${isPDT ? ' (PDT-flagged, relaxed rules apply)' : ''}`;
       }
     } catch (e) {
       pdtReason = 'Could not fetch Alpaca account — not connected?';
@@ -2714,23 +2762,21 @@ async function checkDarkPoolGate(symbol, price, direction) {
 }
 
 // ── Shared PDT guard ────────────────────────────────────────────────────────
-// Pattern Day Trader rule: ≥4 same-day round-trips in a rolling 5-day window
-// on a margin account with equity < $25,000 triggers PDT status.
-// We block any NEW entry conservatively at daytrade_count >= 2 (1-trade buffer)
-// to prevent accidentally crossing the 4-trade threshold if 2 bots fire at once.
+// SEC/FINRA 2025 relaxed PDT rules:
+//   • Accounts ≥ $25,000: unlimited day-trades (unchanged).
+//   • Accounts < $25,000 (PDT-flagged or not): allowed up to 3 day-trades per
+//     rolling 5-day window. The hard equity-floor block is removed — only the
+//     per-window count limit applies.
 async function checkPDTAllowed(userId, botName) {
   try {
     const acct    = await alpacaFetch(userId, '/v2/account');
     const equity  = parseFloat(acct.equity || 0);
     const dtCount = parseInt(acct.daytrade_count || 0, 10);
-    const isPDT   = !!acct.pattern_day_trader;
-    if (isPDT && equity < 25000) {
-      console.log(`[${botName}] PDT flagged — equity $${equity.toFixed(0)} < $25,000 — blocked`);
-      return false;
-    }
-    // Block at 3 used — the cross-bot lock prevents concurrent races so we use the natural limit
-    if (!isPDT && dtCount >= 3) {
-      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades used (rolling 5-day) for user ${userId} — blocked`);
+    // Accounts with enough equity have no day-trade restriction
+    if (equity >= 25000) return true;
+    // Sub-$25k accounts: enforce the 3-trade rolling window limit
+    if (dtCount >= 3) {
+      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades used (rolling 5-day, sub-$25k) for user ${userId} — blocked`);
       return false;
     }
     return true;

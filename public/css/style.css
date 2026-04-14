@@ -8063,3 +8063,66 @@ option { background: var(--card); }
   font-size: .72rem; padding: 4px 10px; cursor: pointer; margin-top: 10px; transition: color .15s, border-color .15s;
 }
 .sim-show-ct-btn:hover { color: #c9d1d9; border-color: #8b949e; }
+
+/* ── Market Calendar & Macro Context Card ────────────────────────────────── */
+.macro-cal-section {
+  background: #0d1117; border: 1px solid #21262d; border-radius: 12px;
+  padding: 22px 24px 24px; margin-top: 20px;
+}
+.macro-cal-top {
+  display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px;
+}
+.macro-cal-heading {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.macro-cal-heading svg { color: #58a6ff; flex-shrink: 0; }
+.macro-cal-title { font-size: .95rem; font-weight: 600; color: #e6edf3; }
+.macro-cal-sub   { font-size: .75rem; color: #6e7681; flex-basis: 100%; padding-left: 27px; }
+.macro-cal-refresh {
+  display: flex; align-items: center; gap: 5px; background: none;
+  border: 1px solid #30363d; border-radius: 6px; color: #8b949e;
+  font-size: .75rem; padding: 5px 11px; cursor: pointer; transition: color .15s, border-color .15s;
+  white-space: nowrap;
+}
+.macro-cal-refresh:hover { color: #c9d1d9; border-color: #8b949e; }
+.macro-cal-loading { color: #6e7681; font-size: .82rem; padding: 8px 0; }
+.macro-cal-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px;
+}
+.mc-tile {
+  background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 14px 16px;
+}
+.mc-tile-label {
+  font-size: .68rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: #6e7681; margin-bottom: 6px;
+}
+.mc-tile-value { font-size: 1.05rem; font-weight: 700; color: #e6edf3; line-height: 1.25; }
+.mc-tile-sub   { font-size: .74rem; color: #8b949e; margin-top: 3px; }
+.mc-chip {
+  display: inline-block; border-radius: 4px; font-size: .69rem; font-weight: 600;
+  padding: 2px 8px; margin-top: 5px; letter-spacing: .03em;
+}
+.mc-chip-bull  { background: rgba(63,185,80,.15); color: #3fb950; }
+.mc-chip-bear  { background: rgba(248,81,73,.15);  color: #f85149; }
+.mc-chip-neut  { background: rgba(110,118,129,.15); color: #8b949e; }
+.mc-chip-warn  { background: rgba(210,153,34,.15);  color: #d29922; }
+.mc-chip-block { background: rgba(248,81,73,.2);    color: #f85149; }
+.mc-block-banner {
+  background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.35); border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 14px; color: #f85149; font-size: .82rem; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.mc-notes-list {
+  list-style: none; margin: 0; padding: 0; grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.mc-notes-list li {
+  background: rgba(139,148,158,.12); border-radius: 5px; padding: 3px 9px;
+  font-size: .73rem; color: #8b949e;
+}
+.mc-size-bar-wrap { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mc-size-bar-bg {
+  flex: 1; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden;
+}
+.mc-size-bar-fill { height: 100%; border-radius: 3px; transition: width .5s; }
+.mc-size-bar-pct { font-size: .75rem; font-weight: 600; color: #e6edf3; min-width: 36px; text-align: right; }

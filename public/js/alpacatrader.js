@@ -815,9 +815,123 @@ const stratSim = (() => {
   return { init };
 })();
 
+// ── Market Calendar & Macro Context Card ─────────────────────────────────────
+const macroCal = (() => {
+  function chipClass(bias) {
+    if (!bias) return 'mc-chip-neut';
+    const b = bias.toLowerCase();
+    if (b === 'bullish') return 'mc-chip-bull';
+    if (b === 'bearish') return 'mc-chip-bear';
+    if (b === 'volatile' || b === 'caution') return 'mc-chip-warn';
+    return 'mc-chip-neut';
+  }
+  function sizeBarColor(mult) {
+    if (mult >= 1.0) return '#3fb950';
+    if (mult >= 0.8) return '#d29922';
+    return '#f85149';
+  }
+  function render(d, el) {
+    let html = '';
+    if (d.hardBlock) {
+      html += `<div class="mc-block-banner">⛔ HARD BLOCK ACTIVE: ${d.hardBlockReason || 'Quad-witch morning — no new entries'}</div>`;
+    }
+    html += '<div class="macro-cal-grid">';
+
+    // Seasonal month tile
+    const m = d.monthly || {};
+    const bias = m.bias || 'Neutral';
+    html += `<div class="mc-tile">
+      <div class="mc-tile-label">Seasonal Month</div>
+      <div class="mc-tile-value">${m.label || '—'}</div>
+      <div class="mc-tile-sub">Hist. avg: <b>${m.avgReturn != null ? (m.avgReturn > 0 ? '+' : '') + m.avgReturn + '%' : '—'}</b></div>
+      <span class="mc-chip ${chipClass(bias)}">${bias}</span>
+    </div>`;
+
+    // OpEx tile
+    const opexChip = d.isOpExDay ? 'mc-chip-warn' : d.inOpExWeek ? 'mc-chip-warn' : 'mc-chip-neut';
+    const opexLabel = d.isOpExDay ? 'OpEx Day' : d.inOpExWeek ? 'OpEx Week' : `${d.daysToOpEx ?? '?'}d to OpEx`;
+    html += `<div class="mc-tile">
+      <div class="mc-tile-label">Options Expiry</div>
+      <div class="mc-tile-value">${d.opExDate || '—'}</div>
+      <div class="mc-tile-sub">${d.isQuadWitch ? '⚠ Quad-witch' : 'Monthly OpEx'}</div>
+      <span class="mc-chip ${opexChip}">${opexLabel}</span>
+    </div>`;
+
+    // Earnings season tile
+    const inEarnings = !!d.earningsSeason;
+    const esChip = inEarnings ? 'mc-chip-warn' : 'mc-chip-neut';
+    html += `<div class="mc-tile">
+      <div class="mc-tile-label">Earnings Season</div>
+      <div class="mc-tile-value">${inEarnings ? d.earningsSeason + ' Earnings' : 'Off-Season'}</div>
+      <div class="mc-tile-sub">${inEarnings ? 'Major reports in progress' : 'No major earnings window'}</div>
+      <span class="mc-chip ${esChip}">${inEarnings ? 'Elevated Vol.' : 'Normal'}</span>
+    </div>`;
+
+    // Position sizing tile
+    const pct = Math.round((d.sizeMult || 1) * 100);
+    const barColor = sizeBarColor(d.sizeMult || 1);
+    html += `<div class="mc-tile">
+      <div class="mc-tile-label">Bot Size Multiplier</div>
+      <div class="mc-tile-value">${d.sizeMult != null ? d.sizeMult.toFixed(2) : '1.00'}×</div>
+      <div class="mc-size-bar-wrap">
+        <div class="mc-size-bar-bg"><div class="mc-size-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <span class="mc-size-bar-pct">${pct}%</span>
+      </div>
+      <div class="mc-tile-sub">Stop adjust: ${d.stopAdjust != null ? d.stopAdjust.toFixed(2) : '1.00'}×</div>
+    </div>`;
+
+    // Year context tile (midterm / election cycle)
+    const yearCtx = d.isMidtermYear ? 'Midterm Election Year'
+                  : d.isPreMidterm  ? 'Pre-Midterm Year'
+                  : d.isPostMidterm ? 'Post-Midterm Year'
+                  : d.isVolatilePreElection ? 'Pre-Election Volatility'
+                  : null;
+    if (yearCtx) {
+      html += `<div class="mc-tile">
+        <div class="mc-tile-label">Election Cycle</div>
+        <div class="mc-tile-value" style="font-size:.85rem">${yearCtx}</div>
+        <span class="mc-chip mc-chip-warn">Cycle Active</span>
+      </div>`;
+    }
+
+    // Notes list (spans full width)
+    if (d.sizeNotes && d.sizeNotes.length) {
+      html += `<ul class="mc-notes-list">`;
+      d.sizeNotes.forEach(n => { html += `<li>${n}</li>`; });
+      html += `</ul>`;
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  async function load() {
+    const el = document.getElementById('macroCalBody');
+    if (!el) return;
+    el.innerHTML = '<div class="macro-cal-loading">Loading macro context…</div>';
+    try {
+      const r = await fetch('/api/macro-context');
+      if (!r.ok) throw new Error(r.statusText);
+      const d = await r.json();
+      render(d, el);
+    } catch (e) {
+      el.innerHTML = `<div class="macro-cal-loading" style="color:#f85149">Failed to load: ${e.message}</div>`;
+    }
+  }
+
+  function init() {
+    load();
+    const btn = document.getElementById('macroCalRefresh');
+    if (btn) btn.addEventListener('click', load);
+  }
+
+  return { init, load };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   simPanel.init();
   initBotToggles();
   initTradeSettings();
   stratSim.init();
+  macroCal.init();
 });

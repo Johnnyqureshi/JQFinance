@@ -1528,6 +1528,12 @@ const WHALE_RADAR_SYMBOLS = [
   'PLTR','MSTR','COIN','HOOD','MARA','SOFI','RIVN','NIO','AMC','GME'
 ];
 
+// ── GET /api/macro-context — current seasonal/OpEx/macro snapshot ─────────────
+app.get('/api/macro-context', requireAuth, (req, res) => {
+  try { res.json(computeSeasonalContext()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/whale/scan', requireAuth, async (req, res) => {
   try {
     const results = await Promise.allSettled(
@@ -2133,6 +2139,173 @@ function logSPYLevels(levels) {
   console.log('\n[SPY-Gate] ═══════════════════════════════════════════════════════');
   console.log(`[SPY-Gate] SPY FLOOR: $${levels.floor}  |  MAX PAIN: $${levels.maxPain}  |  ROOF: $${levels.roof}  (exp ${levels.expiry})`);
   console.log('[SPY-Gate] ═══════════════════════════════════════════════════════\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEASONAL & OPTIONS EXPIRATION CONTEXT ENGINE
+// Computes OpEx status, monthly seasonal bias, earnings season, election-year
+// macro overlay, and energy/war macro factors.  All 3 bots call this before
+// sizing or placing any entry to get a sizing multiplier and advisory notes.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SEASONAL_MONTHLY_BIAS = {
+  1:  { avg: +1.1, bias: 'bullish',  label: 'January Effect',           note: 'Small-cap / growth outperformance historically strong' },
+  2:  { avg: -0.1, bias: 'neutral',  label: 'Pre-Spring Stall',         note: 'Typically flat; earnings digestion period' },
+  3:  { avg: +1.2, bias: 'bullish',  label: 'Spring Run-Up',            note: 'Q4 earnings wrapping, quarter-end inflows' },
+  4:  { avg: +1.5, bias: 'bullish',  label: 'April — Strongest Avg',    note: 'Top-3 month historically; Q1 earnings catalyst' },
+  5:  { avg: -0.1, bias: 'neutral',  label: '"Sell in May" Zone',       note: 'Seasonal weakness begins; consider tighter risk' },
+  6:  { avg:  0.0, bias: 'neutral',  label: 'Summer Drift',             note: 'Low participation; chop-prone market' },
+  7:  { avg: +0.9, bias: 'bullish',  label: 'Summer Rally',             note: 'Q2 earnings catalyst; institutional rebalancing' },
+  8:  { avg: -0.2, bias: 'neutral',  label: 'Late Summer Weakness',     note: 'Thin volume; elevated false-breakout risk' },
+  9:  { avg: -1.1, bias: 'bearish',  label: 'September — Worst Month',  note: 'Historically worst month since 1950; reduce exposure' },
+  10: { avg: +0.4, bias: 'neutral',  label: 'October Volatility',       note: 'Famous crash history but often a bottom; wide swings' },
+  11: { avg: +1.5, bias: 'bullish',  label: 'Santa Season Begins',      note: 'Post-midterm historically strongest; institutional year-end buying' },
+  12: { avg: +1.3, bias: 'bullish',  label: 'Santa Claus Rally',        note: 'Year-end window dressing; low volume drift higher' },
+};
+
+const EARNINGS_SEASON_WINDOWS = [
+  { startM: 1, startD: 10, endM: 2,  endD: 20, quarter: 'Q4' },
+  { startM: 4, startD: 10, endM: 5,  endD: 20, quarter: 'Q1' },
+  { startM: 7, startD: 10, endM: 8,  endD: 20, quarter: 'Q2' },
+  { startM: 10, startD: 10, endM: 11, endD: 20, quarter: 'Q3' },
+];
+
+const QUAD_WITCH_MONTHS = new Set([3, 6, 9, 12]);
+
+// Returns the 3rd Friday of a given month/year (1-indexed month)
+function getMonthlyOpEx(year, month) {
+  const d = new Date(year, month - 1, 1);
+  let fridays = 0;
+  while (true) {
+    if (d.getDay() === 5) { if (++fridays === 3) return new Date(d); }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
+function computeSeasonalContext() {
+  const now   = new Date();
+  const et    = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const year  = et.getFullYear();
+  const month = et.getMonth() + 1;
+  const day   = et.getDate();
+  const minsET = et.getHours() * 60 + et.getMinutes();
+
+  // ── Monthly seasonal bias ─────────────────────────────────────────────────
+  const monthly = SEASONAL_MONTHLY_BIAS[month];
+
+  // ── OpEx calculations ─────────────────────────────────────────────────────
+  let thisOpEx = getMonthlyOpEx(year, month);
+  // If today's date is past this month's OpEx, point to next month's
+  const todayMidnight = new Date(et.getFullYear(), et.getMonth(), et.getDate());
+  const opExMidnight  = new Date(thisOpEx.getFullYear(), thisOpEx.getMonth(), thisOpEx.getDate());
+  if (todayMidnight > opExMidnight) {
+    const nm = month === 12 ? 1 : month + 1;
+    const ny = month === 12 ? year + 1 : year;
+    thisOpEx = getMonthlyOpEx(ny, nm);
+  }
+
+  const daysToOpEx = Math.round((opExMidnight - todayMidnight) / 86400000);
+  const thisOpExStr = `${thisOpEx.getFullYear()}-${String(thisOpEx.getMonth()+1).padStart(2,'0')}-${String(thisOpEx.getDate()).padStart(2,'0')}`;
+
+  // OpEx week = the Monday through Friday of the OpEx week
+  const opExWeekMon = new Date(thisOpEx);
+  opExWeekMon.setDate(thisOpEx.getDate() - thisOpEx.getDay() + 1);
+  const inOpExWeek = todayMidnight >= opExWeekMon && todayMidnight <= opExMidnight;
+  const isOpExDay  = daysToOpEx === 0;
+  const isQuadWitch = QUAD_WITCH_MONTHS.has(month) && inOpExWeek;
+  const isQuadWitchMorning = isQuadWitch && isOpExDay && minsET < 720;
+
+  // ── Earnings season ───────────────────────────────────────────────────────
+  let earningsSeason = null;
+  for (const es of EARNINGS_SEASON_WINDOWS) {
+    const nowOrd   = month * 100 + day;
+    const startOrd = es.startM * 100 + es.startD;
+    const endOrd   = es.endM   * 100 + es.endD;
+    if (nowOrd >= startOrd && nowOrd <= endOrd) { earningsSeason = es.quarter; break; }
+  }
+
+  // ── Election / macro year overlay ─────────────────────────────────────────
+  // Midterm years: 2022, 2026, 2030 (year % 4 === 2)
+  const isMidtermYear  = year % 4 === 2;
+  const isPreMidterm   = isMidtermYear && month <= 10;  // Jan–Oct: uncertainty
+  const isPostMidterm  = isMidtermYear && month >= 11;  // Nov–Dec: historical bull run
+  const isVolatilePreElection = isPreMidterm && month >= 8; // Aug–Oct: worst window
+
+  // ── Macro factors (analyst overlay — update when macro regime changes) ────
+  const macroFactors = [];
+  if (isMidtermYear) {
+    if (isPostMidterm)
+      macroFactors.push({ key: 'midterm', label: 'Post-Midterm Bull Window', bullish: true,
+        note: 'Historically the strongest 12-month period after US midterm elections (avg +18%)' });
+    else
+      macroFactors.push({ key: 'midterm', label: '2026 Midterm Year (Pre-Election)', bullish: false,
+        note: 'H1 of midterm years historically weak (-2.8% avg); H2 recovery accelerates Nov onward' });
+  }
+  if (earningsSeason)
+    macroFactors.push({ key: 'earnings', label: `${earningsSeason} Earnings Season Active`, bullish: null,
+      note: 'Individual stocks subject to large gap risk; tighten single-name stops during reports' });
+  // Energy/geopolitical — active macro overlay (update as needed)
+  macroFactors.push({ key: 'energy', label: 'Elevated Energy Costs (Geopolitical)', bullish: false,
+    note: 'Conflict-driven fuel prices pressure transportation, manufacturing, and consumer margins' });
+
+  // ── Position sizing multiplier ────────────────────────────────────────────
+  let sizeMult   = 1.0;
+  let stopAdjust = 1.0;  // >1 = tighter (stop closer to entry)
+  const sizeNotes = [];
+
+  if (monthly.bias === 'bearish') {
+    sizeMult *= 0.70;
+    sizeNotes.push(`Seasonal: ${monthly.label} → 70% of normal size`);
+  } else if (monthly.avg < 0) {
+    sizeMult *= 0.85;
+    sizeNotes.push(`Neutral/weak seasonal month → 85% of normal size`);
+  }
+
+  if (isQuadWitch) {
+    sizeMult   *= 0.75;
+    stopAdjust  = 1.25;
+    sizeNotes.push('Quad-Witch week → 75% size + stops tightened 25%');
+  } else if (inOpExWeek) {
+    sizeMult   *= 0.85;
+    stopAdjust  = 1.15;
+    sizeNotes.push('OpEx week → 85% size + stops tightened 15%');
+  }
+
+  if (isVolatilePreElection) {
+    sizeMult *= 0.90;
+    sizeNotes.push('Pre-midterm Aug–Oct volatility window → 90% size');
+  }
+
+  if (earningsSeason) {
+    stopAdjust = Math.max(stopAdjust, 1.10);
+    sizeNotes.push(`${earningsSeason} earnings season → stops tightened 10% (gap risk)`);
+  }
+
+  sizeMult = Math.max(0.50, +sizeMult.toFixed(2)); // never below 50%
+
+  // ── Volatility bias label ─────────────────────────────────────────────────
+  let volatilityBias = 'Normal';
+  if (isQuadWitch || monthly.bias === 'bearish') volatilityBias = 'Elevated';
+  else if (inOpExWeek || earningsSeason || isVolatilePreElection) volatilityBias = 'Moderately Elevated';
+  else if (monthly.bias === 'bullish' && !earningsSeason) volatilityBias = 'Subdued';
+
+  // ── Hard block: only quad-witch morning (gamma pin, AM chaos) ────────────
+  const hardBlock = isQuadWitchMorning;
+  const hardBlockReason = hardBlock
+    ? 'Quad-Witch morning — gamma pinning active; bot entries paused until 12:00 ET'
+    : null;
+
+  return {
+    date: et.toISOString(), year, month, day,
+    monthly,
+    opExDate: thisOpExStr, daysToOpEx, inOpExWeek, isOpExDay, isQuadWitch, isQuadWitchMorning,
+    earningsSeason,
+    isMidtermYear, isPreMidterm, isPostMidterm, isVolatilePreElection,
+    macroFactors,
+    sizeMult, stopAdjust, sizeNotes,
+    volatilityBias,
+    hardBlock, hardBlockReason,
+  };
 }
 
 // Returns { allowed: boolean, reason: string }
@@ -2889,7 +3062,13 @@ async function runCTAutoTrader() {
   // Pick best CT signal by strength score
   signals.sort((a, b) => (b.score || 0) - (a.score || 0));
   const bestCT = signals[0];
-  console.log(`[CT-Bot] Best signal: ${bestCT.symbol} ${bestCT.signalType} (${signals.length} confirmed)`);
+  // ── Seasonal & OpEx context — computed once per scan cycle ────────────────
+  const ctSeason = computeSeasonalContext();
+  if (ctSeason.hardBlock) {
+    console.log(`[CT-Bot] SEASONAL BLOCK: ${ctSeason.hardBlockReason}`);
+    return;
+  }
+  console.log(`[CT-Bot] Best signal: ${bestCT.symbol} ${bestCT.signalType} (${signals.length} confirmed) | Season: ${ctSeason.monthly.label} | OpEx: ${ctSeason.daysToOpEx}d | SizeMult: ${ctSeason.sizeMult}× ${ctSeason.inOpExWeek ? '(OpEx week)' : ''}`);
 
   for (const user of users) {
     const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
@@ -2915,7 +3094,7 @@ async function runCTAutoTrader() {
       if (Array.isArray(positions) && positions.some(p => p.symbol === sig.symbol)) continue;
 
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 500) * lev;
+      const amount = (user.amount || 500) * lev * ctSeason.sizeMult; // seasonal sizing adjustment
 
       if (sig.direction === 'LONG') {
         // ── LONG: buy the underlying (or its leveraged proxy if > $30) ─────
@@ -2940,8 +3119,11 @@ async function runCTAutoTrader() {
           tradePrice  = proxy.price;
         }
         const shares = Math.max(1, Math.floor(amount / tradePrice));
-        const slPrice = sig.stopLoss ? sig.stopLoss.toFixed(2) : (tradePrice * 0.985).toFixed(2);
-        const tpPrice = sig.target   ? sig.target.toFixed(2)   : (tradePrice * 1.04).toFixed(2);
+        // Tighten stop during OpEx/bearish season: bring stop closer to entry by stopAdjust factor
+        const rawSLDist = sig.stopLoss ? (tradePrice - sig.stopLoss) : (tradePrice * 0.015);
+        const adjSLDist = rawSLDist / ctSeason.stopAdjust;
+        const slPrice   = Math.max(0.01, tradePrice - adjSLDist).toFixed(2);
+        const tpPrice = sig.target ? sig.target.toFixed(2) : (tradePrice * 1.04).toFixed(2);
         const orderBody = {
           symbol: tradeSymbol, qty: String(shares), side: 'buy',
           type: 'market', time_in_force: 'day', order_class: 'bracket',
@@ -3260,26 +3442,33 @@ async function executeSwingEntry(userId, sig) {
     const equity   = parseFloat(account.equity || account.portfolio_value || 0);
     if (equity <= 0) return;
 
+    // ── Seasonal context for Swing bot (advisory + sizing) ──────────────────
+    const swingSeason = computeSeasonalContext();
     const ts = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(userId)
              || { position_mode: 'pct', position_pct: 15, position_amount: 5000, leverage: 1 };
-    const posValue = ts.position_mode === 'fixed'
+    const basePosValue = ts.position_mode === 'fixed'
       ? ts.position_amount
       : equity * (ts.position_pct / 100);
+    const posValue = basePosValue * swingSeason.sizeMult; // apply seasonal scaling
     const price    = sig.price;
     if (!price || price <= 0) return;
     const shares   = Math.max(1, Math.floor(posValue / price));
 
-    console.log(`[Swing-Bot] Placing ${sig.direction} limit order: ${sig.symbol} × ${shares} @ $${price.toFixed(2)} | SL=$${sig.stopLevel} | TP1=$${sig.tp1} TP2=$${sig.tp2} TP3=$${sig.tp3}`);
+    const seasonNote = swingSeason.sizeNotes.length
+      ? ` | Seasonal: ${swingSeason.sizeNotes.join('; ')}`
+      : '';
+    console.log(`[Swing-Bot] Placing ${sig.direction} limit order: ${sig.symbol} × ${shares} @ $${price.toFixed(2)} | SL=$${sig.stopLevel} | TP1=$${sig.tp1} TP2=$${sig.tp2} TP3=$${sig.tp3} | SizeMult=${swingSeason.sizeMult}×${seasonNote}`);
 
     const order = await alpacaFetch(userId, '/v2/orders', {
       method: 'POST',
       body: JSON.stringify({ symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'limit', time_in_force: 'day', limit_price: price.toFixed(2) }),
     });
 
+    const notesField = `${sig.direction} | All 5 weekly conditions confirmed${seasonNote} | OpEx: ${swingSeason.daysToOpEx}d | ${swingSeason.monthly.label}`;
     db.prepare(`
       INSERT INTO swing_trade_log (user_id, symbol, direction, entry_price, shares, shares_remaining, alpaca_order_id, stop_level, trailing_stop, tp1_price, tp2_price, tp3_price, signal_date, notes)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,date('now'),?)
-    `).run(userId, sig.symbol, sig.direction, price, shares, shares, order.id || null, sig.stopLevel, sig.stopLevel, sig.tp1, sig.tp2, sig.tp3, `${sig.direction} | All 5 weekly conditions confirmed`);
+    `).run(userId, sig.symbol, sig.direction, price, shares, shares, order.id || null, sig.stopLevel, sig.stopLevel, sig.tp1, sig.tp2, sig.tp3, notesField);
 
     console.log(`[Swing-Bot] ✓ Limit order placed: ${sig.symbol} × ${shares} @ $${price.toFixed(2)}`);
   } catch (e) {
@@ -3292,6 +3481,14 @@ async function runSwingAutoTrader() {
   const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   if (et.getDay() !== 1) return; // Monday only — wait for weekly candle confirmation
   if (!isMarketOpen()) return;
+
+  // ── Seasonal & OpEx context — Swing bot is advisory; log but don't hard-block ─
+  const swingRunSeason = computeSeasonalContext();
+  if (swingRunSeason.hardBlock) {
+    console.log(`[Swing-Bot] SEASONAL HARD BLOCK (will not enter): ${swingRunSeason.hardBlockReason}`);
+    return;
+  }
+  console.log(`[Swing-Bot] Monday scan | Season: ${swingRunSeason.monthly.label} | SizeMult: ${swingRunSeason.sizeMult}× | OpEx: ${swingRunSeason.daysToOpEx}d away`);
 
   const users = db.prepare('SELECT DISTINCT user_id FROM alpaca_creds').all();
   if (!users.length) return;
@@ -3481,6 +3678,13 @@ async function runORBAutoTrader() {
   const curMins = et.getHours() * 60 + et.getMinutes();
   if (curMins < 576) return; // wait until 9:36 ET so ORB bars are fully settled
 
+  // ── Seasonal & OpEx context ───────────────────────────────────────────────
+  const orbSeason = computeSeasonalContext();
+  if (orbSeason.hardBlock) {
+    console.log(`[ORB-Bot] SEASONAL BLOCK: ${orbSeason.hardBlockReason}`);
+    return;
+  }
+
   const users = db.prepare('SELECT DISTINCT user_id, 500 AS amount, 1 AS leverage FROM alpaca_creds').all();
   if (!users.length) return;
 
@@ -3488,7 +3692,7 @@ async function runORBAutoTrader() {
   const today = sig.today;
 
   // Log what we see even when no trade is taken (for session log completeness)
-  console.log(`[ORB-Bot] ${today} | Range: $${sig.orbHigh ?? '—'}/$${sig.orbLow ?? '—'} (${sig.rangeWidthPct ?? '—'}%) | Breakout: ${sig.breakout} | Filters: ${sig.confirmed ? 'ALL PASS' : (sig.failReasons?.join(', ') || 'pending')}`);
+  console.log(`[ORB-Bot] ${today} | Range: $${sig.orbHigh ?? '—'}/$${sig.orbLow ?? '—'} (${sig.rangeWidthPct ?? '—'}%) | Breakout: ${sig.breakout} | Season: ${orbSeason.monthly.label} | SizeMult: ${orbSeason.sizeMult}× | Filters: ${sig.confirmed ? 'ALL PASS' : (sig.failReasons?.join(', ') || 'pending')}`);
 
   if (!sig.confirmed) return;
 
@@ -3567,13 +3771,14 @@ async function runORBAutoTrader() {
         continue;
       }
 
-      // ── Position sizing ───────────────────────────────────────────────────
+      // ── Position sizing (with seasonal multiplier) ─────────────────────────
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));
-      const amount = (user.amount || 500) * lev;
+      const amount = (user.amount || 500) * lev * orbSeason.sizeMult;
       let   shares = Math.max(1, Math.floor(amount / candidate.price));
 
-      // SL = 5% below entry; TP = emergency ceiling 18% above (RSI 75 monitor exits first)
-      const slPrice = (candidate.price * 0.95).toFixed(2);
+      // SL = tightened during OpEx/bearish season; TP = ceiling 18% (RSI 75 monitor exits first)
+      const slDistPct = 0.05 / orbSeason.stopAdjust; // e.g., 5% normal → 4.35% during OpEx week
+      const slPrice = (candidate.price * (1 - slDistPct)).toFixed(2);
       const tpPrice = (candidate.price * 1.18).toFixed(2);
 
       // Max loss cap: 1.5% of account equity

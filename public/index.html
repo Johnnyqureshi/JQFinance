@@ -972,47 +972,6 @@
       </div>
     </div><!-- /.at-sim-panel -->
 
-    <!-- ── Strategy Simulation ──────────────────────────────────────────── -->
-    <div class="strat-sim-section" id="stratSimSection">
-      <div class="strat-sim-top">
-        <div class="strat-sim-heading">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span class="strat-sim-title">Strategy Simulation</span>
-          <span class="strat-sim-sub">Runs all 3 bots' signal engines live — no orders placed</span>
-        </div>
-        <button class="strat-sim-btn" id="stratSimBtn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Run Simulation
-        </button>
-      </div>
-
-      <!-- Loading state -->
-      <div class="strat-sim-loading" id="stratSimLoading" style="display:none">
-        <div class="strat-sim-spinner"></div>
-        <span id="stratSimLoadingMsg">Scanning signals across all strategies…</span>
-      </div>
-
-      <!-- Results -->
-      <div id="stratSimResults" style="display:none">
-
-        <!-- Meta bar -->
-        <div class="strat-sim-meta" id="stratSimMeta"></div>
-
-        <!-- Bot result cards row -->
-        <div class="strat-sim-cards" id="stratSimCards"></div>
-
-        <!-- CT signals table (expandable) -->
-        <div class="strat-sim-ct-detail" id="stratSimCTDetail" style="display:none">
-          <div class="strat-sim-ct-label">CT Scan — Top Signals</div>
-          <table class="strat-sim-ct-table" id="stratSimCTTable">
-            <thead><tr><th>Symbol</th><th>Signal</th><th>Dir</th><th>Price</th><th>RSI</th><th>Score</th><th>Status</th></tr></thead>
-            <tbody id="stratSimCTTbody"></tbody>
-          </table>
-        </div>
-
-      </div>
-    </div><!-- /.strat-sim-section -->
-
     <!-- MARKET CALENDAR & MACRO CONTEXT CARD -->
     <div class="macro-cal-section" id="macroCalSection">
       <div class="macro-cal-top">

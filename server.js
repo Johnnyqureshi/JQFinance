@@ -1460,11 +1460,8 @@ app.delete('/api/bots/clear-log', requireAuth, (req, res) => {
   }
 });
 
-// ── POST /api/bots/simulate — dry-run all 3 strategy signal engines ───────────
-// Runs CT scan, ORB signal, and Swing (SPY/QQQ/SH) signal computations with NO
-// market-hours restriction and NO real order placement. Returns a full signal
-// report for each bot plus hypothetical position sizing from trade_settings.
-app.post('/api/bots/simulate', requireAuth, async (req, res) => {
+// (Strategy Simulation endpoint removed)
+if (false) app.post('/api/bots/simulate', requireAuth, async (req, res) => {
   try {
     // Fetch user's trade settings for position sizing
     const ts = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(req.session.userId)

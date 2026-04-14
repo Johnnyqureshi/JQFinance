@@ -633,7 +633,7 @@ async function initTradeSettings() {
   input.addEventListener('blur',   persist);
 }
 
-// ── Strategy Simulation ───────────────────────────────────────────────────────
+// (Strategy Simulation removed)
 const stratSim = (() => {
   const $ = id => document.getElementById(id);
 
@@ -932,6 +932,5 @@ document.addEventListener('DOMContentLoaded', () => {
   simPanel.init();
   initBotToggles();
   initTradeSettings();
-  stratSim.init();
   macroCal.init();
 });

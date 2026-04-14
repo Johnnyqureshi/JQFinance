@@ -106,6 +106,20 @@ db.prepare(`
   )
 `).run();
 
+// ── Seed: ensure the primary admin account always exists ─────────────────────
+// This runs at startup so the account is present even on a fresh deployment DB.
+// The hash below is bcrypt of 'JQFinance2024!' (rounds=10). The user can change
+// their password at any time via the lock-icon modal; this only seeds if missing.
+(function seedAdminUser() {
+  const ADMIN_USER = 'johnnyqureshi';
+  const ADMIN_HASH = '$2b$10$it125q.J9OKxhcn2pNGHR.FA6/isY4CWt5GH/IXMzJqW94se1i.aW';
+  const existing = db.prepare('SELECT id FROM users WHERE LOWER(username)=LOWER(?)').get(ADMIN_USER);
+  if (!existing) {
+    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(ADMIN_USER, ADMIN_HASH);
+    console.log(`[Seed] Created admin account: ${ADMIN_USER}`);
+  }
+})();
+
 // Generate or retrieve a persistent session secret so sessions survive restarts
 // and cannot be forged even if SESSION_SECRET env var is absent.
 function getSessionSecret() {

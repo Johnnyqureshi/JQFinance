@@ -420,6 +420,114 @@ async function yfChartQuote(symbol) {
   }
 }
 
+// ── Alpaca Data API (data.alpaca.markets) — 24/7 real-time market data ─────────
+// Uses stored user Alpaca credentials for the data feed.
+// The data API key is identical to the trading API key.
+
+async function alpacaDataFetch(userId, path) {
+  try {
+    const creds = getAlpacaCreds(userId);
+    if (!creds) return null;
+    const r = await fetch('https://data.alpaca.markets' + path, {
+      headers: {
+        'APCA-API-KEY-ID':     creds.api_key,
+        'APCA-API-SECRET-KEY': creds.api_secret,
+      },
+    });
+    if (!r.ok) return null;
+    return r.json();
+  } catch { return null; }
+}
+
+// Returns any userId that has Alpaca credentials — used by non-auth endpoints
+// so they can still benefit from Alpaca data without being session-bound.
+function getAnyAlpacaUserId() {
+  const row = db.prepare('SELECT user_id FROM alpaca_creds LIMIT 1').get();
+  return row?.user_id ?? null;
+}
+
+// Fetch Alpaca snapshot(s) for one or more symbols.
+// Returns { AAPL: { latestTrade, latestQuote, minuteBar, dailyBar, prevDailyBar }, ... }
+async function alpacaSnapshotFetch(userId, symbols) {
+  const syms = Array.isArray(symbols) ? symbols.join(',') : symbols;
+  return alpacaDataFetch(userId, `/v2/stocks/snapshots?symbols=${encodeURIComponent(syms)}&feed=iex`);
+}
+
+// Determine the current ET market session state (REGULAR, PRE, POST, CLOSED)
+function currentMarketState() {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day  = et.getDay();          // 0=Sun 6=Sat
+  if (day === 0 || day === 6) return 'CLOSED';
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins >= 570 && mins < 960)  return 'REGULAR';   // 9:30–16:00
+  if (mins >= 240 && mins < 570)  return 'PRE';       // 4:00–9:30
+  if (mins >= 960 && mins < 1200) return 'POST';      // 16:00–20:00
+  return 'CLOSED';
+}
+
+// Normalise an Alpaca snapshot entry → same shape as _normaliseQuote
+// so all downstream code is completely unaware of the data source.
+function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
+  if (!snap) return null;
+  const price  = snap.latestTrade?.p ?? snap.minuteBar?.c ?? snap.dailyBar?.c ?? null;
+  const daily  = snap.dailyBar  || {};
+  const prev   = snap.prevDailyBar?.c ?? null;
+  const change = price != null && prev != null ? price - prev : null;
+  const changePct = change != null && prev ? (change / prev) * 100 : null;
+  const marketState = currentMarketState();
+  const isPost = marketState === 'POST';
+  const isPre  = marketState === 'PRE';
+  // Extended-hours price: use minuteBar.c if outside regular session
+  let extendedPrice = null, extendedType = null;
+  if (isPost && price != null && daily.c != null && price !== daily.c) {
+    extendedPrice = price; extendedType = 'AH';
+  } else if (isPre && price != null) {
+    extendedPrice = price; extendedType = 'PRE';
+  }
+  return {
+    symbol:            sym,
+    name:              extras.name || sym,
+    price:             price,
+    regularClose:      daily.c ?? price,
+    extendedPrice,
+    extendedType,
+    extendedChange:    extendedPrice != null && daily.c != null ? extendedPrice - daily.c : null,
+    extendedChangePct: extendedPrice != null && daily.c != null ? ((extendedPrice - daily.c) / daily.c) * 100 : null,
+    marketState,
+    change,
+    changesPercentage: changePct,
+    open:              daily.o ?? null,
+    dayHigh:           daily.h ?? null,
+    dayLow:            daily.l ?? null,
+    previousClose:     prev,
+    volume:            daily.v ?? null,
+    avgVolume:         extras.avgVolume ?? null,
+    marketCap:         extras.marketCap ?? null,
+    yearHigh:          extras.yearHigh  ?? null,
+    yearLow:           extras.yearLow   ?? null,
+    pe:                extras.pe        ?? null,
+    eps:               extras.eps       ?? null,
+    source:            'alpaca',
+  };
+}
+
+// ── fetchLiveQuote: Alpaca-first, Yahoo-fallback ───────────────────────────────
+// Single source of truth for real-time price throughout the app.
+// data.alpaca.markets is the primary feed (24/7); Yahoo Finance is the safety net.
+async function fetchLiveQuote(symbol, userId = null) {
+  const uid = userId ?? getAnyAlpacaUserId();
+  if (uid) {
+    try {
+      const snap = await alpacaSnapshotFetch(uid, symbol);
+      if (snap?.[symbol]) {
+        const q = _normaliseAlpacaSnapshot(symbol, snap[symbol]);
+        if (q?.price != null) return q;
+      }
+    } catch { /* fall through */ }
+  }
+  return yfChartQuote(symbol);
+}
+
 // ── GET /api/futures — near-24/5 futures + overnight proxy prices ─────────────
 // Symbols: ES=F (S&P 500), NQ=F (Nasdaq 100), YM=F (Dow), RTY=F (Russell 2000),
 //          GC=F (Gold), CL=F (Crude Oil), ZB=F (30yr Bond), VX=F (VIX futures)
@@ -451,20 +559,31 @@ app.get('/api/futures', requireAuth, async (req, res) => {
 });
 
 // ── GET /api/quote/:symbol ─────────────────────────────────────────────────────
+// Alpaca data.alpaca.markets is tried first (24/7); Yahoo Finance is the fallback.
 app.get('/api/quote/:symbol', async (req, res) => {
   try {
-    const q = await yfChartQuote(req.params.symbol.toUpperCase());
+    const q = await fetchLiveQuote(req.params.symbol.toUpperCase());
     if (!q) return res.status(404).json({ error: 'Not found' });
     res.json(q);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── GET /api/snapshots?symbols=A,B ────────────────────────────────────────────
+// Alpaca batch snapshot tried first (one call, 24/7); Yahoo Finance fallback.
 app.get('/api/snapshots', async (req, res) => {
   const syms = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   if (!syms.length) return res.json({});
   try {
-    // Batch-fetch all symbols in one SDK call — much faster than individual fetches
+    const uid = getAnyAlpacaUserId();
+    if (uid) {
+      const snap = await alpacaSnapshotFetch(uid, syms).catch(() => null);
+      if (snap && Object.keys(snap).length) {
+        const out = {};
+        syms.forEach(s => { if (snap[s]) out[s] = _normaliseAlpacaSnapshot(s, snap[s]); });
+        if (Object.keys(out).length) return res.json(out);
+      }
+    }
+    // Yahoo Finance fallback
     const raw = await yf.quote(syms, {}, { validateResult: false });
     const quotes = Array.isArray(raw) ? raw : [raw];
     const out = {};
@@ -494,9 +613,27 @@ app.get('/api/search', async (req, res) => {
 
 // ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────────
 app.get('/api/bars/:symbol', async (req, res) => {
-  const sym      = req.params.symbol.toUpperCase();
-  const tf       = req.query.timeframe || '1Day';
-  const limit    = parseInt(req.query.limit) || 60;
+  const sym   = req.params.symbol.toUpperCase();
+  const tf    = req.query.timeframe || '1Day';
+  const limit = parseInt(req.query.limit) || 60;
+
+  // ── Try Alpaca bars first (24/7, includes extended-hours OHLCV) ────────────
+  const uid = getAnyAlpacaUserId();
+  if (uid) {
+    try {
+      // Alpaca timeframe strings match our convention directly
+      const alpacaTf = { '1Day':'1Day','1Hour':'1Hour','5Min':'5Min','15Min':'15Min' }[tf] || '1Day';
+      const data = await alpacaDataFetch(uid,
+        `/v2/stocks/${sym}/bars?timeframe=${alpacaTf}&limit=${limit}&adjustment=all&feed=iex`);
+      if (data?.bars?.length) {
+        return res.json({ bars: data.bars.map(b => ({
+          t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v,
+        })) });
+      }
+    } catch { /* fall through to Yahoo */ }
+  }
+
+  // ── Yahoo Finance fallback ─────────────────────────────────────────────────
   const iMap     = { '1Hour':'1h', '1Day':'1d', '5Min':'5m', '15Min':'15m' };
   const interval = iMap[tf] || '1d';
   const range    = limit <= 7 ? '5d' : limit <= 30 ? '1mo' : limit <= 90 ? '3mo' : limit <= 180 ? '6mo' : '1y';
@@ -516,7 +653,7 @@ app.get('/api/bars/:symbol', async (req, res) => {
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null).slice(-limit);
     res.json({ bars });
-  } catch (e) { res.json({ bars: [] }); }
+  } catch { res.json({ bars: [] }); }
 });
 
 // ── GET /api/historical/:symbol?timeseries=N ──────────────────────────────────
@@ -729,12 +866,38 @@ app.get('/api/signal/:symbol', async (req, res) => {
 });
 
 // ── GET /api/intraday/:symbol (5-min bars — includes pre/post market) ──────────
+// Alpaca 5-Min bars + snapshot tried first (24/7); Yahoo Finance is the fallback.
 app.get('/api/intraday/:symbol', async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   try {
-    // Fetch 5-min bars and live quote in parallel
-    // Chart API provides the intraday bars; yf.quote() provides correct marketState + extended prices
-    const [chartRes, liveQuote] = await Promise.all([
+    const uid = getAnyAlpacaUserId();
+
+    // ── Alpaca path ───────────────────────────────────────────────────────────
+    if (uid) {
+      const [barsData, snapData] = await Promise.all([
+        alpacaDataFetch(uid, `/v2/stocks/${sym}/bars?timeframe=5Min&limit=100&adjustment=all&feed=iex`).catch(() => null),
+        alpacaSnapshotFetch(uid, sym).catch(() => null),
+      ]);
+      if (barsData?.bars?.length) {
+        const bars  = barsData.bars.map(b => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+        const snap  = snapData?.[sym];
+        const normQ = snap ? _normaliseAlpacaSnapshot(sym, snap) : null;
+        const marketState = currentMarketState();
+        return res.json({
+          bars,
+          price:         normQ?.price ?? bars.at(-1)?.c ?? null,
+          regularClose:  normQ?.regularClose ?? bars.at(-1)?.c ?? null,
+          extendedPrice: normQ?.extendedPrice ?? null,
+          extendedType:  normQ?.extendedType  ?? null,
+          marketState,
+          previousClose: normQ?.previousClose ?? null,
+          open:          normQ?.open ?? bars[0]?.o ?? null,
+        });
+      }
+    }
+
+    // ── Yahoo Finance fallback ────────────────────────────────────────────────
+    const [chartRes, yfQuote] = await Promise.all([
       fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=true`, { headers: YH }),
       yf.quote(sym, {}, { validateResult: false }).catch(() => null),
     ]);
@@ -753,27 +916,23 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null);
 
-    // Use yf.quote() for accurate marketState and extended-hours prices
-    const marketState = liveQuote?.marketState || 'CLOSED';
+    const marketState = yfQuote?.marketState || 'CLOSED';
     const isPost = ['POST', 'POSTPOST'].includes(marketState);
     const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
-    const regPrice = liveQuote?.regularMarketPrice ?? bars.at(-1)?.c ?? null;
+    const regPrice = yfQuote?.regularMarketPrice ?? bars.at(-1)?.c ?? null;
     let extendedPrice = null;
-    if (isPost) {
-      extendedPrice = liveQuote?.postMarketPrice ?? null;
-    } else if (isPre) {
-      extendedPrice = liveQuote?.preMarketPrice ?? liveQuote?.postMarketPrice ?? null;
-    }
+    if (isPost)     extendedPrice = yfQuote?.postMarketPrice ?? null;
+    else if (isPre) extendedPrice = yfQuote?.preMarketPrice ?? yfQuote?.postMarketPrice ?? null;
 
     res.json({
       bars,
       price:         extendedPrice ?? regPrice,
       regularClose:  regPrice,
       extendedPrice,
-      extendedType:  isPost ? 'AH' : (isPre && liveQuote?.preMarketPrice != null) ? 'PRE' : (isPre && extendedPrice != null) ? 'AH' : null,
+      extendedType:  isPost ? 'AH' : (isPre && yfQuote?.preMarketPrice != null) ? 'PRE' : (isPre && extendedPrice != null) ? 'AH' : null,
       marketState,
-      previousClose: liveQuote?.regularMarketPreviousClose ?? null,
-      open:          liveQuote?.regularMarketOpen ?? bars[0]?.o ?? null,
+      previousClose: yfQuote?.regularMarketPreviousClose ?? null,
+      open:          yfQuote?.regularMarketOpen ?? bars[0]?.o ?? null,
     });
   } catch (e) {
     console.error('Intraday error:', e.message);
@@ -1120,8 +1279,8 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
 
   try {
-    // Get live price to calculate shares and TP/SL levels
-    const quote = await yfChartQuote(symbol);
+    // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
+    const quote = await fetchLiveQuote(symbol, req.session.userId);
     if (!quote?.regularClose && !quote?.price) throw new Error('Could not fetch current price for ' + symbol);
     const price = quote.regularClose ?? quote.price;
 
@@ -3457,7 +3616,7 @@ async function computeSwingInverseSignal() {
   const tp2 = +sma50w.toFixed(2); // SPY 50w SMA
   const tp3 = +ref200.toFixed(2); // SPY 200w SMA — ultimate magnet
 
-  const shQuote = await yfChartQuote('SH').catch(() => null);
+  const shQuote = await fetchLiveQuote('SH').catch(() => null);
   const shPrice = shQuote?.price ?? 35;
 
   return {
@@ -3568,7 +3727,7 @@ async function monitorSwingTPs() {
 
   for (const trade of openTrades) {
     try {
-      const q = await yfChartQuote(trade.symbol).catch(() => null);
+      const q = await fetchLiveQuote(trade.symbol).catch(() => null);
       if (!q?.price) continue;
       const price     = q.price;
       const sharesLeft = trade.shares_remaining || trade.shares;

@@ -3578,55 +3578,71 @@ function groupDailyToWeekly(dailyBars) {
 }
 
 // ── Swing Long Signal (BOTTOM) — 5 conditions on weekly + daily ───────────────
-async function computeSwingLongSignal(symbol) {
-  // ── Primary trigger: VIX in the 26–34 zone AND declining ─────────────────
-  // When VIX drops to the 29–30 area from elevated levels (40–50+), fear is
-  // subsiding and the market historically presents a strong long-term re-entry.
-  // A declining VIX (today < yesterday) confirms the direction of the move.
-  let vix = null, prevVix = null;
+// ── Swing VIX Signal — finds cheapest inverse ETF under $10 when VIX 26–34 ──
+// Entry: VIX enters 26–34 range → buy long on cheapest inverse ETF < $10
+// Exit:  VIX crushes below $17 → close the full position at market
+async function computeSwingVIXSignal() {
+  // ── Check VIX ─────────────────────────────────────────────────────────────
+  let vix = null;
   try {
-    const vixBars = await fetchOHLCV('^VIX', 5);
-    vix     = vixBars?.at(-1)?.c ?? null;
-    prevVix = vixBars?.at(-2)?.c ?? null;
+    const vixBars = await fetchOHLCV('^VIX', 2);
+    vix = vixBars?.at(-1)?.c ?? null;
   } catch (_) {}
 
-  const vixInRange   = vix !== null && vix >= 26 && vix <= 34;
-  const vixDeclining = vix !== null && prevVix !== null && vix < prevVix;
-  const vixTrigger   = vixInRange && vixDeclining;
+  const vixInRange = vix !== null && vix >= 26 && vix <= 34;
+  if (!vixInRange) {
+    return {
+      confirmed: false, vix: vix ? +vix.toFixed(1) : null,
+      failReasons: [`VIX ${vix?.toFixed(1) ?? '—'} not in 26–34 entry zone`],
+    };
+  }
 
-  // ── Safety filter: don't buy into a broken long-term trend ───────────────
-  // Price must be within 5% of the 200-day SMA — a severe bear market breakdown
-  // (e.g. -20% below 200d) is not the target scenario for this strategy.
-  const daily = await fetchOHLCV(symbol, 220).catch(() => null);
-  if (!daily || daily.length < 60) return { symbol, confirmed: false, error: 'Insufficient data' };
+  // ── Find cheapest inverse ETF under $10 via Alpaca snapshots ─────────────
+  const uid = getAnyAlpacaUserId();
+  const inversePool = [...ORB_INVERSE_ETF_SET];
+  const candidates  = [];
 
-  const price   = daily.at(-1).c;
-  const dCloses = daily.map(b => b.c);
-  const sma200d = calcSMA(dCloses, Math.min(200, dCloses.length - 1));
-  const sma50d  = calcSMA(dCloses, Math.min(50,  dCloses.length - 1));
-  const trendOk = price >= sma200d * 0.95; // within 5% of 200d SMA
+  for (let i = 0; i < inversePool.length; i += 20) {
+    const batch = inversePool.slice(i, i + 20);
+    const snap  = uid ? await alpacaSnapshotFetch(uid, batch).catch(() => null) : null;
+    if (!snap) continue;
+    for (const sym of batch) {
+      const s = snap[sym];
+      if (!s) continue;
+      const price = s.latestTrade?.p ?? s.minuteBar?.c ?? s.dailyBar?.c ?? null;
+      if (price && price > 0 && price < 10) candidates.push({ symbol: sym, price: +price.toFixed(2) });
+    }
+  }
 
-  const confirmed = vixTrigger && trendOk;
+  if (!candidates.length) {
+    return {
+      confirmed: false, vix: +vix.toFixed(1),
+      failReasons: ['No inverse ETF found under $10 right now'],
+    };
+  }
 
-  // TP levels: keyed off 50d SMA, 200d SMA, and a +15% ceiling
-  const tp1 = +Math.max(sma50d,  price * 1.04).toFixed(2);
-  const tp2 = +Math.max(sma200d, price * 1.08).toFixed(2);
-  const tp3 = +(price * 1.15).toFixed(2);
-  const stopLevel = +(price * 0.93).toFixed(2); // 7% stop
+  // Pick the cheapest one (maximises shares per dollar)
+  candidates.sort((a, b) => a.price - b.price);
+  const pick = candidates[0];
+
+  console.log(`[Swing-Bot] VIX ${vix.toFixed(1)} in 26–34 range → cheapest inverse ETF: ${pick.symbol} @ $${pick.price}`);
 
   return {
-    symbol, confirmed, direction: 'LONG',
-    price: +price.toFixed(2),
-    vix:  vix     ? +vix.toFixed(1)     : null,
-    prevVix: prevVix ? +prevVix.toFixed(1) : null,
-    sma200d: +sma200d.toFixed(2), sma50d: +sma50d.toFixed(2), trendOk,
-    stopLevel, tp1, tp2, tp3,
-    failReasons: [
-      !vixInRange   && `VIX ${vix?.toFixed(1) ?? '—'} not in 26–34 entry zone (target 29–30)`,
-      (vixInRange && !vixDeclining) && `VIX ${vix?.toFixed(1)} still rising — wait for decline`,
-      !trendOk      && `${symbol} $${price.toFixed(2)} >5% below 200d SMA — trend broken`,
-    ].filter(Boolean),
+    confirmed:  true,
+    symbol:     pick.symbol,
+    price:      pick.price,
+    direction:  'INVERSE',
+    vix:        +vix.toFixed(1),
+    stopLevel:  +(pick.price * 0.85).toFixed(2), // 15% hard stop (inverse ETFs are volatile)
+    tp1: null, tp2: null, tp3: null,             // Exit is VIX-based, not price-based
+    failReasons: [],
   };
+}
+
+// Keep the old long-signal stub so existing references (bots status page) don't break
+async function computeSwingLongSignal(symbol) {
+  const sig = await computeSwingVIXSignal();
+  return { ...sig, symbol };
 }
 
 // ── Swing Inverse Signal (TOP) — 5 conditions, buys SH (1× inverse SPY) ──────
@@ -3754,84 +3770,68 @@ async function runSwingAutoTrader() {
   const users = db.prepare('SELECT DISTINCT user_id FROM alpaca_creds').all();
   if (!users.length) return;
 
-  const [spyR, qqqR, invR] = await Promise.allSettled([
-    computeSwingLongSignal('SPY'),
-    computeSwingLongSignal('QQQ'),
-    computeSwingInverseSignal(),
-  ]);
-  const spySig = spyR.status === 'fulfilled' ? spyR.value : null;
-  const qqqSig = qqqR.status === 'fulfilled' ? qqqR.value : null;
-  const invSig = invR.status === 'fulfilled' ? invR.value : null;
+  const sig = await computeSwingVIXSignal();
+  const vixStr = sig.vix != null ? `VIX ${sig.vix}` : 'VIX —';
+  console.log(`[Swing-Bot] Daily scan | ${vixStr} | Signal: ${sig.confirmed ? `BUY ${sig.symbol} @ $${sig.price}` : (sig.failReasons?.[0] || 'not triggered')}`);
 
-  const longSig  = spySig?.confirmed ? spySig : qqqSig?.confirmed ? qqqSig : null;
-  const shortSig = invSig?.confirmed ? invSig : null;
-
-  const vixStr = spySig?.vix != null ? `VIX ${spySig.vix} (prev ${spySig.prevVix})` : 'VIX —';
-  console.log(`[Swing-Bot] Daily scan | ${vixStr} | SPY long: ${spySig?.confirmed||false} (${spySig?.failReasons?.[0] || 'all pass'}) | QQQ long: ${qqqSig?.confirmed||false} | Inverse: ${invSig?.confirmed||false}`);
+  if (!sig.confirmed) return;
 
   for (const user of users) {
     if (!getAlpacaCreds(user.user_id)) continue;
     if (!isBotEnabled(user.user_id, 'swing')) continue;
-    if (longSig)  await executeSwingEntry(user.user_id, longSig);
-    if (shortSig && !longSig) await executeSwingEntry(user.user_id, shortSig);
+    await executeSwingEntry(user.user_id, sig);
   }
 }
 
-// ── Swing TP Monitor — runs every 15 min, checks TP1/TP2/TP3 levels ──────────
+// ── Swing Exit Monitor — checks every 15 min during market hours ─────────────
+// Primary exit: VIX drops below 17 → close entire position at market
+//               (fear has fully normalised, inverse ETF will lose value)
+// Safety exit:  price drops 15% below entry (hard stop)
 async function monitorSwingTPs() {
   if (!isMarketOpen()) return;
   const openTrades = db.prepare(`SELECT * FROM swing_trade_log WHERE phase NOT IN ('closed')`).all();
   if (!openTrades.length) return;
 
+  // Fetch current VIX once for all open trades
+  let currentVix = null;
+  try {
+    const vixBars = await fetchOHLCV('^VIX', 2);
+    currentVix = vixBars?.at(-1)?.c ?? null;
+  } catch (_) {}
+
   for (const trade of openTrades) {
     try {
       const q = await fetchLiveQuote(trade.symbol).catch(() => null);
       if (!q?.price) continue;
-      const price     = q.price;
+      const price      = q.price;
       const sharesLeft = trade.shares_remaining || trade.shares;
       if (sharesLeft <= 0) continue;
 
-      // ── Stop loss ──────────────────────────────────────────────────────────
+      // ── Primary exit: VIX crushes below 17 ───────────────────────────────
+      if (currentVix !== null && currentVix < 17) {
+        console.log(`[Swing-Bot] VIX CRUSH EXIT — VIX ${currentVix.toFixed(1)} < 17 → closing ${trade.symbol} @ $${price.toFixed(2)}`);
+        try {
+          await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
+          db.prepare(`UPDATE swing_trade_log SET phase='closed', shares_remaining=0, closed_at=datetime('now'), notes=notes||' | VIX CRUSH EXIT @ VIX '||? WHERE id=?`)
+            .run(currentVix.toFixed(1), trade.id);
+        } catch (e) { console.error('[Swing-Bot] VIX exit error:', e.message); }
+        continue;
+      }
+
+      // ── Safety stop: 15% below entry price ────────────────────────────────
       if (price <= trade.trailing_stop) {
         console.log(`[Swing-Bot] Stop hit: ${trade.symbol} $${price.toFixed(2)} ≤ stop $${trade.trailing_stop} — closing`);
         try {
           await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
-          db.prepare(`UPDATE swing_trade_log SET phase='closed', closed_at=datetime('now'), notes=notes||' | STOP $'||? WHERE id=?`).run(price.toFixed(2), trade.id);
+          db.prepare(`UPDATE swing_trade_log SET phase='closed', closed_at=datetime('now'), notes=notes||' | STOP $'||? WHERE id=?`)
+            .run(price.toFixed(2), trade.id);
         } catch (e) { console.error('[Swing-Bot] Stop close error:', e.message); }
         continue;
       }
 
-      // ── TP1: 21w EMA — trim 33%, trail stop to breakeven ──────────────────
-      if (trade.phase === 'open' && price >= trade.tp1_price) {
-        const sellQty  = Math.max(1, Math.floor(sharesLeft * 0.33));
-        const newStop  = trade.entry_price;
-        console.log(`[Swing-Bot] TP1 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp1_price} — selling ${sellQty} shares, stop → breakeven $${newStop}`);
-        try {
-          await alpacaFetch(trade.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: trade.symbol, qty: String(sellQty), side: 'sell', type: 'market', time_in_force: 'day' }) });
-          db.prepare(`UPDATE swing_trade_log SET phase='tp1_hit', shares_remaining=?, trailing_stop=?, notes=notes||' | TP1 $'||? WHERE id=?`).run(sharesLeft - sellQty, newStop, price.toFixed(2), trade.id);
-        } catch (e) { console.error('[Swing-Bot] TP1 trim error:', e.message); }
-        continue;
-      }
-
-      // ── TP2: 50w SMA — trim another 33%, trail stop to TP1 ───────────────
-      if (trade.phase === 'tp1_hit' && price >= trade.tp2_price) {
-        const sellQty = Math.max(1, Math.floor(sharesLeft * 0.50));
-        const newStop = trade.tp1_price;
-        console.log(`[Swing-Bot] TP2 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp2_price} — selling ${sellQty} shares, stop → TP1 $${newStop}`);
-        try {
-          await alpacaFetch(trade.user_id, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: trade.symbol, qty: String(sellQty), side: 'sell', type: 'market', time_in_force: 'day' }) });
-          db.prepare(`UPDATE swing_trade_log SET phase='tp2_hit', shares_remaining=?, trailing_stop=?, notes=notes||' | TP2 $'||? WHERE id=?`).run(sharesLeft - sellQty, newStop, price.toFixed(2), trade.id);
-        } catch (e) { console.error('[Swing-Bot] TP2 trim error:', e.message); }
-        continue;
-      }
-
-      // ── TP3: prior swing high / +8% — exit final 34% ─────────────────────
-      if (trade.phase === 'tp2_hit' && price >= trade.tp3_price) {
-        console.log(`[Swing-Bot] TP3 hit: ${trade.symbol} $${price.toFixed(2)} ≥ $${trade.tp3_price} — full exit`);
-        try {
-          await alpacaFetch(trade.user_id, `/v2/positions/${trade.symbol}`, { method: 'DELETE' });
-          db.prepare(`UPDATE swing_trade_log SET phase='closed', shares_remaining=0, closed_at=datetime('now'), notes=notes||' | TP3 $'||? WHERE id=?`).run(price.toFixed(2), trade.id);
-        } catch (e) { console.error('[Swing-Bot] TP3 close error:', e.message); }
+      // ── Status log every check (only when VIX is available) ───────────────
+      if (currentVix !== null) {
+        console.log(`[Swing-Bot] Holding ${trade.symbol} @ $${price.toFixed(2)} | VIX ${currentVix.toFixed(1)} (exit < 17) | Stop $${trade.trailing_stop}`);
       }
     } catch (e) {
       console.error(`[Swing-Bot] Monitor error trade ${trade.id}:`, e.message);
@@ -3841,7 +3841,7 @@ async function monitorSwingTPs() {
 
 setInterval(runSwingAutoTrader, 60 * 60 * 1000);  // hourly — any weekday, VIX-triggered
 setInterval(monitorSwingTPs,   15 * 60 * 1000);   // TP/stop check every 15 min
-console.log('[Swing-Bot] Swing auto-trader initialized — VIX 26–34 entry trigger (target 29–30) · SPY/QQQ long + SH inverse · TP1/TP2/TP3 trimming · Trailing stop');
+console.log('[Swing-Bot] Swing auto-trader initialized — Entry: VIX 26–34 → buy cheapest inverse ETF <$10 · Exit: VIX crushes below 17 · Safety: 15% stop');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER

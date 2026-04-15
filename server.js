@@ -23,7 +23,7 @@ console.warn = (...args) => {
 
 const app      = express();
 const PORT           = 5000;
-const MAX_TRADE_PRICE = 25;          // Bot only executes trades on stocks/ETFs priced ≤ $25
+const MAX_TRADE_PRICE = 15;          // Bot only executes trades on stocks/ETFs priced ≤ $15
 const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 6 bots combined never hold more than 2 positions
 const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter any trade (raised for quality)
 const FMP_KEY  = process.env.FMP_API_KEY;

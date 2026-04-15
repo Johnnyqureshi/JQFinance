@@ -3579,74 +3579,52 @@ function groupDailyToWeekly(dailyBars) {
 
 // ── Swing Long Signal (BOTTOM) — 5 conditions on weekly + daily ───────────────
 async function computeSwingLongSignal(symbol) {
-  const daily = await fetchOHLCV(symbol, 350).catch(() => null);
-  if (!daily || daily.length < 100) return { symbol, confirmed: false, error: 'Insufficient data' };
-
-  const weekly  = groupDailyToWeekly(daily);
-  if (weekly.length < 30) return { symbol, confirmed: false, error: 'Insufficient weekly data' };
-
-  const wCloses  = weekly.map(b => b.c);
-  const wVolumes = weekly.map(b => b.v);
-  const curW     = weekly.at(-1);
-  const price    = curW.c;
-
-  // Use longest available window (200 bars ideal; fall back to what we have)
-  const win200 = Math.min(200, wCloses.length - 1);
-  const win50  = Math.min(50,  wCloses.length - 1);
-  const win21  = Math.min(21,  wCloses.length - 1);
-
-  const ref200 = calcSMA(wCloses, win200);
-  const sma50w = calcSMA(wCloses, win50);
-  const ema21w = calcEMA(wCloses, win21);
-
-  // Cond 1: Price within 2% of 200w SMA/EMA
-  const pct200 = Math.abs(price - ref200) / ref200 * 100;
-  const cond1  = pct200 <= 2;
-
-  // Cond 2: Weekly RSI 30–45, hooking upward
-  let wRSI = 50, prevWRSI = 50;
+  // ── Primary trigger: VIX in the 26–34 zone AND declining ─────────────────
+  // When VIX drops to the 29–30 area from elevated levels (40–50+), fear is
+  // subsiding and the market historically presents a strong long-term re-entry.
+  // A declining VIX (today < yesterday) confirms the direction of the move.
+  let vix = null, prevVix = null;
   try {
-    const rs = calcRSISeries(wCloses, 14);
-    wRSI = rs.at(-1); prevWRSI = rs.at(-2);
+    const vixBars = await fetchOHLCV('^VIX', 5);
+    vix     = vixBars?.at(-1)?.c ?? null;
+    prevVix = vixBars?.at(-2)?.c ?? null;
   } catch (_) {}
-  const cond2 = wRSI >= 30 && wRSI <= 45 && wRSI > prevWRSI;
 
-  // Cond 3: Daily bullish engulfing or hammer, closing above 200d SMA
+  const vixInRange   = vix !== null && vix >= 26 && vix <= 34;
+  const vixDeclining = vix !== null && prevVix !== null && vix < prevVix;
+  const vixTrigger   = vixInRange && vixDeclining;
+
+  // ── Safety filter: don't buy into a broken long-term trend ───────────────
+  // Price must be within 5% of the 200-day SMA — a severe bear market breakdown
+  // (e.g. -20% below 200d) is not the target scenario for this strategy.
+  const daily = await fetchOHLCV(symbol, 220).catch(() => null);
+  if (!daily || daily.length < 60) return { symbol, confirmed: false, error: 'Insufficient data' };
+
+  const price   = daily.at(-1).c;
   const dCloses = daily.map(b => b.c);
   const sma200d = calcSMA(dCloses, Math.min(200, dCloses.length - 1));
-  const d0 = daily.at(-1), d1 = daily.at(-2);
-  const isBullEngulf = d0.c > d0.o && d0.c > d1.o && d0.o < d1.c && d0.c > sma200d;
-  const isHammer     = d0.c > d0.o && (d0.h - d0.c) / Math.max(0.001, d0.h - d0.l) < 0.3 && d0.c > sma200d;
-  const cond3 = isBullEngulf || isHammer;
+  const sma50d  = calcSMA(dCloses, Math.min(50,  dCloses.length - 1));
+  const trendOk = price >= sma200d * 0.95; // within 5% of 200d SMA
 
-  // Cond 4: 50w SMA > 200w SMA (secular uptrend — correction, not breakdown)
-  const cond4 = sma50w > ref200;
+  const confirmed = vixTrigger && trendOk;
 
-  // Cond 5: Weekly volume ≥ 10-week average
-  const vol10avg = wVolumes.slice(-11, -1).reduce((a, b) => a + b, 0) / 10;
-  const cond5    = curW.v >= vol10avg;
-
-  const confirmed = cond1 && cond2 && cond3 && cond4 && cond5;
-
-  // Swing high for TP3 (highest close over last 52 weeks)
-  const priorHigh = Math.max(...wCloses.slice(-52));
-  const tp1 = +ema21w.toFixed(2);
-  const tp2 = +sma50w.toFixed(2);
-  const tp3 = priorHigh > price ? +priorHigh.toFixed(2) : +(price * 1.08).toFixed(2);
+  // TP levels: keyed off 50d SMA, 200d SMA, and a +15% ceiling
+  const tp1 = +Math.max(sma50d,  price * 1.04).toFixed(2);
+  const tp2 = +Math.max(sma200d, price * 1.08).toFixed(2);
+  const tp3 = +(price * 1.15).toFixed(2);
+  const stopLevel = +(price * 0.93).toFixed(2); // 7% stop
 
   return {
     symbol, confirmed, direction: 'LONG',
-    price: +price.toFixed(2), ref200: +ref200.toFixed(2),
-    sma50w: +sma50w.toFixed(2), ema21w, wRSI: +wRSI.toFixed(1), pct200: +pct200.toFixed(2),
-    cond1, cond2, cond3, cond4, cond5,
-    stopLevel: +(ref200 * 0.97).toFixed(2),
-    tp1, tp2, tp3,
+    price: +price.toFixed(2),
+    vix:  vix     ? +vix.toFixed(1)     : null,
+    prevVix: prevVix ? +prevVix.toFixed(1) : null,
+    sma200d: +sma200d.toFixed(2), sma50d: +sma50d.toFixed(2), trendOk,
+    stopLevel, tp1, tp2, tp3,
     failReasons: [
-      !cond1 && `Price ${pct200.toFixed(1)}% from 200w SMA (need ≤2%)`,
-      !cond2 && `Weekly RSI ${wRSI.toFixed(1)} not in 30–45 range or not hooking up`,
-      !cond3 && 'No bullish daily candle (engulfing/hammer) above 200d SMA',
-      !cond4 && '50w SMA below 200w SMA — secular uptrend broken',
-      !cond5 && 'Volume below 10-week average',
+      !vixInRange   && `VIX ${vix?.toFixed(1) ?? '—'} not in 26–34 entry zone (target 29–30)`,
+      (vixInRange && !vixDeclining) && `VIX ${vix?.toFixed(1)} still rising — wait for decline`,
+      !trendOk      && `${symbol} $${price.toFixed(2)} >5% below 200d SMA — trend broken`,
     ].filter(Boolean),
   };
 }
@@ -3739,29 +3717,25 @@ async function executeSwingEntry(userId, sig) {
     const equity   = parseFloat(account.equity || account.portfolio_value || 0);
     if (equity <= 0) return;
 
-    // ── Seasonal context for Swing bot (advisory + sizing) ──────────────────
-    const swingSeason = computeSeasonalContext();
+    // ── Position sizing — straight from Global Trading Settings, no seasonal scaling ─
     const ts = db.prepare('SELECT * FROM trade_settings WHERE user_id=?').get(userId)
              || { position_mode: 'pct', position_pct: 15, position_amount: 5000, leverage: 1 };
-    const basePosValue = ts.position_mode === 'fixed'
+    const posValue = ts.position_mode === 'fixed'
       ? ts.position_amount
       : equity * (ts.position_pct / 100);
-    const posValue = basePosValue * swingSeason.sizeMult; // apply seasonal scaling
-    const price    = sig.price;
+    const price  = sig.price;
     if (!price || price <= 0) return;
-    const shares   = Math.max(1, Math.floor(posValue / price));
+    const shares = Math.max(1, Math.floor(posValue / price));
 
-    const seasonNote = swingSeason.sizeNotes.length
-      ? ` | Seasonal: ${swingSeason.sizeNotes.join('; ')}`
-      : '';
-    console.log(`[Swing-Bot] Placing ${sig.direction} limit order: ${sig.symbol} × ${shares} @ $${price.toFixed(2)} | SL=$${sig.stopLevel} | TP1=$${sig.tp1} TP2=$${sig.tp2} TP3=$${sig.tp3} | SizeMult=${swingSeason.sizeMult}×${seasonNote}`);
+    const vixNote = sig.vix != null ? ` | VIX ${sig.vix} ↓ (prev ${sig.prevVix})` : '';
+    console.log(`[Swing-Bot] Placing ${sig.direction} order: ${sig.symbol} × ${shares} @ $${price.toFixed(2)} | SL=$${sig.stopLevel} | TP1=$${sig.tp1} TP2=$${sig.tp2} TP3=$${sig.tp3}${vixNote}`);
 
     const order = await alpacaFetch(userId, '/v2/orders', {
       method: 'POST',
       body: JSON.stringify({ symbol: sig.symbol, qty: String(shares), side: 'buy', type: 'limit', time_in_force: 'day', limit_price: price.toFixed(2) }),
     });
 
-    const notesField = `${sig.direction} | All 5 weekly conditions confirmed${seasonNote} | OpEx: ${swingSeason.daysToOpEx}d | ${swingSeason.monthly.label}`;
+    const notesField = `${sig.direction} | VIX ${sig.vix ?? '—'} entry${vixNote}`;
     db.prepare(`
       INSERT INTO swing_trade_log (user_id, symbol, direction, entry_price, shares, shares_remaining, alpaca_order_id, stop_level, trailing_stop, tp1_price, tp2_price, tp3_price, signal_date, notes)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,date('now'),?)
@@ -3773,19 +3747,9 @@ async function executeSwingEntry(userId, sig) {
   }
 }
 
-// ── Swing Auto-Trader — Monday-only entry, fires hourly ──────────────────────
+// ── Swing Auto-Trader — runs daily (Mon–Fri), VIX-triggered entry ────────────
 async function runSwingAutoTrader() {
-  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  if (et.getDay() !== 1) return; // Monday only — wait for weekly candle confirmation
   if (!isMarketOpen()) return;
-
-  // ── Seasonal & OpEx context — Swing bot is advisory; log but don't hard-block ─
-  const swingRunSeason = computeSeasonalContext();
-  if (swingRunSeason.hardBlock) {
-    console.log(`[Swing-Bot] SEASONAL HARD BLOCK (will not enter): ${swingRunSeason.hardBlockReason}`);
-    return;
-  }
-  console.log(`[Swing-Bot] Monday scan | Season: ${swingRunSeason.monthly.label} | SizeMult: ${swingRunSeason.sizeMult}× | OpEx: ${swingRunSeason.daysToOpEx}d away`);
 
   const users = db.prepare('SELECT DISTINCT user_id FROM alpaca_creds').all();
   if (!users.length) return;
@@ -3799,10 +3763,11 @@ async function runSwingAutoTrader() {
   const qqqSig = qqqR.status === 'fulfilled' ? qqqR.value : null;
   const invSig = invR.status === 'fulfilled' ? invR.value : null;
 
-  const longSig = spySig?.confirmed ? spySig : qqqSig?.confirmed ? qqqSig : null;
+  const longSig  = spySig?.confirmed ? spySig : qqqSig?.confirmed ? qqqSig : null;
   const shortSig = invSig?.confirmed ? invSig : null;
 
-  console.log(`[Swing-Bot] Monday scan | SPY long: ${spySig?.confirmed||false} (${spySig?.failReasons?.length ? spySig.failReasons[0] : 'all pass'}) | QQQ long: ${qqqSig?.confirmed||false} | Inverse: ${shortSig?.confirmed||false}`);
+  const vixStr = spySig?.vix != null ? `VIX ${spySig.vix} (prev ${spySig.prevVix})` : 'VIX —';
+  console.log(`[Swing-Bot] Daily scan | ${vixStr} | SPY long: ${spySig?.confirmed||false} (${spySig?.failReasons?.[0] || 'all pass'}) | QQQ long: ${qqqSig?.confirmed||false} | Inverse: ${invSig?.confirmed||false}`);
 
   for (const user of users) {
     if (!getAlpacaCreds(user.user_id)) continue;
@@ -3874,9 +3839,9 @@ async function monitorSwingTPs() {
   }
 }
 
-setInterval(runSwingAutoTrader, 60 * 60 * 1000);  // hourly — Monday gate inside
+setInterval(runSwingAutoTrader, 60 * 60 * 1000);  // hourly — any weekday, VIX-triggered
 setInterval(monitorSwingTPs,   15 * 60 * 1000);   // TP/stop check every 15 min
-console.log('[Swing-Bot] Swing auto-trader initialized — Monday entry (weekly confirmation) · SPY/QQQ long + SH inverse · TP1/TP2/TP3 trimming · Trailing stop');
+console.log('[Swing-Bot] Swing auto-trader initialized — VIX 26–34 entry trigger (target 29–30) · SPY/QQQ long + SH inverse · TP1/TP2/TP3 trimming · Trailing stop');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER

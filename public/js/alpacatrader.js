@@ -266,6 +266,12 @@ const alpacaTrader = (() => {
         updateConnStatus();
       }
     } catch (e) {
+      // Always clear the reconnecting state so the UI doesn't get stuck on
+      // the yellow "Reconnecting…" badge indefinitely when a session has expired
+      // or a transient network error occurs during the credential check.
+      reconnecting = false;
+      connected    = false;
+      updateConnStatus();
       if (e.message !== 'session_expired') console.warn('[AT] checkCreds:', e.message);
     }
   }
@@ -377,8 +383,15 @@ const alpacaTrader = (() => {
     updateConnStatus();
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && connected) {
+      if (document.visibilityState !== 'visible') return;
+      if (connected) {
+        // Refresh live data when tab comes back into focus
         loadAccount(); loadPositions(); loadOrders();
+      } else {
+        // Not connected — try to restore credentials automatically (handles the
+        // case where the tab was hidden during a server restart / re-deploy and
+        // the session or connection state was reset while the user was away).
+        checkCredentials();
       }
     });
   }

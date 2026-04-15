@@ -1207,8 +1207,43 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
 
 // ── Alpaca Markets Integration ─────────────────────────────────────────────────
 
+// Sentinel key written to DB when the user explicitly disconnects so that the
+// environment-variable fallback is suppressed for that user.
+const DISCONNECTED_SENTINEL = '__disconnected__';
+
 function getAlpacaCreds(userId) {
-  return db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
+  const row = db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
+  // User explicitly disconnected — do NOT fall back to env vars.
+  if (row && row.api_key === DISCONNECTED_SENTINEL) return null;
+  // DB credentials found — use them.
+  if (row) return row;
+
+  // ── Environment-variable fallback ──────────────────────────────────────────
+  // Credentials stored as Replit Secrets survive deployments and container
+  // restarts without the user needing to re-enter them via the UI.
+  //
+  // Set these secrets in your Replit project:
+  //   ALPACA_PAPER_KEY    / ALPACA_PAPER_SECRET   → paper-trading account
+  //   ALPACA_LIVE_KEY     / ALPACA_LIVE_SECRET     → live-trading account
+  //   ALPACA_MODE                                  → "paper" (default) or "live"
+  //
+  // DB credentials entered via the UI always take precedence over env vars.
+  const mode       = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+  const liveKey    = process.env.ALPACA_LIVE_KEY;
+  const liveSecret = process.env.ALPACA_LIVE_SECRET;
+  const paperKey   = process.env.ALPACA_PAPER_KEY;
+  const paperSecret= process.env.ALPACA_PAPER_SECRET;
+
+  if (mode === 'live' && liveKey && liveSecret) {
+    return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
+  }
+  if (paperKey && paperSecret) {
+    return { api_key: paperKey, api_secret: paperSecret, mode: 'paper' };
+  }
+  if (liveKey && liveSecret) {
+    return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
+  }
+  return null;
 }
 
 async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
@@ -1277,8 +1312,12 @@ app.put('/api/alpaca/credentials', requireAuth, (req, res) => {
 });
 
 // Delete credentials (disconnect)
+// We write a sentinel row rather than a hard DELETE so that the env-var fallback
+// is not immediately re-activated for this user after they click "Disconnect".
 app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM alpaca_creds WHERE user_id = ?').run(req.session.userId);
+  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?, ?, ?, ?)').run(
+    req.session.userId, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, 'paper'
+  );
   res.json({ ok: true });
 });
 

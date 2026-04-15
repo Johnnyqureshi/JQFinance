@@ -465,8 +465,13 @@ async function alpacaDataFetch(userId, path, _attempt = 0) {
 // Returns any userId that has Alpaca credentials — used by non-auth endpoints
 // so they can still benefit from Alpaca data without being session-bound.
 function getAnyAlpacaUserId() {
-  const row = db.prepare('SELECT user_id FROM alpaca_creds LIMIT 1').get();
-  return row?.user_id ?? null;
+  // Must skip sentinel rows — disconnected users have api_key = '__disconnected__'
+  // and must not be used to make live API calls.
+  const rows = db.prepare('SELECT user_id FROM alpaca_creds').all();
+  for (const r of rows) {
+    if (getAlpacaCreds(r.user_id)) return r.user_id;
+  }
+  return null;
 }
 
 // Fetch Alpaca snapshot(s) for one or more symbols.
@@ -3358,7 +3363,7 @@ async function runCTAutoTrader() {
   console.log(`[CT-Bot] Best signal: ${bestCT.symbol} ${bestCT.signalType} (${signals.length} confirmed) | Season: ${ctSeason.monthly.label} | OpEx: ${ctSeason.daysToOpEx}d | SizeMult: ${ctSeason.sizeMult}× ${ctSeason.inOpExWeek ? '(OpEx week)' : ''}`);
 
   for (const user of users) {
-    const creds = db.prepare('SELECT * FROM alpaca_creds WHERE user_id = ?').get(user.user_id);
+    const creds = getAlpacaCreds(user.user_id);
     if (!creds) continue;
     if (!isBotEnabled(user.user_id, 'countertrend')) { console.log(`[CT-Bot] Disabled for user ${user.user_id} — skipping`); continue; }
     if (!acquireBotLock(user.user_id)) { console.log(`[CT-Bot] User ${user.user_id} locked by another bot — skipping`); continue; }

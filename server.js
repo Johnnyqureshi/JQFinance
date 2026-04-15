@@ -1997,7 +1997,7 @@ async function computeORBSignal(orbWindowMins = 5) {
     const vixBars = await fetchOHLCV('^VIX', 2);
     vix = vixBars?.at(-1)?.c ?? null;
   } catch (_) {}
-  const vixOk = vix === null || vix <= 35; // skip if VIX > 35
+  const vixOk = vix === null || vix <= 50; // skip if VIX > 50 (raised from 35 — VIX 35–50 is tradeable)
 
   // ── Fetch 1-min intraday bars for SPY ────────────────────────────────────
   const bars = await fetchFMPIntraday('SPY', '1min');
@@ -2053,28 +2053,23 @@ async function computeORBSignal(orbWindowMins = 5) {
 
   // ── Breakout detection — only on candles AFTER the ORB window ─────────────
   // A breakout requires a full CANDLE CLOSE above orbHigh or below orbLow.
-  // Wicks do not count. Check most recent post-ORB bar.
+  // Wicks do not count.
+  // We find the FIRST bar that confirmed the breakout (not just the most recent).
+  // This prevents missed trades when price briefly retests the range after breaking out.
   let breakout = 'NONE';
   let breakoutBar = null;
 
-  if (postOrbBars.length > 0) {
-    const latest = postOrbBars.at(-1);
-    if (latest.c > orbHigh)  { breakout = 'BULLISH'; breakoutBar = latest; }
-    if (latest.c < orbLow)   { breakout = 'BEARISH'; breakoutBar = latest; }
+  for (const b of postOrbBars) {
+    if (b.c > orbHigh) { breakout = 'BULLISH'; breakoutBar = b; break; }
+    if (b.c < orbLow)  { breakout = 'BEARISH'; breakoutBar = b; break; }
   }
 
-  // ── False breakout check — did price re-enter the range within 2 candles? ─
+  // ── False breakout check — did price re-enter the range AFTER breaking out? ─
+  // Only flag as fakeout if a bar SUBSEQUENT to the breakout bar closed back inside.
   let fakeout = false;
-  if (breakout !== 'NONE' && postOrbBars.length >= 2) {
-    // Check the 2 bars just before the latest bar
-    const recentPost = postOrbBars.slice(-3, -1);
-    const alreadyBroken = recentPost.some(b =>
-      (breakout === 'BULLISH' && b.c > orbHigh) || (breakout === 'BEARISH' && b.c < orbLow)
-    );
-    if (alreadyBroken) {
-      // ORB broke before — check if any intermediate bar re-entered the range
-      fakeout = recentPost.some(b => b.c >= orbLow && b.c <= orbHigh);
-    }
+  if (breakout !== 'NONE' && breakoutBar) {
+    const barsAfterBreakout = postOrbBars.filter(b => b.t > breakoutBar.t);
+    fakeout = barsAfterBreakout.some(b => b.c >= orbLow && b.c <= orbHigh);
   }
 
   const price        = latestBar.c;
@@ -2088,7 +2083,7 @@ async function computeORBSignal(orbWindowMins = 5) {
   const failReasons = [];
   if (!isMWF)      failReasons.push('Not a weekday (Mon–Fri)');
   if (!validRange) failReasons.push(`Range ${rangeWidthPct.toFixed(3)}% < 0.2%`);
-  if (!vixOk)      failReasons.push(`VIX ${vix} > 35`);
+  if (!vixOk)      failReasons.push(`VIX ${vix} > 50`);
   if (breakout === 'NONE') failReasons.push('No breakout yet');
   if (breakout !== 'NONE') {
     if (!hasVolume)    failReasons.push('Volume below 20-bar avg');

@@ -184,6 +184,16 @@ db.prepare(`
   )
 `).run();
 
+// ── Startup migration: ensure all 3 active bots are enabled ───────────────────
+// Deletes any explicitly-disabled rows for the current bot names so they
+// revert to the default ON state. If a user disables a bot via the UI toggle
+// it persists until the next restart/redeploy, at which point it resets to ON.
+// This prevents bots from silently staying off after a container restart.
+db.prepare(`
+  DELETE FROM bot_toggles
+  WHERE bot_name IN ('countertrend','orb','swing') AND enabled = 0
+`).run();
+
 // ── ORB session log — one row per user per trading day ────────────────────────
 db.prepare(`
   CREATE TABLE IF NOT EXISTS orb_session_log (
@@ -1224,20 +1234,22 @@ function getAlpacaCreds(userId) {
   if (row) return row;
 
   // ── Environment-variable fallback ──────────────────────────────────────────
-  // Credentials stored as Replit Secrets survive deployments and container
-  // restarts without the user needing to re-enter them via the UI.
+  // Accepts several common naming conventions so whichever secret name was used
+  // in Replit secrets works without having to rename anything.
   //
-  // Set these secrets in your Replit project:
-  //   ALPACA_PAPER_KEY    / ALPACA_PAPER_SECRET   → paper-trading account
-  //   ALPACA_LIVE_KEY     / ALPACA_LIVE_SECRET     → live-trading account
-  //   ALPACA_MODE                                  → "paper" (default) or "live"
+  //   ALPACA_API_KEY  / ALPACA_API_SECRET   (generic — used when only one account)
+  //   ALPACA_PAPER_KEY / ALPACA_PAPER_SECRET → paper account
+  //   ALPACA_LIVE_KEY  / ALPACA_LIVE_SECRET  → live account
+  //   ALPACA_MODE                            → "paper" (default) or "live"
   //
-  // DB credentials entered via the UI always take precedence over env vars.
   const mode       = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
   const liveKey    = process.env.ALPACA_LIVE_KEY;
   const liveSecret = process.env.ALPACA_LIVE_SECRET;
   const paperKey   = process.env.ALPACA_PAPER_KEY;
   const paperSecret= process.env.ALPACA_PAPER_SECRET;
+  // Generic key works for both paper and live (mode determined by ALPACA_MODE)
+  const genericKey   = process.env.ALPACA_API_KEY;
+  const genericSecret= process.env.ALPACA_API_SECRET;
 
   if (mode === 'live' && liveKey && liveSecret) {
     return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
@@ -1247,6 +1259,9 @@ function getAlpacaCreds(userId) {
   }
   if (liveKey && liveSecret) {
     return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
+  }
+  if (genericKey && genericSecret) {
+    return { api_key: genericKey, api_secret: genericSecret, mode };
   }
   return null;
 }
@@ -1944,7 +1959,35 @@ function calcBBWidthSeries(closes, period = 20, mult = 2, lookback = 20) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Fetch 1-min or 5-min intraday bars for today from FMP (newest→oldest, reversed)
+// ── Alpaca 1-minute bars for intraday data ────────────────────────────────────
+// Primary source for ORB since Alpaca credentials are always required.
+// Returns bars in the same normalised format as fetchFMPIntraday.
+async function fetchAlpacaIntraday(symbol) {
+  const uid = getAnyAlpacaUserId();
+  if (!uid) return null;
+  const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
+  // Request bars from market open today; Alpaca requires RFC3339 with timezone
+  const startISO = `${today}T09:25:00-04:00`; // grab a few bars before open for context
+  try {
+    const data = await alpacaDataFetch(uid,
+      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Min&start=${encodeURIComponent(startISO)}&limit=500&feed=iex&adjustment=raw`
+    );
+    if (!data?.bars?.length) return null;
+    // Convert Alpaca UTC timestamps to "YYYY-MM-DD HH:MM:SS" in ET for fmpTimeToMins
+    return data.bars.map(b => {
+      const etStr = new Date(b.t).toLocaleString('sv-SE', { timeZone: 'America/New_York' }); // "YYYY-MM-DD HH:MM:SS"
+      return { t: etStr, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 };
+    });
+  } catch (e) { console.error('[ORB] Alpaca intraday fetch error:', e.message); return null; }
+}
+
 async function fetchFMPIntraday(symbol, interval = '1min') {
+  // Try Alpaca first — it is always connected and free of API-key requirements
+  const alpacaBars = await fetchAlpacaIntraday(symbol);
+  if (alpacaBars) return alpacaBars;
+
+  // Fall back to FMP if configured
   if (!FMP_KEY) return null;
   const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;

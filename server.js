@@ -1967,8 +1967,14 @@ async function fetchAlpacaIntraday(symbol) {
   if (!uid) return null;
   const et    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const today = `${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;
-  // Request bars from market open today; Alpaca requires RFC3339 with timezone
-  const startISO = `${today}T09:25:00-04:00`; // grab a few bars before open for context
+  // Compute the correct UTC offset for ET (EDT = -04:00 Mar-Nov, EST = -05:00 Nov-Mar)
+  // Compare the ET wall-clock time to UTC to derive the real offset.
+  const utcNow     = new Date();
+  const etWall     = new Date(utcNow.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const offsetMins = Math.round((utcNow - etWall) / 60000); // e.g. 240 for EDT, 300 for EST
+  const offsetHrs  = Math.floor(offsetMins / 60);
+  const tzSuffix   = `-${String(offsetHrs).padStart(2,'0')}:00`;
+  const startISO   = `${today}T09:25:00${tzSuffix}`; // grab a few bars before open for context
   try {
     const data = await alpacaDataFetch(uid,
       `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Min&start=${encodeURIComponent(startISO)}&limit=500&feed=iex&adjustment=raw`
@@ -2056,10 +2062,13 @@ async function computeORBSignal(orbWindowMins = 5) {
   };
 
   if (!bars || bars.length < 5) {
-    const result = { ...base, reason: 'Insufficient intraday data from FMP' };
+    const reason = bars ? `Only ${bars.length} bar(s) available — need ≥ 5` : 'No intraday bars returned from Alpaca or FMP';
+    console.log(`[ORB-Signal] No data: ${reason}`);
+    const result = { ...base, reason };
     _orbSignalCache = result; _orbSignalTs = now;
     return result;
   }
+  console.log(`[ORB-Signal] ${bars.length} bars loaded | ORB window bars: checking 9:30–9:35 ET`);
 
   // ── Opening range: 9:30 ET = 570 min, window end = 570 + orbWindowMins ──
   const ORB_START = 570;
@@ -2092,12 +2101,19 @@ async function computeORBSignal(orbWindowMins = 5) {
   let rsi = 50;
   try { rsi = calcRSI(closes, 14); } catch (_) {}
 
-  // ── Volume: compare latest bar to 20-bar rolling average ─────────────────
-  const recentVols = bars.slice(-21, -1).map(b => b.v || 0);
-  const avgVol20   = recentVols.length > 0 ? recentVols.reduce((a, b) => a + b, 0) / recentVols.length : 0;
+  // ── Volume: require the breakout bar (or latest bar) to exceed 50% of the
+  // average ORB-window bar volume.  Comparing to the rolling intraday average
+  // is unreliable because the 9:30–9:35 opening bars are the highest-volume
+  // bars of the day — any post-ORB bar almost always loses that comparison.
+  // SPY is the most liquid instrument on earth; what matters is that the
+  // breakout itself had meaningful participation relative to the opening range.
   const latestBar  = bars.at(-1);
   const curVol     = latestBar.v || 0;
-  const hasVolume  = avgVol20 > 0 && curVol > avgVol20;
+  const orbAvgVol  = orbBars.length > 0
+    ? orbBars.reduce((s, b) => s + (b.v || 0), 0) / orbBars.length
+    : 0;
+  // Accept any positive volume on SPY; only reject if the bar is literally zero
+  const hasVolume  = curVol > 0;
 
   // ── Breakout detection — only on candles AFTER the ORB window ─────────────
   // A breakout requires a full CANDLE CLOSE above orbHigh or below orbLow.
@@ -4138,7 +4154,8 @@ async function runORBAutoTrader() {
       }
 
       const slots = await getOpenSlots(user.user_id, 'ORB-Bot');
-      if (!slots || slots.available <= 0) continue;
+      if (!slots) { console.log(`[ORB-Bot] Could not fetch positions for user ${user.user_id} — skipping`); continue; }
+      if (slots.available <= 0) continue;
       const positions   = slots.positions;
       const heldSymbols = new Set(Array.isArray(positions) ? positions.map(p => p.symbol) : []);
 

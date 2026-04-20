@@ -3074,10 +3074,10 @@ function groupDailyToWeekly(dailyBars) {
 // ── Swing Long Signal (BOTTOM) — 5 conditions on weekly + daily ───────────────
 // ── Swing VIX Signal — two zones, two directions ─────────────────────────────
 //
-//  VIX 26–34  → INVERSE play: buy cheapest inverse ETF < $10
+//  VIX 20–45  → INVERSE play: buy cheapest inverse ETF < $10
 //               Exit: VIX crushes below 17 (fear gone, inverse loses value)
 //
-//  VIX 13–16  → LONG play: buy cheapest strong-fundamental stock < $10
+//  VIX 12–20  → LONG play: buy cheapest strong-fundamental stock < $10
 //               Exit: VIX rises back above 20 (fear returning, long at risk)
 //
 async function computeSwingVIXSignal() {
@@ -3091,9 +3091,9 @@ async function computeSwingVIXSignal() {
   const uid = getAnyAlpacaUserId();
 
   // ════════════════════════════════════════════════════════════════════════════
-  // ZONE 1 — VIX 26–34: elevated fear → buy cheap inverse ETF
+  // ZONE 1 — VIX 20–45: elevated fear → buy cheap inverse ETF
   // ════════════════════════════════════════════════════════════════════════════
-  if (vix !== null && vix >= 26 && vix <= 34) {
+  if (vix !== null && vix >= 20 && vix <= 45) {
     const inversePool = [...ORB_INVERSE_ETF_SET];
     const candidates  = [];
 
@@ -3115,7 +3115,7 @@ async function computeSwingVIXSignal() {
 
     candidates.sort((a, b) => a.price - b.price);
     const pick = candidates[0];
-    console.log(`[Swing-Bot] VIX ${vix.toFixed(1)} (26–34) → cheapest inverse ETF: ${pick.symbol} @ $${pick.price}`);
+    console.log(`[Swing-Bot] VIX ${vix.toFixed(1)} (20–45) → cheapest inverse ETF: ${pick.symbol} @ $${pick.price}`);
 
     return {
       confirmed: true, symbol: pick.symbol, price: pick.price,
@@ -3127,9 +3127,9 @@ async function computeSwingVIXSignal() {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // ZONE 2 — VIX 13–16: very low fear → go long on a cheap quality stock
+  // ZONE 2 — VIX 12–20: low fear → go long on a cheap quality stock
   // ════════════════════════════════════════════════════════════════════════════
-  if (vix !== null && vix >= 13 && vix <= 16) {
+  if (vix !== null && vix >= 12 && vix <= 20) {
     // Scan non-inverse MASTER_UNIVERSE for stocks under $10 with good
     // fundamentals (positive momentum, above-average relative volume,
     // not on the WSB blocklist).
@@ -3165,7 +3165,7 @@ async function computeSwingVIXSignal() {
     // Sort by score (change% × relVol) — best fundamentals/momentum first
     candidates.sort((a, b) => b.score - a.score);
     const pick = candidates[0];
-    console.log(`[Swing-Bot] VIX ${vix.toFixed(1)} (13–16 calm zone) → long candidate: ${pick.symbol} @ $${pick.price} (+${pick.changePct}% | ${pick.relVol}× vol)`);
+    console.log(`[Swing-Bot] VIX ${vix.toFixed(1)} (12–20 calm zone) → long candidate: ${pick.symbol} @ $${pick.price} (+${pick.changePct}% | ${pick.relVol}× vol)`);
 
     return {
       confirmed: true, symbol: pick.symbol, price: pick.price,
@@ -3179,7 +3179,7 @@ async function computeSwingVIXSignal() {
   // Neither zone active
   return {
     confirmed: false, vix: vix ? +vix.toFixed(1) : null,
-    failReasons: [`VIX ${vix?.toFixed(1) ?? '—'} — not in 26–34 (inverse zone) or 13–16 (long zone)`],
+    failReasons: [`VIX ${vix?.toFixed(1) ?? '—'} — not in 20–45 (inverse zone) or 12–20 (long zone)`],
   };
 }
 
@@ -3404,7 +3404,7 @@ async function monitorSwingTPs() {
 
 setInterval(runSwingAutoTrader, 60 * 60 * 1000);  // hourly — any weekday, VIX-triggered
 setInterval(monitorSwingTPs,   15 * 60 * 1000);   // TP/stop check every 15 min
-console.log('[Swing-Bot] Swing auto-trader initialized — Zone A: VIX 26–34 → buy cheapest inverse ETF <$10 (exit VIX<17) · Zone B: VIX 13–16 → go long cheap quality stock <$10 (exit VIX>20) · Hard stops active');
+console.log('[Swing-Bot] Swing auto-trader initialized — Zone A: VIX 20–45 → buy cheapest inverse ETF <$10 (exit VIX<17) · Zone B: VIX 12–20 → go long cheap quality stock <$10 (exit VIX>20) · Hard stops active');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOT 6 — ORB (OPENING RANGE BREAKOUT) AUTO-TRADER

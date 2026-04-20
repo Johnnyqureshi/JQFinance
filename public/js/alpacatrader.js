@@ -410,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 // ── Simulator Status Panel (fully automatic — no manual buttons) ──────────────
 const simPanel = (() => {
   const BOT_LABELS = {
-    countertrend: 'CT', orb: 'ORB', swing: 'Swing'
+    orb: 'ORB', swing: 'Swing'
   };
   const STATUS_INTERVAL  = 60  * 1000;  // refresh status every 60 s
   const WHALE_INTERVAL   = 5 * 60 * 1000; // refresh whale data every 5 min
@@ -687,28 +687,6 @@ const stratSim = (() => {
     </div>`;
   }
 
-  function renderCTCard(ct) {
-    const ok = ct.bestTrade != null;
-    const tr = ct.bestTrade;
-    return `<div class="sim-card ${ok ? 'signal-yes' : 'signal-no'}">
-      <div class="sim-card-head">
-        <span class="sim-card-name">Countertrend (CT)</span>
-        ${badge(ok)}
-      </div>
-      <div class="sim-trade-row" style="font-size:.73rem;color:#8b949e;">Scanned ${ct.scanned} symbols · ${ct.confirmedCount} confirmed</div>
-      ${ok ? `<div class="sim-card-trade">
-        <div class="sim-trade-row"><span class="sim-trade-label">Symbol</span><span class="sim-trade-val blue">${tr.symbol}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Signal</span><span class="sim-trade-val">${tr.signalType}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Direction</span><span class="sim-trade-val ${tr.side.includes('BUY') ? 'green' : 'red'}">${tr.side}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Price</span><span class="sim-trade-val">${fmtDollar(tr.price)}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Shares</span><span class="sim-trade-val">${tr.shares}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Position</span><span class="sim-trade-val green">${fmtDollar(tr.dollars)}</span></div>
-        <div class="sim-trade-row"><span class="sim-trade-label">Stop / Target</span><span class="sim-trade-val">${fmtDollar(tr.sl)} / ${fmtDollar(tr.tp)}</span></div>
-        ${tr.rsi != null ? `<div class="sim-trade-row"><span class="sim-trade-label">RSI</span><span class="sim-trade-val">${fmtNum(tr.rsi,1)}</span></div>` : ''}
-      </div>` : `<div class="sim-card-fails"><div class="sim-fail-item">No confirmed CT setup in universe</div></div>`}
-    </div>`;
-  }
-
   function renderORBCard(orb) {
     if (!orb) return `<div class="sim-card signal-no"><div class="sim-card-head"><span class="sim-card-name">ORB</span>${badge(false)}</div></div>`;
     const ok = orb.confirmed;
@@ -780,35 +758,12 @@ const stratSim = (() => {
 
       // Build bot cards
       cards.innerHTML = [
-        renderCTCard(ct),
         renderORBCard(orb),
         renderSwingCard(swing.spy,     'SPY Long'),
         renderSwingCard(swing.qqq,     'QQQ Long'),
         renderSwingCard(swing.inverse, 'SH Inverse'),
       ].join('');
 
-      // CT signals table
-      if (ct.topSignals?.length) {
-        ctTbody.innerHTML = ct.topSignals.map(s => `<tr>
-          <td>${s.symbol}</td>
-          <td>${s.signalType}</td>
-          <td>${s.direction || '—'}</td>
-          <td>${fmtDollar(s.price)}</td>
-          <td>${s.rsi != null ? fmtNum(s.rsi,1) : '—'}</td>
-          <td>${fmtNum(s.score,1)}</td>
-          <td class="${s.confirmed ? 'sim-ct-confirmed' : 'sim-ct-watching'}">${s.confirmed ? '✓ Confirmed' : 'Watching'}</td>
-        </tr>`).join('');
-
-        const ctDetailBtn = document.createElement('button');
-        ctDetailBtn.className = 'sim-show-ct-btn';
-        ctDetailBtn.textContent = `▸ Show CT signals table (${ct.topSignals.length} symbols)`;
-        ctDetailBtn.onclick = () => {
-          const vis = ctDetail.style.display !== 'none';
-          ctDetail.style.display = vis ? 'none' : 'block';
-          ctDetailBtn.textContent = `${vis ? '▸' : '▾'} ${vis ? 'Show' : 'Hide'} CT signals table (${ct.topSignals.length} symbols)`;
-        };
-        cards.appendChild(ctDetailBtn);
-      }
 
       loading.style.display = 'none';
       results.style.display = 'block';

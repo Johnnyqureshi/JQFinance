@@ -194,30 +194,22 @@ db.prepare(`
   WHERE bot_name IN ('countertrend','orb','swing') AND enabled = 0
 `).run();
 
-// ── Startup migration: seed alpaca_creds from env vars if table is empty ──────
-// All three bots query alpaca_creds for their user list and exit immediately
-// when the table has no rows — even if ALPACA_API_KEY / ALPACA_API_SECRET are
-// set as Replit secrets.  This migration auto-inserts a row for the primary
-// user (id=1, johnnyqureshi) so the bots always have a live account to trade
-// against.  If the user later connects via the UI modal, that upsert will
-// overwrite this row with their own key/secret.
+// ── Startup migration: always sync alpaca_creds from env vars if set ──────────
+// If ALPACA_API_KEY / ALPACA_API_SECRET are present in the environment, they
+// are treated as the source of truth and always overwrite the DB row for user 1.
+// This ensures a credentials update in Replit Secrets takes effect immediately
+// on the next restart/deploy without needing a manual DB edit.
 {
   const envKey    = process.env.ALPACA_API_KEY    || process.env.ALPACA_LIVE_KEY    || process.env.ALPACA_PAPER_KEY;
   const envSecret = process.env.ALPACA_API_SECRET || process.env.ALPACA_LIVE_SECRET || process.env.ALPACA_PAPER_SECRET;
   const envMode   = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
   if (envKey && envSecret) {
-    const validRow = db.prepare(
-      `SELECT user_id FROM alpaca_creds WHERE api_key != ? LIMIT 1`
-    ).get('__disconnected__');
-    if (!validRow) {
-      // No valid credentials in DB — seed from env vars for user 1
-      db.prepare(`
-        INSERT INTO alpaca_creds (user_id, api_key, api_secret, mode)
-        VALUES (1, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET api_key=excluded.api_key, api_secret=excluded.api_secret, mode=excluded.mode
-      `).run(envKey, envSecret, envMode);
-      console.log(`[Startup] Seeded alpaca_creds for user 1 from env vars (mode=${envMode})`);
-    }
+    db.prepare(`
+      INSERT INTO alpaca_creds (user_id, api_key, api_secret, mode)
+      VALUES (1, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET api_key=excluded.api_key, api_secret=excluded.api_secret, mode=excluded.mode
+    `).run(envKey, envSecret, envMode);
+    console.log(`[Startup] Synced alpaca_creds for user 1 from env vars (mode=${envMode})`);
   }
 }
 

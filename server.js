@@ -4196,21 +4196,7 @@ async function runORBAutoTrader() {
 
       console.log(`[ORB-Bot] Candidate: ${candidate.symbol} @ $${candidate.price.toFixed(2)} (${candidate.change > 0 ? '+' : ''}${candidate.change.toFixed(2)}%)`);
 
-      // ── Whale + Dark Pool gates on the candidate symbol ────────────────────
       const direction = sig.direction === 'BULLISH' ? 'LONG' : 'SHORT';
-      const whaleGate = await checkWhaleGate(candidate.symbol, direction);
-      if (!whaleGate.allowed) {
-        console.log(`[ORB-Bot] Whale-Gate BLOCKED ${candidate.symbol}: ${whaleGate.reason}`);
-        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `Whale-Gate blocked ${candidate.symbol}` });
-        continue;
-      }
-
-      const dpGate = await checkDarkPoolGate(candidate.symbol, candidate.price, direction);
-      if (!dpGate.allowed) {
-        console.log(`[ORB-Bot] DP-Gate BLOCKED ${candidate.symbol}: ${dpGate.reason}`);
-        upsertORBSessionLog(user.user_id, today, sig, { trade_taken: 0, notes: `DP-Gate blocked ${candidate.symbol}` });
-        continue;
-      }
 
       // ── Position sizing (with seasonal multiplier) ─────────────────────────
       const lev    = Math.min(4, Math.max(1, user.leverage || 1));

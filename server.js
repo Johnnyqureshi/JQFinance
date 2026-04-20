@@ -281,6 +281,23 @@ function requireAuth(req, res, next) {
 
 const YH = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
+// ── Search result cache (5-min TTL) — prevents Yahoo rate-limits on fast typing ─
+const _searchCache = new Map();
+const SEARCH_CACHE_TTL = 5 * 60 * 1000;
+function _searchCacheGet(key) {
+  const e = _searchCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > SEARCH_CACHE_TTL) { _searchCache.delete(key); return null; }
+  return e.data;
+}
+function _searchCacheSet(key, data) {
+  if (_searchCache.size > 200) {
+    const oldest = [..._searchCache.entries()].sort((a,b) => a[1].ts - b[1].ts)[0];
+    if (oldest) _searchCache.delete(oldest[0]);
+  }
+  _searchCache.set(key, { data, ts: Date.now() });
+}
+
 // ── Auth Routes ────────────────────────────────────────────────────────────────
 
 // Register
@@ -653,19 +670,63 @@ app.get('/api/snapshots', async (req, res) => {
 });
 
 // ── GET /api/search?q= ────────────────────────────────────────────────────────
+// Yahoo Finance attempted first; Alpaca asset catalogue used as 24/7 fallback.
+// Results cached 5 min to survive Yahoo rate-limits and speed up repeat queries.
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
+
+  const cacheKey = q.toLowerCase();
+  const cached = _searchCacheGet(cacheKey);
+  if (cached) return res.json(cached);
+
+  // ── 1. Yahoo Finance ────────────────────────────────────────────────────────
   try {
     const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0`;
-    const r    = await fetch(url, { headers: YH });
-    const data = await r.json();
-    const out  = (data?.quotes || [])
-      .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX','CRYPTOCURRENCY'].includes(x.quoteType) && x.symbol && !x.symbol.includes('.'))
-      .slice(0, 8)
-      .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '', quoteType: x.quoteType || '' }));
-    res.json(out);
-  } catch { res.json([]); }
+    const r    = await fetch(url, { headers: YH, signal: AbortSignal.timeout(4000) });
+    if (r.ok) {
+      const data = await r.json();
+      const out  = (data?.quotes || [])
+        .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX','CRYPTOCURRENCY'].includes(x.quoteType) && x.symbol)
+        .slice(0, 8)
+        .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '', quoteType: x.quoteType || '' }));
+      if (out.length) { _searchCacheSet(cacheKey, out); return res.json(out); }
+    }
+  } catch { /* fall through to Alpaca */ }
+
+  // ── 2. Alpaca asset catalogue fallback (works 24/7, no rate limits) ─────────
+  try {
+    const uid = getAnyAlpacaUserId();
+    if (uid) {
+      const upper = q.toUpperCase();
+      // Try exact symbol match first
+      const exact = await alpacaDataFetch(uid, `/v2/assets/${upper}`).catch(() => null);
+      if (exact?.symbol) {
+        const out = [{ symbol: exact.symbol, name: exact.name || exact.symbol, exchange: exact.exchange || '', quoteType: exact.class === 'crypto' ? 'CRYPTOCURRENCY' : 'EQUITY' }];
+        _searchCacheSet(cacheKey, out); return res.json(out);
+      }
+      // Broader search across active assets
+      const assets = await alpacaDataFetch(uid, `/v2/assets?status=active&asset_class=us_equity`).catch(() => null);
+      if (Array.isArray(assets)) {
+        const ql = q.toLowerCase();
+        const matched = assets
+          .filter(a => a.tradable && (
+            a.symbol.toUpperCase().startsWith(upper) ||
+            (a.name || '').toLowerCase().includes(ql)
+          ))
+          .sort((a, b) => {
+            const aExact = a.symbol.toUpperCase() === upper ? -1 : 0;
+            const bExact = b.symbol.toUpperCase() === upper ? -1 : 0;
+            return aExact - bExact || a.symbol.localeCompare(b.symbol);
+          })
+          .slice(0, 8)
+          .map(a => ({ symbol: a.symbol, name: a.name || a.symbol, exchange: a.exchange || '', quoteType: 'EQUITY' }));
+        if (matched.length) { _searchCacheSet(cacheKey, matched); return res.json(matched); }
+      }
+    }
+  } catch { /* fall through */ }
+
+  res.json([]);
 });
 
 // ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────────

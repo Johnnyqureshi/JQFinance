@@ -1202,13 +1202,47 @@ function buildDropItems(results) {
 
 // ── Nav search ─────────────────────────────────────────────────────────────────
 let navTimer=null;
+
+async function _selectDropSym(sym, input, drop) {
+  drop.classList.remove('open');
+  input.value = '';
+  const s = await api.snapshots([sym]);
+  openStock(sym, s[sym] || { symbol: sym });
+}
+
 function _bindDropSearch(input, drop, getTimer, setTimer) {
+  let reqId = 0; // race-condition guard — only render the latest response
+
+  function _attachItemListeners() {
+    drop.querySelectorAll('.drop-item[data-sym]').forEach(item => {
+      item.addEventListener('mousedown', e => { e.preventDefault(); }); // keep focus on input
+      item.addEventListener('click', () => _selectDropSym(item.dataset.sym, input, drop));
+    });
+  }
+
+  function _getHighlighted() { return drop.querySelector('.drop-item.drop-active'); }
+
+  function _highlight(el) {
+    drop.querySelectorAll('.drop-item.drop-active').forEach(x => x.classList.remove('drop-active'));
+    if (el) { el.classList.add('drop-active'); el.scrollIntoView({ block: 'nearest' }); }
+  }
+
   input.addEventListener('input', () => {
     clearTimeout(getTimer());
     const q = input.value.trim();
     if (!q) { drop.classList.remove('open'); return; }
+
+    // Show loading placeholder immediately
+    const loading = document.createElement('div');
+    loading.className = 'drop-item drop-noresults';
+    loading.textContent = 'Searching…';
+    drop.replaceChildren(loading);
+    drop.classList.add('open');
+
+    const myId = ++reqId;
     setTimer(setTimeout(async () => {
       const results = await api.search(q);
+      if (myId !== reqId) return; // stale response — discard
       if (!results.length) {
         const noRes = document.createElement('div');
         noRes.className = 'drop-item drop-noresults';
@@ -1219,18 +1253,40 @@ function _bindDropSearch(input, drop, getTimer, setTimer) {
       }
       drop.replaceChildren(...buildDropItems(results));
       drop.classList.add('open');
-      drop.querySelectorAll('.drop-item').forEach(item => {
-        item.addEventListener('click', async () => {
-          drop.classList.remove('open'); input.value = '';
-          const s = await api.snapshots([item.dataset.sym]);
-          openStock(item.dataset.sym, s[item.dataset.sym] || { symbol: item.dataset.sym });
-        });
-      });
+      _attachItemListeners();
     }, 260));
   });
+
   input.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { drop.classList.remove('open'); input.blur(); }
+    if (e.key === 'Escape') { drop.classList.remove('open'); input.blur(); return; }
+    if (!drop.classList.contains('open')) return;
+
+    const items = [...drop.querySelectorAll('.drop-item[data-sym]')];
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const cur = _getHighlighted();
+      const next = cur ? (items[items.indexOf(cur) + 1] || items[0]) : items[0];
+      _highlight(next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const cur = _getHighlighted();
+      const prev = cur ? (items[items.indexOf(cur) - 1] || items[items.length - 1]) : items[items.length - 1];
+      _highlight(prev);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const cur = _getHighlighted();
+      if (cur) {
+        _selectDropSym(cur.dataset.sym, input, drop);
+      } else {
+        // No item highlighted — load exact ticker the user typed
+        const sym = input.value.trim().toUpperCase();
+        if (sym) _selectDropSym(sym, input, drop);
+      }
+    }
   });
+
   document.addEventListener('click', e => {
     if (!input.contains(e.target) && !drop.contains(e.target)) drop.classList.remove('open');
   });

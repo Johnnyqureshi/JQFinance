@@ -1655,25 +1655,11 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
   try {
     const spyLevels = await getSPYLevels();
 
-    let account = null, pdtAllowed = true, pdtReason = '';
+    // PDT rule eliminated per SEC approval of FINRA SR-FINRA-2025-017, effective ~June 2026.
+    let account = null;
     try {
       account = await alpacaFetch(req.session.userId, '/v2/account');
-      const equity   = parseFloat(account.equity || 0);
-      const dtCount  = parseInt(account.daytrade_count || 0, 10);
-      const isPDT    = !!account.pattern_day_trader;
-      // SEC/FINRA 2025: accounts ≥ $25k have unlimited day-trades;
-      // sub-$25k accounts (PDT-flagged or not) may use up to 3 per rolling 5-day window.
-      if (equity >= 25000) {
-        pdtReason = `Equity $${equity.toFixed(0)} ≥ $25,000 — unlimited day trades`;
-      } else if (dtCount >= 3) {
-        pdtAllowed = false;
-        pdtReason  = `${dtCount}/3 day-trades used in rolling 5-day window (sub-$25k limit)`;
-      } else {
-        pdtReason = `${dtCount}/3 day-trades used — ${3 - dtCount} remaining this window${isPDT ? ' (PDT-flagged, relaxed rules apply)' : ''}`;
-      }
-    } catch (e) {
-      pdtReason = 'Could not fetch Alpaca account — not connected?';
-    }
+    } catch (e) { /* not connected */ }
 
     // Latest trade logs per bot (last 10 across all strategies)
     const recentTrades = db.prepare(
@@ -1685,10 +1671,11 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
     res.json({
       universeSize: MASTER_UNIVERSE.length,
       spyLevels,
-      pdt: { allowed: pdtAllowed, reason: pdtReason,
+      // PDT rule eliminated per SEC approval of FINRA SR-FINRA-2025-017, effective ~June 2026.
+      pdt: { allowed: true, reason: 'PDT restrictions removed — FINRA SR-FINRA-2025-017',
              daytradeCount: account ? parseInt(account.daytrade_count || 0) : null,
              equity: account ? parseFloat(account.equity || 0) : null,
-             patternDayTrader: account ? !!account.pattern_day_trader : null },
+             patternDayTrader: false },
       recentTrades,
       timestamp: new Date().toISOString()
     });
@@ -2880,29 +2867,10 @@ async function checkDarkPoolGate(symbol, price, direction) {
   return { allowed: true, reason: '' };
 }
 
-// ── Shared PDT guard ────────────────────────────────────────────────────────
-// SEC/FINRA 2025 relaxed PDT rules:
-//   • Accounts ≥ $25,000: unlimited day-trades (unchanged).
-//   • Accounts < $25,000 (PDT-flagged or not): allowed up to 3 day-trades per
-//     rolling 5-day window. The hard equity-floor block is removed — only the
-//     per-window count limit applies.
+// ── PDT guard — eliminated per SEC approval of FINRA SR-FINRA-2025-017, effective ~June 2026.
+// Pattern Day Trader designation and day-trade count restrictions no longer apply.
 async function checkPDTAllowed(userId, botName) {
-  try {
-    const acct    = await alpacaFetch(userId, '/v2/account');
-    const equity  = parseFloat(acct.equity || 0);
-    const dtCount = parseInt(acct.daytrade_count || 0, 10);
-    // Accounts with enough equity have no day-trade restriction
-    if (equity >= 25000) return true;
-    // Sub-$25k accounts: enforce the 3-trade rolling window limit
-    if (dtCount >= 3) {
-      console.log(`[${botName}] PDT guard — ${dtCount}/3 day-trades used (rolling 5-day, sub-$25k) for user ${userId} — blocked`);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.warn(`[${botName}] Could not fetch account for PDT check (user ${userId}):`, e.message);
-    return false; // block on fetch error — safety first
-  }
+  return true;
 }
 
 // ── Cross-bot execution lock ─────────────────────────────────────────────────
@@ -3596,24 +3564,7 @@ async function runORBAutoTrader() {
       continue;
     }
     try {
-      if (!await checkPDTAllowed(user.user_id, 'ORB-Bot')) continue;
-
-      // ── ORB PDT-caution guard: if ≥3 winning ORB trades in the last 5 ──────
-      // calendar days, rest until that window rolls off to protect day-trade
-      // count from creeping toward the PDT 3-trade limit.
-      {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - 5);
-        const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
-        const { cnt: recentWins } = db.prepare(`
-          SELECT COUNT(*) AS cnt FROM orb_session_log
-          WHERE user_id=? AND trade_taken=1 AND result='WIN' AND trade_date >= ?
-        `).get(user.user_id, cutoffStr);
-        if (recentWins >= 3) {
-          console.log(`[ORB-Bot] User ${user.user_id} has ${recentWins} ORB wins in last 5 days — resting to preserve PDT headroom`);
-          continue;
-        }
-      }
+      // PDT rule eliminated per SEC approval of FINRA SR-FINRA-2025-017, effective ~June 2026.
 
       const slots = await getOpenSlots(user.user_id, 'ORB-Bot');
       if (!slots) { console.log(`[ORB-Bot] Could not fetch positions for user ${user.user_id} — skipping`); continue; }
@@ -3902,7 +3853,7 @@ app.get('/api/orb-signal', requireAuth, async (req, res) => {
 setInterval(runORBAutoTrader,   2 * 60 * 1000);
 // RSI-75 exit monitor runs every 2 minutes throughout the session
 setInterval(monitorORBRSIExit, 2 * 60 * 1000);
-console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, Mon–Fri) · RSI-75 exit monitor active · PDT-aware');
+console.log('[ORB-Bot] Opening Range Breakout auto-trader initialized — scans every 2 min (active after 9:36 ET, Mon–Fri) · RSI-75 exit monitor active · no day-trade limits (FINRA SR-FINRA-2025-017)');
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Johnny Qureshi Finance on :${PORT}`);

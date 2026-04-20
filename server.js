@@ -3475,14 +3475,6 @@ async function runCTAutoTrader() {
         if (liveQ?.price && Math.abs(liveQ.price - sig.price) / (sig.price || 1) > 0.03) {
           console.log(`[CT-Bot] Price drift: ${sig.symbol} signal $${sig.price.toFixed(2)} → live $${liveQ.price.toFixed(2)}`);
         }
-        const ctSpyGate = await checkSPYGate(sig.symbol, price, 'long');
-        if (!ctSpyGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED: ${ctSpyGate.reason}`); continue; }
-        const ctLongWhaleGate = await checkWhaleGate(sig.symbol, 'LONG');
-        if (!ctLongWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED: ${ctLongWhaleGate.reason}`); continue; }
-        if (ctLongWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate: ${ctLongWhaleGate.reason}`);
-        const ctLongDPGate = await checkDarkPoolGate(sig.symbol, price, 'LONG');
-        if (!ctLongDPGate.allowed) { console.log(`[CT-Bot] DP-Gate BLOCKED: ${ctLongDPGate.reason}`); continue; }
-        if (ctLongDPGate.reason) console.log(`[CT-Bot] DP-Gate: ${ctLongDPGate.reason}`);
         // Route expensive stocks ($30+) to their 2×/3× leveraged proxy
         let tradeSymbol = sig.symbol;
         let tradePrice  = price;
@@ -3518,15 +3510,6 @@ async function runCTAutoTrader() {
           console.log(`[CT-Bot] No inverse ETF mapped for ${sig.symbol} SHORT — skipping`);
           continue;
         }
-        // SPY gate for short bias
-        const ctShortGate = await checkSPYGate(sig.symbol, sig.price, 'short');
-        if (!ctShortGate.allowed) { console.log(`[CT-Bot] SPY-Gate BLOCKED short: ${ctShortGate.reason}`); continue; }
-        const ctShortWhaleGate = await checkWhaleGate(sig.symbol, 'SHORT');
-        if (!ctShortWhaleGate.allowed) { console.log(`[CT-Bot] Whale-Gate BLOCKED short: ${ctShortWhaleGate.reason}`); continue; }
-        if (ctShortWhaleGate.reason) console.log(`[CT-Bot] Whale-Gate short: ${ctShortWhaleGate.reason}`);
-        const ctShortDPGate = await checkDarkPoolGate(sig.symbol, sig.price, 'SHORT');
-        if (!ctShortDPGate.allowed) { console.log(`[CT-Bot] DP-Gate BLOCKED short: ${ctShortDPGate.reason}`); continue; }
-        if (ctShortDPGate.reason) console.log(`[CT-Bot] DP-Gate short: ${ctShortDPGate.reason}`);
         // Check cooldown on inverse ticker too
         const invAlreadyIn = Array.isArray(positions) && positions.some(p => p.symbol === inverseTicker);
         if (invAlreadyIn) { console.log(`[CT-Bot] Already holding ${inverseTicker} — skipping`); continue; }

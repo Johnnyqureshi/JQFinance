@@ -2096,7 +2096,7 @@ async function computeORBSignal(orbWindowMins = 5) {
   const orbLow  = Math.min(...orbBars.map(b => b.l));
   const orbMid  = (orbHigh + orbLow) / 2;
   const rangeWidthPct = orbLow > 0 ? ((orbHigh - orbLow) / orbLow) * 100 : 0;
-  const validRange    = rangeWidthPct >= 0.2;
+  const validRange    = true; // no minimum range — any breakout qualifies regardless of range size
 
   // ── VWAP from all bars up to current moment ───────────────────────────────
   const vwap = calcVWAP(bars);
@@ -2151,7 +2151,6 @@ async function computeORBSignal(orbWindowMins = 5) {
 
   const failReasons = [];
   if (!isMWF)      failReasons.push('Not a weekday (Mon–Fri)');
-  if (!validRange) failReasons.push(`Range ${rangeWidthPct.toFixed(3)}% < 0.2%`);
   if (!vixOk)      failReasons.push(`VIX ${vix} > 50`);
   if (breakout === 'NONE') failReasons.push('No breakout yet');
   if (breakout !== 'NONE') {
@@ -2161,7 +2160,7 @@ async function computeORBSignal(orbWindowMins = 5) {
     if (fakeout)       failReasons.push('False breakout — price re-entered range');
   }
 
-  const allFiltersPassed = isMWF && validRange && vixOk && breakout !== 'NONE'
+  const allFiltersPassed = isMWF && vixOk && breakout !== 'NONE'
     && hasVolume && vwapAligned && rsiOk && !fakeout;
 
   // ── Risk/reward levels ────────────────────────────────────────────────────

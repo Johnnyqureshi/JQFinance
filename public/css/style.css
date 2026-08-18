@@ -8652,6 +8652,80 @@ option { background: var(--card); }
 }
 .mt-score-num { font-size: .75rem; font-weight: 700; color: var(--t1); min-width: 22px; text-align: right; }
 
+/* Bonus badge on score cell (★ for +20% gain or ≥5× relVol) */
+.mt-bonus-badge {
+  font-size: .58rem;
+  font-weight: 800;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-bdr);
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1.1;
+  flex-shrink: 0;
+}
+
+/* Score cell tooltip wrapper */
+.mt-score-td { position: relative; }
+
+.mt-score-cell-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* Criteria tooltip — shown on hover of score cell */
+.mt-criteria-tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  right: -6px;
+  background: var(--card2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 200px;
+  z-index: 200;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  pointer-events: none;
+}
+/* Caret */
+.mt-criteria-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  border: 5px solid transparent;
+  border-top-color: var(--border2);
+}
+
+.mt-score-cell-wrap:hover .mt-criteria-tooltip { display: flex; }
+
+/* Individual criterion pill inside tooltip */
+.mt-crit-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--teal);
+  white-space: nowrap;
+}
+.mt-crit-pill::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  flex-shrink: 0;
+}
+.mt-crit-bonus { color: var(--gold); }
+.mt-crit-bonus::before { background: var(--gold); }
+
+.mt-crit-empty { font-size: .7rem; color: var(--t3); }
+
 /* Signal badges */
 .mt-signal-badge {
   display: inline-block;

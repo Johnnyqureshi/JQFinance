@@ -791,8 +791,17 @@
       }
 
       tbody.innerHTML = results.slice(0, 40).map((r, i) => {
-        const sig   = MomentumStrategy.getSignal(r);
-        const chgUp = r.change > 0;
+        const sig        = MomentumStrategy.getSignal(r);
+        const chgUp      = r.change > 0;
+        const hasBonus   = (r.change ?? 0) >= 20 || (r.relVol ?? 0) >= 5;
+        const scoreReasons = r.scoreReasons || [];
+        const tooltipContent = scoreReasons.length
+          ? scoreReasons.map(reason => {
+              const isBonus = reason.includes('+20%') || reason.includes('> 5×');
+              return `<span class="mt-crit-pill${isBonus ? ' mt-crit-bonus' : ''}">✓ ${reason}</span>`;
+            }).join('')
+          : '<span class="mt-crit-empty">—</span>';
+
         return `<tr class="mt-scan-row ${i === 0 ? 'mt-scan-row--top' : ''}" data-sym="${r.sym}" data-idx="${i}">
           <td class="mt-sym-cell">
             <span class="mt-sym">${r.sym}</span>
@@ -802,10 +811,14 @@
           <td class="mt-r ${chgUp ? 'mt-up' : 'mt-dn'}">${r.change != null ? (chgUp ? '+' : '') + r.change.toFixed(2) + '%' : '--'}</td>
           <td class="mt-r">${r.relVol != null ? r.relVol.toFixed(2) + '×' : '--'}</td>
           <td class="mt-r">${fmtVol(r.volume)}</td>
-          <td class="mt-r">
-            <div class="mt-score-bar-wrap">
-              <div class="mt-score-bar" style="width:${(r.momentumScore / 6 * 100).toFixed(0)}%"></div>
-              <span class="mt-score-num">${r.momentumScore}/6</span>
+          <td class="mt-r mt-score-td">
+            <div class="mt-score-cell-wrap">
+              <div class="mt-score-bar-wrap">
+                <div class="mt-score-bar" style="width:${(r.momentumScore / 6 * 100).toFixed(0)}%"></div>
+                <span class="mt-score-num">${r.momentumScore}/6</span>
+                ${hasBonus ? '<span class="mt-bonus-badge">★</span>' : ''}
+              </div>
+              <div class="mt-criteria-tooltip">${tooltipContent}</div>
             </div>
           </td>
           <td><span class="mt-signal-badge ${sig.badge}">${sig.signal}</span></td>

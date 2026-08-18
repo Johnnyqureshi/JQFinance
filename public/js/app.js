@@ -134,6 +134,8 @@ function goPage(page) {
   if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); futuresTracker.load(); }
   if (page==='scanner')   scanner.open();
   if (page==='trading')   { alpacaTrader.open(); }
+  if (page==='momentum')  { if (window.momentumTrader) momentumTrader.open(); }
+  else if (window.momentumTrader) momentumTrader.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

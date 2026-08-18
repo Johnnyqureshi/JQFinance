@@ -81,6 +81,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
       Trading
     </button>
+    <button class="nav-link" data-page="momentum">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      Momentum
+    </button>
   </div>
 
   <div class="nav-right">
@@ -980,6 +984,278 @@
   </div><!-- /.at-page -->
 </div><!-- /.page#page-trading -->
 
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MOMENTUM TRADER PAGE
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-momentum">
+  <div class="mt-page">
+
+    <!-- Top bar -->
+    <div class="mt-topbar">
+      <div class="mt-topbar-left">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span class="mt-topbar-title">Momentum Trader</span>
+        <span class="mt-mode-badge mt-badge-disc" id="mtModeBadge">DISCONNECTED</span>
+      </div>
+      <div class="mt-topbar-right">
+        <div class="mt-acct-chips" id="mtAcctChips" style="display:none">
+          <div class="mt-chip"><span class="mt-chip-lbl">Equity</span><span id="mtEquity">--</span></div>
+          <div class="mt-chip"><span class="mt-chip-lbl">Cash</span><span id="mtCash">--</span></div>
+          <div class="mt-chip"><span class="mt-chip-lbl">Buying Power</span><span id="mtBP">--</span></div>
+        </div>
+        <div class="mt-meta">
+          <span id="mtScanStatus" class="mt-scan-status">Initialising…</span>
+          <span id="mtCountdown" class="mt-countdown"></span>
+        </div>
+        <button class="mt-refresh-btn" id="mtRefreshBtn" title="Re-scan universe">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Config panel (config.py) ─────────────────────────────────────── -->
+    <div class="mt-config-section">
+      <div class="mt-config-header">
+        <div class="mt-config-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          Strategy Configuration
+          <span class="mt-config-sub">config.py · scanner.py · risk.py thresholds</span>
+        </div>
+        <button class="mt-config-toggle" id="mtConfigToggle">▼ Configure</button>
+      </div>
+      <div class="mt-config-body" id="mtConfigBody" style="display:none">
+        <div class="mt-config-grid">
+          <div class="mt-config-group">
+            <span class="mt-config-label">RSI Min</span>
+            <input type="number" id="mtRsiMin" class="mt-config-input" min="20" max="80" step="1" value="48" title="Minimum RSI threshold">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">RSI Max</span>
+            <input type="number" id="mtRsiMax" class="mt-config-input" min="20" max="90" step="1" value="73" title="Maximum RSI threshold">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">Min Rel Vol</span>
+            <input type="number" id="mtRelVol" class="mt-config-input" min="0.5" max="10" step="0.1" value="1.5" title="Minimum relative volume multiplier">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">Min Price $</span>
+            <input type="number" id="mtMinPrice" class="mt-config-input" min="0.5" max="100" step="0.5" value="2" title="Minimum stock price">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">Max Price $</span>
+            <input type="number" id="mtMaxPrice" class="mt-config-input" min="10" max="2000" step="10" value="500" title="Maximum stock price">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">Risk % / Trade</span>
+            <input type="number" id="mtRiskPct" class="mt-config-input" min="0.5" max="5" step="0.25" value="2.0" title="Max % of equity to risk per trade">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">Min R:R</span>
+            <input type="number" id="mtMinRR" class="mt-config-input" min="1" max="10" step="0.5" value="2.0" title="Minimum risk:reward ratio">
+          </div>
+          <div class="mt-config-group">
+            <span class="mt-config-label">ATR Mult (SL)</span>
+            <input type="number" id="mtAtrMult" class="mt-config-input" min="0.5" max="5" step="0.25" value="1.5" title="ATR multiplier for stop loss">
+          </div>
+        </div>
+        <div class="mt-config-actions">
+          <button class="mt-btn-apply" id="mtApplyConfig">Apply &amp; Rescan</button>
+          <button class="mt-btn-reset" id="mtResetConfig">Reset Defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Main body: scanner + detail panels ──────────────────────────── -->
+    <div class="mt-body">
+
+      <!-- LEFT: Scanner (scanner.py) -->
+      <div class="mt-left-col">
+        <div class="mt-panel">
+          <div class="mt-panel-head">
+            <span class="mt-panel-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+              Momentum Scanner
+            </span>
+            <span class="mt-panel-sub">scanner.py · Ranked by score</span>
+          </div>
+          <div class="mt-scan-wrap">
+            <table class="mt-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th class="mt-r">Price</th>
+                  <th class="mt-r">Chg%</th>
+                  <th class="mt-r">RelVol</th>
+                  <th class="mt-r">RSI</th>
+                  <th class="mt-r">52w%</th>
+                  <th class="mt-r">Score</th>
+                  <th class="mt-r">Signal</th>
+                </tr>
+              </thead>
+              <tbody id="mtScanBody">
+                <tr><td colspan="8" class="mt-empty-row">Loading momentum universe…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div><!-- /.mt-left-col -->
+
+      <!-- RIGHT: Signal + Risk + Trade panels -->
+      <div class="mt-right-col">
+
+        <!-- Signal panel (strategy.py) -->
+        <div class="mt-panel mt-detail-panel" id="mtDetailPanel" style="display:none">
+          <div class="mt-panel-head">
+            <span class="mt-panel-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+              Signal Analysis
+            </span>
+            <span class="mt-panel-sub">strategy.py · getSignal()</span>
+          </div>
+
+          <!-- Stock header -->
+          <div class="mt-detail-header">
+            <div class="mt-detail-sym-group">
+              <span class="mt-detail-sym" id="mtDetailSym">—</span>
+              <span class="mt-detail-price" id="mtDetailPrice">—</span>
+            </div>
+            <span class="mt-detail-sig-badge mt-signal-watch" id="mtDetailSig">WATCH</span>
+          </div>
+
+          <!-- Score ring + breakdown (strategy.py scoreBreakdown) -->
+          <div class="mt-score-section">
+            <div class="mt-score-ring-wrap" title="Momentum score 0–100">
+              <svg class="mt-score-svg" viewBox="0 0 70 70">
+                <circle cx="35" cy="35" r="28" fill="none" stroke="#1c2a42" stroke-width="6"/>
+                <circle id="mtScoreRing" cx="35" cy="35" r="28" fill="none" stroke="#1dd6a3" stroke-width="6"
+                  stroke-linecap="round" stroke-dasharray="175.93" stroke-dashoffset="175.93"
+                  transform="rotate(-90 35 35)" style="transition:stroke-dashoffset 0.6s ease,stroke 0.4s ease"/>
+              </svg>
+              <div class="mt-score-center">
+                <span class="mt-score-num" id="mtScoreValue">0</span>
+                <span class="mt-score-lbl">Score</span>
+              </div>
+            </div>
+            <div class="mt-breakdown-list" id="mtBreakdownList"></div>
+          </div>
+
+          <!-- EMA Signal (strategy.py getEMASignal) -->
+          <div class="mt-ema-section">
+            <div class="mt-ema-title">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              EMA Trend Signal
+              <span class="mt-ema-sub">strategy.py · calcEMASignal()</span>
+            </div>
+            <div id="mtEmaSignal" class="mt-ema-body">
+              <span class="mt-na">Select a stock to view EMA trend</span>
+            </div>
+          </div>
+        </div><!-- /.mt-detail-panel -->
+
+        <!-- Risk panel (risk.py) -->
+        <div class="mt-panel" id="mtRiskPanel">
+          <div class="mt-panel-head">
+            <span class="mt-panel-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Risk Manager
+            </span>
+            <span class="mt-panel-sub">risk.py · ATR-based sizing</span>
+          </div>
+          <div class="mt-risk-grid">
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Entry (Market)</span>
+              <span class="mt-risk-val" id="mtRiskEntry">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Stop Loss</span>
+              <span class="mt-risk-val mt-dn" id="mtRiskStop">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Take Profit</span>
+              <span class="mt-risk-val mt-up" id="mtRiskTP">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Shares</span>
+              <span class="mt-risk-val" id="mtRiskShares">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Risk : Reward</span>
+              <span class="mt-risk-val" id="mtRiskRR">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Max Risk $</span>
+              <span class="mt-risk-val mt-dn" id="mtRiskAmt">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Target Reward</span>
+              <span class="mt-risk-val mt-up" id="mtRiskReward">—</span>
+            </div>
+            <div class="mt-risk-item">
+              <span class="mt-risk-label">Equity at Risk</span>
+              <span class="mt-risk-val" id="mtRiskPctUsed">—</span>
+            </div>
+          </div>
+          <div class="mt-risk-valid" id="mtRiskValid">Select a stock to calculate risk</div>
+        </div><!-- /.mt-panel risk -->
+
+        <!-- Trade panel (alpaca_client.py) -->
+        <div class="mt-panel mt-trade-panel">
+          <div class="mt-panel-head">
+            <span class="mt-panel-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              Execute Trade
+            </span>
+            <span class="mt-panel-sub">alpaca_client.py · main.py</span>
+          </div>
+          <div class="mt-trade-body">
+            <div class="mt-trade-row">
+              <span class="mt-trade-lbl">Symbol</span>
+              <span class="mt-trade-val" id="mtTradeSymbol">—</span>
+            </div>
+            <div class="mt-trade-row">
+              <span class="mt-trade-lbl">Est. Price</span>
+              <span class="mt-trade-val" id="mtTradePriceDisplay">—</span>
+            </div>
+            <div class="mt-trade-hint">
+              Orders use position size from Risk Manager above. Connect Alpaca on the Trading page to enable execution.
+            </div>
+            <div id="mtTradeMsg" class="mt-trade-msg" style="display:none"></div>
+            <div class="mt-trade-btns">
+              <button class="mt-trade-buy" id="mtBuyBtn">▲ BUY</button>
+              <button class="mt-trade-sell" id="mtSellBtn">▼ SELL</button>
+            </div>
+          </div>
+        </div><!-- /.mt-trade-panel -->
+
+      </div><!-- /.mt-right-col -->
+    </div><!-- /.mt-body -->
+
+    <!-- ── Activity log (main.py run loop output) ──────────────────────── -->
+    <div class="mt-log-section">
+      <div class="mt-log-header">
+        <span class="mt-log-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Activity Log
+          <span class="mt-log-sub">main.py · pipeline output</span>
+        </span>
+        <button class="mt-clear-log-btn" id="mtClearLog">✕ Clear</button>
+      </div>
+      <div class="mt-log-wrap">
+        <table class="mt-log-table">
+          <thead><tr>
+            <th>Time</th><th>Symbol</th><th>Action</th><th>Details</th><th>Status</th>
+          </tr></thead>
+          <tbody id="mtLogBody">
+            <tr><td colspan="5" class="mt-empty-row">No activity yet — run a scan to start</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /.mt-page -->
+</div><!-- /#page-momentum -->
+
 <!-- ALPACA CONNECT MODAL -->
 <div class="trd-modal-bg" id="trdModal" style="display:none" role="dialog" aria-modal="true">
   <div class="trd-modal-card">
@@ -1026,6 +1302,7 @@
 
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
+<script src="/js/momentum.js"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -1048,6 +1325,10 @@
   <button class="mobile-nav-btn nav-link" data-page="trading" aria-label="Trading">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
     <span>Trading</span>
+  </button>
+  <button class="mobile-nav-btn nav-link" data-page="momentum" aria-label="Momentum">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    <span>Momentum</span>
   </button>
 </nav>
 

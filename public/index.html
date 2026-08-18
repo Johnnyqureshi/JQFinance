@@ -1082,8 +1082,8 @@
               <input type="number" id="mtMinVolume" class="mt-config-input" min="0" step="10000" value="100000" title="Minimum absolute trading volume">
             </div>
             <div class="mt-config-group">
-              <span class="mt-config-label">Min Score (0–10)</span>
-              <input type="number" id="mtMinScore" class="mt-config-input" min="0" max="10" step="0.5" value="7" title="Minimum momentum score out of 10">
+              <span class="mt-config-label">Min Score (0–6)</span>
+              <input type="number" id="mtMinScore" class="mt-config-input" min="0" max="6" step="1" value="4" title="Minimum score out of 6 — gain, relVol, price range">
             </div>
           </div>
         </div>
@@ -1200,7 +1200,7 @@
               </svg>
               <div class="mt-score-center">
                 <span class="mt-score-num" id="mtScoreValue">0</span>
-                <span class="mt-score-lbl">Score</span>
+                <span class="mt-score-lbl" id="mtScoreLbl">/ 6</span>
               </div>
             </div>
             <div class="mt-breakdown-list" id="mtBreakdownList"></div>

@@ -53,7 +53,7 @@
       minGainPercent: 10.0,
       minRelVol:      2.0,
       minVolume:      100000,
-      minScore:       7,        // out of 10 (maps to 70/100 internally)
+      minScore:       4,        // out of 6 (current max; more criteria coming)
       // Risk
       stopPercent:    null,     // null = use ATR fallback; number = % below entry
       minRR:          2.0,
@@ -116,64 +116,42 @@
     },
 
     /**
-     * Calculate composite momentum score (0–100) for one row.
-     * Mirrors calcMomentumScore() in scanner.py.
+     * Score a stock using the exact algorithm from strategy.py / calculate_score().
      *
-     * Scoring breakdown (total 100 pts):
-     *   RSI momentum zone  30 pts  — sweet spot 52-68 = max
-     *   Relative Volume    25 pts  — 3×+ = max
-     *   52-week proximity  20 pts  — within 5% of high = max
-     *   Day change %       15 pts  — 3%+ = max
-     *   ATR volatility     10 pts  — 2%+ ATR = max
+     * Max score: 6 points  (more criteria — catalyst, float, L2, chart — coming)
+     *
+     *   Momentum  gain ≥ 10%  → +2   "Strong momentum"
+     *             gain ≥ 20%  → +1   "Very strong momentum"   (cumulative: +3)
+     *   RelVol    rvol ≥ 2×   → +1   "Relative volume > 2×"
+     *             rvol ≥ 5×   → +1   "Relative volume > 5×"   (cumulative: +2)
+     *   Price     $2 – $20    → +1   "Momentum price range"
+     *
+     * Returns { score, reasons, qualified }.
+     * qualified = score >= cfg.minScore (caller passes minScore or it defaults).
      */
-    calcScore(r) {
-      let score = 0;
+    calcScore(r, minScore = 0) {
+      let score   = 0;
+      const reasons = [];
 
-      // RSI component
-      if (r.rsi14 != null) {
-        const rsi = r.rsi14;
-        if (rsi >= 52 && rsi <= 68)      score += 30;
-        else if (rsi >= 48 && rsi < 52)  score += 20;
-        else if (rsi > 68 && rsi <= 73)  score += 18;
-        else if (rsi >= 44 && rsi < 48)  score += 8;
-      }
+      const gain  = r.change ?? 0;
+      const rvol  = r.relVol ?? 0;
+      const price = r.price  ?? 0;
 
-      // Relative volume component
-      if (r.relVol != null) {
-        const rv = r.relVol;
-        if (rv >= 3.0)       score += 25;
-        else if (rv >= 2.0)  score += 20;
-        else if (rv >= 1.5)  score += 13;
-        else if (rv >= 1.2)  score += 6;
-      }
+      // ── MOMENTUM ──────────────────────────────────────────────────────────
+      if (gain >= 10) { score += 2; reasons.push('Strong momentum (+10%)'); }
+      if (gain >= 20) { score += 1; reasons.push('Very strong momentum (+20%)'); }
 
-      // 52-week proximity
-      if (r.w52Dist != null) {
-        const d = r.w52Dist; // negative = below high
-        if (d >= -2)        score += 20;
-        else if (d >= -5)   score += 15;
-        else if (d >= -10)  score += 8;
-        else if (d >= -20)  score += 3;
-      }
+      // ── RELATIVE VOLUME ───────────────────────────────────────────────────
+      if (rvol >= 2)  { score += 1; reasons.push('Relative volume > 2×'); }
+      if (rvol >= 5)  { score += 1; reasons.push('Relative volume > 5×'); }
 
-      // Day change % momentum
-      if (r.change != null) {
-        const chg = r.change;
-        if (chg >= 3)       score += 15;
-        else if (chg >= 1.5) score += 10;
-        else if (chg >= 0.5) score += 5;
-        else if (chg < 0)   score -= 5;
-      }
+      // ── PRICE RANGE ───────────────────────────────────────────────────────
+      if (price >= 2 && price <= 20) { score += 1; reasons.push('Momentum price range ($2–$20)'); }
 
-      // ATR volatility (higher ATR % = more room to move)
-      if (r.atr14 != null && r.price) {
-        const atrPct = (r.atr14 / r.price) * 100;
-        if (atrPct >= 3)      score += 10;
-        else if (atrPct >= 2) score += 7;
-        else if (atrPct >= 1) score += 4;
-      }
+      // ── PLANNED (not yet automated) ───────────────────────────────────────
+      // Catalyst/news, Float, Level 2, Chart pattern — future versions
 
-      return clamp(score, 0, 100);
+      return { score, reasons, qualified: score >= minScore };
     },
 
     /**
@@ -202,11 +180,14 @@
 
       const raw      = await this.fetchBatch(universe);
       const filtered = this.filter(raw, cfg);
-      const scored   = filtered.map(r => ({ ...r, momentumScore: this.calcScore(r) }));
+      const minScore = cfg.minScore ?? 0;
+      const scored   = filtered.map(r => {
+        const result = this.calcScore(r, minScore);
+        return { ...r, momentumScore: result.score, scoreReasons: result.reasons, scoreQualified: result.qualified };
+      });
 
-      // Apply MIN_SCORE post-scoring (minScore is 0–10; score is 0–100)
-      const minScoreInternal = (cfg.minScore ?? 0) * 10;
-      const passing = scored.filter(r => r.momentumScore >= minScoreInternal);
+      // Apply MIN_SCORE filter (0–6 scale, direct comparison)
+      const passing = scored.filter(r => r.scoreQualified);
 
       return passing.sort((a, b) => b.momentumScore - a.momentumScore);
     },
@@ -221,88 +202,72 @@
      * Derive a trade signal from a scored momentum row.
      * Mirrors getSignal() in strategy.py.
      */
+    /**
+     * Signal from score (0–6 scale).
+     * 5–6 = STRONG BUY · 3–4 = BUY · 2 = WATCH · 0–1 = AVOID
+     */
     getSignal(row) {
       const score = row.momentumScore ?? 0;
       let signal, badge;
-      if (score >= 70)      { signal = 'STRONG BUY'; badge = 'mt-signal-strong'; }
-      else if (score >= 55) { signal = 'BUY';        badge = 'mt-signal-buy';    }
-      else if (score >= 38) { signal = 'WATCH';      badge = 'mt-signal-watch';  }
-      else                  { signal = 'AVOID';      badge = 'mt-signal-avoid';  }
+      if (score >= 5)      { signal = 'STRONG BUY'; badge = 'mt-signal-strong'; }
+      else if (score >= 3) { signal = 'BUY';        badge = 'mt-signal-buy';    }
+      else if (score >= 2) { signal = 'WATCH';      badge = 'mt-signal-watch';  }
+      else                 { signal = 'AVOID';      badge = 'mt-signal-avoid';  }
       return { signal, badge, score };
     },
 
     /**
-     * Generate a human-readable breakdown of each scoring component.
+     * Breakdown from the scored reasons array (from calculate_score / calcScore).
      * Mirrors scoreBreakdown() in strategy.py.
+     *
+     * Rows with scoreReasons show each earned criterion.
+     * Rows without it (legacy) fall back to raw field values.
      */
     breakdown(row) {
-      const items = [];
+      const MAX = 6; // current max score
+      const gain  = row.change  ?? 0;
+      const rvol  = row.relVol  ?? 0;
+      const price = row.price   ?? 0;
 
-      // RSI
-      if (row.rsi14 != null) {
-        const rsi = row.rsi14;
-        const ok  = rsi >= 48 && rsi <= 73;
-        const hot = rsi >= 52 && rsi <= 68;
-        items.push({
-          label:  'RSI Momentum',
-          value:  rsi.toFixed(1),
-          note:   hot ? 'Optimal momentum zone' : ok ? 'Acceptable zone' : 'Outside range',
-          status: hot ? 'good' : ok ? 'ok' : 'bad',
-        });
-      }
-
-      // Relative Volume
-      if (row.relVol != null) {
-        const rv = row.relVol;
-        items.push({
-          label:  'Relative Volume',
-          value:  rv.toFixed(2) + '×',
-          note:   rv >= 3 ? 'Extreme surge' : rv >= 2 ? 'High volume' : rv >= 1.5 ? 'Above avg' : 'Low',
-          status: rv >= 2 ? 'good' : rv >= 1.5 ? 'ok' : 'bad',
-        });
-      }
-
-      // 52-week proximity
-      if (row.w52Dist != null) {
-        const d = row.w52Dist;
-        items.push({
-          label:  '52-Wk High Dist',
-          value:  (d >= 0 ? '+' : '') + d.toFixed(1) + '%',
-          note:   d >= -2 ? 'Near 52-wk high — momentum leader'
-                : d >= -10 ? 'Within 10% of high'
-                : 'Far from high — weak trend',
-          status: d >= -5 ? 'good' : d >= -15 ? 'ok' : 'bad',
-        });
-      }
-
-      // Day change
-      if (row.change != null) {
-        const c = row.change;
-        items.push({
-          label:  'Day Change',
-          value:  (c >= 0 ? '+' : '') + c.toFixed(2) + '%',
-          note:   c >= 3 ? 'Strong upward momentum'
-                : c >= 1 ? 'Positive momentum'
-                : c < 0  ? 'Negative — caution'
-                : 'Flat',
-          status: c >= 1.5 ? 'good' : c >= 0 ? 'ok' : 'bad',
-        });
-      }
-
-      // ATR %
-      if (row.atr14 != null && row.price) {
-        const atrPct = (row.atr14 / row.price) * 100;
-        items.push({
-          label:  'ATR Volatility',
-          value:  atrPct.toFixed(2) + '%',
-          note:   atrPct >= 3 ? 'High volatility — wider stops needed'
-                : atrPct >= 1.5 ? 'Good volatility for momentum'
-                : 'Low volatility',
-          status: atrPct >= 1.5 && atrPct <= 6 ? 'good' : atrPct > 0 ? 'ok' : 'bad',
-        });
-      }
-
-      return items;
+      // Criteria mirroring calculate_score() — show pass/fail for each
+      return [
+        {
+          label:  'Gain ≥ 10% (Strong momentum)',
+          value:  gain != null ? (gain >= 0 ? '+' : '') + gain.toFixed(2) + '%' : '--',
+          note:   gain >= 20 ? '+2 pts → +1 bonus (very strong)' : gain >= 10 ? '+2 pts earned' : 'Needs ≥ 10%',
+          status: gain >= 20 ? 'good' : gain >= 10 ? 'ok' : 'bad',
+        },
+        {
+          label:  'Relative Volume ≥ 2×',
+          value:  rvol ? rvol.toFixed(2) + '×' : '--',
+          note:   rvol >= 5 ? '+1 pt → +1 bonus (≥ 5×)' : rvol >= 2 ? '+1 pt earned' : 'Needs ≥ 2×',
+          status: rvol >= 5 ? 'good' : rvol >= 2 ? 'ok' : 'bad',
+        },
+        {
+          label:  'Price $2 – $20',
+          value:  price ? '$' + price.toFixed(2) : '--',
+          note:   price >= 2 && price <= 20 ? '+1 pt earned' : 'Outside $2–$20 range',
+          status: price >= 2 && price <= 20 ? 'good' : 'bad',
+        },
+        {
+          label:  'Catalyst / News',
+          value:  '—',
+          note:   'Not yet automated — manual check',
+          status: 'ok',
+        },
+        {
+          label:  'Float < 5M shares',
+          value:  '—',
+          note:   'Not yet automated — manual check',
+          status: 'ok',
+        },
+        {
+          label:  'Chart Pattern / Level 2',
+          value:  '—',
+          note:   'Not yet automated — manual check',
+          status: 'ok',
+        },
+      ];
     },
 
     /**
@@ -815,8 +780,8 @@
           <td class="mt-r">${fmtVol(r.volume)}</td>
           <td class="mt-r">
             <div class="mt-score-bar-wrap">
-              <div class="mt-score-bar" style="width:${r.momentumScore}%"></div>
-              <span class="mt-score-num">${r.momentumScore}</span>
+              <div class="mt-score-bar" style="width:${(r.momentumScore / 6 * 100).toFixed(0)}%"></div>
+              <span class="mt-score-num">${r.momentumScore}/6</span>
             </div>
           </td>
           <td><span class="mt-signal-badge ${sig.badge}">${sig.signal}</span></td>
@@ -990,17 +955,20 @@
         sigEl.className    = 'mt-detail-sig-badge ' + sig.badge;
       }
 
-      // Score ring
+      // Score ring (0–6 scale)
+      const MAX_SCORE   = 6;
       const scoreEl = $('mtScoreValue');
+      const scoreLblEl = $('mtScoreLbl');
       const ringEl  = $('mtScoreRing');
       if (scoreEl) scoreEl.textContent = row.momentumScore;
+      if (scoreLblEl) scoreLblEl.textContent = `/ ${MAX_SCORE}`;
       if (ringEl) {
-        const pct = row.momentumScore / 100;
+        const pct = row.momentumScore / MAX_SCORE;
         const circumference = 2 * Math.PI * 28;
         ringEl.style.strokeDashoffset = circumference * (1 - pct);
-        ringEl.style.stroke = row.momentumScore >= 70 ? '#1dd6a3'
-          : row.momentumScore >= 55 ? '#4a90e2'
-          : row.momentumScore >= 38 ? '#f5c842'
+        ringEl.style.stroke = row.momentumScore >= 5 ? '#1dd6a3'
+          : row.momentumScore >= 3 ? '#4a90e2'
+          : row.momentumScore >= 2 ? '#f5c842'
           : '#e84545';
       }
 

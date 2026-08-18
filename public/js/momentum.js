@@ -42,16 +42,26 @@
     ],
 
     defaults: {
-      rsiMin:         48,
-      rsiMax:         73,
-      minRelVol:      1.5,
-      minPrice:       2,
-      maxPrice:       500,
-      riskPctPerTrade: 2.0,
+      // Position size
+      manualShares:   null,     // null = user enters; number = fixed shares
+      // Daily limits
+      maxTradesPerDay: 5,
+      maxDailyLoss:   500.00,
+      // Strategy filters
+      minPrice:       1.00,
+      maxPrice:       20.00,
+      minGainPercent: 10.0,
+      minRelVol:      2.0,
+      minVolume:      100000,
+      minScore:       7,        // out of 10 (maps to 70/100 internally)
+      // Risk
+      stopPercent:    null,     // null = use ATR fallback; number = % below entry
       minRR:          2.0,
-      atrMultiplier:  1.5,
+      // EMA trend
       emaFast:        9,
       emaSlow:        21,
+      // Scanner universe: 'curated' | 'alpaca'
+      universeMode:   'curated',
     },
 
     // Load saved config from localStorage, merging with defaults
@@ -89,15 +99,18 @@
     },
 
     /**
-     * Apply momentum pre-filters (price range, relVol, RSI window).
+     * Apply momentum pre-filters.
      * Mirrors the filter() method in scanner.py.
+     * Checks: price range, min gain %, min relative volume, min absolute volume.
+     * MIN_SCORE is applied post-scoring in scan().
      */
     filter(results, cfg) {
       return results.filter(r => {
         if (r.price == null) return false;
         if (r.price < cfg.minPrice || r.price > cfg.maxPrice) return false;
-        if (r.relVol != null && r.relVol < cfg.minRelVol) return false;
-        if (r.rsi14 != null && (r.rsi14 < cfg.rsiMin || r.rsi14 > cfg.rsiMax)) return false;
+        if (cfg.minGainPercent != null && (r.change ?? 0) < cfg.minGainPercent) return false;
+        if (cfg.minRelVol != null && (r.relVol ?? 0) < cfg.minRelVol) return false;
+        if (cfg.minVolume != null && (r.volume ?? 0) < cfg.minVolume) return false;
         return true;
       });
     },
@@ -164,14 +177,38 @@
     },
 
     /**
-     * Full scan: fetch → filter → score → sort by score desc.
+     * Fetch Alpaca most-actives universe from the server.
+     */
+    async fetchAlpacaUniverse() {
+      try {
+        const resp = await fetch('/api/momentum/universe', { credentials: 'include' });
+        if (!resp.ok) return null;
+        const d = await resp.json();
+        return d.symbols?.length ? d.symbols : null;
+      } catch { return null; }
+    },
+
+    /**
+     * Full scan: resolve universe → fetch → filter → score → MIN_SCORE filter → sort.
      * Mirrors the main scan() loop in scanner.py.
      */
     async scan(cfg) {
-      const raw      = await this.fetchBatch(cfg.universe || MomentumConfig.UNIVERSE);
+      // Resolve universe: curated list or live Alpaca most-actives
+      let universe = MomentumConfig.UNIVERSE;
+      if (cfg.universeMode === 'alpaca') {
+        const alpacaSyms = await this.fetchAlpacaUniverse();
+        if (alpacaSyms?.length) universe = alpacaSyms;
+      }
+
+      const raw      = await this.fetchBatch(universe);
       const filtered = this.filter(raw, cfg);
       const scored   = filtered.map(r => ({ ...r, momentumScore: this.calcScore(r) }));
-      return scored.sort((a, b) => b.momentumScore - a.momentumScore);
+
+      // Apply MIN_SCORE post-scoring (minScore is 0–10; score is 0–100)
+      const minScoreInternal = (cfg.minScore ?? 0) * 10;
+      const passing = scored.filter(r => r.momentumScore >= minScoreInternal);
+
+      return passing.sort((a, b) => b.momentumScore - a.momentumScore);
     },
   };
 
@@ -470,25 +507,225 @@
   };
 
   /* ════════════════════════════════════════════════════════════════════════════
+   * MODULE 5b — Trade Methods (Warrior Trading framework)
+   * Three checklists derived from the slides:
+   *   IMG_8901 → profileChecks()  — "The Current Profile" (demand/supply filter)
+   *   IMG_8899 → dipChecks()      — "Indicators for a Dip" (want all these)
+   *   IMG_8898 → dumpFlags()      — "Indicators for a Dump" (want none of these)
+   * ════════════════════════════════════════════════════════════════════════════ */
+  const MomentumAnalysis = {
+
+    /** Fetch intraday analysis (MACD, candle patterns, 50%-of-move) from server */
+    async fetch(sym) {
+      try {
+        const r = await fetch(`/api/momentum/analysis/${sym}`, { credentials: 'include' });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    },
+
+    /**
+     * IMG_8901 — "The Current Profile"
+     * Indicators of High Demand / Low Supply.
+     * Returns array of { label, met (true/false/null), note }.
+     * met=null means "manual check required" (no API data available).
+     */
+    profileChecks(row) {
+      const relVol5x  = (row.relVol ?? 0) >= 5;
+      const up30      = (row.change ?? 0) >= 30;
+      const priceOk   = row.price >= 3.00 && row.price <= 20.00;
+      return [
+        {
+          label: 'RelVol ≥ 5× (high demand)',
+          met:   relVol5x,
+          note:  row.relVol != null ? `${row.relVol.toFixed(1)}×` : '--',
+        },
+        {
+          label: 'Already up ≥ 30% today',
+          met:   up30,
+          note:  row.change != null ? `+${row.change.toFixed(1)}%` : '--',
+        },
+        {
+          label: 'News event driving the move',
+          met:   null,
+          note:  'Manual check',
+        },
+        {
+          label: 'Price between $3.00 – $20.00',
+          met:   priceOk,
+          note:  `$${row.price?.toFixed(2) ?? '--'}`,
+        },
+        {
+          label: 'Float < 5M shares (low supply)',
+          met:   null,
+          note:  'Manual check',
+        },
+      ];
+    },
+
+    /**
+     * IMG_8899 — "Indicators for a Dip"
+     * You WANT to see all of these on a pullback before entry.
+     * met=true → favorable condition is present.
+     */
+    dipChecks(row, ema, analysis, rankInScan) {
+      // 1. Light volume on red candles
+      const isRed      = row.change < 0;
+      const lightVolRed = isRed ? (row.relVol ?? 99) < 2 : true;
+
+      // 2. No topping tail — prefer bottoming tail
+      const ttScore  = analysis?.lastCandle?.toppingTailScore;
+      const btScore  = analysis?.lastCandle?.bottomingTailScore;
+      const noTopping = ttScore != null ? ttScore < 0.35 : null;
+
+      // 3. Stock is "obvious" — top 3 leading gainers by change%
+      const isTop3 = rankInScan != null ? rankInScan <= 2 : null;
+
+      // 4. Holding 9-EMA
+      const holds9ema = ema?.bullish ?? null;
+
+      // 5. MACD still positive
+      const macdPos = analysis?.macd?.positive ?? null;
+
+      // 6. No large sell orders on L2 — Level 2 data not available
+      // 7. Holding ≥ 50% of intraday move
+      const pct      = analysis?.pctOfMove;
+      const holds50  = pct != null ? pct >= 50 : null;
+
+      return [
+        {
+          label: 'Light volume on red candles',
+          met:   lightVolRed,
+          note:  isRed ? `RelVol ${row.relVol?.toFixed(1) ?? '--'}×` : 'Green day ✓',
+        },
+        {
+          label: 'No topping tail (bottoming preferred)',
+          met:   noTopping,
+          note:  ttScore != null
+            ? `Top tail ${(ttScore * 100).toFixed(0)}%  Bot tail ${((btScore ?? 0) * 100).toFixed(0)}%`
+            : 'Loading…',
+        },
+        {
+          label: 'Stock is "obvious" — Top 3 gainers',
+          met:   isTop3,
+          note:  rankInScan != null ? `Rank #${rankInScan + 1} by score` : '--',
+        },
+        {
+          label: 'Holding 9-EMA on pullback',
+          met:   holds9ema,
+          note:  ema ? `EMA9 $${ema.emaFast?.toFixed(3) ?? '--'}` : 'Loading…',
+        },
+        {
+          label: 'MACD still positive',
+          met:   macdPos,
+          note:  analysis?.macd
+            ? `MACD ${analysis.macd.value?.toFixed(4)}  Hist ${analysis.macd.histogram?.toFixed(4)}`
+            : 'Loading…',
+        },
+        {
+          label: 'No large sell orders on Level 2',
+          met:   null,
+          note:  'Manual check required',
+        },
+        {
+          label: 'Holding ≥ 50% of intraday move',
+          met:   holds50,
+          note:  pct != null
+            ? `${pct.toFixed(0)}% of range  (open $${analysis.dailyOpen?.toFixed(2)} → high $${analysis.dailyHigh?.toFixed(2)})`
+            : 'Loading…',
+        },
+      ];
+    },
+
+    /**
+     * IMG_8898 — "Indicators for a Dump"
+     * These are RED FLAGS — a stock showing these is likely topping.
+     * active=true → bearish flag is present (bad for bulls).
+     * active=false → flag NOT present (good — reduces dump risk).
+     */
+    dumpFlags(row, ema, analysis) {
+      // 1. High volume red candle
+      const highVolRed = row.change < 0 && (row.relVol ?? 0) >= 2;
+
+      // 2. Large topping tail
+      const ttScore   = analysis?.lastCandle?.toppingTailScore;
+      const largeTail = ttScore != null ? ttScore >= 0.40 : null;
+
+      // 3. Stock is not "obvious" — low rank / not a top gainer
+      // (We display this as a manual signal since we rank differently)
+
+      // 4. Breaks below 9-EMA
+      const below9ema = ema ? !ema.bullish : null;
+
+      // 5. MACD crosses negative on pullback
+      const macdNeg   = analysis?.macd != null ? !analysis.macd.positive : null;
+
+      // 6. Large sell orders on L2 — not available, manual check
+      return [
+        {
+          label:  'High volume red candle',
+          active: highVolRed,
+          note:   `Chg ${row.change?.toFixed(1) ?? '--'}%  RelVol ${row.relVol?.toFixed(1) ?? '--'}×`,
+        },
+        {
+          label:  'Large topping tail',
+          active: largeTail,
+          note:   ttScore != null ? `${(ttScore * 100).toFixed(0)}% of candle range` : 'Loading…',
+        },
+        {
+          label:  'Stock not "obvious" (not top gainer)',
+          active: null,
+          note:   'Compare to sector leaders manually',
+        },
+        {
+          label:  'Breaks below 9-EMA on pullback',
+          active: below9ema,
+          note:   ema ? `Price $${row.price?.toFixed(2)} vs EMA9 $${ema.emaFast?.toFixed(3)}` : 'Loading…',
+        },
+        {
+          label:  'MACD crosses negative on pullback',
+          active: macdNeg,
+          note:   analysis?.macd
+            ? `MACD ${analysis.macd.value?.toFixed(4)}  ${analysis.macd.positive ? '▲ positive' : '▼ negative'}`
+            : 'Loading…',
+        },
+        {
+          label:  'Large sell orders on Level 2',
+          active: null,
+          note:   'Manual check required',
+        },
+      ];
+    },
+  };
+
+  /* ════════════════════════════════════════════════════════════════════════════
    * MODULE 6 — main.py
    * MomentumBot: orchestrates the full pipeline scan → signal → risk → execute.
    * ════════════════════════════════════════════════════════════════════════════ */
   const MomentumBot = {
-    running:     false,
-    scanResults: [],
-    selectedRow: null,
-    emaSignal:   null,
-    riskCalc:    null,
-    log:         [],
-    config:      null,
+    running:       false,
+    scanResults:   [],
+    selectedRow:   null,
+    emaSignal:     null,
+    tradeAnalysis: null,   // intraday MACD + candle analysis from /api/momentum/analysis/:sym
+    riskCalc:      null,
+    log:           [],
+    config:        null,
     countdownTimer: null,
-    countdown:   0,
-    REFRESH_SEC: 90,
+    countdown:     0,
+    REFRESH_SEC:   90,
+    // Daily limit tracking (resets at midnight)
+    dailyTrades:  0,
+    dailyLossAmt: 0,
+    dailyDate:    '',
+    // Active trade-methods tab
+    _tmTab:       'dip',
 
     init() {
       this.config = MomentumConfig.load();
       this._bindEvents();
       this._renderConfigPanel();
+      this._resetDailyIfNeeded();
       AlpacaClient.checkConnection().then(() => {
         this._renderStatus();
         this.run();
@@ -513,29 +750,44 @@
     /* ── Config ──────────────────────────────────────────────────────────── */
     _renderConfigPanel() {
       const cfg = this.config;
-      const setVal = (id, v) => { const el = $(id); if (el) el.value = v; };
-      setVal('mtRsiMin',    cfg.rsiMin);
-      setVal('mtRsiMax',    cfg.rsiMax);
-      setVal('mtRelVol',    cfg.minRelVol);
-      setVal('mtMinPrice',  cfg.minPrice);
-      setVal('mtMaxPrice',  cfg.maxPrice);
-      setVal('mtRiskPct',   cfg.riskPctPerTrade);
-      setVal('mtMinRR',     cfg.minRR);
-      setVal('mtAtrMult',   cfg.atrMultiplier);
+      const setVal = (id, v) => {
+        const el = $(id);
+        if (!el) return;
+        el.value = (v == null || v === '') ? '' : v;
+      };
+      setVal('mtManualShares',  cfg.manualShares);
+      setVal('mtMaxTrades',     cfg.maxTradesPerDay);
+      setVal('mtMaxDailyLoss',  cfg.maxDailyLoss);
+      setVal('mtMinPrice',      cfg.minPrice);
+      setVal('mtMaxPrice',      cfg.maxPrice);
+      setVal('mtMinGain',       cfg.minGainPercent);
+      setVal('mtRelVol',        cfg.minRelVol);
+      setVal('mtMinVolume',     cfg.minVolume);
+      setVal('mtMinScore',      cfg.minScore);
+      setVal('mtStopPct',       cfg.stopPercent);
+      setVal('mtMinRR',         cfg.minRR);
+      // Universe radio
+      const radio = document.querySelector(`input[name="mtUniverse"][value="${cfg.universeMode || 'curated'}"]`);
+      if (radio) radio.checked = true;
     },
 
     _readConfig() {
       const n = id => { const v = parseFloat($(id)?.value); return isNaN(v) ? null : v; };
+      const uni = document.querySelector('input[name="mtUniverse"]:checked')?.value || 'curated';
       return {
         ...this.config,
-        rsiMin:          n('mtRsiMin')   ?? this.config.rsiMin,
-        rsiMax:          n('mtRsiMax')   ?? this.config.rsiMax,
-        minRelVol:       n('mtRelVol')   ?? this.config.minRelVol,
-        minPrice:        n('mtMinPrice') ?? this.config.minPrice,
-        maxPrice:        n('mtMaxPrice') ?? this.config.maxPrice,
-        riskPctPerTrade: n('mtRiskPct')  ?? this.config.riskPctPerTrade,
-        minRR:           n('mtMinRR')    ?? this.config.minRR,
-        atrMultiplier:   n('mtAtrMult')  ?? this.config.atrMultiplier,
+        manualShares:    n('mtManualShares'),            // null = auto
+        maxTradesPerDay: n('mtMaxTrades')   ?? this.config.maxTradesPerDay,
+        maxDailyLoss:    n('mtMaxDailyLoss') ?? this.config.maxDailyLoss,
+        minPrice:        n('mtMinPrice')    ?? this.config.minPrice,
+        maxPrice:        n('mtMaxPrice')    ?? this.config.maxPrice,
+        minGainPercent:  n('mtMinGain')     ?? this.config.minGainPercent,
+        minRelVol:       n('mtRelVol')      ?? this.config.minRelVol,
+        minVolume:       n('mtMinVolume')   ?? this.config.minVolume,
+        minScore:        n('mtMinScore')    ?? this.config.minScore,
+        stopPercent:     n('mtStopPct'),                 // null = use ATR
+        minRR:           n('mtMinRR')       ?? this.config.minRR,
+        universeMode:    uni,
       };
     },
 
@@ -545,23 +797,22 @@
       if (!tbody) return;
 
       if (!results.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="mt-empty-row">No momentum stocks found — try relaxing filters</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="mt-empty-row">No momentum stocks found — try relaxing filters</td></tr>`;
         return;
       }
 
       tbody.innerHTML = results.slice(0, 40).map((r, i) => {
-        const sig = MomentumStrategy.getSignal(r);
+        const sig   = MomentumStrategy.getSignal(r);
         const chgUp = r.change > 0;
         return `<tr class="mt-scan-row ${i === 0 ? 'mt-scan-row--top' : ''}" data-sym="${r.sym}" data-idx="${i}">
           <td class="mt-sym-cell">
             <span class="mt-sym">${r.sym}</span>
-            <span class="mt-sym-name">${(r.name || '').replace(/&/g, '&amp;').slice(0, 20)}</span>
+            <span class="mt-sym-name">${(r.name || '').replace(/&/g, '&amp;').slice(0, 18)}</span>
           </td>
           <td class="mt-r">${fmtDollar(r.price)}</td>
           <td class="mt-r ${chgUp ? 'mt-up' : 'mt-dn'}">${r.change != null ? (chgUp ? '+' : '') + r.change.toFixed(2) + '%' : '--'}</td>
           <td class="mt-r">${r.relVol != null ? r.relVol.toFixed(2) + '×' : '--'}</td>
-          <td class="mt-r">${r.rsi14 != null ? r.rsi14 : '--'}</td>
-          <td class="mt-r">${r.w52Dist != null ? (r.w52Dist >= 0 ? '+' : '') + r.w52Dist.toFixed(1) + '%' : '--'}</td>
+          <td class="mt-r">${fmtVol(r.volume)}</td>
           <td class="mt-r">
             <div class="mt-score-bar-wrap">
               <div class="mt-score-bar" style="width:${r.momentumScore}%"></div>
@@ -590,19 +841,134 @@
 
     /* ── Detail / signal panel ───────────────────────────────────────────── */
     async _openDetail(row) {
-      this.selectedRow = row;
+      this.selectedRow  = row;
+      this.tradeAnalysis = null;
       this._renderSignalPanel(row);
       this._updateRiskPanel(row);
 
-      // Fetch EMA signal asynchronously
+      // Show trade methods panel immediately with what we have (nulls = loading)
+      this._renderTradeMethodPanel(row, null, null);
+
+      // Fetch EMA + intraday analysis in parallel
       const emaEl = $('mtEmaSignal');
       if (emaEl) emaEl.innerHTML = `<span class="mt-loading-sm">Fetching EMA…</span>`;
 
-      const ema = await MomentumStrategy.getEMASignal(
-        row.sym, this.config.emaFast, this.config.emaSlow
-      );
-      this.emaSignal = ema;
+      const [ema, analysis] = await Promise.all([
+        MomentumStrategy.getEMASignal(row.sym, this.config.emaFast, this.config.emaSlow),
+        MomentumAnalysis.fetch(row.sym),
+      ]);
+
+      this.emaSignal    = ema;
+      this.tradeAnalysis = analysis;
+
       this._renderEMASignal(ema);
+      // Re-render trade methods now that we have full data
+      this._renderTradeMethodPanel(row, ema, analysis);
+    },
+
+    /* ── Trade Methods panel (Warrior Trading framework) ─────────────────── */
+    _renderTradeMethodPanel(row, ema, analysis) {
+      const panel = $('mtTradeMethodPanel');
+      if (!panel) return;
+      panel.style.display = '';
+
+      // Determine rank of this row within scan results
+      const rankInScan = this.scanResults.findIndex(r => r.sym === row.sym);
+
+      const tab = this._tmTab || 'dip';
+
+      const renderChecklist = (items) => items.map(item => {
+        const met  = item.met;
+        const cls  = met === true ? 'mt-chk-pass'
+                   : met === false ? 'mt-chk-fail'
+                   : 'mt-chk-na';
+        const icon = met === true  ? '✓'
+                   : met === false ? '✗'
+                   : '—';
+        return `<div class="mt-chk-item ${cls}">
+          <span class="mt-chk-icon">${icon}</span>
+          <div class="mt-chk-body">
+            <span class="mt-chk-label">${item.label}</span>
+            <span class="mt-chk-note">${item.note || ''}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      const renderDumpFlags = (flags) => flags.map(f => {
+        const active = f.active;
+        const cls    = active === true  ? 'mt-chk-dump-active'
+                     : active === false ? 'mt-chk-dump-clear'
+                     : 'mt-chk-na';
+        const icon   = active === true  ? '⚠'
+                     : active === false ? '✓'
+                     : '—';
+        return `<div class="mt-chk-item ${cls}">
+          <span class="mt-chk-icon">${icon}</span>
+          <div class="mt-chk-body">
+            <span class="mt-chk-label">${f.label}</span>
+            <span class="mt-chk-note">${f.note || ''}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      // Score summaries for tab badges
+      const profile = MomentumAnalysis.profileChecks(row);
+      const dip     = MomentumAnalysis.dipChecks(row, ema, analysis, rankInScan);
+      const dump    = MomentumAnalysis.dumpFlags(row, ema, analysis);
+
+      const metCount  = arr => arr.filter(x => x.met === true || x.active === false).length;
+      const flagCount = arr => arr.filter(x => x.active === true).length;
+
+      const dipScore     = dip.filter(x => x.met === true).length;
+      const dumpRisk     = dump.filter(x => x.active === true).length;
+      const profileScore = profile.filter(x => x.met === true).length;
+
+      const dipBadge     = `<span class="mt-tab-badge mt-tab-badge-green">${dipScore}/${dip.length}</span>`;
+      const dumpBadge    = dumpRisk > 0
+        ? `<span class="mt-tab-badge mt-tab-badge-red">${dumpRisk} flag${dumpRisk > 1 ? 's' : ''}</span>`
+        : `<span class="mt-tab-badge mt-tab-badge-green">Clear</span>`;
+      const profBadge    = `<span class="mt-tab-badge mt-tab-badge-teal">${profileScore}/${profile.length}</span>`;
+
+      let bodyHtml = '';
+      if (tab === 'dip') {
+        bodyHtml = `
+          <div class="mt-chk-header">Check all before entering a pullback dip</div>
+          ${renderChecklist(dip)}
+          <div class="mt-chk-footer">When in doubt — check the 5min chart</div>`;
+      } else if (tab === 'dump') {
+        bodyHtml = `
+          <div class="mt-chk-header">Dump Risk — avoid entry if any flag is active</div>
+          ${renderDumpFlags(dump)}`;
+      } else {
+        bodyHtml = `
+          <div class="mt-chk-header">High Demand / Low Supply profile (Warrior Trading)</div>
+          ${renderChecklist(profile)}`;
+      }
+
+      panel.innerHTML = `
+        <div class="mt-panel-head">
+          <span class="mt-panel-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+            Trade Methods
+          </span>
+          <span class="mt-panel-sub">Warrior Trading framework</span>
+        </div>
+        <div class="mt-tm-tabs">
+          <button class="mt-tm-tab ${tab === 'dip' ? 'mt-tm-active' : ''}" data-tmtab="dip">Dip Buy ${dipBadge}</button>
+          <button class="mt-tm-tab ${tab === 'dump' ? 'mt-tm-active' : ''}" data-tmtab="dump">Dump Risk ${dumpBadge}</button>
+          <button class="mt-tm-tab ${tab === 'profile' ? 'mt-tm-active' : ''}" data-tmtab="profile">Profile ${profBadge}</button>
+        </div>
+        <div class="mt-tm-body">${bodyHtml}</div>`;
+
+      // Bind tab clicks
+      panel.querySelectorAll('.mt-tm-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._tmTab = btn.dataset.tmtab;
+          this._renderTradeMethodPanel(this.selectedRow, this.emaSignal, this.tradeAnalysis);
+        });
+      });
     },
 
     _renderSignalPanel(row) {
@@ -685,36 +1051,51 @@
     _updateRiskPanel(row) {
       if (!row) return;
       const entry  = row.price;
-      const atr    = row.atr14;
-      const equity = AlpacaClient.getEquity() || 10000; // fallback for disconnected
       const cfg    = this.config;
+      const equity = AlpacaClient.getEquity() || 10000;
 
-      const stopLoss   = RiskManager.calcStopLoss(entry, atr, cfg.atrMultiplier);
+      // Stop loss: prefer DEFAULT_STOP_PERCENT; fall back to ATR-based
+      let stopLoss;
+      if (cfg.stopPercent != null && cfg.stopPercent > 0) {
+        stopLoss = +(entry * (1 - cfg.stopPercent / 100)).toFixed(2);
+      } else {
+        stopLoss = RiskManager.calcStopLoss(entry, row.atr14, 1.5);
+      }
+
       const takeProfit = RiskManager.calcTakeProfit(entry, stopLoss, cfg.minRR);
-      const shares     = RiskManager.calcPositionSize(equity, cfg.riskPctPerTrade, entry, stopLoss);
+
+      // Shares: manual entry overrides auto-sizing
+      const manualShares = cfg.manualShares;
+      const autoShares   = RiskManager.calcPositionSize(equity, 2.0, entry, stopLoss);
+      const shares       = (manualShares != null && manualShares > 0) ? manualShares : autoShares;
+
       const rr         = RiskManager.calcRR(entry, stopLoss, takeProfit);
       const validation = shares ? RiskManager.validate(entry, stopLoss, takeProfit, equity, shares, cfg.minRR) : null;
 
       this.riskCalc = { entry, stopLoss, takeProfit, shares, rr, validation };
 
       const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
-      set('mtRiskEntry',    fmtDollar(entry));
-      set('mtRiskStop',     fmtDollar(stopLoss));
-      set('mtRiskTP',       fmtDollar(takeProfit));
-      set('mtRiskShares',   shares ?? '--');
-      set('mtRiskRR',       rr != null ? rr.toFixed(2) + ':1' : '--');
-      set('mtRiskAmt',      validation ? fmtDollar(validation.totalRisk) : '--');
-      set('mtRiskReward',   validation ? fmtDollar(validation.totalReward) : '--');
-      set('mtRiskPctUsed',  validation ? validation.riskPct + '% of equity' : '--');
+      const stopLbl = cfg.stopPercent ? `${cfg.stopPercent}% stop` : 'ATR stop';
+      set('mtRiskEntry',   fmtDollar(entry));
+      set('mtRiskStop',    stopLoss != null ? fmtDollar(stopLoss) + ` (${stopLbl})` : '--');
+      set('mtRiskTP',      fmtDollar(takeProfit));
+      set('mtRiskShares',  shares != null ? shares + (manualShares ? ' (manual)' : ' (auto)') : '--');
+      set('mtRiskRR',      rr != null ? rr.toFixed(2) + ':1' : '--');
+      set('mtRiskAmt',     validation ? fmtDollar(validation.totalRisk) : '--');
+      set('mtRiskReward',  validation ? fmtDollar(validation.totalReward) : '--');
+      set('mtRiskPctUsed', validation ? validation.riskPct + '% of equity' : '--');
 
-      // Validity indicator
       const valEl = $('mtRiskValid');
-      if (valEl && validation) {
-        valEl.textContent = validation.valid ? '✓ Valid trade setup' : '✗ Does not meet risk rules';
-        valEl.className   = 'mt-risk-valid ' + (validation.valid ? 'mt-valid-ok' : 'mt-valid-bad');
+      if (valEl) {
+        if (validation) {
+          valEl.textContent = validation.valid ? '✓ Valid trade setup' : '✗ Does not meet risk rules';
+          valEl.className   = 'mt-risk-valid ' + (validation.valid ? 'mt-valid-ok' : 'mt-valid-bad');
+        } else {
+          valEl.textContent = 'Select a stock to calculate risk';
+          valEl.className   = 'mt-risk-valid';
+        }
       }
 
-      // Populate trade panel
       const symEl = $('mtTradeSymbol');
       if (symEl) symEl.textContent = row.sym;
       const priceEl = $('mtTradePriceDisplay');
@@ -768,6 +1149,59 @@
       }
     },
 
+    /* ── Daily limits ────────────────────────────────────────────────────── */
+    _resetDailyIfNeeded() {
+      const today = new Date().toDateString();
+      if (this.dailyDate !== today) {
+        this.dailyDate    = today;
+        this.dailyTrades  = 0;
+        this.dailyLossAmt = 0;
+        this._renderDailyLimits();
+      }
+    },
+
+    _renderDailyLimits() {
+      const el = $('mtDailyLimits');
+      if (!el) return;
+      const cfg          = this.config;
+      const tradesLeft   = Math.max(0, cfg.maxTradesPerDay - this.dailyTrades);
+      const lossLeft     = Math.max(0, cfg.maxDailyLoss - this.dailyLossAmt);
+      const tradeLimitHit = this.dailyTrades >= cfg.maxTradesPerDay;
+      const lossLimitHit  = this.dailyLossAmt >= cfg.maxDailyLoss;
+      el.innerHTML = `
+        <span class="mt-dl-item ${tradeLimitHit ? 'mt-dl-hit' : ''}">
+          📊 Trades today: <strong>${this.dailyTrades}/${cfg.maxTradesPerDay}</strong>
+          ${tradeLimitHit ? '· <span class="mt-dl-warn">LIMIT REACHED</span>' : `· ${tradesLeft} left`}
+        </span>
+        <span class="mt-dl-item ${lossLimitHit ? 'mt-dl-hit' : ''}">
+          🛑 Daily loss: <strong>${fmtDollar(this.dailyLossAmt)}</strong> / ${fmtDollar(cfg.maxDailyLoss)}
+          ${lossLimitHit ? '· <span class="mt-dl-warn">LIMIT REACHED</span>' : `· ${fmtDollar(lossLeft)} remaining`}
+        </span>
+      `;
+    },
+
+    _checkDailyLimits() {
+      this._resetDailyIfNeeded();
+      const cfg = this.config;
+      if (this.dailyTrades >= cfg.maxTradesPerDay) {
+        return `Daily trade limit reached (${cfg.maxTradesPerDay} trades)`;
+      }
+      if (this.dailyLossAmt >= cfg.maxDailyLoss) {
+        return `Daily loss limit reached ($${cfg.maxDailyLoss})`;
+      }
+      return null; // null = OK to trade
+    },
+
+    _recordTrade(sym, side, shares, entryPrice, stopPrice) {
+      this.dailyTrades++;
+      // Estimate potential loss for tracking (worst-case: full stop hit)
+      const riskAmt = stopPrice ? Math.abs(entryPrice - stopPrice) * shares : 0;
+      this.dailyLossAmt += riskAmt;
+      this._renderDailyLimits();
+      this.addLog(sym, side.toUpperCase(),
+        `${shares} shares @ ~${fmtDollar(entryPrice)} · stop ${fmtDollar(stopPrice)}`, 'ok');
+    },
+
     /* ── Activity log ────────────────────────────────────────────────────── */
     addLog(sym, action, details, status = 'ok') {
       this.log.unshift({ sym, action, details, status, time: new Date().toLocaleTimeString() });
@@ -806,7 +1240,9 @@
         this.config = this._readConfig();
         MomentumConfig.save(this.config);
         this.selectedRow = null;
-        this.addLog('CONFIG', 'Settings updated', `RSI ${this.config.rsiMin}–${this.config.rsiMax} · RelVol ≥${this.config.minRelVol}`, 'info');
+        const c = this.config;
+        this.addLog('CONFIG', 'Settings updated',
+          `$${c.minPrice}–$${c.maxPrice} · Gain≥${c.minGainPercent}% · RelVol≥${c.minRelVol} · Vol≥${fmtVol(c.minVolume)} · Score≥${c.minScore}/10`, 'info');
         this.run();
       });
 
@@ -828,18 +1264,20 @@
         $('mtConfigToggle').textContent = hidden ? '▲ Collapse' : '▼ Configure';
       });
 
-      // Quick buy — places a simple notional order via Alpaca
+      // Quick buy — checks daily limits, uses manual or auto shares
       $('mtBuyBtn')?.addEventListener('click', async () => {
-        const row = this.selectedRow;
-        const rc  = this.riskCalc;
-        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'BUY', 'No valid risk calc', 'err');
+        const row   = this.selectedRow;
+        const rc    = this.riskCalc;
+        const limitMsg = this._checkDailyLimits();
+        if (limitMsg) return this._showTradeError(limitMsg);
+        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'BUY', 'No valid risk calc — set stop % or ATR', 'err');
         if (!AlpacaClient.connected) return this.addLog(row.sym, 'BUY', 'Not connected to Alpaca', 'err');
         const btn = $('mtBuyBtn');
         if (btn) { btn.disabled = true; btn.textContent = 'Placing…'; }
         try {
           await AlpacaClient.placeSimpleOrder(row.sym, 'buy', rc.shares * row.price);
-          this.addLog(row.sym, 'BUY', `${rc.shares} shares @ ~${fmtDollar(row.price)}`, 'ok');
-          this._showTradeSuccess(`BUY ${row.sym} — order placed`);
+          this._recordTrade(row.sym, 'buy', rc.shares, row.price, rc.stopLoss);
+          this._showTradeSuccess(`BUY ${row.sym} — ${rc.shares} shares placed`);
         } catch (err) {
           this.addLog(row.sym, 'BUY FAILED', err.message, 'err');
           this._showTradeError(err.message);
@@ -848,18 +1286,20 @@
         }
       });
 
-      // Short sell
+      // Short sell — checks daily limits, uses manual or auto shares
       $('mtSellBtn')?.addEventListener('click', async () => {
-        const row = this.selectedRow;
-        const rc  = this.riskCalc;
-        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'SELL', 'No valid risk calc', 'err');
+        const row   = this.selectedRow;
+        const rc    = this.riskCalc;
+        const limitMsg = this._checkDailyLimits();
+        if (limitMsg) return this._showTradeError(limitMsg);
+        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'SELL', 'No valid risk calc — set stop % or ATR', 'err');
         if (!AlpacaClient.connected) return this.addLog(row.sym, 'SELL', 'Not connected to Alpaca', 'err');
         const btn = $('mtSellBtn');
         if (btn) { btn.disabled = true; btn.textContent = 'Placing…'; }
         try {
           await AlpacaClient.placeSimpleOrder(row.sym, 'sell', rc.shares * row.price);
-          this.addLog(row.sym, 'SELL', `${rc.shares} shares @ ~${fmtDollar(row.price)}`, 'ok');
-          this._showTradeSuccess(`SELL ${row.sym} — order placed`);
+          this._recordTrade(row.sym, 'sell', rc.shares, row.price, rc.stopLoss);
+          this._showTradeSuccess(`SELL ${row.sym} — ${rc.shares} shares placed`);
         } catch (err) {
           this.addLog(row.sym, 'SELL FAILED', err.message, 'err');
           this._showTradeError(err.message);

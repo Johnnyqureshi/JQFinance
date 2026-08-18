@@ -1028,46 +1028,110 @@
         <button class="mt-config-toggle" id="mtConfigToggle">▼ Configure</button>
       </div>
       <div class="mt-config-body" id="mtConfigBody" style="display:none">
-        <div class="mt-config-grid">
-          <div class="mt-config-group">
-            <span class="mt-config-label">RSI Min</span>
-            <input type="number" id="mtRsiMin" class="mt-config-input" min="20" max="80" step="1" value="48" title="Minimum RSI threshold">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">RSI Max</span>
-            <input type="number" id="mtRsiMax" class="mt-config-input" min="20" max="90" step="1" value="73" title="Maximum RSI threshold">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">Min Rel Vol</span>
-            <input type="number" id="mtRelVol" class="mt-config-input" min="0.5" max="10" step="0.1" value="1.5" title="Minimum relative volume multiplier">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">Min Price $</span>
-            <input type="number" id="mtMinPrice" class="mt-config-input" min="0.5" max="100" step="0.5" value="2" title="Minimum stock price">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">Max Price $</span>
-            <input type="number" id="mtMaxPrice" class="mt-config-input" min="10" max="2000" step="10" value="500" title="Maximum stock price">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">Risk % / Trade</span>
-            <input type="number" id="mtRiskPct" class="mt-config-input" min="0.5" max="5" step="0.25" value="2.0" title="Max % of equity to risk per trade">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">Min R:R</span>
-            <input type="number" id="mtMinRR" class="mt-config-input" min="1" max="10" step="0.5" value="2.0" title="Minimum risk:reward ratio">
-          </div>
-          <div class="mt-config-group">
-            <span class="mt-config-label">ATR Mult (SL)</span>
-            <input type="number" id="mtAtrMult" class="mt-config-input" min="0.5" max="5" step="0.25" value="1.5" title="ATR multiplier for stop loss">
+
+        <!-- ── Position Size ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Position Size</div>
+          <div class="mt-config-grid">
+            <div class="mt-config-group mt-config-group--wide">
+              <span class="mt-config-label">Shares (manual entry)</span>
+              <input type="number" id="mtManualShares" class="mt-config-input" min="1" step="1"
+                placeholder="e.g. 100" title="Leave blank to calculate from risk % automatically">
+              <span class="mt-config-hint">Leave blank to auto-size from stop loss risk</span>
+            </div>
           </div>
         </div>
+
+        <!-- ── Daily Limits ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Daily Limits</div>
+          <div class="mt-config-grid">
+            <div class="mt-config-group">
+              <span class="mt-config-label">Max Trades / Day</span>
+              <input type="number" id="mtMaxTrades" class="mt-config-input" min="1" max="50" step="1" value="5" title="Maximum number of trades per day">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Max Daily Loss $</span>
+              <input type="number" id="mtMaxDailyLoss" class="mt-config-input" min="0" step="50" value="500" title="Stop trading if daily loss exceeds this">
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Strategy Settings ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Strategy Settings</div>
+          <div class="mt-config-grid">
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Price $</span>
+              <input type="number" id="mtMinPrice" class="mt-config-input" min="0.01" max="100" step="0.25" value="1.00" title="Minimum stock price">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Max Price $</span>
+              <input type="number" id="mtMaxPrice" class="mt-config-input" min="1" max="2000" step="1" value="20.00" title="Maximum stock price">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Gain % (day)</span>
+              <input type="number" id="mtMinGain" class="mt-config-input" min="0" max="100" step="0.5" value="10.0" title="Minimum intraday percentage gain">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Rel Volume</span>
+              <input type="number" id="mtRelVol" class="mt-config-input" min="0.5" max="20" step="0.1" value="2.0" title="Minimum relative volume vs average">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Volume</span>
+              <input type="number" id="mtMinVolume" class="mt-config-input" min="0" step="10000" value="100000" title="Minimum absolute trading volume">
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Score (0–10)</span>
+              <input type="number" id="mtMinScore" class="mt-config-input" min="0" max="10" step="0.5" value="7" title="Minimum momentum score out of 10">
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Risk Settings ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Risk Settings</div>
+          <div class="mt-config-grid">
+            <div class="mt-config-group">
+              <span class="mt-config-label">Stop Loss %</span>
+              <input type="number" id="mtStopPct" class="mt-config-input" min="0.1" max="50" step="0.25"
+                placeholder="e.g. 5" title="Stop loss as % below entry price">
+              <span class="mt-config-hint">% below entry — leave blank to use ATR</span>
+            </div>
+            <div class="mt-config-group">
+              <span class="mt-config-label">Min Reward : Risk</span>
+              <input type="number" id="mtMinRR" class="mt-config-input" min="0.5" max="10" step="0.5" value="2.0" title="Minimum reward-to-risk ratio">
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Scanner Universe ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Scanner Universe</div>
+          <div class="mt-universe-row">
+            <label class="mt-uni-pill">
+              <input type="radio" name="mtUniverse" id="mtUniCurated" value="curated" checked>
+              <span>📋 Curated List (50 stocks)</span>
+            </label>
+            <label class="mt-uni-pill">
+              <input type="radio" name="mtUniverse" id="mtUniAlpaca" value="alpaca">
+              <span>⚡ All Alpaca Most-Actives (live)</span>
+            </label>
+          </div>
+          <span class="mt-config-hint" style="display:block;margin-top:4px">
+            "All Alpaca" pulls the top 50 most-traded US equities in real-time from Alpaca's screener.
+          </span>
+        </div>
+
         <div class="mt-config-actions">
           <button class="mt-btn-apply" id="mtApplyConfig">Apply &amp; Rescan</button>
           <button class="mt-btn-reset" id="mtResetConfig">Reset Defaults</button>
         </div>
       </div>
     </div>
+
+    <!-- ── Daily limits status bar ─────────────────────────────────────── -->
+    <div class="mt-daily-bar" id="mtDailyLimits"></div>
 
     <!-- ── Main body: scanner + detail panels ──────────────────────────── -->
     <div class="mt-body">
@@ -1090,14 +1154,13 @@
                   <th class="mt-r">Price</th>
                   <th class="mt-r">Chg%</th>
                   <th class="mt-r">RelVol</th>
-                  <th class="mt-r">RSI</th>
-                  <th class="mt-r">52w%</th>
+                  <th class="mt-r">Volume</th>
                   <th class="mt-r">Score</th>
                   <th class="mt-r">Signal</th>
                 </tr>
               </thead>
               <tbody id="mtScanBody">
-                <tr><td colspan="8" class="mt-empty-row">Loading momentum universe…</td></tr>
+                <tr><td colspan="7" class="mt-empty-row">Loading momentum universe…</td></tr>
               </tbody>
             </table>
           </div>
@@ -1155,6 +1218,9 @@
             </div>
           </div>
         </div><!-- /.mt-detail-panel -->
+
+        <!-- Trade Methods panel (Warrior Trading framework) -->
+        <div class="mt-panel" id="mtTradeMethodPanel" style="display:none"></div>
 
         <!-- Risk panel (risk.py) -->
         <div class="mt-panel" id="mtRiskPanel">

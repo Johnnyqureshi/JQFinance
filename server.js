@@ -1769,6 +1769,125 @@ const MASTER_UNIVERSE = [
 
 
 // ── GET /api/bots/status — SPY gate + PDT state for the logged-in user ────────
+// ── Momentum: intraday analysis (MACD, candle patterns, move %) ──────────────
+app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const sym = req.params.sym.toUpperCase().replace(/[^A-Z.]/g, '');
+    if (!sym) return res.status(400).json({ error: 'Invalid symbol' });
+
+    // Fetch today's 5-min bars from market open
+    const now   = new Date();
+    const start = new Date(now);
+    start.setHours(9, 30, 0, 0);
+
+    const barsData = await alpacaDataFetch(uid,
+      `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=200&adjustment=all&feed=iex`
+    ).catch(() => null);
+
+    const bars = barsData?.bars || [];
+    if (!bars.length) return res.json({ sym, bars: 0, error: 'No intraday bars — market may be closed' });
+
+    const closes = bars.map(b => b.c);
+    const highs  = bars.map(b => b.h);
+    const lows   = bars.map(b => b.l);
+    const opens  = bars.map(b => b.o);
+    const vols   = bars.map(b => b.v);
+
+    const dailyOpen  = opens[0];
+    const dailyHigh  = Math.max(...highs);
+    const dailyLow   = Math.min(...lows);
+    const lastClose  = closes[closes.length - 1];
+    const lastBar    = bars[bars.length - 1];
+
+    // % of intraday move (open→high) currently being held
+    const moveRange  = dailyHigh - dailyOpen;
+    const pctOfMove  = moveRange > 0.0001
+      ? +((lastClose - dailyOpen) / moveRange * 100).toFixed(1)
+      : null;
+
+    // Candle tail analysis on most recent 5-min bar
+    const bHigh = Math.max(lastBar.c, lastBar.o);
+    const bLow  = Math.min(lastBar.c, lastBar.o);
+    const totalRange         = lastBar.h - lastBar.l || 0.0001;
+    const upperTail          = +(lastBar.h - bHigh).toFixed(4);
+    const lowerTail          = +(bLow - lastBar.l).toFixed(4);
+    const toppingTailScore   = +(upperTail / totalRange).toFixed(3);
+    const bottomingTailScore = +(lowerTail / totalRange).toFixed(3);
+
+    // MACD(12,26,9) on close prices
+    function ema(vals, period) {
+      if (vals.length < period) return [];
+      const k = 2 / (period + 1);
+      let e = vals.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      const out = new Array(period - 1).fill(null);
+      out.push(e);
+      for (let i = period; i < vals.length; i++) { e = vals[i] * k + e * (1 - k); out.push(e); }
+      return out;
+    }
+    const e12      = ema(closes, 12);
+    const e26      = ema(closes, 26);
+    const macdLine = e12.map((v, i) => (v != null && e26[i] != null) ? +(v - e26[i]).toFixed(5) : null);
+    const macdNums = macdLine.filter(v => v != null);
+    const sigArr   = ema(macdNums, 9);
+    const lastMacd = macdNums.length ? macdNums[macdNums.length - 1] : null;
+    const lastSig  = sigArr.length  ? sigArr[sigArr.length - 1]       : null;
+    const lastHist = (lastMacd != null && lastSig != null) ? +(lastMacd - lastSig).toFixed(5) : null;
+
+    // Average volume of last 5 bars for "light/heavy" volume detection
+    const last5vols = vols.slice(-5);
+    const avgVol5   = last5vols.length ? last5vols.reduce((a, b) => a + b, 0) / last5vols.length : null;
+    const lastVol   = vols[vols.length - 1];
+    const relVolBar = (avgVol5 && avgVol5 > 0) ? +(lastVol / avgVol5).toFixed(2) : null;
+
+    res.json({
+      sym,
+      bars:     bars.length,
+      dailyOpen, dailyHigh, dailyLow, lastClose, pctOfMove,
+      lastCandle: {
+        open: lastBar.o, high: lastBar.h, low: lastBar.l, close: lastBar.c,
+        isRed: lastBar.c < lastBar.o,
+        toppingTailScore, bottomingTailScore,
+        upperTail, lowerTail,
+        relVolBar,   // volume of last bar vs 5-bar avg
+      },
+      macd: lastMacd != null ? {
+        value:       lastMacd,
+        signal:      lastSig,
+        histogram:   lastHist,
+        positive:    lastMacd > 0,
+        bullishCross: lastHist != null && lastHist > 0 && lastMacd > 0,
+      } : null,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Momentum page: Alpaca most-actives universe ───────────────────────────────
+app.get('/api/momentum/universe', requireAuth, async (req, res) => {
+  try {
+    const uid  = req.session.userId;
+    // Alpaca screener: top 50 most-active US equities by volume (real-time)
+    const data = await alpacaDataFetch(uid,
+      '/v1beta1/screener/us_equity/most_actives?by=volume&top=50'
+    ).catch(() => null);
+
+    if (data?.most_actives?.length) {
+      // Keep clean single-class ticker symbols only (no ETFs with slashes, etc.)
+      const syms = data.most_actives
+        .map(s => s.symbol)
+        .filter(s => s && /^[A-Z]{1,5}$/.test(s));
+      return res.json({ symbols: syms, source: 'alpaca-most-actives', count: syms.length });
+    }
+
+    // Fallback: empty — frontend will revert to curated list
+    res.json({ symbols: [], source: 'empty', count: 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/bots/status', requireAuth, async (req, res) => {
   try {
     const spyLevels = await getSPYLevels();

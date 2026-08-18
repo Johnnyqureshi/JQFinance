@@ -8103,6 +8103,40 @@ option { background: var(--card); }
 .mc-size-bar-fill { height: 100%; border-radius: 3px; transition: width .5s; }
 .mc-size-bar-pct { font-size: .75rem; font-weight: 600; color: #e6edf3; min-width: 36px; text-align: right; }
 
+/* ── Intraday Indicators section (data.py) ─────────────────────────────────── */
+.mt-intraday-section {
+  border-top: 1px solid var(--border);
+  padding: 10px 0 4px;
+  margin-top: 4px;
+}
+.mt-intraday-body { padding: 6px 0 2px; }
+.mt-intra-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto 1fr;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .73rem;
+}
+.mt-intra-row:last-child { border-bottom: none; }
+.mt-intra-label { color: var(--t2); font-weight: 500; }
+.mt-intra-val   { color: var(--t1); font-weight: 600; text-align: right; font-family: var(--font-mono, monospace); }
+.mt-intra-note  { color: var(--t3); font-size: .65rem; }
+.mt-intra-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: .63rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mt-intra-bull  { background: rgba(29,214,163,.13); color: var(--teal); }
+.mt-intra-bear  { background: rgba(232,69,69,.13);  color: var(--red);  }
+.mt-intra-na    { background: var(--card2);          color: var(--t3);   }
+.mt-intra-break { background: rgba(245,200,66,.15);  color: var(--gold); }
+
 /* ── Trade Methods panel (Warrior Trading checklists) ──────────────────────── */
 .mt-tm-tabs {
   display: flex;

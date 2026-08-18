@@ -546,16 +546,23 @@
       // 3. Stock is "obvious" — top 3 leading gainers by change%
       const isTop3 = rankInScan != null ? rankInScan <= 2 : null;
 
-      // 4. Holding 9-EMA
-      const holds9ema = ema?.bullish ?? null;
+      // 4. Holding 9-EMA — prefer intraday EMA9 from data.py, fall back to daily EMA
+      const intradayAboveEma9 = analysis?.priceAboveEma9 ?? null;
+      const holds9ema = intradayAboveEma9 !== null ? intradayAboveEma9 : (ema?.bullish ?? null);
+      const ema9note  = analysis?.ema9  != null
+        ? `EMA9 (1min) $${analysis.ema9.toFixed(3)}  EMA20 $${analysis.ema20?.toFixed(3) ?? '--'}`
+        : ema ? `EMA9 (daily) $${ema.emaFast?.toFixed(3) ?? '--'}` : 'Loading…';
+
+      // 4b. Price above VWAP (data.py)
+      const aboveVwap = analysis?.priceAboveVwap ?? null;
 
       // 5. MACD still positive
       const macdPos = analysis?.macd?.positive ?? null;
 
       // 6. No large sell orders on L2 — Level 2 data not available
       // 7. Holding ≥ 50% of intraday move
-      const pct      = analysis?.pctOfMove;
-      const holds50  = pct != null ? pct >= 50 : null;
+      const pct     = analysis?.pctOfMove;
+      const holds50 = pct != null ? pct >= 50 : null;
 
       return [
         {
@@ -576,9 +583,14 @@
           note:  rankInScan != null ? `Rank #${rankInScan + 1} by score` : '--',
         },
         {
+          label: 'Price above VWAP',
+          met:   aboveVwap,
+          note:  analysis?.vwap != null ? `VWAP $${analysis.vwap.toFixed(3)}` : 'Loading…',
+        },
+        {
           label: 'Holding 9-EMA on pullback',
           met:   holds9ema,
-          note:  ema ? `EMA9 $${ema.emaFast?.toFixed(3) ?? '--'}` : 'Loading…',
+          note:  ema9note,
         },
         {
           label: 'MACD still positive',
@@ -619,11 +631,18 @@
       // 3. Stock is not "obvious" — low rank / not a top gainer
       // (We display this as a manual signal since we rank differently)
 
-      // 4. Breaks below 9-EMA
-      const below9ema = ema ? !ema.bullish : null;
+      // 4. Breaks below 9-EMA — prefer intraday (data.py), fall back to daily EMA
+      const intradayBelowEma9 = analysis?.priceAboveEma9 != null ? !analysis.priceAboveEma9 : null;
+      const below9ema = intradayBelowEma9 !== null ? intradayBelowEma9 : (ema ? !ema.bullish : null);
+      const ema9dumpNote = analysis?.ema9 != null
+        ? `Price $${row.price?.toFixed(2)} vs EMA9 (1min) $${analysis.ema9.toFixed(3)}`
+        : ema ? `Price $${row.price?.toFixed(2)} vs EMA9 (daily) $${ema.emaFast?.toFixed(3)}` : 'Loading…';
+
+      // 4b. Price below VWAP — bearish intraday bias
+      const belowVwap = analysis?.priceAboveVwap != null ? !analysis.priceAboveVwap : null;
 
       // 5. MACD crosses negative on pullback
-      const macdNeg   = analysis?.macd != null ? !analysis.macd.positive : null;
+      const macdNeg = analysis?.macd != null ? !analysis.macd.positive : null;
 
       // 6. Large sell orders on L2 — not available, manual check
       return [
@@ -638,6 +657,11 @@
           note:   ttScore != null ? `${(ttScore * 100).toFixed(0)}% of candle range` : 'Loading…',
         },
         {
+          label:  'Price below VWAP',
+          active: belowVwap,
+          note:   analysis?.vwap != null ? `VWAP $${analysis.vwap.toFixed(3)}` : 'Loading…',
+        },
+        {
           label:  'Stock not "obvious" (not top gainer)',
           active: null,
           note:   'Compare to sector leaders manually',
@@ -645,7 +669,7 @@
         {
           label:  'Breaks below 9-EMA on pullback',
           active: below9ema,
-          note:   ema ? `Price $${row.price?.toFixed(2)} vs EMA9 $${ema.emaFast?.toFixed(3)}` : 'Loading…',
+          note:   ema9dumpNote,
         },
         {
           label:  'MACD crosses negative on pullback',
@@ -827,6 +851,7 @@
       this.tradeAnalysis = analysis;
 
       this._renderEMASignal(ema);
+      this._renderIntradayIndicators(analysis);
       // Re-render trade methods now that we have full data
       this._renderTradeMethodPanel(row, ema, analysis);
     },
@@ -934,6 +959,93 @@
           this._renderTradeMethodPanel(this.selectedRow, this.emaSignal, this.tradeAnalysis);
         });
       });
+    },
+
+    /* ── Intraday Indicators panel (data.py indicators) ─────────────────── */
+    _renderIntradayIndicators(analysis) {
+      const el = $('mtIntradayIndicators');
+      if (!el) return;
+
+      if (!analysis || analysis.error) {
+        el.innerHTML = `<span class="mt-na">${analysis?.error || 'No intraday data — market may be closed'}</span>`;
+        return;
+      }
+
+      const a = analysis;
+      const price = a.lastClose;
+
+      // Helper: direction badge
+      const dir = (above, upLabel = 'Above', dnLabel = 'Below') =>
+        above === true  ? `<span class="mt-intra-tag mt-intra-bull">${upLabel}</span>` :
+        above === false ? `<span class="mt-intra-tag mt-intra-bear">${dnLabel}</span>` :
+                          `<span class="mt-intra-tag mt-intra-na">—</span>`;
+
+      const rows = [
+        {
+          label: 'VWAP',
+          value: a.vwap != null ? `$${a.vwap.toFixed(3)}` : '--',
+          tag:   dir(a.priceAboveVwap, 'Price above', 'Price below'),
+          note:  a.vwap != null ? `Δ ${((price - a.vwap) >= 0 ? '+' : '')}${(price - a.vwap).toFixed(3)}` : '',
+        },
+        {
+          label: 'EMA 9 (1-min)',
+          value: a.ema9 != null ? `$${a.ema9.toFixed(3)}` : '--',
+          tag:   dir(a.priceAboveEma9, 'Holding', 'Below'),
+          note:  a.ema9 != null ? `Δ ${((price - a.ema9) >= 0 ? '+' : '')}${(price - a.ema9).toFixed(3)}` : '',
+        },
+        {
+          label: 'EMA 20 (1-min)',
+          value: a.ema20 != null ? `$${a.ema20.toFixed(3)}` : '--',
+          tag:   dir(a.priceAboveEma20, 'Above', 'Below'),
+          note:  a.ema20 != null ? `Δ ${((price - a.ema20) >= 0 ? '+' : '')}${(price - a.ema20).toFixed(3)}` : '',
+        },
+        {
+          label: '20-Bar High (1-min)',
+          value: a.high20 != null ? `$${a.high20.toFixed(3)}` : '--',
+          tag:   a.breakingHigh20
+            ? `<span class="mt-intra-tag mt-intra-break">🚀 BREAKOUT</span>`
+            : dir(false, '', 'Below high'),
+          note:  a.high20 != null
+            ? (a.breakingHigh20 ? `Price $${price.toFixed(3)} cleared $${a.high20.toFixed(3)}` : `Need $${a.high20.toFixed(3)} to break`)
+            : '',
+        },
+        {
+          label: 'RelVol (1-min bar)',
+          value: a.relVolIntraday != null ? `${a.relVolIntraday}×` : '--',
+          tag:   a.relVolIntraday != null
+            ? (a.relVolIntraday >= 2
+                ? `<span class="mt-intra-tag mt-intra-bull">High</span>`
+                : a.relVolIntraday >= 1
+                  ? `<span class="mt-intra-tag mt-intra-na">Normal</span>`
+                  : `<span class="mt-intra-tag mt-intra-bear">Low</span>`)
+            : '',
+          note: `vs 20-bar avg`,
+        },
+        {
+          label: '% of Intraday Move',
+          value: a.pctOfMove != null ? `${a.pctOfMove.toFixed(0)}%` : '--',
+          tag:   a.pctOfMove != null
+            ? (a.pctOfMove >= 50
+                ? `<span class="mt-intra-tag mt-intra-bull">≥ 50% held</span>`
+                : `<span class="mt-intra-tag mt-intra-bear">< 50% held</span>`)
+            : '',
+          note:  a.dailyOpen != null && a.dailyHigh != null
+            ? `Open $${a.dailyOpen.toFixed(2)} → High $${a.dailyHigh.toFixed(2)}`
+            : '',
+        },
+      ];
+
+      el.innerHTML = rows.map(r => `
+        <div class="mt-intra-row">
+          <span class="mt-intra-label">${r.label}</span>
+          <span class="mt-intra-val">${r.value}</span>
+          ${r.tag}
+          <span class="mt-intra-note">${r.note}</span>
+        </div>`).join('');
+
+      // Update sub-label with bar count
+      const subEl = $('mtIntradaySub');
+      if (subEl) subEl.textContent = `data.py · 1-min bars · ${a.bars} bars loaded`;
     },
 
     _renderSignalPanel(row) {

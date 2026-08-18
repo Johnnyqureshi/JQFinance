@@ -1776,13 +1776,12 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
     const sym = req.params.sym.toUpperCase().replace(/[^A-Z.]/g, '');
     if (!sym) return res.status(400).json({ error: 'Invalid symbol' });
 
-    // Fetch today's 5-min bars from market open
+    // 1-minute bars, 240-minute lookback — mirrors data.py get_intraday_bars()
     const now   = new Date();
-    const start = new Date(now);
-    start.setHours(9, 30, 0, 0);
+    const start = new Date(now.getTime() - 240 * 60 * 1000);
 
     const barsData = await alpacaDataFetch(uid,
-      `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=200&adjustment=all&feed=iex`
+      `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start.toISOString())}&limit=300&adjustment=all&feed=iex`
     ).catch(() => null);
 
     const bars = barsData?.bars || [];
@@ -1794,28 +1793,20 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
     const opens  = bars.map(b => b.o);
     const vols   = bars.map(b => b.v);
 
-    const dailyOpen  = opens[0];
-    const dailyHigh  = Math.max(...highs);
-    const dailyLow   = Math.min(...lows);
-    const lastClose  = closes[closes.length - 1];
-    const lastBar    = bars[bars.length - 1];
+    const dailyOpen = opens[0];
+    const dailyHigh = Math.max(...highs);
+    const dailyLow  = Math.min(...lows);
+    const lastClose = closes[closes.length - 1];
+    const lastBar   = bars[bars.length - 1];
+    const lastVol   = vols[vols.length - 1];
 
-    // % of intraday move (open→high) currently being held
-    const moveRange  = dailyHigh - dailyOpen;
-    const pctOfMove  = moveRange > 0.0001
+    // % of intraday move (open→high) currently held
+    const moveRange = dailyHigh - dailyOpen;
+    const pctOfMove = moveRange > 0.0001
       ? +((lastClose - dailyOpen) / moveRange * 100).toFixed(1)
       : null;
 
-    // Candle tail analysis on most recent 5-min bar
-    const bHigh = Math.max(lastBar.c, lastBar.o);
-    const bLow  = Math.min(lastBar.c, lastBar.o);
-    const totalRange         = lastBar.h - lastBar.l || 0.0001;
-    const upperTail          = +(lastBar.h - bHigh).toFixed(4);
-    const lowerTail          = +(bLow - lastBar.l).toFixed(4);
-    const toppingTailScore   = +(upperTail / totalRange).toFixed(3);
-    const bottomingTailScore = +(lowerTail / totalRange).toFixed(3);
-
-    // MACD(12,26,9) on close prices
+    // ── EMA helper (ewm span=N → alpha = 2/(N+1), mirrors pandas .ewm) ─────
     function ema(vals, period) {
       if (vals.length < period) return [];
       const k = 2 / (period + 1);
@@ -1825,37 +1816,81 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
       for (let i = period; i < vals.length; i++) { e = vals[i] * k + e * (1 - k); out.push(e); }
       return out;
     }
+
+    // ── VWAP — mirrors calculate_vwap() in data.py ──────────────────────────
+    // VWAP = cumsum(typical_price × volume) / cumsum(volume)
+    let cumPV = 0, cumVol = 0;
+    const vwapArr = bars.map(b => {
+      const tp = (b.h + b.l + b.c) / 3;   // typical_price
+      cumPV  += tp * b.v;
+      cumVol += b.v;
+      return cumVol > 0 ? cumPV / cumVol : null;
+    });
+    const currentVwap = vwapArr[vwapArr.length - 1];
+
+    // ── EMA9 + EMA20 on close — mirrors calculate_indicators() in data.py ───
+    const ema9arr  = ema(closes, 9);
+    const ema20arr = ema(closes, 20);
+    const currentEma9  = ema9arr.length  ? ema9arr[ema9arr.length - 1]   : null;
+    const currentEma20 = ema20arr.length ? ema20arr[ema20arr.length - 1] : null;
+
+    // ── volume_avg20 + relative_volume (rolling 20, shifted 1) ─────────────
+    const priorVols  = vols.slice(0, -1);           // shift(1): exclude current bar
+    const vol20slice = priorVols.slice(-20);
+    const vol20avg   = vol20slice.length > 0
+      ? vol20slice.reduce((a, b) => a + b, 0) / vol20slice.length
+      : null;
+    const relVolIntraday = vol20avg && vol20avg > 0 ? +(lastVol / vol20avg).toFixed(2) : null;
+
+    // ── high_20: 20-bar rolling max of high, shifted 1 — mirrors data.py ───
+    // .rolling(20).max().shift(1) → max of 20 bars preceding current bar
+    const priorHighs = highs.slice(0, -1);
+    const h20slice   = priorHighs.slice(-20);
+    const high20     = h20slice.length > 0 ? +Math.max(...h20slice).toFixed(4) : null;
+    const breakingHigh20 = high20 != null && lastClose > high20;
+
+    // ── Candle tail analysis (last 1-min bar) ────────────────────────────────
+    const bHigh = Math.max(lastBar.c, lastBar.o);
+    const bLow  = Math.min(lastBar.c, lastBar.o);
+    const totalRange         = lastBar.h - lastBar.l || 0.0001;
+    const upperTail          = +(lastBar.h - bHigh).toFixed(4);
+    const lowerTail          = +(bLow - lastBar.l).toFixed(4);
+    const toppingTailScore   = +(upperTail / totalRange).toFixed(3);
+    const bottomingTailScore = +(lowerTail / totalRange).toFixed(3);
+
+    // ── MACD(12,26,9) on 1-min close ────────────────────────────────────────
     const e12      = ema(closes, 12);
     const e26      = ema(closes, 26);
     const macdLine = e12.map((v, i) => (v != null && e26[i] != null) ? +(v - e26[i]).toFixed(5) : null);
     const macdNums = macdLine.filter(v => v != null);
     const sigArr   = ema(macdNums, 9);
     const lastMacd = macdNums.length ? macdNums[macdNums.length - 1] : null;
-    const lastSig  = sigArr.length  ? sigArr[sigArr.length - 1]       : null;
+    const lastSig  = sigArr.length   ? sigArr[sigArr.length - 1]      : null;
     const lastHist = (lastMacd != null && lastSig != null) ? +(lastMacd - lastSig).toFixed(5) : null;
-
-    // Average volume of last 5 bars for "light/heavy" volume detection
-    const last5vols = vols.slice(-5);
-    const avgVol5   = last5vols.length ? last5vols.reduce((a, b) => a + b, 0) / last5vols.length : null;
-    const lastVol   = vols[vols.length - 1];
-    const relVolBar = (avgVol5 && avgVol5 > 0) ? +(lastVol / avgVol5).toFixed(2) : null;
 
     res.json({
       sym,
-      bars:     bars.length,
+      bars: bars.length,
       dailyOpen, dailyHigh, dailyLow, lastClose, pctOfMove,
+      // ── data.py indicators ─────────────────────────────────────────────────
+      vwap:            currentVwap  != null ? +currentVwap.toFixed(4)  : null,
+      ema9:            currentEma9  != null ? +currentEma9.toFixed(4)  : null,
+      ema20:           currentEma20 != null ? +currentEma20.toFixed(4) : null,
+      relVolIntraday,
+      high20,
+      priceAboveVwap:  currentVwap  != null ? lastClose > currentVwap  : null,
+      priceAboveEma9:  currentEma9  != null ? lastClose > currentEma9  : null,
+      priceAboveEma20: currentEma20 != null ? lastClose > currentEma20 : null,
+      breakingHigh20,
+      // ── candle + MACD ──────────────────────────────────────────────────────
       lastCandle: {
         open: lastBar.o, high: lastBar.h, low: lastBar.l, close: lastBar.c,
         isRed: lastBar.c < lastBar.o,
-        toppingTailScore, bottomingTailScore,
-        upperTail, lowerTail,
-        relVolBar,   // volume of last bar vs 5-bar avg
+        toppingTailScore, bottomingTailScore, upperTail, lowerTail, relVolIntraday,
       },
       macd: lastMacd != null ? {
-        value:       lastMacd,
-        signal:      lastSig,
-        histogram:   lastHist,
-        positive:    lastMacd > 0,
+        value: lastMacd, signal: lastSig, histogram: lastHist,
+        positive: lastMacd > 0,
         bullishCross: lastHist != null && lastHist > 0 && lastMacd > 0,
       } : null,
     });

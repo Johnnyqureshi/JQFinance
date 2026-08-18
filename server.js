@@ -98,6 +98,42 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 
+// ── DB migration: upgrade alpaca_creds to composite (user_id, mode) PK ────────
+// Allows separate paper + live credentials to coexist for the same user.
+// Safe to run on every startup — the PRAGMA check prevents double-migration.
+{
+  const pkCols = db.prepare('PRAGMA table_info(alpaca_creds)').all()
+    .filter(c => c.pk > 0).map(c => c.name);
+  if (pkCols.length === 1 && pkCols[0] === 'user_id') {
+    try {
+      db.exec(`
+        CREATE TABLE alpaca_creds_new (
+          user_id    INTEGER NOT NULL,
+          api_key    TEXT    NOT NULL,
+          api_secret TEXT    NOT NULL,
+          mode       TEXT    NOT NULL DEFAULT 'paper',
+          PRIMARY KEY (user_id, mode),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        INSERT OR IGNORE INTO alpaca_creds_new (user_id, api_key, api_secret, mode)
+          SELECT user_id, api_key, api_secret, COALESCE(mode,'paper') FROM alpaca_creds;
+        DROP TABLE alpaca_creds;
+        ALTER TABLE alpaca_creds_new RENAME TO alpaca_creds;
+      `);
+      console.log('[Migration] alpaca_creds → composite (user_id, mode) PK');
+    } catch(e) { console.error('[Migration] alpaca_creds failed:', e.message); }
+  }
+}
+
+// ── Active-mode tracker — which account (paper/live) each user is using ───────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS alpaca_active_mode (
+    user_id INTEGER PRIMARY KEY,
+    mode    TEXT    NOT NULL DEFAULT 'paper',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
+
 // ── App settings table (persists generated secrets etc.) ──────────────────────
 db.prepare(`
   CREATE TABLE IF NOT EXISTS app_settings (
@@ -194,22 +230,34 @@ db.prepare(`
   WHERE bot_name IN ('countertrend','orb','swing') AND enabled = 0
 `).run();
 
-// ── Startup migration: always sync alpaca_creds from env vars if set ──────────
-// If ALPACA_API_KEY / ALPACA_API_SECRET are present in the environment, they
-// are treated as the source of truth and always overwrite the DB row for user 1.
-// This ensures a credentials update in Replit Secrets takes effect immediately
-// on the next restart/deploy without needing a manual DB edit.
+// ── Startup: sync alpaca_creds from env vars (paper + live independently) ─────
+// Supports two naming conventions so either works without renaming:
+//   Paper:  ALPACA_PAPER_KEY / ALPACA_PAPER_SECRET
+//           ALPACA_API_KEY   / ALPACA_API_SECRET  (alias)
+//           ALPACA_API_KEY   / ALPACA_SECRET_KEY  (alias — user preferred)
+//   Live:   ALPACA_LIVE_KEY  / ALPACA_LIVE_SECRET
+//   Mode:   ALPACA_MODE = "paper" (default) or "live" — sets the active mode
 {
-  const envKey    = process.env.ALPACA_API_KEY    || process.env.ALPACA_LIVE_KEY    || process.env.ALPACA_PAPER_KEY;
-  const envSecret = process.env.ALPACA_API_SECRET || process.env.ALPACA_LIVE_SECRET || process.env.ALPACA_PAPER_SECRET;
-  const envMode   = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
-  if (envKey && envSecret) {
-    db.prepare(`
-      INSERT INTO alpaca_creds (user_id, api_key, api_secret, mode)
-      VALUES (1, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET api_key=excluded.api_key, api_secret=excluded.api_secret, mode=excluded.mode
-    `).run(envKey, envSecret, envMode);
-    console.log(`[Startup] Synced alpaca_creds for user 1 from env vars (mode=${envMode})`);
+  const paperKey    = process.env.ALPACA_PAPER_KEY
+                   || process.env.ALPACA_API_KEY;
+  const paperSecret = process.env.ALPACA_PAPER_SECRET
+                   || process.env.ALPACA_API_SECRET
+                   || process.env.ALPACA_SECRET_KEY;
+  const liveKey     = process.env.ALPACA_LIVE_KEY;
+  const liveSecret  = process.env.ALPACA_LIVE_SECRET
+                   || process.env.ALPACA_LIVE_SECRET_KEY;
+  const activeMode  = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
+
+  if (paperKey && paperSecret) {
+    db.prepare(`INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (1,?,?,'paper')`).run(paperKey, paperSecret);
+    console.log('[Startup] Synced paper alpaca_creds from env vars');
+  }
+  if (liveKey && liveSecret) {
+    db.prepare(`INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (1,?,?,'live')`).run(liveKey, liveSecret);
+    console.log('[Startup] Synced live alpaca_creds from env vars');
+  }
+  if (paperKey || liveKey) {
+    db.prepare(`INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (1, ?)`).run(activeMode);
   }
 }
 
@@ -1307,43 +1355,26 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
 const DISCONNECTED_SENTINEL = '__disconnected__';
 
 function getAlpacaCreds(userId) {
-  const row = db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id = ?').get(userId);
-  // User explicitly disconnected — do NOT fall back to env vars.
+  // Determine which mode this user has active
+  const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
+  const activeMode    = activeModeRow?.mode || 'paper';
+
+  // Try the active mode first
+  const row = db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
   if (row && row.api_key === DISCONNECTED_SENTINEL) return null;
-  // DB credentials found — use them.
   if (row) return row;
 
-  // ── Environment-variable fallback ──────────────────────────────────────────
-  // Accepts several common naming conventions so whichever secret name was used
-  // in Replit secrets works without having to rename anything.
-  //
-  //   ALPACA_API_KEY  / ALPACA_API_SECRET   (generic — used when only one account)
-  //   ALPACA_PAPER_KEY / ALPACA_PAPER_SECRET → paper account
-  //   ALPACA_LIVE_KEY  / ALPACA_LIVE_SECRET  → live account
-  //   ALPACA_MODE                            → "paper" (default) or "live"
-  //
-  const mode       = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
-  const liveKey    = process.env.ALPACA_LIVE_KEY;
-  const liveSecret = process.env.ALPACA_LIVE_SECRET;
-  const paperKey   = process.env.ALPACA_PAPER_KEY;
-  const paperSecret= process.env.ALPACA_PAPER_SECRET;
-  // Generic key works for both paper and live (mode determined by ALPACA_MODE)
-  const genericKey   = process.env.ALPACA_API_KEY;
-  const genericSecret= process.env.ALPACA_API_SECRET;
+  // Fallback: try the other mode
+  const other = db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id=? AND mode!=?').get(userId, activeMode);
+  if (other && other.api_key !== DISCONNECTED_SENTINEL) return other;
 
-  if (mode === 'live' && liveKey && liveSecret) {
-    return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
-  }
-  if (paperKey && paperSecret) {
-    return { api_key: paperKey, api_secret: paperSecret, mode: 'paper' };
-  }
-  if (liveKey && liveSecret) {
-    return { api_key: liveKey, api_secret: liveSecret, mode: 'live' };
-  }
-  if (genericKey && genericSecret) {
-    return { api_key: genericKey, api_secret: genericSecret, mode };
-  }
   return null;
+}
+
+// Helper: check if a specific mode has valid (non-sentinel) credentials in DB
+function _alpacaCredsExist(userId, mode) {
+  const row = db.prepare('SELECT api_key FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
+  return !!row && row.api_key !== DISCONNECTED_SENTINEL;
 }
 
 async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
@@ -1402,29 +1433,55 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   return data;
 }
 
-// Save credentials
+// Save credentials — stores the key pair for the given mode, sets it as active
 app.put('/api/alpaca/credentials', requireAuth, (req, res) => {
   const { apiKey, apiSecret, mode } = req.body || {};
   if (!apiKey || !apiSecret) return res.status(400).json({ error: 'API key and secret required.' });
   const m = mode === 'live' ? 'live' : 'paper';
-  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?, ?, ?, ?)').run(req.session.userId, apiKey.trim(), apiSecret.trim(), m);
+  const uid = req.session.userId;
+  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(uid, apiKey.trim(), apiSecret.trim(), m);
+  db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
   res.json({ ok: true, mode: m });
 });
 
-// Delete credentials (disconnect)
-// We write a sentinel row rather than a hard DELETE so that the env-var fallback
-// is not immediately re-activated for this user after they click "Disconnect".
+// Disconnect — writes sentinel for the currently-active mode only.
+// The other mode's credentials remain stored and can be reactivated via switch-mode.
 app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
-  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?, ?, ?, ?)').run(
-    req.session.userId, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, 'paper'
+  const uid = req.session.userId;
+  const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
+  const m = activeModeRow?.mode || 'paper';
+  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(
+    uid, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, m
   );
   res.json({ ok: true });
 });
 
-// Check connection status
+// Check connection status — returns active-mode creds plus availability of both modes
 app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
-  const creds = getAlpacaCreds(req.session.userId);
-  res.json({ connected: !!creds, mode: creds?.mode || 'paper' });
+  const uid   = req.session.userId;
+  const creds = getAlpacaCreds(uid);
+  const paperConnected = _alpacaCredsExist(uid, 'paper');
+  const liveConnected  = _alpacaCredsExist(uid, 'live');
+  const activeModeRow  = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
+  const activeMode     = activeModeRow?.mode || (creds?.mode) || 'paper';
+  res.json({
+    connected:      !!creds,
+    mode:           activeMode,
+    paperConnected,
+    liveConnected,
+  });
+});
+
+// Switch active mode — requires credentials for the target mode to already be stored
+app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
+  const { mode } = req.body || {};
+  const m   = mode === 'live' ? 'live' : 'paper';
+  const uid = req.session.userId;
+  if (!_alpacaCredsExist(uid, m)) {
+    return res.status(400).json({ error: `No ${m} account connected. Save your ${m} API keys first.` });
+  }
+  db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  res.json({ ok: true, mode: m });
 });
 
 // Account info

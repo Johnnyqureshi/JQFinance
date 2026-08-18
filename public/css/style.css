@@ -8103,6 +8103,65 @@ option { background: var(--card); }
 .mc-size-bar-fill { height: 100%; border-radius: 3px; transition: width .5s; }
 .mc-size-bar-pct { font-size: .75rem; font-weight: 600; color: #e6edf3; min-width: 36px; text-align: right; }
 
+/* ── Alpaca mode switcher (Paper ↔ Live pill bar) ──────────────────────────── */
+.at-mode-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 20px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.at-sw-label {
+  font-size: .72rem;
+  color: var(--t3);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.at-sw-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: .78rem;
+  font-weight: 600;
+  border: 1px solid var(--border2);
+  background: var(--card2);
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--tr), border-color var(--tr), color var(--tr);
+  white-space: nowrap;
+}
+.at-sw-pill:hover:not(:disabled) {
+  border-color: var(--teal-bdr);
+  color: var(--t1);
+}
+.at-sw-pill.at-sw-active {
+  background: rgba(29,214,163,.12);
+  border-color: var(--teal-bdr);
+  color: var(--teal);
+}
+.at-sw-pill.at-sw-active.at-sw-live {
+  background: rgba(245,200,66,.1);
+  border-color: var(--gold-bdr);
+  color: var(--gold);
+}
+.at-sw-pill:disabled { opacity: .5; cursor: not-allowed; }
+.at-sw-missing {
+  font-size: .65rem;
+  font-weight: 400;
+  color: var(--t3);
+  margin-left: 2px;
+}
+.at-sw-hint {
+  font-size: .7rem;
+  color: var(--t3);
+  margin-left: 4px;
+  font-style: italic;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    MOMENTUM TRADER PAGE
    ═══════════════════════════════════════════════════════════════════════════ */

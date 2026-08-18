@@ -73,6 +73,10 @@ const alpacaTrader = (() => {
     }
   }
 
+  // Tracks which modes have stored credentials (updated by checkCredentials)
+  let paperConnected = false;
+  let liveConnected  = false;
+
   // ── Connection status ──────────────────────────────────────────────────────
   // Three states: connected (green) | reconnecting (yellow) | disconnected (red)
   function updateConnStatus() {
@@ -91,7 +95,6 @@ const alpacaTrader = (() => {
       if (chips) chips.style.display = '';
       if (place) { place.disabled = false; place.textContent = 'Place Order'; }
     } else if (reconnecting) {
-      // Credentials exist in DB — just waiting for session to verify them
       if (dot)   dot.className = 'at-conn-dot dot-yellow';
       if (txt)   txt.textContent = 'Reconnecting…';
       if (badge) { badge.textContent = 'RECONNECTING'; badge.className = 'at-mode-badge mode-paper'; }
@@ -106,6 +109,65 @@ const alpacaTrader = (() => {
       if (chips) chips.style.display = 'none';
       if (place) { place.disabled = true; place.textContent = 'Connect Alpaca to Trade'; }
     }
+
+    // Mode switcher pills — show when at least one account is stored
+    _renderModeSwitcher();
+  }
+
+  // ── Mode switcher pill bar ─────────────────────────────────────────────────
+  function _renderModeSwitcher() {
+    const wrap = $('atModeSwitcher');
+    if (!wrap) return;
+
+    const hasBoth = paperConnected && liveConnected;
+    const hasOne  = paperConnected || liveConnected;
+
+    if (!hasOne) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+
+    wrap.innerHTML = `
+      <span class="at-sw-label">Account:</span>
+      <button class="at-sw-pill ${alpacaMode === 'paper' ? 'at-sw-active' : ''}" data-sw="paper" title="Switch to Paper Trading">
+        📋 Paper ${paperConnected ? '' : '<span class="at-sw-missing">not set</span>'}
+      </button>
+      <button class="at-sw-pill ${alpacaMode === 'live' ? 'at-sw-active' : ''} ${alpacaMode === 'live' ? 'at-sw-live' : ''}" data-sw="live" title="Switch to Live Trading">
+        💵 Live ${liveConnected ? '' : '<span class="at-sw-missing">not set</span>'}
+      </button>
+      ${hasBoth ? '' : '<span class="at-sw-hint">Connect both accounts to switch instantly</span>'}
+    `;
+
+    wrap.querySelectorAll('.at-sw-pill').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const target = btn.dataset.sw;
+        if (target === alpacaMode) return;
+        if (!_alpacaCredsAvailable(target)) {
+          // Open modal pre-set to that mode
+          alpacaMode = target;
+          document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === target));
+          const w = $('trdLiveWarn'); if (w) w.style.display = target === 'live' ? '' : 'none';
+          showModal(); return;
+        }
+        btn.disabled = true;
+        try {
+          const r = await apiFetch('/api/alpaca/switch-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: target }),
+          });
+          if (r.ok) {
+            alpacaMode = target;
+            localStorage.setItem(LS_WAS_CONNECTED, '1');
+            updateConnStatus();
+            loadAccount(); loadPositions(); loadOrders();
+          }
+        } catch(e) { console.warn('[AT] switch-mode:', e.message); }
+        finally { btn.disabled = false; }
+      });
+    });
+  }
+
+  function _alpacaCredsAvailable(mode) {
+    return mode === 'paper' ? paperConnected : liveConnected;
   }
 
   // ── Account snapshot ───────────────────────────────────────────────────────
@@ -240,18 +302,19 @@ const alpacaTrader = (() => {
 
   // ── Check credentials ──────────────────────────────────────────────────────
   async function checkCredentials() {
-    // If we know the user was previously connected, show "Reconnecting…" immediately
-    // so there is never a red "Disconnected" flash between logout and re-login.
     if (!connected && localStorage.getItem(LS_WAS_CONNECTED)) {
       reconnecting = true;
       updateConnStatus();
     }
     try {
       const r = await apiFetch('/api/alpaca/credentials', { _silent: true });
+      // Update both-mode availability from the new response fields
+      paperConnected = !!r.paperConnected;
+      liveConnected  = !!r.liveConnected;
       if (r.connected) {
         reconnecting = false;
         connected    = true;
-        alpacaMode   = r.mode || 'live';
+        alpacaMode   = r.mode || 'paper';
         localStorage.setItem(LS_WAS_CONNECTED, '1');
         updateConnStatus();
         loadAccount();
@@ -259,16 +322,12 @@ const alpacaTrader = (() => {
         loadOrders();
         startKeepAlive();
       } else {
-        // No creds in DB — fully disconnected (user never connected or explicitly removed keys)
         reconnecting = false;
         connected    = false;
         localStorage.removeItem(LS_WAS_CONNECTED);
         updateConnStatus();
       }
     } catch (e) {
-      // Always clear the reconnecting state so the UI doesn't get stuck on
-      // the yellow "Reconnecting…" badge indefinitely when a session has expired
-      // or a transient network error occurs during the credential check.
       reconnecting = false;
       connected    = false;
       updateConnStatus();

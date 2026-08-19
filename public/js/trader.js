@@ -48,7 +48,18 @@ const trader = (() => {
       if (h > bars[i-1].h && h > bars[i+1].h) pivots.push({ type:'r', val:h });
       if (l < bars[i-1].l && l < bars[i+1].l) pivots.push({ type:'s', val:l });
     }
-    const cluster=(arr,tol=0.02)=>{
+    // In a trending market the interior pivots can all sit far from price,
+    // leaving "Level 1" several % away. Add near-term real levels as candidates:
+    // yesterday's high/low and the 5-day high/low (bars are newest-first).
+    if (bars[1]?.l && bars[1]?.h) {
+      pivots.push({ type:'s', val:bars[1].l }, { type:'r', val:bars[1].h });
+    }
+    const recent = bars.slice(0, 5).filter(b => b.l && b.h);
+    if (recent.length >= 2) {
+      pivots.push({ type:'s', val:Math.min(...recent.map(b=>b.l)) },
+                  { type:'r', val:Math.max(...recent.map(b=>b.h)) });
+    }
+    const cluster=(arr,tol=0.005)=>{
       const merged=[]; arr.sort((a,b)=>a-b);
       for(const v of arr){
         const g=merged.find(g=>Math.abs(g.center-v)/g.center<tol);
@@ -56,8 +67,12 @@ const trader = (() => {
       }
       return merged.sort((a,b)=>b.n-a.n).map(g=>g.center);
     };
-    const rs=cluster(pivots.filter(p=>p.type==='r').map(p=>p.val)).filter(v=>v>price);
-    const ss=cluster(pivots.filter(p=>p.type==='s').map(p=>p.val)).filter(v=>v<price);
+    // Nearest-first: Level 1 must be the closest actionable level to the current
+    // price, not the most-touched cluster (which can sit several % away).
+    // Split candidates by side of price BEFORE clustering, so a near support is
+    // never averaged into a cluster that lands above the price (or vice versa).
+    const rs=cluster(pivots.filter(p=>p.type==='r'&&p.val>price).map(p=>p.val)).sort((a,b)=>a-b);
+    const ss=cluster(pivots.filter(p=>p.type==='s'&&p.val<price).map(p=>p.val)).sort((a,b)=>b-a);
     return { resistance: rs.slice(0,2), support: ss.slice(0,2) };
   }
 

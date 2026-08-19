@@ -1590,6 +1590,29 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   const slNum  = parseFloat(slPct)  || 0;
   if (tpNum < 0 || slNum < 0) return res.status(400).json({ error: 'tpPct and slPct must be non-negative.' });
 
+  // ── NO-SHORT POLICY ─────────────────────────────────────────────────────────
+  // This platform never opens short positions. A SELL order is only allowed to
+  // close (or reduce) an existing long position. To profit from a falling
+  // stock/market, buy the mapped inverse ETF instead (GET /api/inverse/:sym).
+  if (sideL === 'sell') {
+    try {
+      const pos = await alpacaFetch(req.session.userId, `/v2/positions/${symbol.toUpperCase()}`, { method: 'GET' });
+      const heldQty = parseFloat(pos?.qty ?? 0);
+      if (!isFinite(heldQty) || heldQty <= 0) {
+        return res.status(400).json({
+          error: `No long position in ${symbol.toUpperCase()} — shorting is not allowed on this platform. To trade the downside, BUY the inverse ETF instead.`,
+          noShort: true,
+        });
+      }
+      req._heldQty = heldQty; // cap the sell below
+    } catch (e) {
+      return res.status(400).json({
+        error: `No long position in ${symbol.toUpperCase()} — shorting is not allowed on this platform. To trade the downside, BUY the inverse ETF instead.`,
+        noShort: true,
+      });
+    }
+  }
+
   // Alpaca bracket orders require BOTH take-profit AND stop-loss legs.
   // If only one is provided, fall back to a simple market order instead of
   // sending a malformed bracket that Alpaca will reject.
@@ -1618,7 +1641,9 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
       // Bracket orders require integer qty (Alpaca limitation for margin accounts)
       // BUG FIX: removed Math.max(1,...) — that forced a 1-share minimum causing over-exposure
       // when position size < stock price. Now we throw a clear error instead.
-      const shares = Math.floor(leveragedAmount / price);
+      let shares = Math.floor(leveragedAmount / price);
+      // NO-SHORT: cap sells at the held quantity so a close can never flip short
+      if (sideL === 'sell' && req._heldQty != null) shares = Math.min(shares, Math.floor(req._heldQty));
       if (shares < 1) throw new Error(`Position size $${amtNum.toFixed(2)} × ${lev}x leverage = $${leveragedAmount.toFixed(2)}, which is less than the price of 1 share ($${price.toFixed(2)}). Increase your position size in Settings.`);
       const tpPrice = sideL === 'buy'
         ? (price * (1 + tpNum / 100)).toFixed(2)
@@ -1636,12 +1661,26 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
         take_profit:    { limit_price: tpPrice },
         stop_loss:      { stop_price:  slPrice },
       };
+    } else if (sideL === 'sell') {
+      // NO-SHORT: sells are always QUANTITY-based from the verified held amount.
+      // A notional sell filled at a lower price would represent more shares than
+      // held and could flip the account short — qty-based sells cannot.
+      const requestedQty = leveragedAmount / price;
+      const sellQty = Math.min(requestedQty, req._heldQty);
+      if (!(sellQty > 0)) throw new Error(`Nothing to sell in ${symbol.toUpperCase()}.`);
+      orderBody = {
+        symbol:         symbol.toUpperCase(),
+        qty:            String(+sellQty.toFixed(6)), // supports fractional holdings
+        side:           'sell',
+        type:           'market',
+        time_in_force:  'day',
+      };
     } else {
-      // Simple notional order (supports fractional shares)
+      // Simple notional BUY order (supports fractional shares)
       orderBody = {
         symbol:         symbol.toUpperCase(),
         notional:       leveragedAmount.toFixed(2),
-        side:           sideL,
+        side:           'buy',
         type:           'market',
         time_in_force:  'day',
       };
@@ -1968,6 +2007,19 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
 });
 
 // ── GET /api/patterns/:sym — standalone daily candle pattern endpoint ─────────
+// ── Inverse-ETF resolver ──────────────────────────────────────────────────────
+// No shorting on this platform: to trade the downside of a stock or the market,
+// buy the mapped inverse ETF instead. Falls back to SH (inverse S&P 500).
+app.get('/api/inverse/:sym', (req, res) => {
+  const sym = req.params.sym?.toUpperCase().replace(/[^A-Z.\-]/g, '');
+  if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
+  const inverse = INVERSE_MAP[sym] || 'SH';
+  res.json({ ok: true, sym, inverse, mapped: !!INVERSE_MAP[sym],
+    note: INVERSE_MAP[sym]
+      ? `${sym} falls → ${inverse} rises (mapped inverse ETF)`
+      : `No specific mapping for ${sym} — SH (inverse S&P 500) is the general market hedge` });
+});
+
 app.get('/api/patterns/:sym', async (req, res) => {
   const sym = req.params.sym?.toUpperCase().replace(/[^A-Z.]/g,'');
   if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });

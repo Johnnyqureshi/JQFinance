@@ -854,7 +854,7 @@
           <div class="mt-cpt-grid">
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMinPrice">① Min Price $</label>
-              <input type="number" id="mtMinPrice" class="mt-cpt-input" min="0.01" max="100" step="0.25" value="2.00" title="Pillar 1 — sub-$2 stocks carry pump-and-dump risk">
+              <input type="number" id="mtMinPrice" class="mt-cpt-input" min="0.01" max="100" step="0.25" value="3.00" title="Pillar 1 — profile: $3.00–$20.00; sub-$3 stocks carry pump-and-dump risk">
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMaxPrice">① Max Price $</label>
@@ -870,7 +870,7 @@
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMaxFloat">⑤ Max Float M</label>
-              <input type="number" id="mtMaxFloat" class="mt-cpt-input" min="0" max="999" step="1" value="10" title="Pillar 5 — float in millions; low supply → explosive moves">
+              <input type="number" id="mtMaxFloat" class="mt-cpt-input" min="0" max="999" step="1" value="10" title="Pillar 5 — float in millions; <5M scores the supply point (profile ideal)">
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMinScore">Min Score /7</label>
@@ -1146,7 +1146,7 @@
             <div id="mtTradeMsg" class="mt-trade-msg" style="display:none"></div>
             <div class="mt-trade-btns">
               <button class="mt-trade-buy" id="mtBuyBtn">▲ BUY</button>
-              <button class="mt-trade-sell" id="mtSellBtn">▼ SELL</button>
+              <button class="mt-trade-sell" id="mtSellBtn" title="No shorting — buys the mapped inverse ETF instead">▼ BUY INVERSE</button>
             </div>
           </div>
         </div><!-- /.mt-trade-panel -->

@@ -48,8 +48,8 @@
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
       // ── 5 PILLARS (hard filters — all must pass) ─────────────────────────
-      // Pillar 1: Price $2–$20 (low-priced volatile small-caps)
-      minPrice:       2.00,
+      // Pillar 1: Price $3–$20 (low-priced volatile small-caps — per profile)
+      minPrice:       3.00,
       maxPrice:       20.00,
       // Pillar 2: Daily gain ≥ 10% (intraday momentum already present)
       minGainPercent: 10.0,
@@ -77,6 +77,13 @@
     load() {
       try {
         const saved = JSON.parse(localStorage.getItem('mtConfig') || '{}');
+        // Migration: old default minPrice was $2 — profile is now $3–$20.
+        // Only migrate the exact legacy default so intentional custom values survive.
+        if (saved.minPrice === 2 && !saved._migratedPrice3) {
+          saved.minPrice = 3;
+          saved._migratedPrice3 = true;
+          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
+        }
         return { ...this.defaults, ...saved };
       } catch { return { ...this.defaults }; }
     },
@@ -140,7 +147,7 @@
         if (r.price == null) return false;
 
         // Pillar 1: price range
-        if (r.price < (cfg.minPrice ?? 2) || r.price > (cfg.maxPrice ?? 20)) return false;
+        if (r.price < (cfg.minPrice ?? 3) || r.price > (cfg.maxPrice ?? 20)) return false;
 
         // Pillar 2: minimum gain
         if (cfg.minGainPercent != null && (r.change ?? 0) < cfg.minGainPercent) return false;
@@ -163,11 +170,11 @@
      * Score a stock against the 5 pillars. Max 7 points.
      *
      *   Pillar 2 — Momentum  gain ≥ 10%       → +2   "Strong momentum"
-     *                        gain ≥ 20%       → +1   "Very strong momentum"  (cumul: +3)
+     *                        gain ≥ 30%       → +1   "Full profile: up 30% on the day"  (cumul: +3)
      *   Pillar 3 — RelVol    rvol ≥ 5×        → +1   "Relative volume ≥ 5×"
      *                        rvol ≥ 10×       → +1   "Extreme volume surge ≥ 10×"  (cumul: +2)
      *   Pillar 4 — News      hasNewsCatalyst  → +1   "News catalyst confirmed"
-     *   Pillar 5 — Float     float < 10M      → +1   "Low float (< 10M shares)"
+     *   Pillar 5 — Float     float < 5M       → +1   "Low float (< 5M shares)"
      *
      * Pillars 1 (price $2–$20) and the ≥10%/≥5x/news requirements are
      * enforced as hard filters in filter() / scan(). Score differentiates
@@ -185,7 +192,7 @@
 
       // ── PILLAR 2: MOMENTUM ────────────────────────────────────────────────
       if (gain >= 10) { score += 2; reasons.push('Strong momentum (≥ 10%)'); }
-      if (gain >= 20) { score += 1; reasons.push('Very strong momentum (≥ 20%)'); }
+      if (gain >= 30) { score += 1; reasons.push('Full profile: already up 30% on the day'); }
 
       // ── PILLAR 3: RELATIVE VOLUME ─────────────────────────────────────────
       if (rvol >= 5)  { score += 1; reasons.push('Relative volume ≥ 5×'); }
@@ -194,8 +201,8 @@
       // ── PILLAR 4: NEWS CATALYST (set by scan() Pass 2) ───────────────────
       if (r.hasNewsCatalyst) { score += 1; reasons.push('News catalyst confirmed'); }
 
-      // ── PILLAR 5: FLOAT ───────────────────────────────────────────────────
-      if (float != null && float < 10_000_000) { score += 1; reasons.push('Low float (< 10M shares)'); }
+      // ── PILLAR 5: FLOAT (profile: < 5M shares available to trade) ─────────
+      if (float != null && float < 5_000_000) { score += 1; reasons.push('Low float (< 5M shares)'); }
 
       return { score, reasons, qualified: score >= minScore };
     },
@@ -329,17 +336,17 @@
       // ── 5 PILLARS — show pass/fail + points earned ────────────────────────
       return [
         {
-          label:  '① Price $2 – $20',
+          label:  '① Price $3 – $20',
           value:  price ? '$' + price.toFixed(2) : '--',
-          note:   price >= 2 && price <= 20 ? '✓ Hard filter passed' : '✗ Outside $2–$20',
-          status: price >= 2 && price <= 20 ? 'good' : 'bad',
+          note:   price >= 3 && price <= 20 ? '✓ Hard filter passed' : '✗ Outside $3–$20',
+          status: price >= 3 && price <= 20 ? 'good' : 'bad',
           pillar: true,
         },
         {
-          label:  '② Daily Gain ≥ 10%',
+          label:  '② Daily Gain ≥ 10% (30% = full profile)',
           value:  gain != null ? (gain >= 0 ? '+' : '') + gain.toFixed(2) + '%' : '--',
-          note:   gain >= 20 ? '+2 pts + bonus: very strong' : gain >= 10 ? '+2 pts: strong momentum' : '✗ Needs ≥ 10%',
-          status: gain >= 20 ? 'good' : gain >= 10 ? 'ok' : 'bad',
+          note:   gain >= 30 ? '+3 pts: full profile — up 30% on the day' : gain >= 10 ? '+2 pts: strong momentum' : '✗ Needs ≥ 10%',
+          status: gain >= 30 ? 'good' : gain >= 10 ? 'ok' : 'bad',
           pillar: true,
         },
         {
@@ -359,14 +366,14 @@
           pillar: true,
         },
         {
-          label:  '⑤ Float < 10M shares',
+          label:  '⑤ Float < 5M shares (supply)',
           value:  floatM ?? 'Unknown',
           note:   float == null
             ? 'Float data unavailable (Yahoo)'
-            : float < 5_000_000  ? '+1 pt: very low float (< 5M) ✓'
-            : float < 10_000_000 ? '+1 pt: low float (< 10M) ✓'
+            : float < 5_000_000  ? '+1 pt: low supply (< 5M) ✓'
+            : float < 10_000_000 ? 'Passes filter but no point (5–10M)'
             : '✗ Float too high (> 10M)',
-          status: float == null ? 'ok' : float < 10_000_000 ? 'good' : 'bad',
+          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 10_000_000 ? 'ok' : 'bad',
           pillar: true,
         },
       ];
@@ -639,36 +646,39 @@
      */
     profileChecks(row) {
       const relVol5x  = (row.relVol ?? 0) >= 5;
+      const up30      = (row.change ?? 0) >= 30;
       const up10      = (row.change ?? 0) >= 10;
-      const priceOk   = (row.price ?? 0) >= 2.00 && (row.price ?? 0) <= 20.00;
+      const priceOk   = (row.price ?? 0) >= 3.00 && (row.price ?? 0) <= 20.00;
       const float     = row.floatSh ?? null;
-      const floatOk   = float != null ? float < 10_000_000 : null; // null = unknown
+      const floatOk   = float != null ? float < 5_000_000 : null; // null = unknown
       const floatStr  = float != null ? (float / 1_000_000).toFixed(2) + 'M shares' : 'Unknown (Yahoo)';
       return [
         {
-          label: '① Price $2–$20 (volatile small-caps)',
-          met:   priceOk,
-          note:  `$${row.price?.toFixed(2) ?? '--'}`,
-        },
-        {
-          label: '② Gain ≥ 10% (intraday momentum)',
-          met:   up10,
-          note:  row.change != null ? `+${row.change.toFixed(1)}%` : '--',
-        },
-        {
-          label: '③ Rel Vol ≥ 5× (market participation)',
+          label: '① Demand: 5× Relative Volume (5× above avg volume today)',
           met:   relVol5x,
           note:  row.relVol != null ? `${row.relVol.toFixed(1)}× avg` : '--',
         },
         {
-          label: '④ News catalyst (headline confirmed)',
+          label: '② Demand: Already up 30% on the day',
+          met:   up30,
+          note:  row.change != null
+            ? `+${row.change.toFixed(1)}%` + (up30 ? '' : up10 ? ' (momentum present, not full profile)' : '')
+            : '--',
+        },
+        {
+          label: '③ Demand: News event moving the stock higher',
           met:   row.hasNewsCatalyst ?? null,
           note:  row.hasNewsCatalyst
             ? (row.newsHeadline?.slice(0, 50) || 'Confirmed')
             : 'No headline found',
         },
         {
-          label: '⑤ Float < 10M shares (low supply)',
+          label: '④ Demand: Price between $3.00 – $20.00',
+          met:   priceOk,
+          note:  `$${row.price?.toFixed(2) ?? '--'}`,
+        },
+        {
+          label: '⑤ Supply: Less than 5M shares available to trade',
           met:   floatOk,
           note:  floatStr,
         },
@@ -1950,25 +1960,34 @@
         }
       });
 
-      // Short sell — checks daily limits, uses manual or auto shares
+      // BUY INVERSE — no shorting on this platform. When you expect a drop,
+      // this buys the mapped inverse ETF (rises when the stock/market falls).
       $('mtSellBtn')?.addEventListener('click', async () => {
         const row   = this.selectedRow;
         const rc    = this.riskCalc;
         const limitMsg = this._checkDailyLimits();
         if (limitMsg) return this._showTradeError(limitMsg);
-        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'SELL', 'No valid risk calc — set stop % or ATR', 'err');
-        if (!AlpacaClient.connected) return this.addLog(row.sym, 'SELL', 'Not connected to Alpaca', 'err');
+        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'INVERSE', 'No valid risk calc — set stop % or ATR', 'err');
+        if (!AlpacaClient.connected) return this.addLog(row.sym, 'INVERSE', 'Not connected to Alpaca', 'err');
         const btn = $('mtSellBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Placing…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Resolving…'; }
         try {
-          await AlpacaClient.placeSimpleOrder(row.sym, 'sell', rc.shares * row.price);
-          this._recordTrade(row.sym, 'sell', rc.shares, row.price, rc.stopLoss);
-          this._showTradeSuccess(`SELL ${row.sym} — ${rc.shares} shares placed`);
+          // Resolve the inverse ETF for this symbol
+          const invResp = await fetch(`/api/inverse/${row.sym}`, { credentials: 'include' }).then(r => r.json());
+          if (!invResp?.ok) throw new Error('Could not resolve inverse ETF');
+          const invSym = invResp.inverse;
+          if (btn) btn.textContent = `Buying ${invSym}…`;
+          const notional = rc.shares * row.price; // same dollar exposure as planned
+          await AlpacaClient.placeSimpleOrder(invSym, 'buy', notional);
+          this.dailyTrades++;
+          this._renderDailyLimits();
+          this.addLog(row.sym, '↔ INVERSE', `${invResp.note} — bought $${notional.toFixed(0)} of ${invSym}`, 'info');
+          this._showTradeSuccess(`Bought $${notional.toFixed(0)} of ${invSym} (inverse of ${row.sym})`);
         } catch (err) {
-          this.addLog(row.sym, 'SELL FAILED', err.message, 'err');
+          this.addLog(row.sym, 'INVERSE FAILED', err.message, 'err');
           this._showTradeError(err.message);
         } finally {
-          if (btn) { btn.disabled = false; btn.textContent = '▼ SELL'; }
+          if (btn) { btn.disabled = false; btn.textContent = '▼ BUY INVERSE'; }
         }
       });
 

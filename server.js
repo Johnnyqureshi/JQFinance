@@ -1375,6 +1375,461 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
   }
 });
 
+// ── AI TRADE GAME PLAN ─────────────────────────────────────────────────────────
+// Probability-based intraday game plan. All numbers are computed deterministically
+// from real market data; the LLM only writes the narrative around those facts.
+// Missing data is reported explicitly — never fabricated.
+
+const _gpCache = new Map();    // sym → { at, data }
+const _gpInflight = new Map(); // sym → Promise (coalesces concurrent generations)
+const _gpForceAt = new Map();  // userId:sym → last forced-regeneration time
+const GP_CACHE_MS = 3 * 60 * 1000;
+const GP_FORCE_COOLDOWN_MS = 30 * 1000;
+
+const SECTOR_ETF = {
+  'Technology': 'XLK', 'Financial Services': 'XLF', 'Healthcare': 'XLV',
+  'Consumer Cyclical': 'XLY', 'Consumer Defensive': 'XLP', 'Energy': 'XLE',
+  'Industrials': 'XLI', 'Basic Materials': 'XLB', 'Utilities': 'XLU',
+  'Real Estate': 'XLRE', 'Communication Services': 'XLC',
+};
+
+async function gpFetchDaily(symbol, range = '2y') {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
+    const r = await fetch(url, { headers: YH });
+    if (!r.ok) return null;
+    const rs = (await r.json())?.chart?.result?.[0];
+    if (!rs) return null;
+    const times = rs.timestamp || [];
+    const q = rs.indicators?.quote?.[0] || {};
+    return times.map((t, i) => ({
+      t: new Date(t * 1000).toISOString().slice(0, 10),
+      o: q.open?.[i], h: q.high?.[i], l: q.low?.[i], c: q.close?.[i], v: q.volume?.[i],
+    })).filter(b => [b.o, b.h, b.l, b.c].every(x => x != null));
+  } catch { return null; }
+}
+
+async function gpFetchIntraday5m(symbol) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=1d&includePrePost=true`;
+    const r = await fetch(url, { headers: YH });
+    if (!r.ok) return null;
+    const rs = (await r.json())?.chart?.result?.[0];
+    if (!rs) return null;
+    const times = rs.timestamp || [];
+    const q = rs.indicators?.quote?.[0] || {};
+    const tz = rs.meta?.exchangeTimezoneName || 'America/New_York';
+    return times.map((t, i) => ({
+      t, o: q.open?.[i], h: q.high?.[i], l: q.low?.[i], c: q.close?.[i], v: q.volume?.[i],
+      session: (() => {
+        const d = new Date(t * 1000);
+        const et = new Date(d.toLocaleString('en-US', { timeZone: tz }));
+        const mins = et.getHours() * 60 + et.getMinutes();
+        return mins < 570 ? 'pre' : mins >= 960 ? 'post' : 'reg';
+      })(),
+    })).filter(b => b.c != null);
+  } catch { return null; }
+}
+
+function gpATR(bars, period = 14) {
+  if (!bars || bars.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < bars.length; i++) {
+    const b = bars[i], p = bars[i - 1];
+    trs.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
+  }
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
+  return atr;
+}
+
+function gpVWAP(intraBars) {
+  const reg = (intraBars || []).filter(b => b.session === 'reg' && b.v > 0);
+  if (!reg.length) return null;
+  let pv = 0, vol = 0;
+  reg.forEach(b => { const tp = (b.h + b.l + b.c) / 3; pv += tp * b.v; vol += b.v; });
+  return vol > 0 ? pv / vol : null;
+}
+
+function gpMACD(closes) {
+  if (closes.length < 35) return null;
+  const emaSeries = (vals, p) => {
+    const k = 2 / (p + 1); const out = [];
+    let e = vals.slice(0, p).reduce((a, b) => a + b, 0) / p;
+    out.push(e);
+    for (let i = p; i < vals.length; i++) { e = vals[i] * k + e * (1 - k); out.push(e); }
+    return out;
+  };
+  const e12 = emaSeries(closes, 12), e26 = emaSeries(closes, 26);
+  const macdLine = [];
+  for (let i = 0; i < e26.length; i++) macdLine.push(e12[i + 14] - e26[i]);
+  if (macdLine.length < 9) return null;
+  const sig = emaSeries(macdLine, 9);
+  const m = macdLine.at(-1), s = sig.at(-1);
+  return { value: m, signal: s, histogram: m - s };
+}
+
+// Historical analogs: past days with a 1-day drop >= threshold%.
+// Measures what actually happened the SAME day (low→close rebound) and the NEXT day.
+function gpAnalogs(daily, thresholdPct) {
+  const events = [];
+  for (let i = 1; i < daily.length - 1; i++) {
+    const chg = ((daily[i].c - daily[i - 1].c) / daily[i - 1].c) * 100;
+    if (chg > -thresholdPct) continue;
+    const day = daily[i], next = daily[i + 1];
+    const reboundClose = day.l > 0 ? ((day.c - day.l) / day.l) * 100 : 0;   // low → close
+    const reboundHigh  = day.l > 0 ? ((Math.max(day.h, next.h) - day.l) / day.l) * 100 : 0;
+    const nextRet      = ((next.c - day.c) / day.c) * 100;
+    // max further downside over following 3 days
+    let minLow = day.l;
+    for (let j = i + 1; j <= Math.min(i + 3, daily.length - 1); j++) minLow = Math.min(minLow, daily[j].l);
+    events.push({
+      reboundClose, reboundHigh, nextRet,
+      nextGreen: next.c > next.o,
+      bounced3: reboundClose >= 3,
+      bounced5: reboundClose >= 5,
+      furtherDown: ((minLow - day.l) / day.l) * 100,
+    });
+  }
+  if (!events.length) return null;
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const med = arr => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+  const pct = f => Math.round((events.filter(f).length / events.length) * 100);
+  return {
+    sampleSize: events.length,
+    lowConfidence: events.length < 10,
+    bounced3Pct: pct(e => e.bounced3),
+    bounced5Pct: pct(e => e.bounced5),
+    closedGreenNextPct: pct(e => e.nextGreen),
+    avgMaxReboundPct: +avg(events.map(e => e.reboundHigh)).toFixed(1),
+    medMaxReboundPct: +med(events.map(e => e.reboundHigh)).toFixed(1),
+    avgNextDayPct: +avg(events.map(e => e.nextRet)).toFixed(1),
+    maxFurtherDownsidePct: +Math.min(...events.map(e => e.furtherDown)).toFixed(1),
+  };
+}
+
+// Swing highs/lows (5-bar pivots) from recent daily bars
+function gpSwings(daily, lookback = 90) {
+  const bars = daily.slice(-lookback);
+  const highs = [], lows = [];
+  for (let i = 2; i < bars.length - 2; i++) {
+    const w = bars.slice(i - 2, i + 3);
+    if (bars[i].h === Math.max(...w.map(b => b.h))) highs.push(bars[i].h);
+    if (bars[i].l === Math.min(...w.map(b => b.l))) lows.push(bars[i].l);
+  }
+  return { highs, lows };
+}
+
+app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
+  const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+  if (!sym) return res.status(400).json({ ok: false, error: 'Symbol required' });
+
+  // ?force=1 bypasses the cache, but per user+symbol at most once per cooldown window
+  let force = !!req.query.force;
+  if (force) {
+    const fKey = `${req.session.userId}:${sym}`;
+    const lastForce = _gpForceAt.get(fKey) || 0;
+    if (Date.now() - lastForce < GP_FORCE_COOLDOWN_MS) force = false;
+    else {
+      _gpForceAt.set(fKey, Date.now());
+      if (_gpForceAt.size > 200) _gpForceAt.delete(_gpForceAt.keys().next().value);
+    }
+  }
+
+  const cached = _gpCache.get(sym);
+  if (cached && Date.now() - cached.at < GP_CACHE_MS && !force) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  // Coalesce: if a generation for this symbol is already running, share its result
+  const inflight = _gpInflight.get(sym);
+  if (inflight) {
+    try { return res.json(await inflight); }
+    catch { return res.status(500).json({ ok: false, error: 'Game plan generation failed' }); }
+  }
+
+  const job = (async () => {
+    const [quote, daily, intra, profile, mktRaw] = await Promise.all([
+      fetchLiveQuote(sym, req.session.userId).catch(() => null),
+      gpFetchDaily(sym, '2y'),
+      gpFetchIntraday5m(sym),
+      yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
+      yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
+    ]);
+
+    if (!quote?.price || !daily?.length) {
+      return { ok: false, unavailable: true, symbol: sym, error: 'REAL-TIME DATA UNAVAILABLE' };
+    }
+
+    const dataGaps = [];
+    const price  = quote.price;
+    const closes = daily.map(b => b.c);
+    const atr    = gpATR(daily);
+    const vwap   = gpVWAP(intra);
+    if (!intra?.length) dataGaps.push('Intraday 5-min data unavailable');
+    if (vwap == null)   dataGaps.push('VWAP unavailable (no regular-session volume yet)');
+
+    // Premarket
+    const preBars = (intra || []).filter(b => b.session === 'pre');
+    const premarket = preBars.length ? {
+      last: preBars.at(-1).c,
+      high: Math.max(...preBars.map(b => b.h ?? b.c)),
+      low:  Math.min(...preBars.map(b => b.l ?? b.c)),
+    } : null;
+
+    // Indicators
+    const rsi14 = calcRSI(closes);
+    const rsi5  = calcRSI(closes, 5);
+    const rsiPrev = calcRSI(closes.slice(0, -3));
+    const indicators = {
+      rsi14: rsi14 != null ? +rsi14.toFixed(1) : null,
+      rsi5:  rsi5  != null ? +rsi5.toFixed(1)  : null,
+      rsiTrend: rsi14 != null && rsiPrev != null ? (rsi14 > rsiPrev + 2 ? 'rising' : rsi14 < rsiPrev - 2 ? 'falling' : 'flat') : null,
+      atr: atr != null ? +atr.toFixed(2) : null,
+      atrPct: atr != null ? +((atr / price) * 100).toFixed(1) : null,
+      vwap: vwap != null ? +vwap.toFixed(2) : null,
+      ema9:  calcEMA(closes, 9),
+      ema20: calcEMA(closes, 20),
+      sma20: calcSMA(closes, 20),
+      sma50: calcSMA(closes, 50),
+      sma200: calcSMA(closes, 200),
+      macd: gpMACD(closes),
+      distVwapPct: vwap ? +(((price - vwap) / vwap) * 100).toFixed(1) : null,
+    };
+    if (indicators.sma200 == null) dataGaps.push('SMA 200 unavailable (insufficient history)');
+
+    // Sell-off stats
+    const chgN = n => closes.length > n ? +(((price - closes.at(-1 - n)) / closes.at(-1 - n)) * 100).toFixed(1) : null;
+    const high20 = Math.max(...daily.slice(-20).map(b => b.h));
+    const relVol = quote.volume && quote.avgVolume ? +(quote.volume / quote.avgVolume).toFixed(1) : null;
+    const gapPct = quote.open && quote.previousClose ? +(((quote.open - quote.previousClose) / quote.previousClose) * 100).toFixed(1) : null;
+    const chg1d = quote.previousClose ? +(((price - quote.previousClose) / quote.previousClose) * 100).toFixed(1) : null;
+    const selloffClass = [];
+    if (chg1d != null && indicators.atrPct != null) {
+      const mag = Math.abs(chg1d) / Math.max(indicators.atrPct, 0.5);
+      if (chg1d <= -1 || chg1d >= 1) selloffClass.push(mag >= 3 ? (chg1d < 0 ? 'EXTREME DECLINE' : 'EXTREME RALLY') : mag >= 1.5 ? (chg1d < 0 ? 'SHARP DECLINE' : 'SHARP RALLY') : (chg1d < 0 ? 'NORMAL DECLINE' : 'NORMAL ADVANCE'));
+    }
+    if (gapPct != null && gapPct <= -2) selloffClass.push('GAP-DOWN');
+    if (gapPct != null && gapPct >= 2)  selloffClass.push('GAP-UP');
+    if (relVol != null && chg1d != null) {
+      if (relVol >= 2 && chg1d < -3) selloffClass.push('HIGH-VOLUME LIQUIDATION');
+      else if (relVol < 0.8 && chg1d < 0) selloffClass.push('LOW-VOLUME PULLBACK');
+    }
+    const selloff = {
+      chg1d, chg2d: chgN(2), chg5d: chgN(5), chg10d: chgN(10),
+      distFromHigh20Pct: +(((price - high20) / high20) * 100).toFixed(1),
+      distSma20Pct: indicators.sma20 ? +(((price - indicators.sma20) / indicators.sma20) * 100).toFixed(1) : null,
+      distSma50Pct: indicators.sma50 ? +(((price - indicators.sma50) / indicators.sma50) * 100).toFixed(1) : null,
+      gapPct, relVol, classification: selloffClass,
+    };
+
+    // Oversold classification — multi-factor, never RSI alone
+    const reds = (() => { let n = 0; for (let i = daily.length - 1; i > 0 && daily[i].c < daily[i].o; i--) n++; return n; })();
+    const greens = (() => { let n = 0; for (let i = daily.length - 1; i > 0 && daily[i].c > daily[i].o; i--) n++; return n; })();
+    let obScore = 0;
+    const obReasons = [];
+    if (rsi14 != null) {
+      if (rsi14 <= 25) { obScore -= 2; obReasons.push(`RSI(14) ${rsi14.toFixed(0)} deeply depressed`); }
+      else if (rsi14 <= 35) { obScore -= 1; obReasons.push(`RSI(14) ${rsi14.toFixed(0)} in lower band`); }
+      else if (rsi14 >= 75) { obScore += 2; obReasons.push(`RSI(14) ${rsi14.toFixed(0)} elevated`); }
+      else if (rsi14 >= 65) { obScore += 1; obReasons.push(`RSI(14) ${rsi14.toFixed(0)} in upper band`); }
+    }
+    if (indicators.distVwapPct != null && Math.abs(indicators.distVwapPct) >= 2) {
+      obScore += indicators.distVwapPct > 0 ? 1 : -1;
+      obReasons.push(`Price ${indicators.distVwapPct > 0 ? '+' : ''}${indicators.distVwapPct}% vs VWAP`);
+    }
+    if (selloff.distSma20Pct != null && Math.abs(selloff.distSma20Pct) >= (indicators.atrPct ?? 3) * 2) {
+      obScore += selloff.distSma20Pct > 0 ? 1 : -1;
+      obReasons.push(`Extended ${selloff.distSma20Pct}% from 20-day MA`);
+    }
+    if (reds >= 3)   { obScore -= 1; obReasons.push(`${reds} consecutive red days`); }
+    if (greens >= 3) { obScore += 1; obReasons.push(`${greens} consecutive green days`); }
+    if (relVol != null && relVol >= 2) obReasons.push(`Volume ${relVol}x average`);
+    const oversold = {
+      label: obScore <= -3 ? 'VERY OVERSOLD' : obScore <= -1 ? 'OVERSOLD' : obScore >= 3 ? 'VERY OVERBOUGHT' : obScore >= 1 ? 'OVERBOUGHT' : 'NEUTRAL',
+      reasons: obReasons,
+    };
+
+    // Historical analogs — threshold picked from current move size
+    const dropMag = chg1d != null && chg1d < 0 ? Math.abs(chg1d) : null;
+    const threshold = dropMag == null ? null : dropMag >= 10 ? 10 : dropMag >= 8 ? 8 : dropMag >= 5 ? 5 : null;
+    const analogs = threshold ? gpAnalogs(daily, threshold) : null;
+
+    // Market + sector context
+    const mktArr = Array.isArray(mktRaw) ? mktRaw : mktRaw ? [mktRaw] : [];
+    const mkt = {};
+    mktArr.forEach(q => { if (q?.symbol) mkt[q.symbol] = +(q.regularMarketChangePercent ?? 0).toFixed(2); });
+    const sectorName = profile?.assetProfile?.sector || null;
+    const sectorEtf = sectorName ? SECTOR_ETF[sectorName] || null : null;
+    let sectorChg = null;
+    if (sectorEtf) {
+      try {
+        const sq = await yf.quote(sectorEtf, {}, { validateResult: false });
+        sectorChg = +(sq?.regularMarketChangePercent ?? 0).toFixed(2);
+      } catch { /* sector data unavailable */ }
+    }
+    if (sectorChg == null) dataGaps.push('Sector ETF data unavailable');
+    let attribution = 'UNKNOWN';
+    if (chg1d != null && mkt.SPY != null) {
+      const mktMove = mkt.SPY, secMove = sectorChg ?? mktMove;
+      const stockExtra = chg1d - secMove;
+      if (Math.abs(chg1d) < 1.5) attribution = 'QUIET';
+      else if (Math.abs(stockExtra) >= Math.abs(chg1d) * 0.6) attribution = 'STOCK-SPECIFIC';
+      else if (sectorChg != null && Math.abs(sectorChg) >= Math.abs(mktMove) * 1.5) attribution = 'SECTOR-DRIVEN';
+      else if (Math.abs(mktMove) >= 1) attribution = 'MARKET-DRIVEN';
+      else attribution = 'COMBINATION';
+    }
+    const market = {
+      spy: mkt.SPY ?? null, qqq: mkt.QQQ ?? null, iwm: mkt.IWM ?? null,
+      sector: sectorName, sectorEtf, sectorChangePct: sectorChg,
+      trend: mkt.SPY == null ? null : mkt.SPY >= 0.3 ? 'BULLISH' : mkt.SPY <= -0.3 ? 'BEARISH' : 'NEUTRAL',
+      sectorTrend: sectorChg == null ? null : sectorChg >= 0.3 ? 'BULLISH' : sectorChg <= -0.3 ? 'BEARISH' : 'NEUTRAL',
+      attribution,
+    };
+
+    // News (Yahoo search — no key needed; NewsAPI headline titles if key present)
+    let news = [];
+    try {
+      const nr = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&newsCount=6&quotesCount=0`, { headers: YH });
+      if (nr.ok) {
+        const nd = await nr.json();
+        news = (nd.news || []).slice(0, 5).map(n => ({
+          headline: n.title, source: n.publisher,
+          date: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString().slice(0, 10) : null,
+        }));
+      }
+    } catch { /* news optional */ }
+    if (!news.length) dataGaps.push('No recent news retrieved');
+
+    // Key levels
+    const prevDay = daily.at(-2) || null;
+    const swings = gpSwings(daily);
+    const candidates = [];
+    const push = (p, label) => { if (p != null && isFinite(p) && p > 0) candidates.push({ price: +(+p).toFixed(2), label }); };
+    if (prevDay) { push(prevDay.h, "Prev day high"); push(prevDay.l, "Prev day low"); }
+    push(quote.dayHigh, 'Today high'); push(quote.dayLow, 'Today low');
+    push(vwap, 'VWAP');
+    if (premarket) { push(premarket.high, 'Premarket high'); push(premarket.low, 'Premarket low'); }
+    push(indicators.sma20, 'SMA 20'); push(indicators.sma50, 'SMA 50'); push(indicators.sma200, 'SMA 200');
+    swings.highs.slice(-3).forEach(h => push(h, 'Swing high'));
+    swings.lows.slice(-3).forEach(l => push(l, 'Swing low'));
+    const inRange = candidates.filter(c => Math.abs(c.price - price) / price <= 0.15);
+    const dedupe = arr => {
+      const out = [];
+      arr.forEach(c => {
+        const near = out.find(o => Math.abs(o.price - c.price) / price < 0.004);
+        if (near) near.label += ' + ' + c.label; else out.push({ ...c });
+      });
+      return out;
+    };
+    const support = dedupe(inRange.filter(c => c.price < price).sort((a, b) => b.price - a.price)).slice(0, 3);
+    const resistance = dedupe(inRange.filter(c => c.price > price).sort((a, b) => a.price - b.price)).slice(0, 3);
+    const breakdown = support.length ? +(support.at(-1).price - (atr ?? price * 0.02) * 0.5).toFixed(2) : null;
+    const levels = { support, resistance, breakdown, currentPrice: +price.toFixed(2) };
+
+    // Probabilities — analog base rates adjusted by live context, rounded to 5s
+    const clamp5 = v => Math.max(5, Math.min(95, Math.round(v / 5) * 5));
+    let pBounce, pGreen, p3, p5;
+    if (analogs && !analogs.lowConfidence) {
+      pBounce = analogs.bounced3Pct * 0.6 + 40 * 0.4;
+      p3 = analogs.bounced3Pct; p5 = analogs.bounced5Pct;
+      pGreen = analogs.closedGreenNextPct;
+    } else {
+      pBounce = 50; p3 = 40; p5 = 25; pGreen = 45;
+    }
+    const adj = (indicators.distVwapPct != null && indicators.distVwapPct > 0 ? 8 : indicators.distVwapPct != null ? -8 : 0)
+      + (market.trend === 'BULLISH' ? 6 : market.trend === 'BEARISH' ? -6 : 0)
+      + (market.sectorTrend === 'BULLISH' ? 4 : market.sectorTrend === 'BEARISH' ? -4 : 0)
+      + (oversold.label.includes('OVERSOLD') && relVol != null && relVol >= 2 ? 5 : 0);
+    const probabilities = {
+      reliefBounce: clamp5(pBounce + adj),
+      closeGreen:   clamp5(pGreen + adj),
+      rebound3:     clamp5(p3 + adj * 0.5),
+      rebound5:     clamp5(p5 + adj * 0.5),
+      downsideLeg:  clamp5(100 - (pBounce + adj)),
+      basis: analogs
+        ? `Base rates from ${analogs.sampleSize} past session(s) that closed down ${threshold}%+ (end-of-day statistics — intraday timing not modeled)${analogs.lowConfidence ? '. LIMITED SAMPLE, LOW CONFIDENCE' : ''}. Adjusted for VWAP position, market and sector trend.`
+        : 'No comparable historical selloff for the current move — probabilities are neutral heuristics adjusted for live context. LOW CONFIDENCE.',
+    };
+
+    // Confidence breakdown
+    const parts = {
+      technical: Math.min(100, 40 + (indicators.rsi14 != null ? 15 : 0) + (vwap != null ? 15 : 0) + (indicators.macd ? 15 : 0) + (atr != null ? 15 : 0)),
+      historical: analogs ? (analogs.lowConfidence ? 35 : Math.min(90, 40 + analogs.sampleSize * 2)) : 15,
+      market: mkt.SPY != null ? 75 : 20,
+      sector: sectorChg != null ? 75 : 25,
+      catalyst: news.length ? 65 : 30,
+      volume: relVol != null ? (relVol >= 1.5 ? 80 : 60) : 25,
+    };
+    const overall = Math.round(Object.values(parts).reduce((a, b) => a + b, 0) / Object.keys(parts).length);
+
+    const snapshot = {
+      price: +price.toFixed(2), prevClose: quote.previousClose, open: quote.open,
+      high: quote.dayHigh, low: quote.dayLow, volume: quote.volume, avgVolume: quote.avgVolume,
+      relVol, marketCap: quote.marketCap, wk52High: quote.yearHigh, wk52Low: quote.yearLow,
+      marketState: quote.marketState, premarket, changePct: chg1d,
+    };
+
+    // ── AI narrative (facts in → narrative out; numbers stay deterministic) ──
+    let ai = { available: false, reason: 'AI narrative unavailable' };
+    const apiKey = process.env.AIML_API_KEY;
+    if (apiKey) {
+      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities };
+      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. Oversold alone is NOT a buy signal. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
+      try {
+        const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: gpPrompt },
+              { role: 'user', content: JSON.stringify(facts) },
+            ],
+            max_tokens: 900, temperature: 0.35,
+            response_format: { type: 'json_object' },
+          }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const raw = data.choices?.[0]?.message?.content?.trim() || '';
+          try {
+            const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, ''));
+            ai = { available: true, ...parsed };
+          } catch { ai = { available: false, reason: 'AI returned unparseable output' }; }
+        } else {
+          ai = { available: false, reason: `AI service error (${r.status})` };
+        }
+      } catch { ai = { available: false, reason: 'AI service unreachable' }; }
+    } else {
+      ai = { available: false, reason: 'AI key not configured' };
+    }
+
+    const out = {
+      ok: true, symbol: sym, generatedAt: new Date().toISOString(), dataGaps,
+      snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
+      selloff, oversold,
+      analogs: analogs ? { threshold, ...analogs } : null,
+      market, news, levels, probabilities,
+      confidence: { overall, parts },
+      ai,
+    };
+    _gpCache.set(sym, { at: Date.now(), data: out });
+    if (_gpCache.size > 50) _gpCache.delete(_gpCache.keys().next().value);
+    return out;
+  })();
+
+  _gpInflight.set(sym, job);
+  try {
+    res.json(await job);
+  } catch (e) {
+    console.error('[GamePlan]', sym, e.message);
+    res.status(500).json({ ok: false, error: 'Game plan generation failed' });
+  } finally {
+    _gpInflight.delete(sym);
+  }
+});
+
 // ── Alpaca Markets Integration ─────────────────────────────────────────────────
 
 // Sentinel key written to DB when the user explicitly disconnects so that the

@@ -31,3 +31,6 @@ description: All external data sources, their primary/fallback chain, and live s
 - No mock/fake/random market data anywhere in the codebase — confirmed by full audit
 
 **Why:** Knowing the exact source chain prevents hunting for the wrong API when a feature goes dark.
+
+## AI narrative (Aug 19, 2026)
+AIML_API_KEY is DISABLED at aimlapi.com (provider returns 401 "API key is disabled"). Affects /api/agent/chat and /api/gameplan narrative. Both degrade gracefully — game plan shows quantitative analysis with an explicit notice. **How to apply:** if AI features return 401, check key status at aimlapi.com/app/keys before debugging code.

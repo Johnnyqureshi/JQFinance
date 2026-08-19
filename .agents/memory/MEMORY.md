@@ -1,4 +1,4 @@
 - [5-pillar scanner system](5-pillar-scanner.md) — hard filters: price $2-$20, gain≥10%, relVol≥5x, news catalyst, float<10M; scoring max 7pts; implemented in momentum.js
 - [Realtime trader null-safe writes](rt-dom-nullsafe.md) — all DOM writes in realtimetrader.js must use setSafe/setCls helpers; direct $().textContent= crashes when panel is unmounted
-- [API data sources](api-data-sources.md) — all data sources confirmed live; FMP_KEY set (analyst/earnings/calendar); NEWS_KEY set; Alpaca keys set; ElevenLabs keys MISSING (voice offline)
+- [API data sources](api-data-sources.md) — FMP/NEWS/Alpaca keys live; AIML_API_KEY DISABLED at provider (AI chat + game-plan narrative degrade gracefully); ElevenLabs MISSING
 - [Auto-trade safety gates](autotrade-safety-gates.md) — order API leverages server-side (send base amount!); gates fail closed; cycle mutex required; accept BUY and STRONG BUY

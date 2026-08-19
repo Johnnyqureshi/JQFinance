@@ -207,6 +207,7 @@ async function openStock(sym, snap) {
 
   trader.analyze(sym);
   if (typeof rtTrader !== 'undefined') rtTrader.load(sym);
+  if (typeof gamePlan !== 'undefined') gamePlan.load(sym);
 
   const [barsData, fmpData, newsData, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),

@@ -312,34 +312,26 @@
 
     </div><!-- .hw-layout -->
 
-    <!-- ── Bounce 2.0 Signal Panel ───────────────────────────────────────────── -->
-    <div class="tdi-panel" id="tdiPanel" style="display:none">
-      <div class="tdi-header">
-        <div class="tdi-title-row">
-          <span class="tdi-icon">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-          </span>
-          <span class="tdi-title">Bounce 2.0 Signal</span>
-          <span class="tdi-sub">EMA 8/21/34 · SMA 50 · Stochastic (8,3,3)</span>
-        </div>
+    <!-- ── AI Trade Game Plan ────────────────────────────────────────────────── -->
+    <div class="gp-panel" id="gpPanel" style="display:none">
+      <div class="gp-header">
+        <span class="gp-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a10 10 0 1010 10"/><path d="M12 6a6 6 0 106 6"/><circle cx="12" cy="12" r="2"/><path d="M22 2l-8 8"/></svg>
+        </span>
+        <span class="gp-title">AI Trade Game Plan</span>
+        <span class="gp-setup-badge" id="gpSetupBadge" style="display:none">--</span>
+        <span class="gp-updated" id="gpUpdated"></span>
+        <button class="gp-refresh-btn" id="gpRefreshBtn" title="Regenerate now">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </button>
       </div>
-      <div class="tdi-body" id="tdiBody">
-        <div class="tdi-sig-card" id="tdiSigCard">
-          <div class="tdi-sig-loading" id="tdiLoading">
-            <div class="t-spinner"></div>
-            <span>Checking Bounce 2.0…</span>
-          </div>
-          <div class="tdi-sig-content" id="tdiSigContent" style="display:none">
-            <div class="tdi-verdict-col">
-              <div class="tdi-verdict" id="tdiVerdict">--</div>
-              <div class="tdi-conf" id="tdiConf"></div>
-            </div>
-            <div class="tdi-bounce-conds" id="tdiBounceConds"></div>
-            <div class="tdi-bounce-targets" id="tdiTargets"></div>
-          </div>
-          <!-- Candle Patterns strip (populated by renderCandlePatterns) -->
-          <div class="tdi-patterns-strip" id="tdiPatternsList" style="display:none"></div>
+      <div class="gp-body">
+        <div class="gp-loading" id="gpLoading">
+          <div class="t-spinner"></div>
+          <span>Building game plan for <strong id="gpLoadSym"></strong>…</span>
         </div>
+        <div class="gp-error" id="gpError" style="display:none"></div>
+        <div class="gp-content" id="gpContent" style="display:none"></div>
       </div>
     </div>
 
@@ -442,43 +434,6 @@
                 <div class="rt-vp-msub">Value Area Low</div>
               </div>
             </div>
-          </div>
-
-          <!-- Next-Day Prediction Panel -->
-          <div class="rt-pred-panel" id="rtPredPanel" style="display:none">
-            <div class="rt-pred-header">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              <span class="rt-pred-title">Next Day Forecast</span>
-              <span class="rt-pred-date" id="rtPredDate"></span>
-            </div>
-            <div class="rt-pred-body">
-              <div class="rt-pred-left">
-                <div class="rt-pred-dir-badge neut" id="rtPredDir">--</div>
-                <div class="rt-pred-conf neut" id="rtPredConf">--%</div>
-              </div>
-              <div class="rt-pred-right">
-                <div class="rt-pred-target-row">
-                  <span class="rt-pred-target-lbl">Target</span>
-                  <span class="rt-pred-target-val" id="rtPredTarget">--</span>
-                </div>
-                <div class="rt-pred-range-wrap" id="rtPredRangeWrap">
-                  <div class="rt-pred-range-labels">
-                    <span id="rtPredLow">--</span>
-                    <span id="rtPredHigh">--</span>
-                  </div>
-                  <div class="rt-pred-bar">
-                    <div class="rt-pred-bar-fill" id="rtPredBarFill"></div>
-                    <div class="rt-pred-pin cur" id="rtPredCurPin" title="Current price"></div>
-                    <div class="rt-pred-pin tgt" id="rtPredTgtPin" title="Predicted target"></div>
-                  </div>
-                  <div class="rt-pred-range-sub">
-                    <span>Est. low</span><span>Est. high</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="rt-pred-factors" id="rtPredFactors"></div>
-            <div class="rt-pred-disclaimer">Algorithmic estimate based on intraday data · Not financial advice</div>
           </div>
 
           <!-- Auto-refresh footer -->
@@ -1267,6 +1222,7 @@
 <script src="/js/app.js"></script>
 <script src="/js/trader.js"></script>
 <script src="/js/realtimetrader.js"></script>
+<script src="/js/gameplan.js"></script>
 <script src="/js/scanner.js"></script>
 
 <script src="/js/alpacatrader.js"></script>

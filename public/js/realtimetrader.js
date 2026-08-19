@@ -481,160 +481,6 @@ const rtTrader = (() => {
     return trs.reduce((s, v) => s + v, 0) / trs.length;
   }
 
-  // ── Next-Day Price Prediction ────────────────────────────────────────────────
-  function calcPrediction(price, vwap, rsi, momentum, volData, dailyBars) {
-    const atr = calcATR(dailyBars);
-
-    // Score each signal: +1 bullish, -1 bearish, 0 neutral
-    let score = 0;
-    const factors = [];
-
-    // VWAP position — weight 2 (strongest intraday structural signal)
-    if (vwap != null) {
-      const vwapPct = ((price - vwap) / vwap * 100);
-      if (price > vwap) {
-        score += 2;
-        factors.push({ label: 'Trading above VWAP', dir: 'bull', note: '+' + vwapPct.toFixed(2) + '%' });
-      } else {
-        score -= 2;
-        factors.push({ label: 'Trading below VWAP', dir: 'bear', note: vwapPct.toFixed(2) + '%' });
-      }
-    }
-
-    // RSI — weight 1
-    if (rsi != null) {
-      if (rsi < 38) {
-        score += 1;
-        factors.push({ label: 'RSI deeply oversold', dir: 'bull', note: rsi.toFixed(1) });
-      } else if (rsi < 48) {
-        score += 1;
-        factors.push({ label: 'RSI in recovery zone', dir: 'bull', note: rsi.toFixed(1) });
-      } else if (rsi > 72) {
-        score -= 1;
-        factors.push({ label: 'RSI overbought', dir: 'bear', note: rsi.toFixed(1) });
-      } else if (rsi > 62) {
-        score -= 1;
-        factors.push({ label: 'RSI elevated', dir: 'bear', note: rsi.toFixed(1) });
-      } else {
-        factors.push({ label: 'RSI neutral', dir: 'neut', note: rsi.toFixed(1) });
-      }
-    }
-
-    // Candle momentum — weight 1
-    if (momentum >= 2) {
-      score += 1;
-      factors.push({ label: 'Bullish bar sequence', dir: 'bull', note: '+' + momentum + ' net bars' });
-    } else if (momentum <= -2) {
-      score -= 1;
-      factors.push({ label: 'Bearish bar sequence', dir: 'bear', note: momentum + ' net bars' });
-    } else {
-      factors.push({ label: 'Mixed candle sentiment', dir: 'neut', note: momentum + ' net bars' });
-    }
-
-    // Volume — amplifies the current directional bias
-    if (volData.surge && volData.avgVol > 0) {
-      const ratio = (volData.lastVol / volData.avgVol).toFixed(1);
-      if (score > 0) {
-        score += 1;
-        factors.push({ label: 'Volume surge — bull confirm', dir: 'bull', note: ratio + 'x avg' });
-      } else if (score < 0) {
-        score -= 1;
-        factors.push({ label: 'Volume surge — bear confirm', dir: 'bear', note: ratio + 'x avg' });
-      }
-    }
-
-    // Direction verdict
-    let direction, dirClass;
-    if      (score >= 3)  { direction = 'Bullish';      dirClass = 'bull'; }
-    else if (score === 2) { direction = 'Mild Bullish'; dirClass = 'bull'; }
-    else if (score <= -3) { direction = 'Bearish';      dirClass = 'bear'; }
-    else if (score === -2){ direction = 'Mild Bearish'; dirClass = 'bear'; }
-    else                  { direction = 'Neutral';       dirClass = 'neut'; }
-
-    // Confidence: stronger signal alignment → higher confidence
-    const maxScore = 5;
-    const confidence = Math.min(88, Math.round(50 + (Math.abs(score) / maxScore) * 38));
-
-    // Price range using ATR (Daily Average True Range)
-    let low = null, high = null, target = null;
-    if (atr) {
-      // Distribute ATR range based on directional bias
-      // Bullish: more range above; Bearish: more range below; Neutral: symmetric
-      const bias    = Math.max(-1, Math.min(1, score / maxScore)); // -1 to +1
-      const upMult  = 0.5 + bias * 0.25;  // 0.25–0.75
-      const dnMult  = 0.5 - bias * 0.25;  // 0.25–0.75
-      high   = price + atr * upMult;
-      low    = price - atr * dnMult;
-      target = price + atr * bias * 0.35;
-    }
-
-    const nextDate = (() => {
-      const d = new Date();
-      d.setDate(d.getDate() + (d.getDay() === 5 ? 3 : d.getDay() === 6 ? 2 : 1));
-      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    })();
-
-    return { direction, dirClass, score, confidence, factors, low, high, target, atr, nextDate };
-  }
-
-  // ── Render prediction panel ──────────────────────────────────────────────────
-  function renderPrediction(pred, price) {
-    const panel = $('rtPredPanel');
-    if (!panel) return;
-
-    $('rtPredDir').textContent    = pred.direction;
-    $('rtPredDir').className      = 'rt-pred-dir-badge ' + pred.dirClass;
-    $('rtPredDate').textContent   = pred.nextDate;
-    $('rtPredConf').textContent   = pred.confidence + '% confidence';
-    $('rtPredConf').className     = 'rt-pred-conf ' + pred.dirClass;
-
-    // Price range
-    if (pred.low != null && pred.high != null) {
-      $('rtPredLow').textContent    = '$' + fmt(pred.low);
-      $('rtPredHigh').textContent   = '$' + fmt(pred.high);
-      $('rtPredTarget').textContent = pred.target != null ? '$' + fmt(pred.target) : '$' + fmt(price);
-
-      // Position current price on the range bar
-      const rng = pred.high - pred.low;
-      const curPct = rng > 0 ? Math.max(2, Math.min(98, ((price - pred.low) / rng) * 100)) : 50;
-      const tgtPct = pred.target != null && rng > 0
-        ? Math.max(2, Math.min(98, ((pred.target - pred.low) / rng) * 100)) : curPct;
-
-      const bar = $('rtPredBarFill');
-      const curPin = $('rtPredCurPin');
-      const tgtPin = $('rtPredTgtPin');
-      if (bar)    bar.style.width    = tgtPct.toFixed(1) + '%';
-      if (curPin) curPin.style.left  = curPct.toFixed(1) + '%';
-      if (tgtPin) tgtPin.style.left  = tgtPct.toFixed(1) + '%';
-
-      $('rtPredRangeWrap').style.display = '';
-    } else {
-      $('rtPredRangeWrap').style.display = 'none';
-    }
-
-    // Factors
-    const factorsEl = $('rtPredFactors');
-    if (factorsEl) {
-      factorsEl.replaceChildren();
-      pred.factors.slice(0, 4).forEach(f => {
-        const row = document.createElement('div');
-        row.className = 'rt-pred-factor ' + f.dir;
-        const dot = document.createElement('span');
-        dot.className = 'rt-pred-dot ' + f.dir;
-        const lbl = document.createElement('span');
-        lbl.className = 'rt-pred-factor-lbl';
-        lbl.textContent = f.label;
-        const note = document.createElement('span');
-        note.className = 'rt-pred-factor-note';
-        note.textContent = f.note;
-        row.append(dot, lbl, note);
-        factorsEl.appendChild(row);
-      });
-    }
-
-    panel.style.display = '';
-  }
-
   // ── Countdown timer ─────────────────────────────────────────────────────────
   function startCountdown(onDone) {
     clearInterval(cdTimer);
@@ -763,188 +609,11 @@ const rtTrader = (() => {
     const vp = calcVolumeProfile(bars);
     renderVolumeProfile(vp, price);
 
-    // Next-day price prediction
-    const pred = calcPrediction(price, vwap, rsi, momentum, volData, dailyBars || []);
-    renderPrediction(pred, price);
-
     // Daily pivot levels + implied move
     const pivots = calcDailyPivots(dailyBars || [], price);
     renderDailyPivots(pivots, price);
 
     startCountdown(() => analyze(sym));
-  }
-
-  // ── Trading Intelligence Panel ───────────────────────────────────────────────
-  function renderIntelPanel(data) {
-    const panel = $('tdiPanel');
-    if (!panel) return;
-
-    const { ok, signal, regime, geoRisk, isInverse, symbol } = data || {};
-
-    // Always show panel (even on error)
-    panel.style.display = '';
-
-    // INV badge
-    const invBadge = $('tdiInvBadge');
-    if (invBadge) invBadge.style.display = isInverse ? 'inline-block' : 'none';
-
-    // ── Market Regime badge ─────────────────────────────────────────────────
-    const regimeWrap = $('tdiRegimeWrap');
-    if (regimeWrap && regime) {
-      const r  = regime.regime || 'MIXED';
-      const cls = r === 'BULL' ? 'regime-bull' : r === 'MIXED' ? 'regime-mixed' : r === 'BEAR' ? 'regime-bear' : 'regime-crash';
-      regimeWrap.innerHTML = `<span class="at-risk-pill at-regime-pill ${cls}">${r}</span>
-        <span class="tdi-regime-reason">${regime.reason || ''}</span>`;
-    } else if (regimeWrap) {
-      regimeWrap.innerHTML = '';
-    }
-
-    // ── Geo Risk pills ──────────────────────────────────────────────────────
-    const pillsEl = $('tdiRiskPills');
-    if (pillsEl && geoRisk) {
-      const vix     = geoRisk.vix?.toFixed(1) ?? '--';
-      const spyChg  = geoRisk.spyChg;
-      const spread  = geoRisk.spread?.toFixed(2) ?? '--';
-      const vixCls  = geoRisk.vix >= 30 ? 'risk-high' : geoRisk.vix >= 20 ? 'risk-med' : 'risk-low';
-      const spyCls  = spyChg <= -2 ? 'risk-high' : spyChg <= -1 ? 'risk-med' : spyChg >= 1 ? 'risk-low' : 'risk-neutral';
-      const oilCls  = geoRisk.oilTension ? 'risk-high' : 'risk-neutral';
-      const spyStr  = spyChg != null ? (spyChg >= 0 ? '+' : '') + spyChg.toFixed(2) + '%' : '--';
-      pillsEl.innerHTML = `
-        <span class="at-risk-pill ${vixCls}">VIX ${vix}</span>
-        <span class="at-risk-pill ${spyCls}">SPY ${spyStr}</span>
-        <span class="at-risk-pill ${oilCls}">${geoRisk.oilTension ? '⚠ Oil Risk' : 'Oil OK'}</span>`;
-    } else if (pillsEl) {
-      pillsEl.innerHTML = '';
-    }
-
-    // ── Loading / error states ──────────────────────────────────────────────
-    const loadEl = $('tdiLoading');
-    const contEl = $('tdiSigContent');
-    if (!ok || !signal) {
-      if (loadEl) loadEl.style.display = 'none';
-      if (contEl) {
-        contEl.style.display = 'flex';
-        const verdictEl = $('tdiVerdict');
-        if (verdictEl) { verdictEl.textContent = 'N/A'; verdictEl.className = 'tdi-verdict hold'; }
-        const confEl = $('tdiConf'); if (confEl) confEl.textContent = 'No data';
-        const zoneEl = $('tdiZone'); if (zoneEl) zoneEl.textContent = data?.error || 'Insufficient bar data';
-        const vpHero = $('tdiVPHero'); if (vpHero) vpHero.style.display = 'none';
-        const emaEl  = $('tdiEmaPills'); if (emaEl) emaEl.innerHTML = '';
-        const resEl  = $('tdiReasons');  if (resEl) resEl.innerHTML = '';
-      }
-      return;
-    }
-
-    if (loadEl) loadEl.style.display = 'none';
-    if (contEl) contEl.style.display = 'flex';
-
-    // ── Verdict + confidence ────────────────────────────────────────────────
-    const sig = signal.signal || 'HOLD';
-    const verdictEl = $('tdiVerdict');
-    if (verdictEl) {
-      verdictEl.textContent = sig;
-      verdictEl.className   = 'tdi-verdict ' + sig.toLowerCase();
-    }
-    const confEl = $('tdiConf');
-    if (confEl) confEl.textContent = (signal.confidence || 0) + '% confidence';
-
-    const zoneEl = $('tdiZone');
-    if (zoneEl) {
-      const zoneMap = {
-        'val_bounce': '📍 VAL Bounce Zone',
-        'poc_breakout': '🔼 POC Breakout',
-      };
-      zoneEl.textContent = signal.zoneStr || (signal.checks?.vp_primary?.detail || 'No VP trigger');
-    }
-
-    // ── Volume Profile visual bar ───────────────────────────────────────────
-    const vpHero = $('tdiVPHero');
-    if (vpHero && signal.vah && signal.val && signal.poc && signal.price) {
-      vpHero.style.display = '';
-      const { vah, val, poc, price: px } = signal;
-      const range = vah - val;
-      if (range > 0) {
-        const pocPct   = ((poc - val) / range) * 100;
-        const fillPct  = pocPct;
-        const pricePct = Math.max(0, Math.min(100, ((px - val) / range) * 100));
-        const fillEl   = $('tdiVPFill');    if (fillEl)  fillEl.style.width = fillPct + '%';
-        const pocLine  = $('tdiVPPocLine'); if (pocLine) pocLine.style.left = pocPct + '%';
-        const priceTick= $('tdiVPPriceTick'); if (priceTick) priceTick.style.left = pricePct + '%';
-        const valEl = $('tdiVPVal'); if (valEl) valEl.textContent = '$' + val.toFixed(2);
-        const pocEl = $('tdiVPPoc'); if (pocEl) pocEl.textContent = '$' + poc.toFixed(2);
-        const vahEl = $('tdiVPVah'); if (vahEl) vahEl.textContent = '$' + vah.toFixed(2);
-      }
-    } else if (vpHero) {
-      vpHero.style.display = 'none';
-    }
-
-    // ── EMA Ribbon pills ────────────────────────────────────────────────────
-    const emaEl = $('tdiEmaPills');
-    if (emaEl) {
-      const checks = signal.checks || {};
-      const isCross = checks.ma_crossover?.pass;
-      const isRibbon = checks.ma_ribbon_bullish?.pass;
-      const ema9Det  = checks.ema_trend?.detail      || '';
-      const ema50Det = checks.above_ema50?.detail     || '';
-      const above9   = checks.ema_trend?.pass;
-      const above50  = checks.above_ema50?.pass;
-
-      let pills = '';
-      if (isCross) {
-        pills += `<span class="at-ma-pill ma-crossover">EMA Cross ↑</span>`;
-      }
-      if (isRibbon) {
-        pills += `<span class="at-ma-pill ma-ribbon">Bull Ribbon</span>`;
-      }
-      const e9Cls  = above9  ? 'ma-above' : 'ma-below';
-      const e50Cls = above50 ? 'ma-above' : 'ma-below';
-      pills += `<span class="at-ma-pill ${e9Cls}">EMA 9/21 ${above9 ? '▲' : '▼'}</span>`;
-      pills += `<span class="at-ma-pill ${e50Cls}">EMA 50 ${above50 ? '▲' : '▼'}</span>`;
-
-      if (isInverse) {
-        pills += `<span class="at-ma-pill" style="color:#f87171;border-color:rgba(248,113,113,0.4);background:rgba(248,113,113,0.06)">INV mode</span>`;
-      }
-      emaEl.innerHTML = pills;
-    }
-
-    // ── Top signal reasons (max 3) ──────────────────────────────────────────
-    const resEl = $('tdiReasons');
-    if (resEl) {
-      const reasons = (signal.reasons || []).slice(0, 3);
-      resEl.innerHTML = reasons.map(r => `<div class="tdi-reason-row">${r}</div>`).join('');
-    }
-
-    // ── Candle Patterns ─────────────────────────────────────────────────────
-    renderCandlePatterns(data.patterns || []);
-  }
-
-  // ── Render detected candlestick / chart patterns ─────────────────────────────
-  function renderCandlePatterns(patterns) {
-    const el = $('tdiPatternsList');
-    if (!el) return;
-    if (!patterns || patterns.length === 0) {
-      el.style.display = 'none';
-      return;
-    }
-    el.style.display = '';
-    el.innerHTML = `
-      <div class="cp-header">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="4" height="16"/><rect x="10" y="8" width="4" height="12"/><rect x="18" y="2" width="4" height="18"/></svg>
-        Candlestick Patterns
-      </div>
-      ${patterns.map(p => {
-        const cls = p.type === 'BULLISH' ? 'cp-bull' : p.type === 'BEARISH' ? 'cp-bear' : 'cp-neutral';
-        const dots = '●'.repeat(p.strength) + '○'.repeat(3 - p.strength);
-        return `<div class="cp-row ${cls}">
-          <div class="cp-left">
-            <span class="cp-badge ${cls}">${p.type === 'BULLISH' ? '▲' : p.type === 'BEARISH' ? '▼' : '●'}</span>
-            <span class="cp-name">${p.name}</span>
-            <span class="cp-strength" title="Signal strength">${dots}</span>
-          </div>
-          <span class="cp-desc">${p.desc}</span>
-        </div>`;
-      }).join('')}
-    `;
   }
 
   // ── Analyze ─────────────────────────────────────────────────────────────────
@@ -959,26 +628,11 @@ const rtTrader = (() => {
     const ls = $('rtLoadSym'); if (ls) ls.textContent = sym;
     clearInterval(cdTimer);
 
-    // Show intel panel in loading state
-    const tdiPanel = $('tdiPanel');
-    if (tdiPanel) tdiPanel.style.display = '';
-    const tdiLoad = $('tdiLoading');
-    if (tdiLoad) tdiLoad.style.display = 'flex';
-    const tdiCont = $('tdiSigContent');
-    if (tdiCont) tdiCont.style.display = 'none';
-    const tdiReg  = $('tdiRegimeWrap');
-    if (tdiReg)  tdiReg.innerHTML  = '';
-    const tdiPills = $('tdiRiskPills');
-    if (tdiPills) tdiPills.innerHTML = '';
-    const tdiInvB  = $('tdiInvBadge');
-    if (tdiInvB)  tdiInvB.style.display = 'none';
-
     try {
-      const [quoteRes, intradayRes, histRes, signalRes] = await Promise.all([
+      const [quoteRes, intradayRes, histRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`/api/signal/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       const price       = quoteRes?.price ?? intradayRes?.price ?? null;
@@ -992,14 +646,10 @@ const rtTrader = (() => {
       $('rtInput').value = sym;
       render(sym, bars, price, dailyBars, marketState);
 
-      // Render trading intelligence panel
-      renderIntelPanel(signalRes || { ok: false, error: 'Signal data unavailable' });
-
     } catch (e) {
       $('rtLoading').style.display = 'none';
       $('rtError').style.display   = 'flex';
       const em = $('rtErrMsg'); if (em) em.textContent = e.message || 'Failed to analyze. Please try again.';
-      renderIntelPanel({ ok: false, error: e.message });
     }
   }
 

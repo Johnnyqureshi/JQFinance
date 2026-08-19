@@ -1598,10 +1598,17 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   // Validate leverage (1–4x, must be numeric)
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
 
+  // ── Market-hours guard (equity only — crypto trades 24/7) ─────────────────
+  const isCryptoSym = /[-]|USD$|USDT$/.test(symbol.toUpperCase());
+  if (!isCryptoSym && !isMarketOpen()) {
+    return res.status(400).json({ error: 'Market is closed. Equity orders are only accepted during regular market hours (9:35 AM – 3:50 PM ET, Mon–Fri). Use Alpaca directly for extended-hours orders.' });
+  }
+
   try {
     // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
     const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId);
-    const price = quote?.regularClose ?? quote?.price;
+    // BUG FIX: use live `price` field — regularClose is prior-session close and causes stale bracket levels
+    const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.regularClose;
     if (!price || !isFinite(price) || price <= 0) throw new Error('Could not fetch a valid current price for ' + symbol.toUpperCase());
 
     const leveragedAmount = amtNum * lev;
@@ -1609,7 +1616,10 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
 
     if (hasBracket) {
       // Bracket orders require integer qty (Alpaca limitation for margin accounts)
-      const shares = Math.max(1, Math.floor(leveragedAmount / price));
+      // BUG FIX: removed Math.max(1,...) — that forced a 1-share minimum causing over-exposure
+      // when position size < stock price. Now we throw a clear error instead.
+      const shares = Math.floor(leveragedAmount / price);
+      if (shares < 1) throw new Error(`Position size $${amtNum.toFixed(2)} × ${lev}x leverage = $${leveragedAmount.toFixed(2)}, which is less than the price of 1 share ($${price.toFixed(2)}). Increase your position size in Settings.`);
       const tpPrice = sideL === 'buy'
         ? (price * (1 + tpNum / 100)).toFixed(2)
         : (price * (1 - tpNum / 100)).toFixed(2);

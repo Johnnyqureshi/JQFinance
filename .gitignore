@@ -18,3 +18,5 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+*.db-shm
+*.db-wal

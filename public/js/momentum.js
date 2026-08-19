@@ -113,7 +113,10 @@
           }).then(r => r.ok ? r.json() : { results: [] })
             .then(d => d.results || [])
         ));
-        for (const r of settled) if (r.status === 'fulfilled') results.push(...r.value);
+        for (const r of settled) {
+          if (r.status === 'fulfilled') results.push(...r.value);
+          else console.warn('[Scanner] Batch chunk failed:', r.reason?.message || r.reason);
+        }
         if (onProgress) {
           const done = Math.min(symbols.length, (i + CONCURRENCY) * CHUNK);
           onProgress(done, symbols.length);
@@ -1517,9 +1520,26 @@
     _getPosMode()  { return $('tsBtnPct')?.classList.contains('active') ? 'pct' : 'fixed'; },
     _getPosValue() { return parseFloat($('tsPositionValue')?.value) || 15; },
 
+    // ── Market-hours helper (mirrors server isMarketOpen) ─────────────────
+    _isMarketOpen() {
+      // US equity market: Mon–Fri 9:35 AM – 3:50 PM ET
+      const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const day  = et.getDay();
+      const mins = et.getHours() * 60 + et.getMinutes();
+      return day >= 1 && day <= 5 && mins >= 575 && mins < 950;
+    },
+
     // ── Main auto-trade method — called after every scan when bot is ON ────
     async _autoTrade(results) {
+      // BUG FIX: null guard — results could be undefined if scan throws
+      if (!results?.length) return;
       if (!this.botEnabled || !AlpacaClient.connected) return;
+
+      // BUG FIX: market-hours guard — never attempt equity orders when market is closed
+      if (!this._isMarketOpen()) {
+        this.addLog('BOT', 'Market Closed', 'Auto-trading skipped — US equity market is closed (9:35 AM–3:50 PM ET)', 'warn');
+        return;
+      }
 
       // Check daily limits first
       const limitMsg = this._checkDailyLimits();
@@ -1692,6 +1712,7 @@
       const btn    = $('mtBotToggle');
       const status = $('mtBotStatus');
       const bar    = $('mtBotBar');
+      const dot    = $('mtBotDot');    // BUG FIX: dot was never updated
       if (!btn) return;
       if (this.botEnabled) {
         btn.textContent = '⏹ STOP BOT';
@@ -1699,6 +1720,7 @@
         if (status) status.textContent =
           `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
         if (bar) bar.className = 'mt-bot-bar mt-bot-bar--on';
+        if (dot) { dot.style.background = '#22c55e'; dot.title = 'Bot active'; }
       } else {
         btn.textContent = '▶ START BOT';
         btn.className   = 'mt-bot-toggle mt-bot-toggle--off';
@@ -1707,6 +1729,7 @@
             ? 'Connected · click START BOT to enable automated trading'
             : 'Connect Alpaca account to enable automated trading';
         if (bar) bar.className = 'mt-bot-bar';
+        if (dot) { dot.style.background = ''; dot.title = 'Bot inactive'; }
       }
     },
 

@@ -346,6 +346,66 @@ function _searchCacheSet(key, data) {
   _searchCache.set(key, { data, ts: Date.now() });
 }
 
+// ── Float/share-count cache (15-min TTL) ─────────────────────────────────────
+// Yahoo's quote response sometimes omits floatShares. Keep the fundamentals
+// lookup separate from the short-lived quote cache so scanner refreshes do not
+// repeatedly hit quoteSummary for the same symbol.
+const _floatCache = new Map();
+const FLOAT_CACHE_TTL = 15 * 60 * 1000;
+function _floatCacheGet(sym) {
+  const entry = _floatCache.get(sym);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > FLOAT_CACHE_TTL) {
+    _floatCache.delete(sym);
+    return null;
+  }
+  return entry.data;
+}
+function _floatCacheSet(sym, data) {
+  if (_floatCache.size > 500) {
+    const oldest = [..._floatCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) _floatCache.delete(oldest[0]);
+  }
+  _floatCache.set(sym, { data, ts: Date.now() });
+}
+
+/**
+ * Return Yahoo's best available low-float metric.
+ *
+ * floatShares is the preferred value because it represents shares available
+ * to trade. sharesOutstanding is a useful fallback when Yahoo has not
+ * published a float value for a symbol. The source is returned so the UI/API
+ * can remain transparent about which value was used.
+ */
+async function _fetchFloatData(sym) {
+  const cached = _floatCacheGet(sym);
+  if (cached) return cached;
+
+  try {
+    const summary = await yf.quoteSummary(sym, {
+      modules: ['defaultKeyStatistics', 'summaryDetail'],
+    }, { validateResult: false });
+    const stats = summary?.defaultKeyStatistics || {};
+    const detail = summary?.summaryDetail || {};
+    const floatShares = Number.isFinite(stats.floatShares) ? stats.floatShares : null;
+    const sharesOutstanding = Number.isFinite(stats.sharesOutstanding)
+      ? stats.sharesOutstanding
+      : Number.isFinite(detail.sharesOutstanding) ? detail.sharesOutstanding : null;
+    const data = {
+      float: floatShares ?? sharesOutstanding,
+      floatShares,
+      sharesOutstanding,
+      floatSource: floatShares != null ? 'floatShares' : sharesOutstanding != null ? 'sharesOutstanding' : null,
+    };
+    _floatCacheSet(sym, data);
+    return data;
+  } catch (_) {
+    // The scanner can still use quote.floatShares when quoteSummary is
+    // unavailable (for example, a temporary Yahoo module/rate-limit failure).
+    return { float: null, floatShares: null, sharesOutstanding: null, floatSource: null };
+  }
+}
+
 // ── Auth Routes ────────────────────────────────────────────────────────────────
 
 // Register
@@ -961,10 +1021,12 @@ app.post('/api/scanner-batch', async (req, res) => {
     const chunk   = symbols.slice(i, i + BATCH);
     const settled = await Promise.allSettled(chunk.map(async sym => {
       try {
-        const [quote, bars] = await Promise.all([
+        const [quote, bars, fundamentals] = await Promise.all([
           yf.quote(sym, {}, { validateResult: false }).catch(() => null),
           fetchOHLCV(sym, 70).catch(() => null),
+          _fetchFloatData(sym),
         ]);
+        if (!quote) return null;
         const price = quote.regularMarketPrice;
         if (!price || !isFinite(price) || price <= 0) return null;
 
@@ -973,7 +1035,14 @@ app.post('/api/scanner-batch', async (req, res) => {
         const avgVol    = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? 0;
         const relVol    = avgVol > 0 ? +(volume / avgVol).toFixed(2) : null;
         const marketCap = quote.marketCap ?? null;
-        const floatSh   = quote.floatShares ?? null;
+        // Prefer quoteSummary's floatShares, then sharesOutstanding, then the
+        // quote endpoint's optional floatShares field as a final fallback.
+        const floatSh   = fundamentals.float
+          ?? quote.floatShares
+          ?? null;
+        const floatSource = fundamentals.float != null
+          ? fundamentals.floatSource
+          : quote.floatShares != null ? 'quote' : null;
         const w52High   = quote.fiftyTwoWeekHigh ?? null;
         const w52Dist   = w52High ? +((price - w52High) / w52High * 100).toFixed(2) : null;
         const name      = quote.shortName ?? quote.longName ?? sym;
@@ -985,7 +1054,12 @@ app.post('/api/scanner-batch', async (req, res) => {
           try { const v = calcRSI(closes, 14); rsi14 = v != null ? +v.toFixed(1) : null; } catch(_) {}
         }
 
-        return { sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14, floatSh, marketCap, w52Dist };
+        return {
+          sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14,
+          float: floatSh, floatSh, floatShares: fundamentals.floatShares ?? quote.floatShares ?? null,
+          sharesOutstanding: fundamentals.sharesOutstanding ?? null, floatSource,
+          marketCap, w52Dist,
+        };
       } catch { return null; }
     }));
     out.push(...settled.map(r => r.value).filter(Boolean));

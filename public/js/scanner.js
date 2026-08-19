@@ -112,7 +112,7 @@
         <td class="nsc-r ${surge ? 'nsc-relvol-hi' : ''}">${r.relVol != null ? r.relVol.toFixed(2) + '×' : '--'}</td>
         <td class="nsc-r">${r.atr14 != null ? r.atr14 : '--'}</td>
         <td class="nsc-r ${rsiCls}">${r.rsi14 != null ? r.rsi14 : '--'}</td>
-        <td class="nsc-r">${fmtVol(r.floatSh)}</td>
+        <td class="nsc-r">${fmtVol(r.float ?? r.floatSh)}</td>
         <td class="nsc-r">${fmtMcap(r.marketCap)}</td>
         <td class="nsc-r ${nearHigh ? 'nsc-52hi' : ''}">${r.w52Dist != null ? (r.w52Dist >= 0 ? '+' : '') + r.w52Dist.toFixed(1) + '%' : '--'}</td>
       </tr>`;

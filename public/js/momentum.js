@@ -149,7 +149,7 @@
      * Pillar 2: Daily gain ≥ 10%
      * Pillar 3: Relative volume ≥ 5× (configurable)
      * Pillar 4: News catalyst — checked AFTER Pass 2 in scan()
-     * Pillar 5: Float < 10M shares — if floatSh is known, reject over-limit; if unknown, allow through
+     * Pillar 5: Float < 10M shares — if float is known, reject over-limit; if unknown, allow through
      */
     filter(results, cfg) {
       return results.filter(r => {
@@ -168,8 +168,9 @@
         if (cfg.minVolume != null && (r.volume ?? 0) < cfg.minVolume) return false;
 
         // Pillar 5: float — only filter when float data is available AND over the limit
-        // (null floatSh = Yahoo didn't return it → allow through, don't penalise)
-        if (cfg.maxFloat != null && r.floatSh != null && r.floatSh > cfg.maxFloat) return false;
+        // (null float = Yahoo didn't return it → allow through, don't penalise)
+        const float = r.float ?? r.floatSh ?? null;
+        if (cfg.maxFloat != null && float != null && float > cfg.maxFloat) return false;
 
         return true;
       });
@@ -197,7 +198,7 @@
 
       const gain  = r.change  ?? 0;
       const rvol  = r.relVol  ?? 0;
-      const float = r.floatSh ?? null;
+      const float = r.float ?? r.floatSh ?? null;
 
       // ── PILLAR 2: MOMENTUM ────────────────────────────────────────────────
       if (gain >= 10) { score += 2; reasons.push('Strong momentum (≥ 10%)'); }
@@ -340,7 +341,7 @@
       const gain  = row.change  ?? 0;
       const rvol  = row.relVol  ?? 0;
       const price = row.price   ?? 0;
-      const float = row.floatSh ?? null;
+      const float = row.float ?? row.floatSh ?? null;
       const floatM = float != null ? (float / 1_000_000).toFixed(2) + 'M' : null;
 
       // ── 5 PILLARS — show pass/fail + points earned ────────────────────────
@@ -668,7 +669,7 @@
       const up30      = (row.change ?? 0) >= 30;
       const up10      = (row.change ?? 0) >= 10;
       const priceOk   = (row.price ?? 0) >= 3.00 && (row.price ?? 0) <= 20.00;
-      const float     = row.floatSh ?? null;
+      const float     = row.float ?? row.floatSh ?? null;
       const floatOk   = float != null ? float < 5_000_000 : null; // null = unknown
       const floatStr  = float != null ? (float / 1_000_000).toFixed(2) + 'M shares' : 'Unknown (Yahoo)';
       return [

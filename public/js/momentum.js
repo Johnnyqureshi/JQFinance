@@ -57,8 +57,9 @@
       minRelVol:      5.0,
       // Pillar 4: News catalyst required (breaking headline confirms the move)
       requireNewsCatalyst: true,
-      // Pillar 5: Float < 10M shares (low supply → explosive moves possible)
-      maxFloat:       10_000_000,
+      // Pillar 5: Float — ideal < 5M shares (scores the supply point);
+      // hard ceiling 20M (anything above is rejected — too much supply)
+      maxFloat:       20_000_000,
       // Minimum absolute volume sanity check (independent of pillars)
       minVolume:      100000,
       // Score threshold: max 7 — all 5 pillars = 6 pts, rvol≥10× adds 1 bonus
@@ -82,6 +83,12 @@
         if (saved.minPrice === 2 && !saved._migratedPrice3) {
           saved.minPrice = 3;
           saved._migratedPrice3 = true;
+          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
+        }
+        // Migration: old default float ceiling was 10M — now 20M (sub-5M still ideal)
+        if (saved.maxFloat === 10_000_000 && !saved._migratedFloat20) {
+          saved.maxFloat = 20_000_000;
+          saved._migratedFloat20 = true;
           try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
         }
         return { ...this.defaults, ...saved };
@@ -366,14 +373,14 @@
           pillar: true,
         },
         {
-          label:  '⑤ Float < 5M shares (supply)',
+          label:  '⑤ Float < 5M ideal · 20M max (supply)',
           value:  floatM ?? 'Unknown',
           note:   float == null
             ? 'Float data unavailable (Yahoo)'
             : float < 5_000_000  ? '+1 pt: low supply (< 5M) ✓'
-            : float < 10_000_000 ? 'Passes filter but no point (5–10M)'
-            : '✗ Float too high (> 10M)',
-          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 10_000_000 ? 'ok' : 'bad',
+            : float < 20_000_000 ? 'Passes ceiling but no point (5–20M)'
+            : '✗ Float too high (> 20M)',
+          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 20_000_000 ? 'ok' : 'bad',
           pillar: true,
         },
       ];

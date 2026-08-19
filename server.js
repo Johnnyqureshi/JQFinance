@@ -1905,7 +1905,7 @@ app.get('/api/momentum/universe', requireAuth, async (req, res) => {
     const uid  = req.session.userId;
     // Alpaca screener: top 50 most-active US equities by volume (real-time)
     const data = await alpacaDataFetch(uid,
-      '/v1beta1/screener/us_equity/most_actives?by=volume&top=50'
+      '/v1beta1/screener/us_equity/most_actives?by=volume&top=100'
     ).catch(() => null);
 
     if (data?.most_actives?.length) {

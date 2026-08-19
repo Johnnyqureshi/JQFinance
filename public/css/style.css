@@ -8548,6 +8548,78 @@ option { background: var(--card); }
 }
 .mt-btn-reset:hover { color: var(--t1); }
 
+/* ── Compact merged config panel (.mt-cpt-*) ─────────────────────────────── */
+.mt-cpt-block {
+  padding: 10px 0 6px;
+  border-top: 1px solid var(--border);
+}
+.mt-cpt-block:first-child { border-top: none; padding-top: 0; }
+.mt-cpt-block--uni { padding-bottom: 10px; }
+.mt-cpt-block-label {
+  display: block;
+  font-size: .67rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--t3);
+  margin-bottom: 8px;
+}
+.mt-cpt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.mt-cpt-grid--risk {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+.mt-cpt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mt-cpt-label {
+  font-size: .70rem;
+  color: var(--t3);
+  font-weight: 500;
+}
+.mt-cpt-input {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--t1);
+  font-size: .80rem;
+  padding: 6px 9px;
+  width: 100%;
+  transition: border-color var(--tr);
+}
+.mt-cpt-input:focus {
+  outline: none;
+  border-color: var(--teal-bdr);
+  box-shadow: 0 0 0 2px var(--teal-dim);
+}
+.mt-cpt-input::placeholder { color: var(--t3); }
+.mt-cpt-hint {
+  font-size: .63rem;
+  color: var(--t3);
+  font-style: italic;
+  margin-top: 3px;
+}
+/* Position sizing inline row inside the grid */
+.mt-cpt-field--pos { grid-column: span 2; }
+.mt-cpt-pos-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Leverage field */
+.mt-cpt-field--lev { grid-column: span 2; }
+@media (max-width: 540px) {
+  .mt-cpt-field--pos,
+  .mt-cpt-field--lev { grid-column: span 1; }
+  .mt-cpt-grid { grid-template-columns: 1fr 1fr; }
+}
+
 /* ── Body layout ─────────────────────────────────────────────────────────── */
 .mt-body {
   display: grid;

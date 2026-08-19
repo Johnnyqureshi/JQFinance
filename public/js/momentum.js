@@ -48,12 +48,12 @@
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
       // Strategy filters
-      minPrice:       1.00,
+      minPrice:       0.50,     // catches all sub-$20 momentum movers incl. low-priced runners
       maxPrice:       20.00,
       minGainPercent: 10.0,
       minRelVol:      2.0,
       minVolume:      100000,
-      minScore:       4,        // out of 6 (current max; more criteria coming)
+      minScore:       4,        // out of 7 (6 base + 1 news catalyst bonus)
       // Risk
       stopPercent:    null,     // null = use ATR fallback; number = % below entry
       minRR:          2.0,
@@ -61,7 +61,7 @@
       emaFast:        9,
       emaSlow:        21,
       // Scanner universe: 'curated' | 'alpaca'
-      universeMode:   'curated',
+      universeMode:   'alpaca',   // default to live Alpaca top-100 most-actives
     },
 
     // Load saved config from localStorage, merging with defaults

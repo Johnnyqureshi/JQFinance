@@ -838,138 +838,115 @@
     <!-- PDT + Market Hours Banner -->
     <div class="at-pdt-banner" id="atPDTBanner" style="display:none"></div>
 
-    <!-- ── Config panel (config.py) ─────────────────────────────────────── -->
+    <!-- ── Scanner & Trade Settings (merged config panel) ──────────────── -->
     <div class="mt-config-section">
       <div class="mt-config-header">
         <div class="mt-config-title">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-          Strategy Configuration
-          <span class="mt-config-sub">config.py · scanner.py · risk.py thresholds</span>
+          Scanner &amp; Trade Settings
+          <span class="mt-config-sub">scanner · risk · execution — all in one place</span>
         </div>
         <button class="mt-config-toggle" id="mtConfigToggle">▼ Configure</button>
       </div>
       <div class="mt-config-body" id="mtConfigBody" style="display:none">
 
-        <!-- ── Position Size ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Position Size</div>
-          <div class="mt-config-grid">
-            <div class="mt-config-group mt-config-group--wide">
-              <span class="mt-config-label">Shares (manual entry)</span>
-              <input type="number" id="mtManualShares" class="mt-config-input" min="1" step="1"
-                placeholder="e.g. 100" title="Leave blank to calculate from risk % automatically">
-              <span class="mt-config-hint">Leave blank to auto-size from stop loss risk</span>
+        <!-- ── Universe ── -->
+        <div class="mt-cpt-block mt-cpt-block--uni">
+          <span class="mt-cpt-block-label">Universe</span>
+          <div class="mt-universe-row">
+            <label class="mt-uni-pill">
+              <input type="radio" name="mtUniverse" id="mtUniCurated" value="curated">
+              <span>📋 Curated (50)</span>
+            </label>
+            <label class="mt-uni-pill">
+              <input type="radio" name="mtUniverse" id="mtUniAlpaca" value="alpaca" checked>
+              <span>⚡ Alpaca Live (100)</span>
+            </label>
+          </div>
+          <span class="mt-cpt-hint">Alpaca pulls the top 100 most-traded US equities live — price &amp; gain filters apply on top</span>
+        </div>
+
+        <!-- ── Scan Filters ── -->
+        <div class="mt-cpt-block">
+          <span class="mt-cpt-block-label">Scan Filters</span>
+          <div class="mt-cpt-grid">
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMinPrice">Min Price $</label>
+              <input type="number" id="mtMinPrice" class="mt-cpt-input" min="0.01" max="100" step="0.25" value="0.50" title="Minimum stock price">
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMaxPrice">Max Price $</label>
+              <input type="number" id="mtMaxPrice" class="mt-cpt-input" min="1" max="2000" step="1" value="20" title="Maximum stock price — all stocks under this price qualify">
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMinGain">Min Gain %</label>
+              <input type="number" id="mtMinGain" class="mt-cpt-input" min="0" max="100" step="0.5" value="10" title="Minimum intraday percentage gain">
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtRelVol">Min Rel Vol</label>
+              <input type="number" id="mtRelVol" class="mt-cpt-input" min="0.5" max="20" step="0.1" value="2.0" title="Relative volume vs 20-day average">
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMinVolume">Min Volume</label>
+              <input type="number" id="mtMinVolume" class="mt-cpt-input" min="0" step="10000" value="100000" title="Minimum absolute share volume">
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMinScore">Min Score /7</label>
+              <input type="number" id="mtMinScore" class="mt-cpt-input" min="0" max="7" step="1" value="4" title="Score out of 7: gain, relVol, price range, news catalyst">
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Risk & Execution ── -->
+        <div class="mt-cpt-block">
+          <span class="mt-cpt-block-label">Risk &amp; Execution <span class="ts-saved" id="tsSavedBadge"></span></span>
+          <div class="mt-cpt-grid mt-cpt-grid--risk">
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtStopPct">Stop Loss %</label>
+              <input type="number" id="mtStopPct" class="mt-cpt-input" min="0.1" max="50" step="0.25"
+                placeholder="ATR" title="% below entry — blank uses ATR automatically">
+              <span class="mt-cpt-hint">Blank → ATR-based</span>
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMinRR">Min R : R</label>
+              <input type="number" id="mtMinRR" class="mt-cpt-input" min="0.5" max="10" step="0.5" value="2.0" title="Minimum reward-to-risk ratio required to enter">
+            </div>
+            <div class="mt-cpt-field mt-cpt-field--pos">
+              <label class="mt-cpt-label">Position</label>
+              <div class="mt-cpt-pos-row">
+                <div class="ts-mode-group">
+                  <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% equity</button>
+                  <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
+                </div>
+                <div class="ts-input-wrap">
+                  <span class="ts-input-prefix" id="tsInputPrefix">%</span>
+                  <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size per trade">
+                </div>
+              </div>
+            </div>
+            <div class="mt-cpt-field mt-cpt-field--lev">
+              <label class="mt-cpt-label">Leverage</label>
+              <div class="ts-lev-group" id="tsLevGroup">
+                <button class="ts-lev-btn active" data-lev="1">1×</button>
+                <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
+                <button class="ts-lev-btn" data-lev="2">2×</button>
+                <button class="ts-lev-btn" data-lev="3">3×</button>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- ── Daily Limits ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Daily Limits</div>
-          <div class="mt-config-grid">
-            <div class="mt-config-group">
-              <span class="mt-config-label">Max Trades / Day</span>
-              <input type="number" id="mtMaxTrades" class="mt-config-input" min="1" max="50" step="1" value="5" title="Maximum number of trades per day">
+        <div class="mt-cpt-block">
+          <span class="mt-cpt-block-label">Daily Limits</span>
+          <div class="mt-cpt-grid">
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMaxTrades">Max Trades / Day</label>
+              <input type="number" id="mtMaxTrades" class="mt-cpt-input" min="1" max="50" step="1" value="5" title="Stop opening new trades after this many">
             </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Max Daily Loss $</span>
-              <input type="number" id="mtMaxDailyLoss" class="mt-config-input" min="0" step="50" value="500" title="Stop trading if daily loss exceeds this">
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Strategy Settings ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Strategy Settings</div>
-          <div class="mt-config-grid">
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Price $</span>
-              <input type="number" id="mtMinPrice" class="mt-config-input" min="0.01" max="100" step="0.25" value="1.00" title="Minimum stock price">
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Max Price $</span>
-              <input type="number" id="mtMaxPrice" class="mt-config-input" min="1" max="2000" step="1" value="20.00" title="Maximum stock price">
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Gain % (day)</span>
-              <input type="number" id="mtMinGain" class="mt-config-input" min="0" max="100" step="0.5" value="10.0" title="Minimum intraday percentage gain">
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Rel Volume</span>
-              <input type="number" id="mtRelVol" class="mt-config-input" min="0.5" max="20" step="0.1" value="2.0" title="Minimum relative volume vs average">
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Volume</span>
-              <input type="number" id="mtMinVolume" class="mt-config-input" min="0" step="10000" value="100000" title="Minimum absolute trading volume">
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Score (0–6)</span>
-              <input type="number" id="mtMinScore" class="mt-config-input" min="0" max="6" step="1" value="4" title="Minimum score out of 6 — gain, relVol, price range">
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Risk Settings ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Risk Settings</div>
-          <div class="mt-config-grid">
-            <div class="mt-config-group">
-              <span class="mt-config-label">Stop Loss %</span>
-              <input type="number" id="mtStopPct" class="mt-config-input" min="0.1" max="50" step="0.25"
-                placeholder="e.g. 5" title="Stop loss as % below entry price">
-              <span class="mt-config-hint">% below entry — leave blank to use ATR</span>
-            </div>
-            <div class="mt-config-group">
-              <span class="mt-config-label">Min Reward : Risk</span>
-              <input type="number" id="mtMinRR" class="mt-config-input" min="0.5" max="10" step="0.5" value="2.0" title="Minimum reward-to-risk ratio">
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Scanner Universe ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Scanner Universe</div>
-          <div class="mt-universe-row">
-            <label class="mt-uni-pill">
-              <input type="radio" name="mtUniverse" id="mtUniCurated" value="curated" checked>
-              <span>📋 Curated List (50 stocks)</span>
-            </label>
-            <label class="mt-uni-pill">
-              <input type="radio" name="mtUniverse" id="mtUniAlpaca" value="alpaca">
-              <span>⚡ All Alpaca Most-Actives (live)</span>
-            </label>
-          </div>
-          <span class="mt-config-hint" style="display:block;margin-top:4px">
-            "All Alpaca" pulls the top 50 most-traded US equities in real-time from Alpaca's screener.
-          </span>
-        </div>
-
-        <!-- ── Execution Settings ── -->
-        <div class="mt-cfg-section">
-          <div class="mt-cfg-section-title">Execution Settings <span class="ts-saved" id="tsSavedBadge"></span></div>
-          <div class="ts-module" id="tradeSettingsModule">
-            <div class="ts-rows">
-              <div class="ts-row">
-                <span class="ts-label">Position size</span>
-                <div class="ts-mode-group">
-                  <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% of equity</button>
-                  <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
-                </div>
-                <div class="ts-input-wrap">
-                  <span class="ts-input-prefix" id="tsInputPrefix">%</span>
-                  <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size">
-                </div>
-              </div>
-              <div class="ts-row">
-                <span class="ts-label">Leverage</span>
-                <div class="ts-lev-group" id="tsLevGroup">
-                  <button class="ts-lev-btn active" data-lev="1">1×</button>
-                  <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
-                  <button class="ts-lev-btn" data-lev="2">2×</button>
-                  <button class="ts-lev-btn" data-lev="3">3×</button>
-                </div>
-                <span class="ts-lev-note">Applies to bot position sizing</span>
-              </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtMaxDailyLoss">Max Daily Loss $</label>
+              <input type="number" id="mtMaxDailyLoss" class="mt-cpt-input" min="0" step="50" value="500" title="Halt trading when realized loss reaches this amount">
             </div>
           </div>
         </div>

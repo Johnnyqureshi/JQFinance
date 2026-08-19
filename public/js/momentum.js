@@ -739,6 +739,11 @@
     dailyDate:    '',
     // Active trade-methods tab
     _tmTab:       'dip',
+    // ── Automation state ─────────────────────────────────────────────────────
+    botEnabled:    false,          // true when auto-trading is running
+    botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
+    _activeTrades: new Set(),      // symbols with pending/live bot orders (prevents double-entry)
+    posMonitorId:  null,           // setInterval handle for position polling
 
     init() {
       this.config = MomentumConfig.load();
@@ -747,6 +752,7 @@
       this._resetDailyIfNeeded();
       AlpacaClient.checkConnection().then(() => {
         this._renderStatus();
+        this._renderBotStatus();
         this.run();
       });
     },
@@ -761,6 +767,8 @@
         this._renderScanTable(results);
         this._setScanStatus('done', results.length);
         this._startCountdown();
+        // Auto-trade: fire-and-forget after scan completes
+        if (this.botEnabled) this._autoTrade(results).catch(() => {});
       } catch (err) {
         this._setScanStatus('error', 0, err.message);
       }
@@ -1354,6 +1362,211 @@
       </tr>`).join('');
     },
 
+    /* ══════════════════════════════════════════════════════════════════════
+     * AUTOMATION ENGINE
+     * ══════════════════════════════════════════════════════════════════════ */
+
+    // ── Read execution settings from the live DOM (set by trade-settings UI) ─
+    _getLeverage() {
+      const btn = document.querySelector('#tsLevGroup .ts-lev-btn.active');
+      return btn ? Math.max(1, parseFloat(btn.dataset.lev) || 1) : 1;
+    },
+    _getPosMode()  { return $('tsBtnPct')?.classList.contains('active') ? 'pct' : 'fixed'; },
+    _getPosValue() { return parseFloat($('tsPositionValue')?.value) || 15; },
+
+    // ── Main auto-trade method — called after every scan when bot is ON ────
+    async _autoTrade(results) {
+      if (!this.botEnabled || !AlpacaClient.connected) return;
+
+      // Check daily limits first
+      const limitMsg = this._checkDailyLimits();
+      if (limitMsg) {
+        this.addLog('BOT', 'Halted', limitMsg, 'warn');
+        return;
+      }
+
+      // Fetch current open positions (avoid doubling into the same symbol)
+      let heldSyms = new Set();
+      try {
+        const r = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        if (r.ok) {
+          const pos = await r.json();
+          (Array.isArray(pos) ? pos : []).forEach(p => heldSyms.add(p.symbol));
+        }
+      } catch (_) {}
+
+      // Find BUY candidates: signal=BUY, not already held, not already bot-pending
+      const candidates = results.filter(r => {
+        const sig = MomentumStrategy.getSignal(r);
+        return sig.signal === 'BUY'
+          && !heldSyms.has(r.sym)
+          && !this._activeTrades.has(r.sym);
+      });
+
+      if (!candidates.length) return; // nothing qualifies this cycle
+
+      // Trade the single top-ranked candidate (highest score wins)
+      const row   = candidates[0];
+      const cfg   = this.config;
+      const entry = row.price;
+
+      // ── Calculate stop loss % ────────────────────────────────────────────
+      let slPct = (cfg.stopPercent != null && cfg.stopPercent > 0) ? cfg.stopPercent : null;
+      if (!slPct && row.atr14 != null) {
+        const stopPrice = RiskManager.calcStopLoss(entry, row.atr14, 1.5);
+        if (stopPrice) slPct = +((entry - stopPrice) / entry * 100).toFixed(2);
+      }
+      if (!slPct) {
+        this.addLog(row.sym, 'SKIP', 'No stop loss configured — set Stop Loss % in settings', 'warn');
+        return;
+      }
+      const tpPct = +(slPct * cfg.minRR).toFixed(2);
+
+      // ── Calculate notional from execution settings ────────────────────────
+      const equity   = AlpacaClient.getEquity() || 10000;
+      const leverage = this._getLeverage();
+      const posMode  = this._getPosMode();
+      const posVal   = this._getPosValue();
+      const notional = posMode === 'fixed'
+        ? posVal * leverage
+        : equity * (posVal / 100) * leverage;
+
+      // Lock this symbol to prevent duplicate orders while request is in flight
+      this._activeTrades.add(row.sym);
+      this.addLog(row.sym, '→ AUTO-BUY',
+        `Bracket $${notional.toFixed(0)} · SL ${slPct}% · TP ${tpPct}% · ${AlpacaClient.mode.toUpperCase()}`, 'info');
+
+      try {
+        const resp = await fetch('/api/alpaca/order', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: notional, slPct, tpPct, leverage }),
+        });
+        if (!resp.ok) {
+          const e = await resp.json().catch(() => ({}));
+          throw new Error(e.error || 'Order failed');
+        }
+        const result   = await resp.json();
+        const shares   = result.shares ? parseInt(result.shares) : Math.floor(notional / entry);
+        const stopPx   = +(entry * (1 - slPct / 100)).toFixed(2);
+        const tpPx     = +(entry * (1 + tpPct / 100)).toFixed(2);
+        const riskAmt  = Math.abs(entry - stopPx) * shares;
+
+        // Update daily counters
+        this.dailyTrades++;
+        this.dailyLossAmt += riskAmt; // worst-case risk
+        this._renderDailyLimits();
+
+        this.addLog(row.sym, '✓ AUTO-BUY',
+          `${shares} sh @ $${entry.toFixed(2)} · stop $${stopPx} · target $${tpPx}`, 'ok');
+        this.botPositions.set(row.sym, { entry, slPct, tpPct, shares, ts: Date.now() });
+        // Note: _activeTrades keeps row.sym locked until position closes (avoids re-entry while in trade)
+      } catch (err) {
+        this.addLog(row.sym, '✗ AUTO-BUY', err.message, 'err');
+        this._activeTrades.delete(row.sym); // unlock on failure so next scan can retry
+      }
+    },
+
+    // ── Position monitor — polls every 20 s to show P&L and detect exits ──
+    _startPositionMonitor() {
+      this._stopPositionMonitor();
+      this._pollPositions(); // immediate first check
+      this.posMonitorId = setInterval(() => this._pollPositions(), 20000);
+    },
+
+    _stopPositionMonitor() {
+      if (this.posMonitorId) { clearInterval(this.posMonitorId); this.posMonitorId = null; }
+    },
+
+    async _pollPositions() {
+      if (!AlpacaClient.connected) return;
+      try {
+        const r = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        if (!r.ok) return;
+        const positions = await r.json();
+        this._renderPositionsPanel(Array.isArray(positions) ? positions : []);
+
+        // Detect bracket exits: bot-tracked symbol disappeared from open positions
+        const heldSet = new Set((positions || []).map(p => p.symbol));
+        for (const [sym] of this.botPositions) {
+          if (!heldSet.has(sym)) {
+            this.addLog(sym, '✓ AUTO-EXIT', 'Bracket order closed position automatically', 'ok');
+            this.botPositions.delete(sym);
+            this._activeTrades.delete(sym); // unlock for re-entry
+          }
+        }
+      } catch (_) {}
+    },
+
+    _renderPositionsPanel(positions) {
+      const el = $('atPositionsBody');
+      if (!el) return;
+      if (!positions.length) {
+        el.innerHTML = `<tr><td colspan="7" class="mt-empty-row">No open positions</td></tr>`;
+        return;
+      }
+      el.innerHTML = positions.map(p => {
+        const plPct  = parseFloat(p.unrealized_plpc || 0) * 100;
+        const pl     = parseFloat(p.unrealized_pl   || 0);
+        const curr   = parseFloat(p.current_price   || 0);
+        const avg    = parseFloat(p.avg_entry_price  || 0);
+        const isBot  = this.botPositions.has(p.symbol);
+        const bInfo  = isBot ? this.botPositions.get(p.symbol) : null;
+        const meta   = bInfo ? `SL ${bInfo.slPct}% · TP ${bInfo.tpPct}%` : '—';
+        return `<tr>
+          <td style="font-weight:700">${isBot ? '<span title="Bot-managed">🤖</span> ' : ''}${p.symbol}</td>
+          <td class="mt-r">${p.qty}</td>
+          <td class="mt-r">$${avg.toFixed(2)}</td>
+          <td class="mt-r">$${curr.toFixed(2)}</td>
+          <td class="mt-r ${plPct >= 0 ? 'mt-up' : 'mt-dn'}" style="font-weight:600">${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%</td>
+          <td class="mt-r ${pl >= 0 ? 'mt-up' : 'mt-dn'}">$${pl >= 0 ? '' : ''}${pl.toFixed(2)}</td>
+          <td class="mt-r" style="font-size:.68rem;color:var(--t3)">${meta}</td>
+        </tr>`;
+      }).join('');
+    },
+
+    // ── Bot toggle — enable/disable auto-trading ──────────────────────────
+    _toggleBot() {
+      if (!this.botEnabled && !AlpacaClient.connected) {
+        this.addLog('BOT', 'Cannot start', 'Connect your Alpaca account first', 'err');
+        return;
+      }
+      this.botEnabled = !this.botEnabled;
+      this._renderBotStatus();
+      if (this.botEnabled) {
+        this.addLog('BOT', '▶ Auto-trading ON',
+          `${AlpacaClient.mode.toUpperCase()} account · bracket orders · scan every ${this.REFRESH_SEC}s`, 'ok');
+        this._startPositionMonitor();
+        this.run(); // trigger an immediate scan + trade cycle
+      } else {
+        this.addLog('BOT', '⏹ Auto-trading OFF', 'Manual mode — open positions remain, Alpaca brackets still active', 'info');
+        this._stopPositionMonitor();
+      }
+    },
+
+    _renderBotStatus() {
+      const btn    = $('mtBotToggle');
+      const status = $('mtBotStatus');
+      const bar    = $('mtBotBar');
+      if (!btn) return;
+      if (this.botEnabled) {
+        btn.textContent = '⏹ STOP BOT';
+        btn.className   = 'mt-bot-toggle mt-bot-toggle--on';
+        if (status) status.textContent =
+          `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
+        if (bar) bar.className = 'mt-bot-bar mt-bot-bar--on';
+      } else {
+        btn.textContent = '▶ START BOT';
+        btn.className   = 'mt-bot-toggle mt-bot-toggle--off';
+        if (status) status.textContent =
+          AlpacaClient.connected
+            ? 'Connected · click START BOT to enable automated trading'
+            : 'Connect Alpaca account to enable automated trading';
+        if (bar) bar.className = 'mt-bot-bar';
+      }
+    },
+
     /* ── Event binding ───────────────────────────────────────────────────── */
     _bindEvents() {
       // Refresh scan
@@ -1436,6 +1649,9 @@
           if (btn) { btn.disabled = false; btn.textContent = '▼ SELL'; }
         }
       });
+
+      // Bot ON/OFF toggle
+      $('mtBotToggle')?.addEventListener('click', () => this._toggleBot());
 
       // Clear log
       $('mtClearLog')?.addEventListener('click', () => {

@@ -8548,6 +8548,98 @@ option { background: var(--card); }
 }
 .mt-btn-reset:hover { color: var(--t1); }
 
+/* ── Bot control bar ─────────────────────────────────────────────────────── */
+.mt-bot-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  transition: background .25s, border-color .25s;
+}
+.mt-bot-bar--on {
+  background: rgba(29,214,163,.06);
+  border-top-color:    rgba(29,214,163,.3);
+  border-bottom-color: rgba(29,214,163,.3);
+}
+.mt-bot-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.mt-bot-right {
+  font-size: .65rem;
+  color: var(--t3);
+  max-width: 380px;
+  text-align: right;
+}
+.mt-bot-toggle {
+  padding: 9px 22px;
+  border-radius: 7px;
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  border: none;
+  white-space: nowrap;
+  transition: background .15s, box-shadow .15s, transform .1s;
+}
+.mt-bot-toggle:active { transform: scale(.97); }
+.mt-bot-toggle--off {
+  background: var(--card2);
+  color: var(--t2);
+  border: 1px solid var(--border2);
+}
+.mt-bot-toggle--off:hover {
+  background: rgba(29,214,163,.12);
+  border-color: var(--teal-bdr);
+  color: var(--teal);
+}
+.mt-bot-toggle--on {
+  background: var(--teal);
+  color: #0a0d18;
+  box-shadow: 0 0 16px rgba(29,214,163,.4);
+}
+.mt-bot-toggle--on:hover { opacity: .88; }
+.mt-bot-indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mt-bot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--t3);
+  flex-shrink: 0;
+  transition: background .3s, box-shadow .3s;
+}
+.mt-bot-bar--on .mt-bot-dot {
+  background: var(--teal);
+  box-shadow: 0 0 7px rgba(29,214,163,.8);
+  animation: bot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes bot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .35; }
+}
+.mt-bot-status {
+  font-size: .76rem;
+  color: var(--t2);
+  transition: color .25s;
+}
+.mt-bot-bar--on .mt-bot-status {
+  color: var(--teal);
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .mt-bot-right { display: none; }
+  .mt-bot-bar   { padding: 10px 14px; }
+}
+
 /* ── Compact merged config panel (.mt-cpt-*) ─────────────────────────────── */
 .mt-cpt-block {
   padding: 10px 0 6px;

@@ -2537,6 +2537,69 @@ app.get('/api/patterns/:sym', async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+// ── GET /api/momentum/news/:sym ──────────────────────────────────────────────
+// Returns { hasCatalyst, headline, articles } for the last 24 hours.
+// Uses NewsAPI (NEWSAPI_KEY). Results cached 10 min per symbol.
+const _momentumNewsCache = new Map();
+const MOMENTUM_NEWS_TTL  = 10 * 60 * 1000; // 10 minutes
+
+app.get('/api/momentum/news/:sym', requireAuth, async (req, res) => {
+  const sym = req.params.sym.toUpperCase().trim();
+  if (!/^[A-Z]{1,6}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol' });
+
+  // Serve from cache if fresh
+  const cached = _momentumNewsCache.get(sym);
+  if (cached && Date.now() - cached.ts < MOMENTUM_NEWS_TTL) return res.json(cached.data);
+
+  if (!NEWS_KEY) {
+    return res.json({ hasCatalyst: false, headline: null, articles: [], source: 'no_key' });
+  }
+
+  try {
+    // Use exact ISO-8601 timestamp so NewsAPI doesn't widen the window to midnight.
+    // Also post-filter by publishedAt to enforce the 24-hour cutoff regardless of
+    // any rounding or timezone offset the API applies on its side.
+    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+    const from     = new Date(cutoffMs).toISOString(); // e.g. 2026-08-17T23:36:00.000Z
+    const q        = encodeURIComponent(sym);
+    const url      = `https://newsapi.org/v2/everything?q=${q}&from=${from}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_KEY}`;
+    const r        = await fetch(url, { signal: AbortSignal.timeout(8000) });
+
+    if (!r.ok) {
+      console.warn(`[MomentumNews] NewsAPI HTTP ${r.status} for ${sym}`);
+      return res.json({ hasCatalyst: false, headline: null, articles: [], source: 'newsapi_err' });
+    }
+
+    const data     = await r.json();
+    const articles = (data.articles || [])
+      .filter(a => {
+        if (!a.title || a.title === '[Removed]') return false;
+        // Post-filter: reject anything published before the 24-hour cutoff
+        if (a.publishedAt) {
+          const pub = new Date(a.publishedAt).getTime();
+          if (!isNaN(pub) && pub < cutoffMs) return false;
+        }
+        return true;
+      })
+      .slice(0, 5)
+      .map(a => ({
+        headline:    a.title,
+        url:         a.url,
+        source:      a.source?.name || '',
+        publishedAt: a.publishedAt || null,
+      }));
+
+    const hasCatalyst = articles.length > 0;
+    const headline    = hasCatalyst ? articles[0].headline : null;
+    const result      = { hasCatalyst, headline, articles, source: 'newsapi' };
+
+    _momentumNewsCache.set(sym, { data: result, ts: Date.now() });
+    res.json(result);
+  } catch (e) {
+    console.error('[MomentumNews] error for', sym, e.message);
+    res.json({ hasCatalyst: false, headline: null, articles: [], source: 'error' });
+  }
+});
 
 // ── Full-market universe cache (4-minute TTL) ─────────────────────────────────
 let _universeCache = null;

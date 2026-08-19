@@ -260,25 +260,26 @@
         return { ...r, momentumScore: result.score, scoreReasons: result.reasons, scoreQualified: result.qualified };
       });
 
-      // ── Pass 2: news catalyst check on base-qualifying stocks ─────────────
-      // Fetch news in parallel only for stocks that clear the base threshold.
-      // A confirmed headline adds +1 and can lift a borderline stock above minScore.
+      // ── Pass 2: news catalyst check via /api/momentum/news/:sym ──────────
+      // Uses the dedicated 24h-filtered news endpoint with per-symbol caching.
+      // Fetched in parallel only for stocks near/above the score threshold.
+      // A confirmed headline sets hasNewsCatalyst = true and adds +1 to score.
       const candidates = scored.filter(r => r.momentumScore >= Math.max(0, minScore - 1));
       if (candidates.length > 0) {
         try {
           const newsResults = await Promise.allSettled(
             candidates.map(r =>
-              fetch(`/api/news/${encodeURIComponent(r.sym)}`, { credentials: 'include' })
-                .then(res => res.ok ? res.json() : { news: [] })
-                .catch(() => ({ news: [] }))
+              fetch(`/api/momentum/news/${encodeURIComponent(r.sym)}`, { credentials: 'include' })
+                .then(res => res.ok ? res.json() : { hasCatalyst: false, articles: [] })
+                .catch(() => ({ hasCatalyst: false, articles: [] }))
             )
           );
           newsResults.forEach((result, i) => {
-            if (result.status === 'fulfilled' && result.value?.news?.length > 0) {
+            if (result.status === 'fulfilled' && result.value?.hasCatalyst) {
               const stock = candidates[i];
-              stock.hasNewsCatalyst  = true;
-              stock.newsHeadline     = result.value.news[0]?.title || null;
-              // Re-score with news flag set
+              stock.hasNewsCatalyst = true;
+              stock.newsHeadline    = result.value.headline || null;
+              // Re-score with news flag set on the row
               const rescored = this.calcScore(stock, minScore);
               stock.momentumScore  = rescored.score;
               stock.scoreReasons   = rescored.reasons;
@@ -642,6 +643,15 @@
     async fetch(sym) {
       try {
         const r = await fetch(`/api/momentum/analysis/${sym}`, { credentials: 'include' });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    },
+
+    /** Fetch news catalyst data for the last 24 hours from /api/momentum/news/:sym */
+    async fetchNews(sym) {
+      try {
+        const r = await fetch(`/api/momentum/news/${encodeURIComponent(sym)}`, { credentials: 'include' });
         if (!r.ok) return null;
         return await r.json();
       } catch { return null; }

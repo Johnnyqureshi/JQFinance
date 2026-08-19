@@ -95,16 +95,31 @@
      * Fetch scanner-batch data for the given symbols.
      * Returns raw results array from the server.
      */
-    async fetchBatch(symbols) {
-      const resp = await fetch('/api/scanner-batch', {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body:        JSON.stringify({ symbols }),
-      });
-      if (!resp.ok) throw new Error('Scanner fetch failed: HTTP ' + resp.status);
-      const data = await resp.json();
-      return data.results || [];
+    async fetchBatch(symbols, onProgress) {
+      // Split into chunks of 50 and run up to 3 chunks in parallel
+      const CHUNK = 50, CONCURRENCY = 3;
+      const chunks = [];
+      for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK));
+
+      const results = [];
+      for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+        const wave = chunks.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(wave.map(chunk =>
+          fetch('/api/scanner-batch', {
+            method:      'POST',
+            headers:     { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body:        JSON.stringify({ symbols: chunk }),
+          }).then(r => r.ok ? r.json() : { results: [] })
+            .then(d => d.results || [])
+        ));
+        for (const r of settled) if (r.status === 'fulfilled') results.push(...r.value);
+        if (onProgress) {
+          const done = Math.min(symbols.length, (i + CONCURRENCY) * CHUNK);
+          onProgress(done, symbols.length);
+        }
+      }
+      return results;
     },
 
     /**
@@ -183,14 +198,17 @@
     },
 
     /**
-     * Fetch Alpaca most-actives universe from the server.
+     * Fetch the live full-market universe from the server.
+     * Returns { symbols, gainers, highVolume, source, count } or null on failure.
      */
     async fetchAlpacaUniverse() {
       try {
         const resp = await fetch('/api/momentum/universe', { credentials: 'include' });
         if (!resp.ok) return null;
         const d = await resp.json();
-        return d.symbols?.length ? d.symbols : null;
+        if (!d.symbols?.length) return null;
+        // Attach metadata so the scan loop can show progress labels
+        return d;
       } catch { return null; }
     },
 
@@ -198,15 +216,22 @@
      * Full scan: resolve universe → fetch → filter → score → MIN_SCORE filter → sort.
      * Mirrors the main scan() loop in scanner.py.
      */
-    async scan(cfg) {
-      // Resolve universe: curated list or live Alpaca most-actives
+    // Metadata from the last universe fetch — used by the status display
+    _lastUniverseMeta: null,
+
+    async scan(cfg, onProgress) {
+      // Resolve universe: live full-market feed OR static curated list
       let universe = MomentumConfig.UNIVERSE;
+      this._lastUniverseMeta = null;
       if (cfg.universeMode === 'alpaca') {
-        const alpacaSyms = await this.fetchAlpacaUniverse();
-        if (alpacaSyms?.length) universe = alpacaSyms;
+        const uni = await this.fetchAlpacaUniverse();
+        if (uni?.symbols?.length) {
+          universe = uni.symbols;
+          this._lastUniverseMeta = uni;
+        }
       }
 
-      const raw      = await this.fetchBatch(universe);
+      const raw = await this.fetchBatch(universe, onProgress);
       const filtered = this.filter(raw, cfg);
       const minScore = cfg.minScore ?? 0;
 
@@ -811,12 +836,14 @@
       this.running = true;
       this._setScanStatus('scanning');
       try {
-        const results = await MomentumScanner.scan(this.config);
+        const results = await MomentumScanner.scan(this.config, (done, total) => {
+          this._setScanStatus('scanning', 0, '', done, total);
+        });
         this.scanResults = results;
         this._renderScanTable(results);
-        this._setScanStatus('done', results.length);
+        const meta = MomentumScanner._lastUniverseMeta;
+        this._setScanStatus('done', results.length, '', 0, meta?.count || 0, meta);
         this._startCountdown();
-        // Auto-trade: fire-and-forget after scan completes
         if (this.botEnabled) this._autoTrade(results).catch(() => {});
       } catch (err) {
         this._setScanStatus('error', 0, err.message);
@@ -1340,15 +1367,31 @@
     },
 
     /* ── Status / countdown ──────────────────────────────────────────────── */
-    _setScanStatus(state, count = 0, err = '') {
-      const el    = $('mtScanStatus');
-      const cdEl  = $('mtCountdown');
+    _setScanStatus(state, count = 0, err = '', done = 0, total = 0, meta = null) {
+      const el   = $('mtScanStatus');
+      const cdEl = $('mtCountdown');
       if (!el) return;
       if (state === 'scanning') {
-        el.textContent = '⟳ Scanning ' + (this.config.universe || MomentumConfig.UNIVERSE).length + ' tickers…';
+        const isFullMarket = this.config?.universeMode === 'alpaca';
+        if (isFullMarket && total > 0) {
+          el.textContent = `⟳ Full market scan — ${done} / ${total} tickers…`;
+        } else if (isFullMarket) {
+          el.textContent = '⟳ Fetching live market data…';
+        } else {
+          const n = MomentumConfig.UNIVERSE.length;
+          el.textContent = `⟳ Scanning ${n} tickers…`;
+        }
         if (cdEl) cdEl.textContent = '';
       } else if (state === 'done') {
-        el.textContent = `✓ ${count} stock${count !== 1 ? 's' : ''} · Updated ${new Date().toLocaleTimeString()}`;
+        const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        if ((meta?.source === 'yf-full-market' || meta?.source === 'alpaca-full-market') && meta.count) {
+          const gainersN = (meta.gainers?.length || 0) + (meta.smallCap?.length || 0);
+          el.textContent = `✓ ${count} hit${count !== 1 ? 's' : ''} from ${meta.count} live tickers · ${gainersN} gainers scanned · ${time}`;
+        } else if (meta?.source === 'curated-fallback') {
+          el.textContent = `✓ ${count} stock${count !== 1 ? 's' : ''} · Curated list · ${time}`;
+        } else {
+          el.textContent = `✓ ${count} stock${count !== 1 ? 's' : ''} · ${time}`;
+        }
       } else if (state === 'error') {
         el.textContent = '✗ ' + (err || 'Scan failed');
       }

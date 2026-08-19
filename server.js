@@ -952,7 +952,7 @@ app.get('/api/valuation/:symbol', async (req, res) => {
 app.post('/api/scanner-batch', async (req, res) => {
   const symbols = (req.body.symbols || [])
     .map(s => String(s).toUpperCase().replace(/[^A-Z0-9.\-]/g, '').trim())
-    .filter(Boolean).slice(0, 50);
+    .filter(Boolean).slice(0, 100); // increased from 50 → 100 for full-market scan
   if (!symbols.length) return res.json({ results: [] });
 
   const BATCH = 5;
@@ -1971,27 +1971,93 @@ app.get('/api/patterns/:sym', async (req, res) => {
   }
 });
 
-// ── Momentum page: Alpaca most-actives universe ───────────────────────────────
+// ── Full-market universe cache (4-minute TTL) ─────────────────────────────────
+let _universeCache = null;
+let _universeCacheAt = 0;
+const UNIVERSE_TTL_MS = 4 * 60 * 1000;
+
+// ── Momentum page: live full-market universe ───────────────────────────────────
+// Sources (Yahoo Finance public screeners — no API key required):
+//   1. day_gainers       — stocks up ≥3% today (large + mid cap)
+//   2. small_cap_gainers — small-cap stocks gaining today ($0–$5B market cap)
+//   3. most_actives      — highest volume across all caps (catches pre-filter candidates)
+// Pre-filters $1–$60 price and ≥2% gain before returning to keep scanner focused.
 app.get('/api/momentum/universe', requireAuth, async (req, res) => {
   try {
-    const uid  = req.session.userId;
-    // Alpaca screener: top 50 most-active US equities by volume (real-time)
-    const data = await alpacaDataFetch(uid,
-      '/v1beta1/screener/us_equity/most_actives?by=volume&top=100'
-    ).catch(() => null);
-
-    if (data?.most_actives?.length) {
-      // Keep clean single-class ticker symbols only (no ETFs with slashes, etc.)
-      const syms = data.most_actives
-        .map(s => s.symbol)
-        .filter(s => s && /^[A-Z]{1,5}$/.test(s));
-      return res.json({ symbols: syms, source: 'alpaca-most-actives', count: syms.length });
+    const now = Date.now();
+    if (_universeCache && (now - _universeCacheAt) < UNIVERSE_TTL_MS) {
+      return res.json({ ..._universeCache, cached: true });
     }
 
-    // Fallback: empty — frontend will revert to curated list
-    res.json({ symbols: [], source: 'empty', count: 0 });
+    const YF_SCREENER = 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved';
+    const YF_HDR = { ...YH, 'Accept': 'application/json' };
+
+    // Fetch all three screeners in parallel
+    const [gainersRes, smallCapRes, activesRes] = await Promise.all([
+      fetch(`${YF_SCREENER}?count=100&scrIds=day_gainers`,        { headers: YF_HDR }).catch(() => null),
+      fetch(`${YF_SCREENER}?count=100&scrIds=small_cap_gainers`,  { headers: YF_HDR }).catch(() => null),
+      fetch(`${YF_SCREENER}?count=100&scrIds=most_actives`,       { headers: YF_HDR }).catch(() => null),
+    ]);
+
+    const parseScreener = async r => {
+      if (!r?.ok) return [];
+      try {
+        const d = await r.json();
+        return d?.finance?.result?.[0]?.quotes || [];
+      } catch { return []; }
+    };
+
+    const [gainersRaw, smallCapRaw, activesRaw] = await Promise.all([
+      parseScreener(gainersRes),
+      parseScreener(smallCapRes),
+      parseScreener(activesRes),
+    ]);
+
+    const clean = s => s && /^[A-Z]{1,6}$/.test(s);
+
+    // Day gainers: price $1–$60, gain ≥2%
+    const gainers = gainersRaw
+      .filter(q => clean(q.symbol) && (q.regularMarketPrice||0) >= 1 && (q.regularMarketPrice||0) <= 60 && (q.regularMarketChangePercent||0) >= 2)
+      .map(q => ({ symbol: q.symbol, price: q.regularMarketPrice, change: q.regularMarketChangePercent }));
+
+    // Small-cap gainers: price $1–$20 (prime 5-pillar range), gain ≥2%
+    const seen = new Set(gainers.map(g => g.symbol));
+    const smallCap = smallCapRaw
+      .filter(q => clean(q.symbol) && !seen.has(q.symbol) && (q.regularMarketPrice||0) >= 1 && (q.regularMarketPrice||0) <= 20 && (q.regularMarketChangePercent||0) >= 2)
+      .map(q => ({ symbol: q.symbol, price: q.regularMarketPrice, change: q.regularMarketChangePercent }));
+    smallCap.forEach(s => seen.add(s.symbol));
+
+    // Most-actives: add any not already captured (regardless of direction — scanner will filter)
+    const actives = activesRaw
+      .map(q => q.symbol).filter(s => clean(s) && !seen.has(s));
+
+    const allSymbols = [
+      ...gainers.map(g => g.symbol),
+      ...smallCap.map(g => g.symbol),
+      ...actives,
+    ];
+
+    if (!allSymbols.length) {
+      return res.json({ symbols: MASTER_UNIVERSE, source: 'curated-fallback', count: MASTER_UNIVERSE.length, gainers: [], cached: false });
+    }
+
+    const payload = {
+      symbols:    allSymbols,
+      source:     'yf-full-market',
+      count:      allSymbols.length,
+      gainers:    gainers.map(g => g.symbol),
+      smallCap:   smallCap.map(g => g.symbol),
+      highVolume: actives,
+      cached:     false,
+    };
+
+    _universeCache   = payload;
+    _universeCacheAt = now;
+    console.log(`[Universe] YF full market: ${gainers.length} day-gainers + ${smallCap.length} small-cap + ${actives.length} actives = ${allSymbols.length} total`);
+    res.json(payload);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[Universe] Error:', e.message);
+    res.json({ symbols: MASTER_UNIVERSE, source: 'curated-fallback', count: MASTER_UNIVERSE.length, cached: false });
   }
 });
 

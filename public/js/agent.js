@@ -7,7 +7,7 @@
   function getScreenContext() {
     const appState = window.state || {};
     const ctx = {
-      platform:     'JQFinance — Johnny Qureshi Finance',
+      platform:     'Qureshi Finance',
       timestamp:    new Date().toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' }),
       marketStatus: document.getElementById('mktText')?.textContent?.trim() || 'Unknown',
       currentPage:  appState.page || 'home',
@@ -181,7 +181,7 @@
 
   // ── Widget HTML ────────────────────────────────────────────────────────────
   const WIDGET_HTML = `
-<div id="jqfAgent" class="jqf-agent" role="complementary" aria-label="JQFinance AI Agent">
+<div id="jqfAgent" class="jqf-agent" role="complementary" aria-label="Qureshi Finance AI Agent">
 
   <!-- Bubble toggle -->
   <button class="jqf-bubble" id="jqfBubble" aria-label="Open JQF AI Agent" aria-expanded="false">
@@ -208,7 +208,7 @@
           </svg>
         </div>
         <div>
-          <div class="jqf-head-name">JQF Agent</div>
+          <div class="jqf-head-name">QF Agent</div>
           <div class="jqf-head-status" id="jqfStatus">
             <span class="jqf-status-dot" id="jqfStatusDot"></span>
             <span id="jqfStatusText">Ready</span>
@@ -235,7 +235,7 @@
     <div class="jqf-messages" id="jqfMessages" role="log" aria-live="polite">
       <div class="jqf-msg jqf-msg-ai" id="jqfWelcomeMsg">
         <div class="jqf-msg-bubble">
-          Hi! I'm your <strong>JQFinance AI assistant</strong>. I can read your live charts, RSI, support &amp; resistance levels, analyst ratings, and trading signals in real time.<br><br>
+          Hi! I'm your <strong>Qureshi Finance AI assistant</strong>. I can read your live charts, RSI, support &amp; resistance levels, analyst ratings, and trading signals in real time.<br><br>
           Ask me anything about a stock on screen, or try: <em>"Analyze what I'm looking at"</em> or <em>"Is this a good entry?"</em>
         </div>
         <div class="jqf-msg-time">Just now</div>

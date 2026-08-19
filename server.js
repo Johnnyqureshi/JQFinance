@@ -886,6 +886,7 @@ app.get('/api/news/:symbol', async (req, res) => {
   try {
     const url  = `https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&quotesCount=0&newsCount=12`;
     const r    = await fetch(url, { headers: YH });
+    if (!r.ok) throw new Error(`Yahoo search ${r.status}`);
     const data = await r.json();
     const news = (data?.news || []).map(n => ({
       headline:   n.title, url: n.link, source: n.publisher,
@@ -964,9 +965,9 @@ app.post('/api/scanner-batch', async (req, res) => {
           yf.quote(sym, {}, { validateResult: false }).catch(() => null),
           fetchOHLCV(sym, 70).catch(() => null),
         ]);
-        if (!quote?.regularMarketPrice) return null;
+        const price = quote.regularMarketPrice;
+        if (!price || !isFinite(price) || price <= 0) return null;
 
-        const price     = quote.regularMarketPrice;
         const change    = quote.regularMarketChangePercent ?? 0;
         const volume    = quote.regularMarketVolume ?? 0;
         const avgVol    = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? 0;
@@ -1009,12 +1010,22 @@ app.get('/api/signal/:symbol', async (req, res) => {
     const aboveSma = price > sma50;
     const rsiOk    = rsi14 < 70 && rsi14 > 30;
     const condsMet = [aboveEma, aboveSma, rsiOk].filter(Boolean).length;
+    // ── Candlestick pattern detection ────────────────────────────────────────
+    const patterns = detectCandlePatterns(bars);
+    // Boost/reduce confidence based on detected patterns
+    let confBoost = 0;
+    for (const p of patterns.bullish) confBoost += p.strength === 3 ? 6 : p.strength === 2 ? 3 : 1;
+    for (const p of patterns.bearish) confBoost -= p.strength === 3 ? 6 : p.strength === 2 ? 3 : 1;
+
     const signal    = condsMet === 3 ? 'BUY' : condsMet === 2 ? 'WATCH' : 'HOLD';
-    const confidence = condsMet === 3 ? 72 : condsMet === 2 ? 48 : 30;
+    const rawConf   = condsMet === 3 ? 72 : condsMet === 2 ? 48 : 30;
+    const confidence = Math.min(95, Math.max(10, rawConf + confBoost));
     const reasons = [];
     if (aboveEma) reasons.push('Price above 21 EMA (short-term trend up)');
     if (aboveSma) reasons.push('Price above 50 SMA (medium-term trend up)');
     if (rsiOk)    reasons.push(`RSI ${rsi14} — momentum neutral/healthy`);
+    if (patterns.bullish.length) reasons.push(`${patterns.bullish[0].name} detected — ${patterns.bullish[0].desc.split('—')[0].trim()}`);
+    else if (patterns.bearish.length) reasons.push(`${patterns.bearish[0].name} detected — ${patterns.bearish[0].desc.split('—')[0].trim()}`);
     res.json({
       ok: true,
       symbol: sym,
@@ -1024,6 +1035,7 @@ app.get('/api/signal/:symbol', async (req, res) => {
         confirmed: condsMet === 3,
         zoneStr: condsMet === 3 ? 'Trend aligned — all conditions met' : condsMet === 2 ? 'Partial setup — monitoring' : 'No active setup',
       },
+      patterns: patterns.all,
       regime: { regime: 'NEUTRAL', label: 'Market Neutral' },
     });
   } catch(e) {
@@ -1277,10 +1289,10 @@ app.get('/api/elevenlabs/signed-url', requireAuth, async (req, res) => {
 });
 
 // ── AI Text Chat (AIML API) ────────────────────────────────────────────────────
-const AGENT_SYSTEM_PROMPT = `You are JQF Agent — an expert AI financial assistant embedded inside JQFinance, a professional stock research and real-time analysis platform built by Johnny Qureshi.
+const AGENT_SYSTEM_PROMPT = `You are QF Agent — an expert AI financial assistant embedded inside Qureshi Finance, a professional stock research and real-time analysis platform.
 
 PLATFORM OVERVIEW:
-JQFinance is a single-page application with four main pages:
+Qureshi Finance is a single-page application with four main pages:
 1. HOME / SEARCH: Search any stock ticker. Displays real-time Trading Signals (BUY/HOLD/SELL), RSI gauge, support & resistance levels, direction bias, volume analysis, intraday VWAP console, analyst ratings donut chart, price targets, valuation metrics, and recent news.
 2. MARKETS: Top daily gainers and losers, r/WallStreetBets trending stocks (from ApeWisdom), and a live scrolling ticker tape for major indices and mega-caps.
 3. WATCHLIST: User's personally saved stocks with live prices, plus a Sector Rotation Heatmap showing momentum across 11 major ETF sectors (SPY, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLB, XLRE, XLU).
@@ -1439,17 +1451,50 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403)
+    throw new Error('Alpaca authentication failed — check your API credentials.');
   if (!r.ok) throw new Error(data.message || `Alpaca error (${r.status})`);
   return data;
 }
 
 // Save credentials — stores the key pair for the given mode, sets it as active
-app.put('/api/alpaca/credentials', requireAuth, (req, res) => {
+app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const { apiKey, apiSecret, mode } = req.body || {};
-  if (!apiKey || !apiSecret) return res.status(400).json({ error: 'API key and secret required.' });
+  const key = (apiKey  || '').trim();
+  const sec = (apiSecret || '').trim();
+  if (!key || !sec) return res.status(400).json({ error: 'API key and secret required.' });
+  if (key.length < 8 || sec.length < 8) return res.status(400).json({ error: 'Credentials look too short — paste the full key and secret.' });
   const m = mode === 'live' ? 'live' : 'paper';
+
+  // ── Validate credentials against Alpaca before saving ─────────────────────
+  // Never store credentials that Alpaca rejects.
+  const base = m === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
+  try {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 10000);
+    const test = await fetch(`${base}/v2/account`, {
+      headers: {
+        'APCA-API-KEY-ID':     key,
+        'APCA-API-SECRET-KEY': sec,
+        'Content-Type':        'application/json',
+      },
+      signal: ctrl.signal,
+    });
+    clearTimeout(tid);
+    if (test.status === 401 || test.status === 403) {
+      return res.status(401).json({ error: 'Alpaca rejected these credentials — double-check your key and secret.' });
+    }
+    if (!test.ok) {
+      const body = await test.json().catch(() => ({}));
+      return res.status(400).json({ error: body.message || `Alpaca returned ${test.status} — please try again.` });
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return res.status(400).json({ error: 'Alpaca did not respond in time — check your connection.' });
+    return res.status(400).json({ error: 'Could not reach Alpaca to verify credentials: ' + e.message });
+  }
+
   const uid = req.session.userId;
-  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(uid, apiKey.trim(), apiSecret.trim(), m);
+  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(uid, key, sec, m);
   db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
   res.json({ ok: true, mode: m });
 });
@@ -1531,50 +1576,60 @@ app.get('/api/spy-levels', async (req, res) => {
 // Place order (market with optional TP/SL bracket)
 app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   const { symbol, side, amount, tpPct, slPct, leverage } = req.body || {};
-  if (!symbol || !side || !amount) return res.status(400).json({ error: 'symbol, side, amount required.' });
+
+  // ── Input validation ───────────────────────────────────────────────────────
+  if (!symbol || !side) return res.status(400).json({ error: 'symbol and side required.' });
+  if (!/^[A-Z0-9.\-]{1,12}$/i.test(symbol)) return res.status(400).json({ error: 'Invalid symbol.' });
+  const sideL = side.toLowerCase();
+  if (sideL !== 'buy' && sideL !== 'sell') return res.status(400).json({ error: 'side must be buy or sell.' });
+
+  const amtNum = parseFloat(amount);
+  if (!isFinite(amtNum) || amtNum <= 0) return res.status(400).json({ error: 'amount must be a positive number.' });
+
+  const tpNum  = parseFloat(tpPct)  || 0;
+  const slNum  = parseFloat(slPct)  || 0;
+  if (tpNum < 0 || slNum < 0) return res.status(400).json({ error: 'tpPct and slPct must be non-negative.' });
+
+  // Alpaca bracket orders require BOTH take-profit AND stop-loss legs.
+  // If only one is provided, fall back to a simple market order instead of
+  // sending a malformed bracket that Alpaca will reject.
+  const hasBracket = tpNum > 0 && slNum > 0;
 
   // Validate leverage (1–4x, must be numeric)
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
 
   try {
     // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
-    const quote = await fetchLiveQuote(symbol, req.session.userId);
-    if (!quote?.regularClose && !quote?.price) throw new Error('Could not fetch current price for ' + symbol);
-    const price = quote.regularClose ?? quote.price;
+    const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId);
+    const price = quote?.regularClose ?? quote?.price;
+    if (!price || !isFinite(price) || price <= 0) throw new Error('Could not fetch a valid current price for ' + symbol.toUpperCase());
 
-    const leveragedAmount = amount * lev;
-    const hasBracket = tpPct > 0 || slPct > 0;
-    const sideL = side.toLowerCase();
-
+    const leveragedAmount = amtNum * lev;
     let orderBody;
 
     if (hasBracket) {
-      // Bracket orders require integer qty (Alpaca limitation for margin)
+      // Bracket orders require integer qty (Alpaca limitation for margin accounts)
       const shares = Math.max(1, Math.floor(leveragedAmount / price));
+      const tpPrice = sideL === 'buy'
+        ? (price * (1 + tpNum / 100)).toFixed(2)
+        : (price * (1 - tpNum / 100)).toFixed(2);
+      const slPrice = sideL === 'buy'
+        ? (price * (1 - slNum / 100)).toFixed(2)
+        : (price * (1 + slNum / 100)).toFixed(2);
       orderBody = {
-        symbol,
+        symbol:         symbol.toUpperCase(),
         qty:            String(shares),
         side:           sideL,
         type:           'market',
         time_in_force:  'day',
         order_class:    'bracket',
+        take_profit:    { limit_price: tpPrice },
+        stop_loss:      { stop_price:  slPrice },
       };
-      if (tpPct > 0) {
-        const tpPrice = sideL === 'buy'
-          ? (price * (1 + tpPct / 100)).toFixed(2)
-          : (price * (1 - tpPct / 100)).toFixed(2);
-        orderBody.take_profit = { limit_price: tpPrice };
-      }
-      if (slPct > 0) {
-        const slPrice = sideL === 'buy'
-          ? (price * (1 - slPct / 100)).toFixed(2)
-          : (price * (1 + slPct / 100)).toFixed(2);
-        orderBody.stop_loss = { stop_price: slPrice };
-      }
     } else {
       // Simple notional order (supports fractional shares)
       orderBody = {
-        symbol,
+        symbol:         symbol.toUpperCase(),
         notional:       leveragedAmount.toFixed(2),
         side:           sideL,
         type:           'market',
@@ -1587,7 +1642,10 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
       body:   JSON.stringify(orderBody),
     });
     res.json({ ok: true, order: data, shares: orderBody.qty || null, price, leverage: lev });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    const status = e.message.includes('authentication') ? 401 : 400;
+    res.status(status).json({ error: e.message });
+  }
 });
 
 // Cancel order
@@ -1899,6 +1957,20 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
   }
 });
 
+// ── GET /api/patterns/:sym — standalone daily candle pattern endpoint ─────────
+app.get('/api/patterns/:sym', async (req, res) => {
+  const sym = req.params.sym?.toUpperCase().replace(/[^A-Z.]/g,'');
+  if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
+  try {
+    const bars = await fetchOHLCV(sym, 30);
+    if (!bars || bars.length < 3) return res.json({ ok: false, sym, patterns: [], error: 'Insufficient data' });
+    const patterns = detectCandlePatterns(bars);
+    res.json({ ok: true, sym, patterns: patterns.all });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── Momentum page: Alpaca most-actives universe ───────────────────────────────
 app.get('/api/momentum/universe', requireAuth, async (req, res) => {
   try {
@@ -2107,6 +2179,372 @@ function calcBBWidth(closes, period = 20, mult = 2) {
 }
 
 // Returns last N BB widths for squeeze detection
+// ── Candlestick & Chart Pattern Detection Engine ──────────────────────────────
+// bars: { o, h, l, c, v }[] in CHRONOLOGICAL order (oldest → newest)
+// Returns: { bullish: Pattern[], bearish: Pattern[], neutral: Pattern[], all: Pattern[] }
+// Pattern: { name, type ('BULLISH'|'BEARISH'|'NEUTRAL'), strength (1-3), desc, emoji }
+function detectCandlePatterns(bars) {
+  if (!bars || bars.length < 2) return { bullish: [], bearish: [], neutral: [], all: [] };
+  const found = [];
+  const n = bars.length;
+
+  const body  = b => Math.abs(b.c - b.o);
+  const range = b => (b.h - b.l) || 0.00001;
+  const upper = b => b.h - Math.max(b.o, b.c);
+  const lower = b => Math.min(b.o, b.c) - b.l;
+  const mid   = b => (b.o + b.c) / 2;
+  const isUp  = b => b.c > b.o;
+  const isDn  = b => b.c < b.o;
+  const isBig  = (b, t=0.60) => body(b) >= t * range(b);
+  const isTiny = (b, t=0.18) => body(b) <= t * range(b);
+  const isDoji = b => body(b) <= 0.08 * range(b);
+  const avgBody = bars.slice(Math.max(0,n-14)).reduce((s,b) => s + body(b), 0) / Math.min(14, n);
+
+  const c0 = bars[n-1];
+  const c1 = n>=2 ? bars[n-2] : null;
+  const c2 = n>=3 ? bars[n-3] : null;
+  const c3 = n>=4 ? bars[n-4] : null;
+
+  // Trend: did the prior bars trend up or down?
+  const prior = bars.slice(Math.max(0,n-6), n-1);
+  const trendUp   = prior.length >= 2 && prior.at(-1).c > prior[0].c * 1.005;
+  const trendDown = prior.length >= 2 && prior.at(-1).c < prior[0].c * 0.995;
+
+  const add = (name, type, strength, desc, emoji='') => found.push({ name, type, strength, desc, emoji });
+
+  // ── SINGLE CANDLE ──────────────────────────────────────────────────────────
+
+  // Hammer / Hanging Man — long lower wick (≥2× body), tiny upper wick
+  { const lw=lower(c0),uw=upper(c0),bd=body(c0);
+    if (bd>0 && lw>=2*bd && uw<=0.4*bd && lw>=avgBody*0.25 && isUp(c0) && trendDown)
+      add('Hammer','BULLISH',2,'Buyers absorbed all selling — strong reversal candle','🔨');
+    else if (bd>0 && lw>=2*bd && uw<=0.4*bd && lw>=avgBody*0.25 && isDn(c0) && trendDown)
+      add('Hammer (Red)','BULLISH',1,'Buyers still pushed back from lows despite closing red','🔨');
+    else if (bd>0 && lw>=2*bd && uw<=0.4*bd && lw>=avgBody*0.25 && trendUp)
+      add('Hanging Man','BEARISH',2,'Warning: selling pressure appeared in uptrend — watch next candle','🕴');
+  }
+
+  // Inverted Hammer — long upper wick, tiny lower wick, after downtrend
+  { const uw=upper(c0),lw=lower(c0),bd=body(c0);
+    if (bd>0 && uw>=2*bd && lw<=0.4*bd && trendDown && isUp(c0))
+      add('Inverted Hammer','BULLISH',1,'Buyers fought back from highs — confirmation needed next candle','🔃');
+  }
+
+  // Shooting Star — long upper wick, after uptrend
+  { const uw=upper(c0),lw=lower(c0),bd=body(c0);
+    if (bd>0 && uw>=2*bd && lw<=0.4*bd && trendUp && isDn(c0))
+      add('Shooting Star','BEARISH',2,'Sellers rejected highs — momentum exhaustion at the top','⭐');
+  }
+
+  // Doji variants — open ≈ close
+  if (isDoji(c0)) {
+    const uw=upper(c0), lw=lower(c0);
+    if (lw > 3*uw && lw > avgBody*0.25)
+      add('Dragonfly Doji','BULLISH',2,'Bears pushed down but closed at open — strong buying floor','🐉');
+    else if (uw > 3*lw && uw > avgBody*0.25)
+      add('Gravestone Doji','BEARISH',2,'Buyers pushed up but closed at open — strong selling ceiling','🪦');
+    else
+      add('Doji','NEUTRAL',1,'Market indecision — watch next candle for direction','➕');
+  }
+
+  // Bullish/Bearish Belt Hold (Marubozu — ≥85% body, tiny wicks)
+  if (isBig(c0,0.85)) {
+    const uw=upper(c0),lw=lower(c0),rng=range(c0);
+    if (uw<0.06*rng && lw<0.06*rng) {
+      if (isUp(c0)) add('Bullish Belt Hold','BULLISH',2,'Full-body green — pure buying conviction, no rejection','💚');
+      else           add('Bearish Belt Hold','BEARISH',2,'Full-body red — pure selling conviction, no rejection','❤');
+    }
+  }
+
+  // ── TWO CANDLE ────────────────────────────────────────────────────────────
+  if (c1) {
+    // Bullish Engulfing
+    if (isDn(c1) && isUp(c0) && c0.o<=c1.c && c0.c>=c1.o && body(c0)>body(c1))
+      add('Bullish Engulfing','BULLISH',3,'Bulls fully reversed the prior red bar — high-confidence reversal','🟢');
+
+    // Bearish Engulfing
+    if (isUp(c1) && isDn(c0) && c0.o>=c1.c && c0.c<=c1.o && body(c0)>body(c1))
+      add('Bearish Engulfing','BEARISH',3,'Bears fully reversed the prior green bar — high-confidence reversal','🔴');
+
+    // Bullish Harami
+    if (isDn(c1) && isUp(c0) && c0.o>=c1.c && c0.c<=c1.o && body(c0)<body(c1)*0.5)
+      add('Bullish Harami','BULLISH',2,'Small green inside prior red — selling momentum is slowing','🌱');
+
+    // Bearish Harami
+    if (isUp(c1) && isDn(c0) && c0.o<=c1.c && c0.c>=c1.o && body(c0)<body(c1)*0.5)
+      add('Bearish Harami','BEARISH',2,'Small red inside prior green — buying momentum is slowing','🍂');
+
+    // Bullish Harami Cross (Doji inside prior red)
+    if (isDn(c1) && isDoji(c0) && c0.h<=c1.o && c0.l>=c1.c)
+      add('Bullish Harami Cross','BULLISH',2,'Doji indecision after downbar — reversal signal building','✝');
+
+    // Bearish Harami Cross (Doji inside prior green)
+    if (isUp(c1) && isDoji(c0) && c0.h<=c1.c && c0.l>=c1.o)
+      add('Bearish Harami Cross','BEARISH',2,'Doji indecision after upbar — reversal signal building','✝');
+
+    // Dark Cloud Cover
+    if (isUp(c1) && isDn(c0) && c0.o>c1.h && c0.c<mid(c1) && c0.c>c1.o && isBig(c1) && isBig(c0))
+      add('Dark Cloud Cover','BEARISH',3,'Sellers opened above prior high then drove deep into green body','⛅');
+
+    // Piercing Line
+    if (isDn(c1) && isUp(c0) && c0.o<c1.l && c0.c>mid(c1) && c0.c<c1.o && isBig(c1) && isBig(c0))
+      add('Piercing Line','BULLISH',3,'Buyers opened below prior low then drove deep into red body','🗡');
+
+    // Bullish Kicking — bearish marubozu then bullish marubozu with gap up
+    if (isDn(c1) && isUp(c0) && isBig(c1,0.80) && isBig(c0,0.80) && c0.o>c1.o)
+      add('Bullish Kicking','BULLISH',3,'Gap up after marubozu — sudden aggressive buying shift','⚡');
+
+    // Bearish Kicking
+    if (isUp(c1) && isDn(c0) && isBig(c1,0.80) && isBig(c0,0.80) && c0.o<c1.o)
+      add('Bearish Kicking','BEARISH',3,'Gap down after marubozu — sudden aggressive selling shift','⚡');
+
+    // Bullish Meeting Lines
+    if (isDn(c1) && isUp(c0) && Math.abs(c0.c-c1.c)/c1.c<0.002 && isBig(c1) && isBig(c0))
+      add('Bullish Meeting Lines','BULLISH',2,'Bulls and bears closed at same level after downtrend — balance shift','⚖');
+
+    // Bearish Meeting Lines
+    if (isUp(c1) && isDn(c0) && Math.abs(c0.c-c1.c)/c1.c<0.002 && isBig(c1) && isBig(c0))
+      add('Bearish Meeting Lines','BEARISH',2,'Bears matched bulls at exact close after uptrend — reversal signal','⚖');
+
+    // Tweezer Bottom
+    if (isDn(c1) && isUp(c0) && Math.abs(c0.l-c1.l)/c1.l<0.002 && trendDown)
+      add('Tweezer Bottom','BULLISH',2,'Double test of exact same low — strong demand floor confirmed','📐');
+
+    // Tweezer Top
+    if (isUp(c1) && isDn(c0) && Math.abs(c0.h-c1.h)/c1.h<0.002 && trendUp)
+      add('Tweezer Top','BEARISH',2,'Double test of exact same high — strong supply ceiling confirmed','📐');
+
+    // Bullish Doji Star (gap-down doji after downtrend)
+    if (isDn(c1) && isDoji(c0) && c0.h<c1.c && trendDown)
+      add('Bullish Doji Star','BULLISH',2,'Isolated doji below downtrend — reversal signal building','⭐');
+
+    // Bearish Doji Star (gap-up doji after uptrend)
+    if (isUp(c1) && isDoji(c0) && c0.l>c1.c && trendUp)
+      add('Bearish Doji Star','BEARISH',2,'Isolated doji above uptrend — exhaustion signal at peak','⭐');
+
+    // Bullish Separating Lines
+    if (isDn(c1) && isUp(c0) && Math.abs(c0.o-c1.o)/c1.o<0.002 && isBig(c0))
+      add('Bullish Separating Lines','BULLISH',2,'Gap recovery to same open as prior red — uptrend resuming','📈');
+
+    // Bearish Separating Lines
+    if (isUp(c1) && isDn(c0) && Math.abs(c0.o-c1.o)/c1.o<0.002 && isBig(c0))
+      add('Bearish Separating Lines','BEARISH',2,'Gap drop to same open as prior green — downtrend resuming','📉');
+
+    // In-Neck / On-Neck / Thrusting (bearish continuation)
+    if (isDn(c1) && isUp(c0) && c0.o<c1.l) {
+      if (c0.c<=c1.l*1.001)
+        add('In-Neck','BEARISH',1,'Weak recovery only to prior low — bears retain full control','👎');
+      else if (c0.c>c1.l*1.001 && c0.c<mid(c1))
+        add('Thrusting','BEARISH',1,'Recovery fails below prior midpoint — bearish continuation likely','🎯');
+    }
+
+    // Bullish Matching Low — two red bars closing at same level
+    if (isDn(c1) && isDn(c0) && Math.abs(c0.c-c1.c)/c1.c<0.002)
+      add('Matching Low','BULLISH',1,'Second red bar closed at same support — potential floor forming','📏');
+  }
+
+  // ── THREE CANDLE ──────────────────────────────────────────────────────────
+  if (c1 && c2) {
+    // Morning Star
+    if (isDn(c2) && isBig(c2) && isTiny(c1,0.4) && isUp(c0) && isBig(c0) && c0.c>mid(c2))
+      add('Morning Star','BULLISH',3,'Classic 3-bar reversal — decisive confirmation of trend change','🌅');
+
+    // Evening Star
+    if (isUp(c2) && isBig(c2) && isTiny(c1,0.4) && isDn(c0) && isBig(c0) && c0.c<mid(c2))
+      add('Evening Star','BEARISH',3,'Classic 3-bar reversal — decisive confirmation of market top','🌆');
+
+    // Morning Doji Star
+    if (isDn(c2) && isDoji(c1) && isUp(c0) && c0.c>mid(c2))
+      add('Morning Doji Star','BULLISH',3,'Doji pivot after downtrend — highest accuracy bullish reversal','🌠');
+
+    // Evening Doji Star
+    if (isUp(c2) && isDoji(c1) && isDn(c0) && c0.c<mid(c2))
+      add('Evening Doji Star','BEARISH',3,'Doji pivot at the top — highest accuracy bearish reversal','🌠');
+
+    // Three White Soldiers
+    if (isUp(c2)&&isUp(c1)&&isUp(c0)&&isBig(c2,0.55)&&isBig(c1,0.55)&&isBig(c0,0.55)&&
+        c1.c>c2.c&&c0.c>c1.c&&c1.o>c2.o&&c0.o>c1.o&&upper(c0)<body(c0)*0.35)
+      add('Three White Soldiers','BULLISH',3,'Three consecutive conviction greens — powerful new uptrend','🪖');
+
+    // Three Black Crows
+    if (isDn(c2)&&isDn(c1)&&isDn(c0)&&isBig(c2,0.55)&&isBig(c1,0.55)&&isBig(c0,0.55)&&
+        c1.c<c2.c&&c0.c<c1.c&&c1.o<c2.o&&c0.o<c1.o&&lower(c0)<body(c0)*0.35)
+      add('Three Black Crows','BEARISH',3,'Three consecutive conviction reds — powerful new downtrend','🐦‍⬛');
+
+    // Bullish Abandoned Baby
+    if (isDn(c2)&&isDoji(c1)&&isUp(c0)&&c1.h<c2.l&&c0.o>c1.h)
+      add('Bullish Abandoned Baby','BULLISH',3,'Rarest pattern — isolated doji gap creates perfect reversal pivot','👶');
+
+    // Bearish Abandoned Baby
+    if (isUp(c2)&&isDoji(c1)&&isDn(c0)&&c1.l>c2.h&&c0.o<c1.l)
+      add('Bearish Abandoned Baby','BEARISH',3,'Rarest pattern — isolated doji gap at the top','👶');
+
+    // Three Inside Up (Harami confirmed)
+    if (isDn(c2)&&isUp(c1)&&c1.o>=c2.c&&c1.c<=c2.o&&isUp(c0)&&c0.c>c2.o)
+      add('Three Inside Up','BULLISH',3,'Harami confirmed by follow-through — high reliability reversal','✅');
+
+    // Three Inside Down
+    if (isUp(c2)&&isDn(c1)&&c1.o<=c2.c&&c1.c>=c2.o&&isDn(c0)&&c0.c<c2.o)
+      add('Three Inside Down','BEARISH',3,'Harami confirmed by follow-through — high reliability reversal','❌');
+
+    // Three Outside Up (Engulfing confirmed)
+    if (isDn(c2)&&isUp(c1)&&c1.o<c2.c&&c1.c>c2.o&&isUp(c0)&&c0.c>c1.c)
+      add('Three Outside Up','BULLISH',3,'Engulfing confirmed with follow-through — maximum reliability','🚀');
+
+    // Three Outside Down
+    if (isUp(c2)&&isDn(c1)&&c1.o>c2.c&&c1.c<c2.o&&isDn(c0)&&c0.c<c1.c)
+      add('Three Outside Down','BEARISH',3,'Engulfing confirmed with follow-through — maximum reliability','🔻');
+
+    // Advance Block (3 greens but shrinking bodies + upper wicks = exhaustion)
+    if (isUp(c2)&&isUp(c1)&&isUp(c0)&&body(c1)<body(c2)*0.85&&body(c0)<body(c1)*0.85&&
+        upper(c0)>body(c0)*0.3&&trendUp)
+      add('Advance Block','BEARISH',2,'Three greens with shrinking bodies — buying exhaustion warning','🧱');
+
+    // Deliberation (stalling after 3 greens)
+    if (isUp(c2)&&isUp(c1)&&isUp(c0)&&isBig(c2,0.55)&&isBig(c1,0.55)&&isTiny(c0,0.4)&&c0.o>c1.c)
+      add('Deliberation','BEARISH',2,'Stall candle after two strong greens — uptrend losing energy','🤔');
+
+    // Bullish Tri-Star
+    if (isDoji(c2)&&isDoji(c1)&&isDoji(c0)&&trendDown)
+      add('Bullish Tri-Star','BULLISH',3,'Three consecutive dojis in downtrend — extreme indecision, reversal imminent','⭐⭐⭐');
+
+    // Bearish Tri-Star
+    if (isDoji(c2)&&isDoji(c1)&&isDoji(c0)&&trendUp)
+      add('Bearish Tri-Star','BEARISH',3,'Three consecutive dojis at top — extreme indecision, reversal imminent','⭐⭐⭐');
+
+    // Upside Tasuki Gap (bullish continuation — gap up held)
+    if (isUp(c2)&&isUp(c1)&&c1.o>c2.h&&isDn(c0)&&c0.c>c2.h)
+      add('Upside Tasuki Gap','BULLISH',2,'Bearish pullback failed to close bullish gap — uptrend continues','⬆');
+
+    // Downside Tasuki Gap (bearish continuation)
+    if (isDn(c2)&&isDn(c1)&&c1.o<c2.l&&isUp(c0)&&c0.c<c2.l)
+      add('Downside Tasuki Gap','BEARISH',2,'Bullish bounce failed to close bearish gap — downtrend continues','⬇');
+
+    // Unique 3 River Bottom
+    if (isDn(c2)&&isBig(c2)&&lower(c1)>lower(c2)&&isTiny(c1)&&isUp(c0)&&c0.c<c1.o)
+      add('Unique 3 River Bottom','BULLISH',2,'Rare 3-bar river formation — uncommon but reliable reversal','🌊');
+
+    // Bearish 2 Crows (using c2=large green, c1=gap-up small red, c0=larger red)
+    if (isUp(c2)&&isBig(c2)&&isDn(c1)&&c1.o>c2.c&&isTiny(c1)&&isDn(c0)&&c0.o>=c1.o&&c0.c<c2.c&&c0.c>c2.o)
+      add('Bearish 2 Crows','BEARISH',2,'Two bearish crows pull back from above — selling takes control','🐦');
+  }
+
+  // ── FOUR CANDLE ───────────────────────────────────────────────────────────
+  if (c1&&c2&&c3) {
+    // Bullish 3 Line Strike — 3 red bars then one large engulfing green
+    if (isDn(c3)&&isDn(c2)&&isDn(c1)&&c2.c<c3.c&&c1.c<c2.c&&
+        isUp(c0)&&c0.o<c1.c&&c0.c>c3.o)
+      add('Bullish 3 Line Strike','BULLISH',2,'Three reds reversed by single large green — bulls reassert control','🎯');
+
+    // Bearish 3 Line Strike
+    if (isUp(c3)&&isUp(c2)&&isUp(c1)&&c2.c>c3.c&&c1.c>c2.c&&
+        isDn(c0)&&c0.o>c1.c&&c0.c<c3.o)
+      add('Bearish 3 Line Strike','BEARISH',2,'Three greens reversed by single large red — bears reassert control','🎯');
+
+    // Upside Gap 2 Crows (bearish)
+    if (isUp(c3)&&isBig(c3)&&isDn(c2)&&c2.o>c3.c&&isTiny(c2)&&
+        isDn(c1)&&c1.o<=c2.o&&c1.c<c3.c&&isDn(c0)&&c0.c<c1.c)
+      add('Upside Gap 2 Crows','BEARISH',2,'Gap up filled by two crow candles — exhaustion at resistance','🐦🐦');
+  }
+
+  // ── CHART PATTERNS (multi-bar) ────────────────────────────────────────────
+  if (n >= 10) {
+    const last = bars.slice(Math.max(0,n-20));
+    const L = last.length;
+    const H = last.map(b=>b.h);
+    const Lo = last.map(b=>b.l);
+    const Cl = last.map(b=>b.c);
+
+    // Double Bottom
+    if (L>=8) {
+      const pairs = [];
+      for (let i=0;i<L-3;i++) for (let j=i+3;j<L;j++)
+        if (Math.abs(Lo[i]-Lo[j])/Lo[i]<0.015) pairs.push([i,j,Math.min(Lo[i],Lo[j])]);
+      if (pairs.length && isUp(c0)) {
+        const bp = pairs.sort((a,b)=>a[2]-b[2])[0];
+        const peakBetween = Math.max(...Cl.slice(bp[0],bp[1]));
+        if (peakBetween>bp[2]*1.02) add('Double Bottom','BULLISH',3,'Two tests of same support — strong buy signal on upside breakout','📊');
+      }
+    }
+
+    // Double Top
+    if (L>=8) {
+      const pairs = [];
+      for (let i=0;i<L-3;i++) for (let j=i+3;j<L;j++)
+        if (Math.abs(H[i]-H[j])/H[i]<0.015) pairs.push([i,j,Math.max(H[i],H[j])]);
+      if (pairs.length && isDn(c0)) {
+        const bp = pairs.sort((a,b)=>b[2]-a[2])[0];
+        const troughBetween = Math.min(...Cl.slice(bp[0],bp[1]));
+        if (troughBetween<bp[2]*0.98) add('Double Top','BEARISH',3,'Two tests of same resistance — strong sell signal on downside break','📊');
+      }
+    }
+
+    // Head and Shoulders
+    if (L>=12) {
+      const t3=Math.floor(L/3);
+      const lh=Math.max(...H.slice(0,t3)), mh=Math.max(...H.slice(t3,2*t3)), rh=Math.max(...H.slice(2*t3));
+      if (mh>lh*1.02&&mh>rh*1.02&&Math.abs(lh-rh)/lh<0.04&&isDn(c0))
+        add('Head & Shoulders','BEARISH',3,'Classic top — higher head between two equal shoulders','👤');
+    }
+
+    // Inverse Head and Shoulders
+    if (L>=12) {
+      const t3=Math.floor(L/3);
+      const ll=Math.min(...Lo.slice(0,t3)), ml=Math.min(...Lo.slice(t3,2*t3)), rl=Math.min(...Lo.slice(2*t3));
+      if (ml<ll*0.98&&ml<rl*0.98&&Math.abs(ll-rl)/ll<0.04&&isUp(c0))
+        add('Inv. Head & Shoulders','BULLISH',3,'Classic bottom — deeper head between two equal shoulders','🙃');
+    }
+
+    // Ascending Triangle (flat highs, rising lows)
+    if (L>=8) {
+      const topH=H.slice(-5), botL=Lo.slice(-5);
+      const flatTop=(Math.max(...topH)-Math.min(...topH))/Math.max(...topH)<0.015;
+      const risingBot=botL[botL.length-1]>botL[0]*1.01;
+      if (flatTop&&risingBot&&isUp(c0)) add('Ascending Triangle','BULLISH',2,'Flat resistance + rising support = bullish breakout setup','△');
+    }
+
+    // Descending Triangle (flat lows, falling highs)
+    if (L>=8) {
+      const topH=H.slice(-5), botL=Lo.slice(-5);
+      const flatBot=(Math.max(...botL)-Math.min(...botL))/Math.min(...botL)<0.015;
+      const fallingTop=topH[topH.length-1]<topH[0]*0.99;
+      if (flatBot&&fallingTop&&isDn(c0)) add('Descending Triangle','BEARISH',2,'Flat support + falling resistance = bearish breakdown setup','▽');
+    }
+
+    // Bull Flag / Pennant — sharp rise + tight consolidation
+    if (L>=8) {
+      const flagBase=bars[Math.max(0,n-8)], flagPeak=bars[Math.max(0,n-4)];
+      const move=(flagPeak.c-flagBase.c)/flagBase.c;
+      const recent4=bars.slice(n-4);
+      const consol=(Math.max(...recent4.map(b=>b.h))-Math.min(...recent4.map(b=>b.l)))/flagPeak.c;
+      if (move>0.07&&consol<0.035&&isUp(c0))
+        add('Bull Flag / Pennant','BULLISH',2,'Sharp rally + tight consolidation = continuation breakout setup','🚩');
+    }
+
+    // Bear Flag / Pennant
+    if (L>=8) {
+      const flagBase=bars[Math.max(0,n-8)], flagTrough=bars[Math.max(0,n-4)];
+      const drop=(flagBase.c-flagTrough.c)/flagBase.c;
+      const recent4=bars.slice(n-4);
+      const consol=(Math.max(...recent4.map(b=>b.h))-Math.min(...recent4.map(b=>b.l)))/flagTrough.c;
+      if (drop>0.07&&consol<0.035&&isDn(c0))
+        add('Bear Flag / Pennant','BEARISH',2,'Sharp drop + tight consolidation = continuation breakdown setup','🚩');
+    }
+  }
+
+  // Sort: strongest first, bullish before bearish at same strength
+  found.sort((a,b) => {
+    if (b.strength!==a.strength) return b.strength-a.strength;
+    return ({BULLISH:0,NEUTRAL:1,BEARISH:2})[a.type] - ({BULLISH:0,NEUTRAL:1,BEARISH:2})[b.type];
+  });
+
+  const all     = found.slice(0,8);
+  const bullish = all.filter(p=>p.type==='BULLISH');
+  const bearish = all.filter(p=>p.type==='BEARISH');
+  const neutral = all.filter(p=>p.type==='NEUTRAL');
+  return { all, bullish, bearish, neutral };
+}
+
 function calcBBWidthSeries(closes, period = 20, mult = 2, lookback = 20) {
   const widths = [];
   for (let i = closes.length - lookback; i <= closes.length; i++) {
@@ -3010,7 +3448,7 @@ function groupDailyToWeekly(dailyBars) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Johnny Qureshi Finance on :${PORT}`);
+  console.log(`Qureshi Finance on :${PORT}`);
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

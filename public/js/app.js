@@ -287,7 +287,7 @@ async function loadScorePanel(fmp, price) {
 
     scoreCardHtml = `
     <div class="score-card">
-      <div class="score-card-title">JQF Score</div>
+      <div class="score-card-title">Qureshi Finance Score</div>
       <div class="score-badge-wrap">
         <div class="score-badge ${scoreClass}">${score}</div>
         <div>
@@ -573,14 +573,17 @@ async function loadCrypto() {
 
     const cards = CRYPTO_TICKERS.map(sym => {
       const s     = snaps[sym] || {};
-      const px    = s.price || 0;
-      const prev  = s.previousClose || 0;
-      const ch    = px - prev;
-      const pct   = prev ? (ch / prev) * 100 : 0;
+      const px    = s.price   || null;   // null = data unavailable, never show $0
+      const prev  = s.previousClose || null;
+      const ch    = (px != null && prev != null) ? px - prev : null;
+      const pct   = (ch != null && prev)         ? (ch / prev) * 100 : null;
       const mktcap = s.marketCap || 0;
       const name  = sym.replace('-USD','');
       const color = CRYPTO_ICONS[sym] || '#888';
       const eSym  = escapeHtml(sym);
+      const priceStr = px != null ? (px >= 1000 ? fmt(px,0) : px >= 1 ? fmt(px,2) : fmt(px,6)) : '—';
+      const pctStr   = pct != null ? (pct >= 0 ? '+' : '') + fmt(Math.abs(pct)) + '%' : '—';
+      const chgCls   = pct == null ? '' : pct >= 0 ? 'up' : 'down';
 
       return `<div class="crypto-card" data-sym="${eSym}">
         <div class="crypto-card-icon" style="background:${color}22;border:1.5px solid ${color}44;color:${color}">${name.slice(0,3)}</div>
@@ -589,8 +592,8 @@ async function loadCrypto() {
           <div class="crypto-card-sym">${name} <span class="crypto-24-7">24/7</span></div>
         </div>
         <div class="crypto-card-right">
-          <div class="crypto-card-price">$${px >= 1000 ? fmt(px,0) : px >= 1 ? fmt(px,2) : fmt(px,6)}</div>
-          <div class="crypto-card-chg ${cls(ch)}">${ch >= 0 ? '+' : ''}${fmt(pct)}%</div>
+          <div class="crypto-card-price">${px != null ? '$' + priceStr : '—'}</div>
+          <div class="crypto-card-chg ${chgCls}">${pctStr}</div>
           ${mktcap ? `<div class="crypto-card-mcap">${fmtV(mktcap)}</div>` : ''}
         </div>
       </div>`;

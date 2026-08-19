@@ -47,13 +47,22 @@
       // Daily limits
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
-      // Strategy filters
-      minPrice:       0.50,     // catches all sub-$20 momentum movers incl. low-priced runners
+      // ── 5 PILLARS (hard filters — all must pass) ─────────────────────────
+      // Pillar 1: Price $2–$20 (low-priced volatile small-caps)
+      minPrice:       2.00,
       maxPrice:       20.00,
+      // Pillar 2: Daily gain ≥ 10% (intraday momentum already present)
       minGainPercent: 10.0,
-      minRelVol:      2.0,
+      // Pillar 3: Relative volume ≥ 5× (heavy market participation)
+      minRelVol:      5.0,
+      // Pillar 4: News catalyst required (breaking headline confirms the move)
+      requireNewsCatalyst: true,
+      // Pillar 5: Float < 10M shares (low supply → explosive moves possible)
+      maxFloat:       10_000_000,
+      // Minimum absolute volume sanity check (independent of pillars)
       minVolume:      100000,
-      minScore:       4,        // out of 7 (6 base + 1 news catalyst bonus)
+      // Score threshold: max 7 — all 5 pillars = 6 pts, rvol≥10× adds 1 bonus
+      minScore:       4,
       // Risk
       stopPercent:    null,     // null = use ATR fallback; number = % below entry
       minRR:          2.0,
@@ -99,33 +108,52 @@
     },
 
     /**
-     * Apply momentum pre-filters.
+     * Apply momentum pre-filters — the 5 pillars as hard gates.
      * Mirrors the filter() method in scanner.py.
-     * Checks: price range, min gain %, min relative volume, min absolute volume.
-     * MIN_SCORE is applied post-scoring in scan().
+     *
+     * Pillar 1: Price $2–$20
+     * Pillar 2: Daily gain ≥ 10%
+     * Pillar 3: Relative volume ≥ 5× (configurable)
+     * Pillar 4: News catalyst — checked AFTER Pass 2 in scan()
+     * Pillar 5: Float < 10M shares — if floatSh is known, reject over-limit; if unknown, allow through
      */
     filter(results, cfg) {
       return results.filter(r => {
         if (r.price == null) return false;
-        if (r.price < cfg.minPrice || r.price > cfg.maxPrice) return false;
+
+        // Pillar 1: price range
+        if (r.price < (cfg.minPrice ?? 2) || r.price > (cfg.maxPrice ?? 20)) return false;
+
+        // Pillar 2: minimum gain
         if (cfg.minGainPercent != null && (r.change ?? 0) < cfg.minGainPercent) return false;
+
+        // Pillar 3: relative volume
         if (cfg.minRelVol != null && (r.relVol ?? 0) < cfg.minRelVol) return false;
+
+        // Absolute volume floor
         if (cfg.minVolume != null && (r.volume ?? 0) < cfg.minVolume) return false;
+
+        // Pillar 5: float — only filter when float data is available AND over the limit
+        // (null floatSh = Yahoo didn't return it → allow through, don't penalise)
+        if (cfg.maxFloat != null && r.floatSh != null && r.floatSh > cfg.maxFloat) return false;
+
         return true;
       });
     },
 
     /**
-     * Score a stock using the exact algorithm from strategy.py / calculate_score().
+     * Score a stock against the 5 pillars. Max 7 points.
      *
-     * Base max: 6 points. News catalyst adds +1 bonus → possible max 7.
+     *   Pillar 2 — Momentum  gain ≥ 10%       → +2   "Strong momentum"
+     *                        gain ≥ 20%       → +1   "Very strong momentum"  (cumul: +3)
+     *   Pillar 3 — RelVol    rvol ≥ 5×        → +1   "Relative volume ≥ 5×"
+     *                        rvol ≥ 10×       → +1   "Extreme volume surge ≥ 10×"  (cumul: +2)
+     *   Pillar 4 — News      hasNewsCatalyst  → +1   "News catalyst confirmed"
+     *   Pillar 5 — Float     float < 10M      → +1   "Low float (< 10M shares)"
      *
-     *   Momentum  gain ≥ 10%        → +2   "Strong momentum"
-     *             gain ≥ 20%        → +1   "Very strong momentum"  (cumul: +3)
-     *   RelVol    rvol ≥ 2×         → +1   "Relative volume > 2×"
-     *             rvol ≥ 5×         → +1   "Relative volume > 5×"  (cumul: +2)
-     *   Price     $2 – $20          → +1   "Momentum price range"
-     *   News      hasNewsCatalyst   → +1   "News catalyst confirmed" (async pass)
+     * Pillars 1 (price $2–$20) and the ≥10%/≥5x/news requirements are
+     * enforced as hard filters in filter() / scan(). Score differentiates
+     * quality among stocks that already passed all pillars.
      *
      * Returns { score, reasons, qualified }.
      */
@@ -133,23 +161,23 @@
       let score   = 0;
       const reasons = [];
 
-      const gain  = r.change ?? 0;
-      const rvol  = r.relVol ?? 0;
-      const price = r.price  ?? 0;
+      const gain  = r.change  ?? 0;
+      const rvol  = r.relVol  ?? 0;
+      const float = r.floatSh ?? null;
 
-      // ── MOMENTUM ──────────────────────────────────────────────────────────
-      if (gain >= 10) { score += 2; reasons.push('Strong momentum (+10%)'); }
-      if (gain >= 20) { score += 1; reasons.push('Very strong momentum (+20%)'); }
+      // ── PILLAR 2: MOMENTUM ────────────────────────────────────────────────
+      if (gain >= 10) { score += 2; reasons.push('Strong momentum (≥ 10%)'); }
+      if (gain >= 20) { score += 1; reasons.push('Very strong momentum (≥ 20%)'); }
 
-      // ── RELATIVE VOLUME ───────────────────────────────────────────────────
-      if (rvol >= 2)  { score += 1; reasons.push('Relative volume > 2×'); }
-      if (rvol >= 5)  { score += 1; reasons.push('Relative volume > 5×'); }
+      // ── PILLAR 3: RELATIVE VOLUME ─────────────────────────────────────────
+      if (rvol >= 5)  { score += 1; reasons.push('Relative volume ≥ 5×'); }
+      if (rvol >= 10) { score += 1; reasons.push('Extreme volume surge ≥ 10×'); }
 
-      // ── PRICE RANGE ───────────────────────────────────────────────────────
-      if (price >= 2 && price <= 20) { score += 1; reasons.push('Momentum price range ($2–$20)'); }
-
-      // ── NEWS CATALYST (pre-scored by scan()) ──────────────────────────────
+      // ── PILLAR 4: NEWS CATALYST (set by scan() Pass 2) ───────────────────
       if (r.hasNewsCatalyst) { score += 1; reasons.push('News catalyst confirmed'); }
+
+      // ── PILLAR 5: FLOAT ───────────────────────────────────────────────────
+      if (float != null && float < 10_000_000) { score += 1; reasons.push('Low float (< 10M shares)'); }
 
       return { score, reasons, qualified: score >= minScore };
     },
@@ -216,8 +244,18 @@
         } catch (_) { /* news fetch failing must never break the scan */ }
       }
 
+      // ── Pillar 4: News catalyst hard filter (if enabled) ─────────────────
+      // Applied after Pass 2 so we only reject stocks we actually checked.
+      // If ALL news fetches failed (API down), skip this filter to avoid
+      // silently returning zero results.
+      const anyNewsFound = scored.some(r => r.hasNewsCatalyst);
+      const applyNewsFilter = cfg.requireNewsCatalyst && anyNewsFound;
+      const withNewsFilter = applyNewsFilter
+        ? scored.filter(r => r.hasNewsCatalyst)
+        : scored;
+
       // Apply MIN_SCORE filter
-      const passing = scored.filter(r => r.scoreQualified);
+      const passing = withNewsFilter.filter(r => r.scoreQualified);
 
       return passing.sort((a, b) => b.momentumScore - a.momentumScore);
     },
@@ -254,48 +292,54 @@
      * Rows without it (legacy) fall back to raw field values.
      */
     breakdown(row) {
-      const MAX = 6; // current max score
       const gain  = row.change  ?? 0;
       const rvol  = row.relVol  ?? 0;
       const price = row.price   ?? 0;
+      const float = row.floatSh ?? null;
+      const floatM = float != null ? (float / 1_000_000).toFixed(2) + 'M' : null;
 
-      // Criteria mirroring calculate_score() — show pass/fail for each
+      // ── 5 PILLARS — show pass/fail + points earned ────────────────────────
       return [
         {
-          label:  'Gain ≥ 10% (Strong momentum)',
-          value:  gain != null ? (gain >= 0 ? '+' : '') + gain.toFixed(2) + '%' : '--',
-          note:   gain >= 20 ? '+2 pts → +1 bonus (very strong)' : gain >= 10 ? '+2 pts earned' : 'Needs ≥ 10%',
-          status: gain >= 20 ? 'good' : gain >= 10 ? 'ok' : 'bad',
-        },
-        {
-          label:  'Relative Volume ≥ 2×',
-          value:  rvol ? rvol.toFixed(2) + '×' : '--',
-          note:   rvol >= 5 ? '+1 pt → +1 bonus (≥ 5×)' : rvol >= 2 ? '+1 pt earned' : 'Needs ≥ 2×',
-          status: rvol >= 5 ? 'good' : rvol >= 2 ? 'ok' : 'bad',
-        },
-        {
-          label:  'Price $2 – $20',
+          label:  '① Price $2 – $20',
           value:  price ? '$' + price.toFixed(2) : '--',
-          note:   price >= 2 && price <= 20 ? '+1 pt earned' : 'Outside $2–$20 range',
+          note:   price >= 2 && price <= 20 ? '✓ Hard filter passed' : '✗ Outside $2–$20',
           status: price >= 2 && price <= 20 ? 'good' : 'bad',
+          pillar: true,
         },
         {
-          label:  'Catalyst / News',
-          value:  '—',
-          note:   'Not yet automated — manual check',
-          status: 'ok',
+          label:  '② Daily Gain ≥ 10%',
+          value:  gain != null ? (gain >= 0 ? '+' : '') + gain.toFixed(2) + '%' : '--',
+          note:   gain >= 20 ? '+2 pts + bonus: very strong' : gain >= 10 ? '+2 pts: strong momentum' : '✗ Needs ≥ 10%',
+          status: gain >= 20 ? 'good' : gain >= 10 ? 'ok' : 'bad',
+          pillar: true,
         },
         {
-          label:  'Float < 5M shares',
-          value:  '—',
-          note:   'Not yet automated — manual check',
-          status: 'ok',
+          label:  '③ Relative Volume ≥ 5×',
+          value:  rvol ? rvol.toFixed(2) + '×' : '--',
+          note:   rvol >= 10 ? '+1 pt + bonus: extreme surge ≥ 10×' : rvol >= 5 ? '+1 pt: ≥ 5× confirmed' : '✗ Needs ≥ 5×',
+          status: rvol >= 10 ? 'good' : rvol >= 5 ? 'ok' : 'bad',
+          pillar: true,
         },
         {
-          label:  'Chart Pattern / Level 2',
-          value:  '—',
-          note:   'Not yet automated — manual check',
-          status: 'ok',
+          label:  '④ News Catalyst',
+          value:  row.hasNewsCatalyst ? '✓ Found' : row.newsHeadline === undefined ? '—' : 'None',
+          note:   row.hasNewsCatalyst
+            ? (row.newsHeadline ? row.newsHeadline.slice(0, 60) + '…' : '+1 pt: catalyst confirmed')
+            : 'Required — no headline detected',
+          status: row.hasNewsCatalyst ? 'good' : 'bad',
+          pillar: true,
+        },
+        {
+          label:  '⑤ Float < 10M shares',
+          value:  floatM ?? 'Unknown',
+          note:   float == null
+            ? 'Float data unavailable (Yahoo)'
+            : float < 5_000_000  ? '+1 pt: very low float (< 5M) ✓'
+            : float < 10_000_000 ? '+1 pt: low float (< 10M) ✓'
+            : '✗ Float too high (> 10M)',
+          status: float == null ? 'ok' : float < 10_000_000 ? 'good' : 'bad',
+          pillar: true,
         },
       ];
     },
@@ -527,33 +571,38 @@
      */
     profileChecks(row) {
       const relVol5x  = (row.relVol ?? 0) >= 5;
-      const up30      = (row.change ?? 0) >= 30;
-      const priceOk   = row.price >= 3.00 && row.price <= 20.00;
+      const up10      = (row.change ?? 0) >= 10;
+      const priceOk   = (row.price ?? 0) >= 2.00 && (row.price ?? 0) <= 20.00;
+      const float     = row.floatSh ?? null;
+      const floatOk   = float != null ? float < 10_000_000 : null; // null = unknown
+      const floatStr  = float != null ? (float / 1_000_000).toFixed(2) + 'M shares' : 'Unknown (Yahoo)';
       return [
         {
-          label: 'RelVol ≥ 5× (high demand)',
-          met:   relVol5x,
-          note:  row.relVol != null ? `${row.relVol.toFixed(1)}×` : '--',
-        },
-        {
-          label: 'Already up ≥ 30% today',
-          met:   up30,
-          note:  row.change != null ? `+${row.change.toFixed(1)}%` : '--',
-        },
-        {
-          label: 'News event driving the move',
-          met:   null,
-          note:  'Manual check',
-        },
-        {
-          label: 'Price between $3.00 – $20.00',
+          label: '① Price $2–$20 (volatile small-caps)',
           met:   priceOk,
           note:  `$${row.price?.toFixed(2) ?? '--'}`,
         },
         {
-          label: 'Float < 5M shares (low supply)',
-          met:   null,
-          note:  'Manual check',
+          label: '② Gain ≥ 10% (intraday momentum)',
+          met:   up10,
+          note:  row.change != null ? `+${row.change.toFixed(1)}%` : '--',
+        },
+        {
+          label: '③ Rel Vol ≥ 5× (market participation)',
+          met:   relVol5x,
+          note:  row.relVol != null ? `${row.relVol.toFixed(1)}× avg` : '--',
+        },
+        {
+          label: '④ News catalyst (headline confirmed)',
+          met:   row.hasNewsCatalyst ?? null,
+          note:  row.hasNewsCatalyst
+            ? (row.newsHeadline?.slice(0, 50) || 'Confirmed')
+            : 'No headline found',
+        },
+        {
+          label: '⑤ Float < 10M shares (low supply)',
+          met:   floatOk,
+          note:  floatStr,
         },
       ];
     },
@@ -791,8 +840,12 @@
       setVal('mtRelVol',        cfg.minRelVol);
       setVal('mtMinVolume',     cfg.minVolume);
       setVal('mtMinScore',      cfg.minScore);
+      setVal('mtMaxFloat',      cfg.maxFloat != null ? cfg.maxFloat / 1_000_000 : '');
       setVal('mtStopPct',       cfg.stopPercent);
       setVal('mtMinRR',         cfg.minRR);
+      // News required toggle
+      const newsChk = $('mtRequireNews');
+      if (newsChk) newsChk.checked = cfg.requireNewsCatalyst ?? true;
       // Universe radio
       const radio = document.querySelector(`input[name="mtUniverse"][value="${cfg.universeMode || 'curated'}"]`);
       if (radio) radio.checked = true;
@@ -801,20 +854,23 @@
     _readConfig() {
       const n = id => { const v = parseFloat($(id)?.value); return isNaN(v) ? null : v; };
       const uni = document.querySelector('input[name="mtUniverse"]:checked')?.value || 'curated';
+      const rawFloat = n('mtMaxFloat');  // stored in millions in UI; convert to raw count
       return {
         ...this.config,
-        manualShares:    n('mtManualShares'),            // null = auto
-        maxTradesPerDay: n('mtMaxTrades')   ?? this.config.maxTradesPerDay,
-        maxDailyLoss:    n('mtMaxDailyLoss') ?? this.config.maxDailyLoss,
-        minPrice:        n('mtMinPrice')    ?? this.config.minPrice,
-        maxPrice:        n('mtMaxPrice')    ?? this.config.maxPrice,
-        minGainPercent:  n('mtMinGain')     ?? this.config.minGainPercent,
-        minRelVol:       n('mtRelVol')      ?? this.config.minRelVol,
-        minVolume:       n('mtMinVolume')   ?? this.config.minVolume,
-        minScore:        n('mtMinScore')    ?? this.config.minScore,
-        stopPercent:     n('mtStopPct'),                 // null = use ATR
-        minRR:           n('mtMinRR')       ?? this.config.minRR,
-        universeMode:    uni,
+        manualShares:        n('mtManualShares'),
+        maxTradesPerDay:     n('mtMaxTrades')    ?? this.config.maxTradesPerDay,
+        maxDailyLoss:        n('mtMaxDailyLoss') ?? this.config.maxDailyLoss,
+        minPrice:            n('mtMinPrice')     ?? this.config.minPrice,
+        maxPrice:            n('mtMaxPrice')     ?? this.config.maxPrice,
+        minGainPercent:      n('mtMinGain')      ?? this.config.minGainPercent,
+        minRelVol:           n('mtRelVol')       ?? this.config.minRelVol,
+        minVolume:           n('mtMinVolume')    ?? this.config.minVolume,
+        minScore:            n('mtMinScore')     ?? this.config.minScore,
+        maxFloat:            rawFloat != null ? rawFloat * 1_000_000 : this.config.maxFloat,
+        requireNewsCatalyst: $('mtRequireNews')?.checked ?? this.config.requireNewsCatalyst,
+        stopPercent:         n('mtStopPct'),
+        minRR:               n('mtMinRR')        ?? this.config.minRR,
+        universeMode:        uni,
       };
     },
 
@@ -876,6 +932,11 @@
           tr.classList.add('mt-row-active');
           const idx = +tr.dataset.idx;
           this._openDetail(this.scanResults[idx]);
+          // On stacked mobile layout (body is single column), scroll detail panel into view
+          if (window.innerWidth <= 1100) {
+            const panel = $('mtDetailPanel');
+            if (panel) setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+          }
         });
       });
 
@@ -909,6 +970,7 @@
 
       this._renderEMASignal(ema);
       this._renderIntradayIndicators(analysis);
+      this._renderCandlePatterns(row.sym);
       // Re-render trade methods now that we have full data
       this._renderTradeMethodPanel(row, ema, analysis);
     },
@@ -1019,6 +1081,44 @@
     },
 
     /* ── Intraday Indicators panel (data.py indicators) ─────────────────── */
+    /* ── Candlestick Patterns panel ─────────────────────────────────────── */
+    async _renderCandlePatterns(sym) {
+      const section = $('mtCandleSection');
+      const listEl  = $('mtPatternsList');
+      if (!section || !listEl) return;
+
+      section.style.display = '';
+      listEl.innerHTML = '<span class="mt-na">Detecting patterns…</span>';
+
+      try {
+        const r = await fetch(`/api/patterns/${sym}`);
+        const data = r.ok ? await r.json() : null;
+        const patterns = data?.patterns || [];
+
+        if (!patterns.length) {
+          listEl.innerHTML = '<span class="mt-na">No significant patterns detected on daily bars</span>';
+          return;
+        }
+
+        listEl.innerHTML = patterns.map(p => {
+          const cls  = p.type === 'BULLISH' ? 'cp-bull' : p.type === 'BEARISH' ? 'cp-bear' : 'cp-neutral';
+          const arrow = p.type === 'BULLISH' ? '▲' : p.type === 'BEARISH' ? '▼' : '●';
+          const dots  = '●'.repeat(p.strength) + '○'.repeat(3 - p.strength);
+          const [shortDesc, longDesc] = p.desc.split(' — ');
+          return `<div class="cp-row ${cls}">
+            <div class="cp-row-top">
+              <span class="cp-badge ${cls}">${arrow}</span>
+              <span class="cp-name">${p.name}</span>
+              <span class="cp-strength">${dots}</span>
+            </div>
+            <div class="cp-desc">${longDesc || shortDesc}</div>
+          </div>`;
+        }).join('');
+      } catch (_) {
+        listEl.innerHTML = '<span class="mt-na">Pattern data unavailable</span>';
+      }
+    },
+
     _renderIntradayIndicators(analysis) {
       const el = $('mtIntradayIndicators');
       if (!el) return;

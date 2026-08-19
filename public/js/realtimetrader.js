@@ -9,6 +9,9 @@ const rtTrader = (() => {
   const $ = id => document.getElementById(id);
   const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   const fmtV = v => !v ? '--' : v >= 1e9 ? (v/1e9).toFixed(1)+'B' : v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v);
+  // Null-safe DOM write helpers — elements may not exist when panel is unmounted
+  const setSafe = (id, val)  => { const e = $(id); if (e) e.textContent = String(val); };
+  const setCls  = (id, cls)  => { const e = $(id); if (e) e.className   = cls; };
 
   // ── VWAP (Volume Weighted Average Price) ────────────────────────────────────
   function calcVWAP(bars) {
@@ -337,10 +340,10 @@ const rtTrader = (() => {
     // Defer to allow panel to be visible + sized first
     requestAnimationFrame(() => drawVolumeProfile(vp, price));
 
-    // Fill metric cells
-    $('rtVPPoc').textContent = '$' + fmt(vp.poc);
-    $('rtVPVah').textContent = '$' + fmt(vp.vah);
-    $('rtVPVal').textContent = '$' + fmt(vp.val);
+    // Fill metric cells (null-safe — panel may not be in DOM)
+    setSafe('rtVPPoc', '$' + fmt(vp.poc));
+    setSafe('rtVPVah', '$' + fmt(vp.vah));
+    setSafe('rtVPVal', '$' + fmt(vp.val));
 
     const pocPct = ((price - vp.poc) / vp.poc * 100);
     const pocEl  = $('rtVPPocSub');
@@ -658,41 +661,46 @@ const rtTrader = (() => {
 
     // Verdict
     const vb = $('rtVerdict');
-    ['buy', 'hold', 'sell'].forEach(c => vb.classList.remove(c));
-    vb.classList.add(signal.toLowerCase());
-    vb.textContent = signal;
-    $('rtConf').textContent   = confidence + '% confidence';
-    $('rtSym').textContent    = sym;
-    $('rtReason').textContent = reasons.join(' · ');
+    if (vb) {
+      ['buy', 'hold', 'sell'].forEach(c => vb.classList.remove(c));
+      vb.classList.add(signal.toLowerCase());
+      vb.textContent = signal;
+    }
+    setSafe('rtConf',   confidence + '% confidence');
+    setSafe('rtSym',    sym);
+    setSafe('rtReason', reasons.join(' · '));
 
     // VWAP
     if (vwap != null) {
       const diff    = ((price - vwap) / vwap * 100);
       const diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2) + '% vs price';
-      $('rtVwap').textContent    = '$' + fmt(vwap);
-      $('rtVwapSub').textContent = diffStr;
-      $('rtVwapSub').className   = 'rt-m-sub ' + (price > vwap ? 'up' : 'down');
+      setSafe('rtVwap',    '$' + fmt(vwap));
+      setSafe('rtVwapSub', diffStr);
+      setCls ('rtVwapSub', 'rt-m-sub ' + (price > vwap ? 'up' : 'down'));
     } else {
-      $('rtVwap').textContent    = '--';
-      $('rtVwapSub').textContent = 'No data';
-      $('rtVwapSub').className   = 'rt-m-sub';
+      setSafe('rtVwap',    '--');
+      setSafe('rtVwapSub', 'No data');
+      setCls ('rtVwapSub', 'rt-m-sub');
     }
 
-    // RSI
+    // RSI (element removed from RT console — shown in Trading Signals panel instead)
     const rsiZone = rsi === null ? '--'
       : rsi < 30 ? 'Oversold' : rsi < 45 ? 'Low' : rsi > 70 ? 'Overbought' : rsi > 60 ? 'High' : 'Neutral';
     const rsiCls  = rsi === null ? '' : rsi < 45 ? 'up' : rsi > 65 ? 'down' : 'neut';
-    $('rtRsi').textContent      = rsi !== null ? fmt(rsi, 1) : '--';
-    $('rtRsiZone').textContent  = rsiZone;
-    $('rtRsiZone').className    = 'rt-m-sub ' + rsiCls;
+    const rtRsiEl = $('rtRsi');
+    if (rtRsiEl) {
+      rtRsiEl.textContent             = rsi !== null ? fmt(rsi, 1) : '--';
+      $('rtRsiZone').textContent      = rsiZone;
+      $('rtRsiZone').className        = 'rt-m-sub ' + rsiCls;
+    }
 
     // Volume
     const volSurge = volData.surge;
-    $('rtVol').textContent    = fmtV(volData.lastVol);
-    $('rtVolSub').textContent = volSurge
+    setSafe('rtVol',    fmtV(volData.lastVol));
+    setSafe('rtVolSub', volSurge
       ? 'Surge vs avg ' + fmtV(Math.round(volData.avgVol))
-      : (volData.avgVol ? 'Avg ' + fmtV(Math.round(volData.avgVol)) : '--');
-    $('rtVolSub').className   = 'rt-m-sub ' + (volSurge ? 'up' : '');
+      : (volData.avgVol ? 'Avg ' + fmtV(Math.round(volData.avgVol)) : '--'));
+    setCls ('rtVolSub', 'rt-m-sub ' + (volSurge ? 'up' : ''));
 
     // Sentiment (momentum-based)
     const sentLabel = momentum >= 3 ? 'Strong Bull'
@@ -702,36 +710,40 @@ const rtTrader = (() => {
     const sentCls   = momentum > 0 ? 'up' : momentum < 0 ? 'down' : 'neut';
     const momDesc   = momentum > 0 ? momentum + ' bull bars'
       : momentum < 0 ? Math.abs(momentum) + ' bear bars' : 'Mixed';
-    $('rtSent').textContent    = sentLabel;
-    $('rtSentSub').textContent = 'Last 5 · ' + momDesc;
-    $('rtSentSub').className   = 'rt-m-sub ' + sentCls;
+    setSafe('rtSent',    sentLabel);
+    setSafe('rtSentSub', 'Last 5 · ' + momDesc);
+    setCls ('rtSentSub', 'rt-m-sub ' + sentCls);
 
-    // Support
-    if (sr.support != null) {
-      const pct = ((price - sr.support) / price * 100).toFixed(2);
-      $('rtSupport').textContent    = '$' + fmt(sr.support);
-      $('rtSupportSub').textContent = pct + '% below';
-      $('rtSupportSub').className   = 'rt-m-sub';
-    } else {
-      $('rtSupport').textContent    = '--';
-      $('rtSupportSub').textContent = 'No level';
-      $('rtSupportSub').className   = 'rt-m-sub';
+    // Support / Resistance (elements removed from RT console — shown in Trading Signals panel instead)
+    const rtSupportEl = $('rtSupport');
+    if (rtSupportEl) {
+      if (sr.support != null) {
+        const pct = ((price - sr.support) / price * 100).toFixed(2);
+        rtSupportEl.textContent           = '$' + fmt(sr.support);
+        $('rtSupportSub').textContent     = pct + '% below';
+        $('rtSupportSub').className       = 'rt-m-sub';
+      } else {
+        rtSupportEl.textContent           = '--';
+        $('rtSupportSub').textContent     = 'No level';
+        $('rtSupportSub').className       = 'rt-m-sub';
+      }
     }
-
-    // Resistance
-    if (sr.resistance != null) {
-      const pct = ((sr.resistance - price) / price * 100).toFixed(2);
-      $('rtResistance').textContent    = '$' + fmt(sr.resistance);
-      $('rtResistanceSub').textContent = pct + '% above';
-      $('rtResistanceSub').className   = 'rt-m-sub';
-    } else {
-      $('rtResistance').textContent    = '--';
-      $('rtResistanceSub').textContent = 'No level';
-      $('rtResistanceSub').className   = 'rt-m-sub';
+    const rtResistanceEl = $('rtResistance');
+    if (rtResistanceEl) {
+      if (sr.resistance != null) {
+        const pct = ((sr.resistance - price) / price * 100).toFixed(2);
+        rtResistanceEl.textContent           = '$' + fmt(sr.resistance);
+        $('rtResistanceSub').textContent     = pct + '% above';
+        $('rtResistanceSub').className       = 'rt-m-sub';
+      } else {
+        rtResistanceEl.textContent           = '--';
+        $('rtResistanceSub').textContent     = 'No level';
+        $('rtResistanceSub').className       = 'rt-m-sub';
+      }
     }
 
     // Timestamp + market state badge
-    $('rtUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    setSafe('rtUpdated', 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
     const msEl = $('rtMarketState');
     if (msEl) {
       const isCrypto = sym.includes('-');
@@ -901,6 +913,38 @@ const rtTrader = (() => {
       const reasons = (signal.reasons || []).slice(0, 3);
       resEl.innerHTML = reasons.map(r => `<div class="tdi-reason-row">${r}</div>`).join('');
     }
+
+    // ── Candle Patterns ─────────────────────────────────────────────────────
+    renderCandlePatterns(data.patterns || []);
+  }
+
+  // ── Render detected candlestick / chart patterns ─────────────────────────────
+  function renderCandlePatterns(patterns) {
+    const el = $('tdiPatternsList');
+    if (!el) return;
+    if (!patterns || patterns.length === 0) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = '';
+    el.innerHTML = `
+      <div class="cp-header">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="4" height="16"/><rect x="10" y="8" width="4" height="12"/><rect x="18" y="2" width="4" height="18"/></svg>
+        Candlestick Patterns
+      </div>
+      ${patterns.map(p => {
+        const cls = p.type === 'BULLISH' ? 'cp-bull' : p.type === 'BEARISH' ? 'cp-bear' : 'cp-neutral';
+        const dots = '●'.repeat(p.strength) + '○'.repeat(3 - p.strength);
+        return `<div class="cp-row ${cls}">
+          <div class="cp-left">
+            <span class="cp-badge ${cls}">${p.type === 'BULLISH' ? '▲' : p.type === 'BEARISH' ? '▼' : '●'}</span>
+            <span class="cp-name">${p.name}</span>
+            <span class="cp-strength" title="Signal strength">${dots}</span>
+          </div>
+          <span class="cp-desc">${p.desc}</span>
+        </div>`;
+      }).join('')}
+    `;
   }
 
   // ── Analyze ─────────────────────────────────────────────────────────────────

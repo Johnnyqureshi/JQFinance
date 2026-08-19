@@ -497,17 +497,22 @@
    * Thin wrapper around the existing /api/alpaca/* server endpoints.
    * ════════════════════════════════════════════════════════════════════════════ */
   const AlpacaClient = {
-    connected: false,
-    account:   null,
-    mode:      'paper',
+    connected:      false,
+    account:        null,
+    accountError:   null,   // set when creds exist but account fetch fails
+    mode:           'paper',
+    paperConnected: false,
+    liveConnected:  false,
 
     async checkConnection() {
       try {
         const r = await fetch('/api/alpaca/credentials', { credentials: 'include' });
         if (!r.ok) { this.connected = false; return false; }
         const d = await r.json();
-        this.connected = !!d.connected;
-        this.mode      = d.mode || 'paper';
+        this.mode           = d.mode || 'paper';
+        this.paperConnected = !!d.paperConnected;
+        this.liveConnected  = !!d.liveConnected;
+        this.connected      = !!d.connected;
         if (this.connected) await this.loadAccount();
         return this.connected;
       } catch { this.connected = false; return false; }
@@ -516,8 +521,43 @@
     async loadAccount() {
       try {
         const r = await fetch('/api/alpaca/account', { credentials: 'include' });
-        if (r.ok) { this.account = await r.json(); }
-      } catch {}
+        if (r.ok) {
+          this.account      = await r.json();
+          this.accountError = null;
+          return true;
+        }
+        const err         = await r.json().catch(() => ({}));
+        this.account      = null;
+        this.accountError = err.error || `Account fetch failed (HTTP ${r.status})`;
+        return false;
+      } catch (e) {
+        this.account      = null;
+        this.accountError = e.message || 'Network error fetching account';
+        return false;
+      }
+    },
+
+    // Switch between paper and live — requires that mode's creds to be saved first
+    async switchMode(mode) {
+      try {
+        const r = await fetch('/api/alpaca/switch-mode', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode }),
+        });
+        if (!r.ok) {
+          const e    = await r.json().catch(() => ({}));
+          this.accountError = e.error || `Cannot switch to ${mode} — save ${mode} API keys first`;
+          return false;
+        }
+        this.mode         = mode;
+        this.accountError = null;
+        await this.loadAccount();
+        return true;
+      } catch (e) {
+        this.accountError = e.message;
+        return false;
+      }
     },
 
     getEquity()  { return parseFloat(this.account?.equity     || 0); },
@@ -1415,20 +1455,60 @@
     },
 
     _renderStatus() {
-      const conn  = AlpacaClient.connected;
-      const mode  = AlpacaClient.mode;
-      const badge = $('mtModeBadge');
-      const chips = $('mtAcctChips');
+      const conn    = AlpacaClient.connected;
+      const hasAcct = conn && !!AlpacaClient.account;
+      const hasErr  = conn && !!AlpacaClient.accountError;
+      const mode    = AlpacaClient.mode;
+      const badge   = $('mtModeBadge');
+      const chips   = $('mtAcctChips');
+      const errEl   = $('mtAcctError');
+      const sw      = $('mtModeSwitcher');
+
+      // ── Mode badge ──────────────────────────────────────────────────────────
       if (badge) {
-        badge.textContent = conn ? mode.toUpperCase() : 'DISCONNECTED';
-        badge.className   = 'mt-mode-badge ' + (conn ? (mode === 'live' ? 'mt-badge-live' : 'mt-badge-paper') : 'mt-badge-disc');
+        if (hasAcct) {
+          badge.textContent = mode.toUpperCase();
+          badge.className   = 'mt-mode-badge ' + (mode === 'live' ? 'mt-badge-live' : 'mt-badge-paper');
+        } else if (hasErr) {
+          badge.textContent = '⚠ KEY ERROR';
+          badge.className   = 'mt-mode-badge mt-badge-warn';
+        } else {
+          badge.textContent = 'DISCONNECTED';
+          badge.className   = 'mt-mode-badge mt-badge-disc';
+        }
       }
-      if (chips) chips.style.display = conn ? '' : 'none';
-      if (conn) {
+
+      // ── Account chips (only when data is actually loaded) ───────────────────
+      if (chips) chips.style.display = hasAcct ? '' : 'none';
+      if (hasAcct) {
         const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
         set('mtEquity', fmtDollar(AlpacaClient.getEquity()));
         set('mtCash',   fmtDollar(AlpacaClient.getCash()));
         set('mtBP',     fmtDollar(AlpacaClient.getBP()));
+      }
+
+      // ── Account error notice ────────────────────────────────────────────────
+      if (errEl) {
+        errEl.style.display = hasErr ? '' : 'none';
+        if (hasErr) errEl.textContent = '⚠ ' + AlpacaClient.accountError;
+      }
+
+      // ── Paper / Live mode-switcher pills ────────────────────────────────────
+      if (sw) {
+        const show = AlpacaClient.paperConnected || AlpacaClient.liveConnected;
+        sw.style.display = show ? '' : 'none';
+        const pBtn = $('mtSwitchPaper');
+        const lBtn = $('mtSwitchLive');
+        if (pBtn) {
+          pBtn.disabled  = !AlpacaClient.paperConnected || mode === 'paper';
+          pBtn.className = 'mt-mode-pill' + (mode === 'paper' ? ' mt-mode-pill--active' : '');
+          pBtn.title     = AlpacaClient.paperConnected ? 'Switch to Paper' : 'No paper keys saved';
+        }
+        if (lBtn) {
+          lBtn.disabled  = !AlpacaClient.liveConnected || mode === 'live';
+          lBtn.className = 'mt-mode-pill' + (mode === 'live' ? ' mt-mode-pill--active' : '');
+          lBtn.title     = AlpacaClient.liveConnected ? 'Switch to Live' : 'Save live keys first';
+        }
       }
     },
 
@@ -1823,6 +1903,31 @@
       $('mtClearLog')?.addEventListener('click', () => {
         this.log = [];
         this._renderLog();
+      });
+
+      // Paper / Live mode-switcher pills
+      $('mtSwitchPaper')?.addEventListener('click', async () => {
+        if (AlpacaClient.mode === 'paper') return;
+        $('mtSwitchPaper').textContent = 'Switching…';
+        const ok = await AlpacaClient.switchMode('paper');
+        $('mtSwitchPaper').textContent = 'PAPER';
+        this._renderStatus();
+        if (ok) this.addLog('BOT', 'Switched to PAPER', 'Paper trading account active', 'info');
+        else    this.addLog('BOT', 'Switch failed', AlpacaClient.accountError || 'Could not switch to paper', 'err');
+      });
+      $('mtSwitchLive')?.addEventListener('click', async () => {
+        if (AlpacaClient.mode === 'live') return;
+        $('mtSwitchLive').textContent = 'Switching…';
+        const ok = await AlpacaClient.switchMode('live');
+        $('mtSwitchLive').textContent = 'LIVE';
+        this._renderStatus();
+        if (ok) this.addLog('BOT', 'Switched to LIVE', '⚠ Live account active — real money trades', 'warn');
+        else    this.addLog('BOT', 'Switch failed', AlpacaClient.accountError || 'Save live API keys first', 'err');
+      });
+
+      // Re-check connection whenever alpacatrader.js saves or disconnects credentials
+      window.addEventListener('alpaca-connection-changed', () => {
+        AlpacaClient.checkConnection().then(() => this._renderStatus());
       });
     },
 

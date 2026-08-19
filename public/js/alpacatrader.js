@@ -373,6 +373,8 @@ const alpacaTrader = (() => {
       loadPositions();
       loadOrders();
       startKeepAlive();
+      // Notify momentum scanner so AlpacaClient re-checks with fresh credentials
+      window.dispatchEvent(new CustomEvent('alpaca-connection-changed'));
     } catch (e) { if (errEl) errEl.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = 'Connect'; }
   }
@@ -385,6 +387,7 @@ const alpacaTrader = (() => {
     stopKeepAlive();
     updateConnStatus();
     hideModal();
+    window.dispatchEvent(new CustomEvent('alpaca-connection-changed'));
     const posBody = $('atPositionsBody');
     if (posBody) posBody.innerHTML = '<div class="at-empty">Connect Alpaca to view live positions</div>';
     const ordBody = $('atOrdersBody');

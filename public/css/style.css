@@ -8487,9 +8487,58 @@ option { background: var(--card); }
   padding: 3px 9px;
   border-radius: 4px;
 }
-.mt-badge-disc  { background: rgba(61,80,112,.4); color: var(--t3); }
+.mt-badge-disc  { background: rgba(61,80,112,.4);    color: var(--t3);   }
 .mt-badge-paper { background: rgba(74,144,226,.15); color: var(--blue); }
 .mt-badge-live  { background: rgba(29,214,163,.15); color: var(--teal); }
+.mt-badge-warn  { background: rgba(234,179,8,.15);  color: #eab308;     }
+
+/* ── Mode-switcher pill buttons (PAPER / LIVE) ────────────────────────────── */
+.mt-mode-switcher {
+  display:     flex;
+  gap:         4px;
+  align-items: center;
+  margin-left: 6px;
+}
+.mt-mode-pill {
+  padding:       2px 9px;
+  border-radius: 20px;
+  border:        1px solid rgba(255,255,255,.15);
+  background:    transparent;
+  color:         var(--t3);
+  font-size:     10px;
+  font-weight:   600;
+  letter-spacing:.5px;
+  cursor:        pointer;
+  transition:    background .15s, color .15s, border-color .15s;
+}
+.mt-mode-pill:hover:not(:disabled) {
+  background:   rgba(255,255,255,.08);
+  color:        var(--t1);
+  border-color: rgba(255,255,255,.3);
+}
+.mt-mode-pill--active {
+  background:   rgba(74,144,226,.2);
+  color:        var(--blue);
+  border-color: rgba(74,144,226,.4);
+  cursor:       default;
+}
+.mt-mode-pill--active[id="mtSwitchLive"] {
+  background:   rgba(29,214,163,.2);
+  color:        var(--teal);
+  border-color: rgba(29,214,163,.4);
+}
+.mt-mode-pill:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Account error notice (inline in topbar) ──────────────────────────────── */
+.mt-acct-error {
+  font-size:   11px;
+  color:       #eab308;
+  margin-left: 8px;
+  max-width:   260px;
+  white-space: nowrap;
+  overflow:    hidden;
+  text-overflow: ellipsis;
+}
 
 .mt-topbar-right {
   display: flex;

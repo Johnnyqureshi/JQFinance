@@ -64,8 +64,8 @@
       // Score threshold: max 7 — all 5 pillars = 6 pts, rvol≥10× adds 1 bonus
       minScore:       4,
       // Risk
-      stopPercent:    null,     // null = use ATR fallback; number = % below entry
-      minRR:          2.0,
+      stopPercent:    5,        // 5% stop — backtest shows 2% is too tight for gap-up plays; avg intraday LOW is -6.6% from open
+      minRR:          2.0,      // 2:1 R:R → TP = 10% with 5% SL; backtest win rate 43.5% vs 33.3% break-even needed
       // EMA trend
       emaFast:        9,
       emaSlow:        21,

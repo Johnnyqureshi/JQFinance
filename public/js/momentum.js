@@ -1723,7 +1723,10 @@
         const sig = MomentumStrategy.getSignal(r);
         return (sig.signal === 'BUY' || sig.signal === 'STRONG BUY')
           && !heldSyms.has(r.sym)
-          && !this._activeTrades.has(r.sym);
+          && !this._activeTrades.has(r.sym)
+          // Re-entry cooldown: don't buy back a stock we just exited (RSI-overbought
+          // or stopped out) — rotate to the next candidate instead of churning
+          && !(this._exitCooldown?.get(r.sym) > Date.now());
       });
 
       if (!candidates.length) return; // nothing qualifies this cycle
@@ -1837,7 +1840,8 @@
           if (!heldSet.has(sym)) {
             this.addLog(sym, '✓ AUTO-EXIT', 'Stop-loss order closed position', 'ok');
             this.botPositions.delete(sym);
-            this._activeTrades.delete(sym); // unlock for re-entry
+            this._activeTrades.delete(sym);
+            this._setExitCooldown(sym);
           }
         }
 
@@ -1845,6 +1849,12 @@
         if (this.botEnabled && this._isMarketOpen()) await this._checkRsiExits(positions || []);
       } catch (_) {}
       finally { this._pollBusy = false; }
+    },
+
+    // 15-min re-entry cooldown after any exit — prevents buy-back churn
+    _setExitCooldown(sym) {
+      if (!this._exitCooldown) this._exitCooldown = new Map();
+      this._exitCooldown.set(sym, Date.now() + 15 * 60 * 1000);
     },
 
     // Sell any bot position whose intraday RSI has reached its take-profit level
@@ -1871,6 +1881,7 @@
           this.addLog(sym, '✓ TAKE PROFIT', `RSI ${rsi} ≥ ${info.tpRsi ?? 75} — sold ${qty} sh @ ~$${price.toFixed(2)}`, 'ok');
           this.botPositions.delete(sym);
           this._activeTrades.delete(sym);
+          this._setExitCooldown(sym);
         } catch (err) {
           info._exiting = false; // retry next poll
           this.addLog(sym, '✗ TAKE PROFIT', err.message, 'err');

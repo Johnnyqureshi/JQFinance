@@ -118,16 +118,16 @@
     /**
      * Score a stock using the exact algorithm from strategy.py / calculate_score().
      *
-     * Max score: 6 points  (more criteria — catalyst, float, L2, chart — coming)
+     * Base max: 6 points. News catalyst adds +1 bonus → possible max 7.
      *
-     *   Momentum  gain ≥ 10%  → +2   "Strong momentum"
-     *             gain ≥ 20%  → +1   "Very strong momentum"   (cumulative: +3)
-     *   RelVol    rvol ≥ 2×   → +1   "Relative volume > 2×"
-     *             rvol ≥ 5×   → +1   "Relative volume > 5×"   (cumulative: +2)
-     *   Price     $2 – $20    → +1   "Momentum price range"
+     *   Momentum  gain ≥ 10%        → +2   "Strong momentum"
+     *             gain ≥ 20%        → +1   "Very strong momentum"  (cumul: +3)
+     *   RelVol    rvol ≥ 2×         → +1   "Relative volume > 2×"
+     *             rvol ≥ 5×         → +1   "Relative volume > 5×"  (cumul: +2)
+     *   Price     $2 – $20          → +1   "Momentum price range"
+     *   News      hasNewsCatalyst   → +1   "News catalyst confirmed" (async pass)
      *
      * Returns { score, reasons, qualified }.
-     * qualified = score >= cfg.minScore (caller passes minScore or it defaults).
      */
     calcScore(r, minScore = 0) {
       let score   = 0;
@@ -148,8 +148,8 @@
       // ── PRICE RANGE ───────────────────────────────────────────────────────
       if (price >= 2 && price <= 20) { score += 1; reasons.push('Momentum price range ($2–$20)'); }
 
-      // ── PLANNED (not yet automated) ───────────────────────────────────────
-      // Catalyst/news, Float, Level 2, Chart pattern — future versions
+      // ── NEWS CATALYST (pre-scored by scan()) ──────────────────────────────
+      if (r.hasNewsCatalyst) { score += 1; reasons.push('News catalyst confirmed'); }
 
       return { score, reasons, qualified: score >= minScore };
     },
@@ -181,12 +181,42 @@
       const raw      = await this.fetchBatch(universe);
       const filtered = this.filter(raw, cfg);
       const minScore = cfg.minScore ?? 0;
-      const scored   = filtered.map(r => {
+
+      // ── Pass 1: base score (no news) — fast, synchronous ─────────────────
+      const scored = filtered.map(r => {
         const result = this.calcScore(r, minScore);
         return { ...r, momentumScore: result.score, scoreReasons: result.reasons, scoreQualified: result.qualified };
       });
 
-      // Apply MIN_SCORE filter (0–6 scale, direct comparison)
+      // ── Pass 2: news catalyst check on base-qualifying stocks ─────────────
+      // Fetch news in parallel only for stocks that clear the base threshold.
+      // A confirmed headline adds +1 and can lift a borderline stock above minScore.
+      const candidates = scored.filter(r => r.momentumScore >= Math.max(0, minScore - 1));
+      if (candidates.length > 0) {
+        try {
+          const newsResults = await Promise.allSettled(
+            candidates.map(r =>
+              fetch(`/api/news/${encodeURIComponent(r.sym)}`, { credentials: 'include' })
+                .then(res => res.ok ? res.json() : { news: [] })
+                .catch(() => ({ news: [] }))
+            )
+          );
+          newsResults.forEach((result, i) => {
+            if (result.status === 'fulfilled' && result.value?.news?.length > 0) {
+              const stock = candidates[i];
+              stock.hasNewsCatalyst  = true;
+              stock.newsHeadline     = result.value.news[0]?.title || null;
+              // Re-score with news flag set
+              const rescored = this.calcScore(stock, minScore);
+              stock.momentumScore  = rescored.score;
+              stock.scoreReasons   = rescored.reasons;
+              stock.scoreQualified = rescored.qualified;
+            }
+          });
+        } catch (_) { /* news fetch failing must never break the scan */ }
+      }
+
+      // Apply MIN_SCORE filter
       const passing = scored.filter(r => r.scoreQualified);
 
       return passing.sort((a, b) => b.momentumScore - a.momentumScore);
@@ -794,18 +824,23 @@
         const sig        = MomentumStrategy.getSignal(r);
         const chgUp      = r.change > 0;
         const hasBonus   = (r.change ?? 0) >= 20 || (r.relVol ?? 0) >= 5;
+        const hasNews    = !!r.hasNewsCatalyst;
         const scoreReasons = r.scoreReasons || [];
         const tooltipContent = scoreReasons.length
           ? scoreReasons.map(reason => {
-              const isBonus = reason.includes('+20%') || reason.includes('> 5×');
+              const isBonus = reason.includes('+20%') || reason.includes('> 5×') || reason.includes('catalyst');
               return `<span class="mt-crit-pill${isBonus ? ' mt-crit-bonus' : ''}">✓ ${reason}</span>`;
             }).join('')
           : '<span class="mt-crit-empty">—</span>';
+
+        const MAX_SCORE_ROW = 7; // 6 base + 1 news bonus
+        const scorePct = Math.min(100, (r.momentumScore / MAX_SCORE_ROW * 100)).toFixed(0);
 
         return `<tr class="mt-scan-row ${i === 0 ? 'mt-scan-row--top' : ''}" data-sym="${r.sym}" data-idx="${i}">
           <td class="mt-sym-cell">
             <span class="mt-sym">${r.sym}</span>
             <span class="mt-sym-name">${(r.name || '').replace(/&/g, '&amp;').slice(0, 18)}</span>
+            ${hasNews ? '<span class="mt-news-badge" title="News catalyst detected">📰</span>' : ''}
           </td>
           <td class="mt-r">${fmtDollar(r.price)}</td>
           <td class="mt-r ${chgUp ? 'mt-up' : 'mt-dn'}">${r.change != null ? (chgUp ? '+' : '') + r.change.toFixed(2) + '%' : '--'}</td>
@@ -814,9 +849,10 @@
           <td class="mt-r mt-score-td">
             <div class="mt-score-cell-wrap">
               <div class="mt-score-bar-wrap">
-                <div class="mt-score-bar" style="width:${(r.momentumScore / 6 * 100).toFixed(0)}%"></div>
-                <span class="mt-score-num">${r.momentumScore}/6</span>
+                <div class="mt-score-bar" style="width:${scorePct}%"></div>
+                <span class="mt-score-num">${r.momentumScore}/7</span>
                 ${hasBonus ? '<span class="mt-bonus-badge">★</span>' : ''}
+                ${hasNews  ? '<span class="mt-bonus-badge mt-news-star" title="News +1">📰</span>' : ''}
               </div>
               <div class="mt-criteria-tooltip">${tooltipContent}</div>
             </div>
@@ -1081,7 +1117,7 @@
       }
 
       // Score ring (0–6 scale)
-      const MAX_SCORE   = 6;
+      const MAX_SCORE   = 7; // 6 base + 1 news catalyst bonus
       const scoreEl = $('mtScoreValue');
       const scoreLblEl = $('mtScoreLbl');
       const ringEl  = $('mtScoreRing');
@@ -1335,7 +1371,7 @@
         this.selectedRow = null;
         const c = this.config;
         this.addLog('CONFIG', 'Settings updated',
-          `$${c.minPrice}–$${c.maxPrice} · Gain≥${c.minGainPercent}% · RelVol≥${c.minRelVol} · Vol≥${fmtVol(c.minVolume)} · Score≥${c.minScore}/10`, 'info');
+          `$${c.minPrice}–$${c.maxPrice} · Gain≥${c.minGainPercent}% · RelVol≥${c.minRelVol} · Vol≥${fmtVol(c.minVolume)} · Score≥${c.minScore}/7`, 'info');
         this.run();
       });
 

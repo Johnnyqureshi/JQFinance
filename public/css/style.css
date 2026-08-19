@@ -8103,6 +8103,10 @@ option { background: var(--card); }
 .mc-size-bar-fill { height: 100%; border-radius: 3px; transition: width .5s; }
 .mc-size-bar-pct { font-size: .75rem; font-weight: 600; color: #e6edf3; min-width: 36px; text-align: right; }
 
+/* ── Merged account section (positions/orders on Momentum page) ─────────────── */
+.mt-account-section { margin: 12px 0 4px; }
+.mt-account-section .at-right-col--full { display: flex; flex-direction: column; gap: 10px; }
+
 /* ── Intraday Indicators section (data.py) ─────────────────────────────────── */
 .mt-intraday-section {
   border-top: 1px solid var(--border);

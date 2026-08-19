@@ -77,10 +77,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       Scanner
     </button>
-    <button class="nav-link" data-page="trading">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-      Trading
-    </button>
     <button class="nav-link" data-page="momentum">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
       Momentum
@@ -798,195 +794,6 @@
 </div>
 
 <!-- TRADING PAGE -->
-<div class="page" id="page-trading">
-  <div class="at-page">
-
-    <!-- Top bar -->
-    <div class="at-topbar">
-      <div class="at-topbar-left">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-        <span class="at-topbar-title">Trading Desk</span>
-        <span class="at-mode-badge" id="atModeBadge">DISCONNECTED</span>
-      </div>
-      <div class="at-topbar-right">
-        <div class="at-acct-chips" id="atAcctChips" style="display:none">
-          <div class="at-chip"><span class="at-chip-lbl">Equity</span><span id="atEquity">--</span></div>
-          <div class="at-chip"><span class="at-chip-lbl">Cash</span><span id="atCash">--</span></div>
-          <div class="at-chip"><span class="at-chip-lbl">Buying Power</span><span id="atBP">--</span></div>
-          <div class="at-chip at-chip-pdt" id="atPDTChip" style="display:none">
-            <span class="at-chip-lbl">Day Trades Used</span>
-            <span id="atDayTrades">--</span>
-          </div>
-        </div>
-        <div class="at-conn-status">
-          <span class="at-conn-dot dot-red" id="atConnDot"></span>
-          <span id="atConnText">Not connected</span>
-        </div>
-        <button class="at-conn-btn" id="atConnBtn">Connect Alpaca</button>
-      </div>
-    </div>
-
-    <!-- Mode switcher — Paper ↔ Live pills -->
-    <div class="at-mode-switcher" id="atModeSwitcher" style="display:none"></div>
-
-    <!-- PDT + Market Hours Banner -->
-    <div class="at-pdt-banner" id="atPDTBanner" style="display:none"></div>
-
-    <!-- Account Overview: Positions + Orders -->
-    <div class="at-body">
-
-      <!-- Positions / Orders (full width) -->
-      <div class="at-right-col at-right-col--full">
-        <!-- Open Positions -->
-        <div class="at-panel">
-          <div class="at-panel-head">
-            Open Positions
-            <span class="at-badge" id="atPosCount">0</span>
-            <button class="at-icon-btn" id="atRefreshPos" title="Refresh positions">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            </button>
-            <button class="at-close-all-btn" id="atCloseAllPos" title="Close all open positions at market">✕ Close All</button>
-          </div>
-          <div id="atPositionsBody"><div class="at-empty">Connect Alpaca to view live positions</div></div>
-        </div>
-
-        <!-- Pending Orders -->
-        <div class="at-panel">
-          <div class="at-panel-head">
-            Pending Orders
-            <button class="at-icon-btn" id="atRefreshOrders" title="Refresh orders">↻</button>
-          </div>
-          <div id="atOrdersBody"><div class="at-empty">No pending orders</div></div>
-        </div>
-      </div>
-
-    </div><!-- /.at-body -->
-
-    <!-- ── Auto-Trade Bot Settings ───────────────────────────────────────────── -->
-    <div class="at-bots-section">
-      <div class="at-bots-title">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-        Automated Bot Strategies
-        <span class="at-bots-sub">3 active bots · Swing (weekly), CT, and ORB run automatically · Connect Alpaca to activate</span>
-      </div>
-      <!-- ── Global Trading Settings module ──────────────────────────────── -->
-      <div class="ts-module" id="tradeSettingsModule">
-        <div class="ts-title">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-          Trading Settings
-          <span class="ts-saved" id="tsSavedBadge"></span>
-        </div>
-        <div class="ts-rows">
-          <!-- Position Size -->
-          <div class="ts-row">
-            <span class="ts-label">Position size</span>
-            <div class="ts-mode-group">
-              <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% of equity</button>
-              <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
-            </div>
-            <div class="ts-input-wrap">
-              <span class="ts-input-prefix" id="tsInputPrefix">%</span>
-              <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size">
-            </div>
-          </div>
-          <!-- Leverage -->
-          <div class="ts-row">
-            <span class="ts-label">Leverage</span>
-            <div class="ts-lev-group" id="tsLevGroup">
-              <button class="ts-lev-btn active" data-lev="1">1×</button>
-              <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
-              <button class="ts-lev-btn" data-lev="2">2×</button>
-              <button class="ts-lev-btn" data-lev="3">3×</button>
-            </div>
-            <span class="ts-lev-note">Applies to all bot position values</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="at-bots-grid">
-
-        <!-- Bot 1: Swing Trading -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotSwing">
-          <div class="at-bot-head">
-            <span class="at-bot-name">Swing <span style="font-weight:400;font-size:0.75em;opacity:0.7">Weekly / Daily</span></span>
-            <label class="bot-toggle" title="Enable / disable Swing bot">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="swing" checked>
-              <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
-              <span class="bot-toggle-label">ON</span>
-            </label>
-          </div>
-          <div class="at-bot-desc">Weekly chart signals only · Long: SPY/QQQ near 200w SMA · Inverse: SH when SPY extended · 5-condition entry · TP1/TP2/TP3 @ 21w EMA / 50w SMA / swing high · Min 5-day hold · Monday entry</div>
-        </div>
-
-        <!-- Bot 2: ORB -->
-        <div class="at-bot-card at-bot-card--always-on" id="atBotORB">
-          <div class="at-bot-head">
-            <span class="at-bot-name">ORB <span style="font-weight:400;font-size:0.75em;opacity:0.7">Opening Range Breakout</span></span>
-            <label class="bot-toggle" title="Enable / disable ORB">
-              <input type="checkbox" class="bot-toggle-cb" data-bot="orb" checked>
-              <span class="bot-toggle-track"><span class="bot-toggle-thumb"></span></span>
-              <span class="bot-toggle-label">ON</span>
-            </label>
-          </div>
-          <div class="at-bot-desc">SPY 5-min range 9:30–9:35 ET · Bullish ORB → cheapest momentum stock · Bearish ORB → cheapest inverse ETF · RSI 75 take profit · Mon–Fri · no day-trade limits · 1 trade/day</div>
-        </div>
-
-      </div><!-- /.at-bots-grid -->
-    </div><!-- /.at-bots-section -->
-
-    <!-- ── Simulator Test Panel ───────────────────────────────────────────── -->
-    <div class="at-sim-panel" id="atSimPanel">
-      <div class="at-sim-header">
-        <span class="at-sim-title">Live Bot Status</span>
-        <div class="at-sim-auto-badge" id="atSimAutoBadge">
-          <span class="at-sim-pulse"></span>
-          <span id="atSimAutoLabel">Auto-refreshing…</span>
-        </div>
-      </div>
-
-      <!-- Universe size -->
-      <div class="at-sim-meta">
-        <span id="atSimUniverseSize"></span>
-        <span id="atSimLastRefresh" class="at-sim-last-refresh"></span>
-      </div>
-
-      <!-- Recent trades table -->
-      <div class="at-sim-section-label" style="display:flex;align-items:center;gap:10px;">
-        Recent Bot Trades (last 10)
-        <button id="atClearLog" class="at-clear-log-btn" title="Clear trade log">✕ Clear Log</button>
-      </div>
-      <div class="at-sim-trades-wrap">
-        <table class="at-sim-trades-table" id="atSimTradesTable">
-          <thead><tr>
-            <th>Symbol</th><th>Bot</th><th>Side</th><th>Shares</th>
-            <th>Entry $</th><th>Status</th><th>Time</th>
-          </tr></thead>
-          <tbody id="atSimTradesTbody"><tr><td colspan="7" class="at-sim-empty">No trades yet — connect Alpaca to activate bots</td></tr></tbody>
-        </table>
-      </div>
-    </div><!-- /.at-sim-panel -->
-
-    <!-- MARKET CALENDAR & MACRO CONTEXT CARD -->
-    <div class="macro-cal-section" id="macroCalSection">
-      <div class="macro-cal-top">
-        <div class="macro-cal-heading">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span class="macro-cal-title">Market Calendar &amp; Macro Context</span>
-          <span class="macro-cal-sub">Seasonal bias · OpEx · Earnings · Position sizing overlay</span>
-        </div>
-        <button class="macro-cal-refresh" id="macroCalRefresh" title="Refresh">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          Refresh
-        </button>
-      </div>
-      <div class="macro-cal-body" id="macroCalBody">
-        <div class="macro-cal-loading">Loading macro context…</div>
-      </div>
-    </div><!-- /.macro-cal-section -->
-
-  </div><!-- /.at-page -->
-</div><!-- /.page#page-trading -->
-
 <!-- ══════════════════════════════════════════════════════════════════════════
      MOMENTUM TRADER PAGE
      ══════════════════════════════════════════════════════════════════════════ -->
@@ -1005,7 +812,16 @@
           <div class="mt-chip"><span class="mt-chip-lbl">Equity</span><span id="mtEquity">--</span></div>
           <div class="mt-chip"><span class="mt-chip-lbl">Cash</span><span id="mtCash">--</span></div>
           <div class="mt-chip"><span class="mt-chip-lbl">Buying Power</span><span id="mtBP">--</span></div>
+          <div class="at-chip at-chip-pdt" id="atPDTChip" style="display:none">
+            <span class="at-chip-lbl">Day Trades</span>
+            <span id="atDayTrades">--</span>
+          </div>
         </div>
+        <div class="at-conn-status">
+          <span class="at-conn-dot dot-red" id="atConnDot"></span>
+          <span id="atConnText">Not connected</span>
+        </div>
+        <button class="at-conn-btn" id="atConnBtn">Connect Alpaca</button>
         <div class="mt-meta">
           <span id="mtScanStatus" class="mt-scan-status">Initialising…</span>
           <span id="mtCountdown" class="mt-countdown"></span>
@@ -1016,6 +832,11 @@
         </button>
       </div>
     </div>
+
+    <!-- Mode switcher — Paper ↔ Live pills -->
+    <div class="at-mode-switcher" id="atModeSwitcher" style="display:none"></div>
+    <!-- PDT + Market Hours Banner -->
+    <div class="at-pdt-banner" id="atPDTBanner" style="display:none"></div>
 
     <!-- ── Config panel (config.py) ─────────────────────────────────────── -->
     <div class="mt-config-section">
@@ -1121,6 +942,36 @@
           <span class="mt-config-hint" style="display:block;margin-top:4px">
             "All Alpaca" pulls the top 50 most-traded US equities in real-time from Alpaca's screener.
           </span>
+        </div>
+
+        <!-- ── Execution Settings ── -->
+        <div class="mt-cfg-section">
+          <div class="mt-cfg-section-title">Execution Settings <span class="ts-saved" id="tsSavedBadge"></span></div>
+          <div class="ts-module" id="tradeSettingsModule">
+            <div class="ts-rows">
+              <div class="ts-row">
+                <span class="ts-label">Position size</span>
+                <div class="ts-mode-group">
+                  <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% of equity</button>
+                  <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
+                </div>
+                <div class="ts-input-wrap">
+                  <span class="ts-input-prefix" id="tsInputPrefix">%</span>
+                  <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size">
+                </div>
+              </div>
+              <div class="ts-row">
+                <span class="ts-label">Leverage</span>
+                <div class="ts-lev-group" id="tsLevGroup">
+                  <button class="ts-lev-btn active" data-lev="1">1×</button>
+                  <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
+                  <button class="ts-lev-btn" data-lev="2">2×</button>
+                  <button class="ts-lev-btn" data-lev="3">3×</button>
+                </div>
+                <span class="ts-lev-note">Applies to bot position sizing</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="mt-config-actions">
@@ -1299,7 +1150,7 @@
               <span class="mt-trade-val" id="mtTradePriceDisplay">—</span>
             </div>
             <div class="mt-trade-hint">
-              Orders use position size from Risk Manager above. Connect Alpaca on the Trading page to enable execution.
+              Orders use position size from Risk Manager above. Connect Alpaca using the button in the top bar to enable execution.
             </div>
             <div id="mtTradeMsg" class="mt-trade-msg" style="display:none"></div>
             <div class="mt-trade-btns">
@@ -1311,6 +1162,48 @@
 
       </div><!-- /.mt-right-col -->
     </div><!-- /.mt-body -->
+
+    <!-- ── Alpaca Positions & Orders ───────────────────────────────────── -->
+    <div class="mt-account-section">
+      <div class="at-right-col at-right-col--full">
+        <div class="at-panel">
+          <div class="at-panel-head">
+            Open Positions
+            <span class="at-badge" id="atPosCount">0</span>
+            <button class="at-icon-btn" id="atRefreshPos" title="Refresh positions">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+            <button class="at-close-all-btn" id="atCloseAllPos">✕ Close All</button>
+          </div>
+          <div id="atPositionsBody"><div class="at-empty">Connect Alpaca to view live positions</div></div>
+        </div>
+        <div class="at-panel">
+          <div class="at-panel-head">
+            Pending Orders
+            <button class="at-icon-btn" id="atRefreshOrders" title="Refresh orders">↻</button>
+          </div>
+          <div id="atOrdersBody"><div class="at-empty">No pending orders</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Market Calendar & Macro Context ─────────────────────────────── -->
+    <div class="macro-cal-section" id="macroCalSection">
+      <div class="macro-cal-top">
+        <div class="macro-cal-heading">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="macro-cal-title">Market Calendar &amp; Macro Context</span>
+          <span class="macro-cal-sub">Seasonal bias · OpEx · Earnings · Position sizing overlay</span>
+        </div>
+        <button class="macro-cal-refresh" id="macroCalRefresh" title="Refresh">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="macro-cal-body" id="macroCalBody">
+        <div class="macro-cal-loading">Loading macro context…</div>
+      </div>
+    </div>
 
     <!-- ── Activity log (main.py run loop output) ──────────────────────── -->
     <div class="mt-log-section">
@@ -1402,10 +1295,6 @@
   <button class="mobile-nav-btn nav-link" data-page="scanner" aria-label="Scanner">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="trading" aria-label="Trading">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-    <span>Trading</span>
   </button>
   <button class="mobile-nav-btn nav-link" data-page="momentum" aria-label="Momentum">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>

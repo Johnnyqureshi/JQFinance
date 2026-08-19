@@ -1609,11 +1609,69 @@
       return day >= 1 && day <= 5 && mins >= 575 && mins < 950;
     },
 
+    // ── Pre-trade safety gate ───────────────────────────────────────────────
+    // For each candidate (best score first): fetch intraday analysis + candle
+    // patterns, then reject if the stock shows dump indicators or a strong
+    // bearish reversal pattern. Returns the first safe candidate or null.
+    async _pickSafeCandidate(candidates) {
+      for (const row of candidates) {
+        const [analysis, patResp] = await Promise.all([
+          MomentumAnalysis.fetch(row.sym),
+          fetch(`/api/patterns/${row.sym}`, { credentials: 'include' })
+            .then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+
+        // FAIL CLOSED: if safety data is unavailable, we cannot verify the setup —
+        // skip this candidate rather than trading blind.
+        if (!analysis && !patResp?.ok) {
+          this.addLog(row.sym, 'SKIP', 'Safety analysis unavailable — cannot verify dump/pattern status', 'warn');
+          continue;
+        }
+
+        // 1. Dump-indicator gate (same flags shown in the "Indicators for a Dump" tab)
+        const flags  = MomentumAnalysis.dumpFlags(row, null, analysis);
+        const active = flags.filter(f => f.active === true);
+        // High-volume red candle or large topping tail alone is disqualifying;
+        // otherwise require 2+ simultaneous dump flags to block.
+        const hardFlag = active.find(f =>
+          f.label === 'High volume red candle' || f.label === 'Large topping tail');
+        if (hardFlag || active.length >= 2) {
+          const why = (hardFlag ? [hardFlag] : active).map(f => f.label).join(', ');
+          this.addLog(row.sym, 'SKIP', `Dump indicator(s): ${why}`, 'warn');
+          continue;
+        }
+
+        // 2. Bearish candlestick pattern gate (strength ≥2 = confirmed reversal)
+        const patterns = patResp?.ok ? (patResp.patterns || []) : [];
+        const bearish  = patterns.find(p => p.type === 'BEARISH' && p.strength >= 2);
+        if (bearish) {
+          this.addLog(row.sym, 'SKIP', `Bearish pattern: ${bearish.name}`, 'warn');
+          continue;
+        }
+
+        return row; // passed all safety checks
+      }
+      return null;
+    },
+
     // ── Main auto-trade method — called after every scan when bot is ON ────
     async _autoTrade(results) {
       // BUG FIX: null guard — results could be undefined if scan throws
       if (!results?.length) return;
       if (!this.botEnabled || !AlpacaClient.connected) return;
+
+      // Concurrency mutex — prevent overlapping auto-trade cycles (manual refresh,
+      // timer scan, or config change could each trigger a cycle in flight)
+      if (this._autoTradeBusy) return;
+      this._autoTradeBusy = true;
+      try {
+        await this._autoTradeInner(results);
+      } finally {
+        this._autoTradeBusy = false;
+      }
+    },
+
+    async _autoTradeInner(results) {
 
       // BUG FIX: market-hours guard — never attempt equity orders when market is closed
       if (!this._isMarketOpen()) {
@@ -1638,18 +1696,22 @@
         }
       } catch (_) {}
 
-      // Find BUY candidates: signal=BUY, not already held, not already bot-pending
+      // Find BUY candidates: signal BUY or STRONG BUY, not already held, not bot-pending
+      // BUG FIX: was `=== 'BUY'` which excluded STRONG BUY (score ≥5) — the best setups!
       const candidates = results.filter(r => {
         const sig = MomentumStrategy.getSignal(r);
-        return sig.signal === 'BUY'
+        return (sig.signal === 'BUY' || sig.signal === 'STRONG BUY')
           && !heldSyms.has(r.sym)
           && !this._activeTrades.has(r.sym);
       });
 
       if (!candidates.length) return; // nothing qualifies this cycle
 
-      // Trade the single top-ranked candidate (highest score wins)
-      const row   = candidates[0];
+      // ── Pre-trade safety gate: dump indicators + bearish candlestick patterns ──
+      // Enforces what the "Indicators for a Dump" checklist promises: skip any
+      // candidate that is topping (dump flags) or printing a strong bearish pattern.
+      const row = await this._pickSafeCandidate(candidates.slice(0, 3));
+      if (!row) return; // every candidate failed the safety gate this cycle
       const cfg   = this.config;
       const entry = row.price;
 
@@ -1665,14 +1727,28 @@
       }
       const tpPct = +(slPct * cfg.minRR).toFixed(2);
 
-      // ── Calculate notional from execution settings ────────────────────────
-      const equity   = AlpacaClient.getEquity() || 10000;
-      const leverage = this._getLeverage();
-      const posMode  = this._getPosMode();
-      const posVal   = this._getPosValue();
-      const notional = posMode === 'fixed'
-        ? posVal * leverage
-        : equity * (posVal / 100) * leverage;
+      // ── Calculate position size from execution settings ──────────────────
+      // BUG FIX: the server multiplies `amount` by `leverage` itself — sending a
+      // pre-leveraged amount doubled the leverage. Send the BASE amount only.
+      const equity     = AlpacaClient.getEquity();
+      if (!equity || equity <= 0) {
+        this.addLog(row.sym, 'SKIP', 'Account equity unknown — cannot size position safely', 'warn');
+        return;
+      }
+      const leverage   = this._getLeverage();
+      const posMode    = this._getPosMode();
+      const posVal     = this._getPosValue();
+      const baseAmount = posMode === 'fixed' ? posVal : equity * (posVal / 100);
+      const notional   = baseAmount * leverage; // true final exposure (leverage applied ONCE)
+
+      // ── Risk validation (RiskManager rule: never risk >5% of equity per trade) ──
+      const worstCaseRisk = notional * (slPct / 100);
+      const riskPct       = (worstCaseRisk / equity) * 100;
+      if (riskPct > 5) {
+        this.addLog(row.sym, 'SKIP',
+          `Risk ${riskPct.toFixed(1)}% of equity exceeds 5% cap — reduce position size or stop %`, 'warn');
+        return;
+      }
 
       // Lock this symbol to prevent duplicate orders while request is in flight
       this._activeTrades.add(row.sym);
@@ -1684,7 +1760,7 @@
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: notional, slPct, tpPct, leverage }),
+          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: baseAmount, slPct, tpPct, leverage }),
         });
         if (!resp.ok) {
           const e = await resp.json().catch(() => ({}));

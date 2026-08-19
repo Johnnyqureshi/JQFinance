@@ -2,3 +2,4 @@
 - [Realtime trader null-safe writes](rt-dom-nullsafe.md) — all DOM writes in realtimetrader.js must use setSafe/setCls helpers; direct $().textContent= crashes when panel is unmounted
 - [API data sources](api-data-sources.md) — FMP/NEWS/Alpaca keys live; AIML_API_KEY DISABLED at provider (AI chat + game-plan narrative degrade gracefully); ElevenLabs MISSING
 - [Auto-trade safety gates](autotrade-safety-gates.md) — order API leverages server-side (send base amount!); gates fail closed; cycle mutex required; accept BUY and STRONG BUY
+- [Session simulator](session-simulator.md) — run node scripts/simulate.js (needs running server) for a 25-check end-to-end smoke suite: auth, scanner, fail-closed gates, game plan

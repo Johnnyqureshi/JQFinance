@@ -870,7 +870,7 @@
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMaxFloat">⑤ Max Float M</label>
-              <input type="number" id="mtMaxFloat" class="mt-cpt-input" min="0" max="999" step="1" value="20" title="Pillar 5 — float in millions; <5M scores the supply point (ideal), 20M is the hard ceiling">
+              <input type="number" id="mtMaxFloat" class="mt-cpt-input" min="0" max="999" step="1" value="10" title="Pillar 5 — float in millions; <5M scores the supply point (ideal), 10M is the hard ceiling">
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMinScore">Min Score /7</label>
@@ -894,6 +894,11 @@
               <input type="number" id="mtStopPct" class="mt-cpt-input" min="0.1" max="50" step="0.25" value="5"
                 placeholder="ATR" title="% below entry — blank uses ATR automatically">
               <span class="mt-cpt-hint">Blank → ATR-based</span>
+            </div>
+            <div class="mt-cpt-field">
+              <label class="mt-cpt-label" for="mtTpRsi">Take Profit RSI</label>
+              <input type="number" id="mtTpRsi" class="mt-cpt-input" min="50" max="99" step="1" value="75" title="Bot sells when intraday RSI(14) reaches this level (default 75 = overbought exhaustion)">
+              <span class="mt-cpt-hint">Sell at RSI ≥ this</span>
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMinRR">Min R : R</label>
@@ -1145,8 +1150,7 @@
             </div>
             <div id="mtTradeMsg" class="mt-trade-msg" style="display:none"></div>
             <div class="mt-trade-btns">
-              <button class="mt-trade-buy" id="mtBuyBtn">▲ BUY</button>
-              <button class="mt-trade-sell" id="mtSellBtn" title="No shorting — buys the mapped inverse ETF instead">▼ BUY INVERSE</button>
+              <button class="mt-trade-buy" id="mtBuyBtn" style="width:100%">▲ BUY</button>
             </div>
           </div>
         </div><!-- /.mt-trade-panel -->

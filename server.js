@@ -982,7 +982,7 @@ app.post('/api/scanner-batch', async (req, res) => {
         if (bars && bars.length >= 20) {
           const closes = bars.map(b => b.c);
           try { atr14 = +calcATR(bars, 14).toFixed(3); } catch(_) {}
-          try { rsi14 = +calcRSI(closes, 14).toFixed(1); } catch(_) {}
+          try { const v = calcRSI(closes, 14); rsi14 = v != null ? +v.toFixed(1) : null; } catch(_) {}
         }
 
         return { sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14, floatSh, marketCap, w52Dist };
@@ -1005,7 +1005,7 @@ app.get('/api/signal/:symbol', async (req, res) => {
     const ema21   = calcEMA(closes, 21);
     const sma50   = calcSMA(closes, 50);
     let rsi14 = 50;
-    try { rsi14 = +calcRSI(closes, 14).toFixed(1); } catch (_) {}
+    try { const v = calcRSI(closes, 14); if (v != null) rsi14 = +v.toFixed(1); } catch (_) {}
     const aboveEma = price > ema21;
     const aboveSma = price > sma50;
     const rsiOk    = rsi14 < 70 && rsi14 > 30;
@@ -1605,6 +1605,16 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
         });
       }
       req._heldQty = heldQty; // cap the sell below
+
+      // Cancel any open orders on this symbol (e.g. the OTO stop-loss child)
+      // BEFORE selling — otherwise the leftover stop order could later trigger
+      // against nothing (or a re-entered position) and flip the account short.
+      try {
+        const open = await alpacaFetch(req.session.userId, `/v2/orders?status=open&symbols=${symbol.toUpperCase()}`, { method: 'GET' });
+        for (const o of (Array.isArray(open) ? open : [])) {
+          await alpacaFetch(req.session.userId, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {});
+        }
+      } catch (_) {} // no open orders / cancel failure → proceed; Alpaca rejects unsafe sells
     } catch (e) {
       return res.status(400).json({
         error: `No long position in ${symbol.toUpperCase()} — shorting is not allowed on this platform. To trade the downside, BUY the inverse ETF instead.`,
@@ -1614,9 +1624,10 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   }
 
   // Alpaca bracket orders require BOTH take-profit AND stop-loss legs.
-  // If only one is provided, fall back to a simple market order instead of
-  // sending a malformed bracket that Alpaca will reject.
+  // With SL only (bot default: fixed stop + RSI-based take profit handled
+  // client-side), use an OTO order: market buy + attached stop-loss leg.
   const hasBracket = tpNum > 0 && slNum > 0;
+  const hasOtoStop = !hasBracket && slNum > 0 && sideL === 'buy';
 
   // Validate leverage (1–4x, must be numeric)
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
@@ -1660,6 +1671,20 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
         order_class:    'bracket',
         take_profit:    { limit_price: tpPrice },
         stop_loss:      { stop_price:  slPrice },
+      };
+    } else if (hasOtoStop) {
+      // OTO: market buy + stop-loss leg only (take profit handled by RSI exit).
+      // Advanced orders require integer qty.
+      const shares = Math.floor(leveragedAmount / price);
+      if (shares < 1) throw new Error(`Position size $${amtNum.toFixed(2)} × ${lev}x leverage = $${leveragedAmount.toFixed(2)}, which is less than the price of 1 share ($${price.toFixed(2)}). Increase your position size in Settings.`);
+      orderBody = {
+        symbol:         symbol.toUpperCase(),
+        qty:            String(shares),
+        side:           'buy',
+        type:           'market',
+        time_in_force:  'day',
+        order_class:    'oto',
+        stop_loss:      { stop_price: (price * (1 - slNum / 100)).toFixed(2) },
       };
     } else if (sideL === 'sell') {
       // NO-SHORT: sells are always QUANTITY-based from the verified held amount.
@@ -1727,6 +1752,26 @@ function calcEMA(closes, period) {
     ema = closes[i] * k + ema * (1 - k);
   }
   return ema;
+}
+
+// Wilder-smoothed RSI. Returns null when there are fewer than period+1 valid closes.
+function calcRSI(closes, period = 14) {
+  const vals = (closes || []).filter(v => isFinite(v));
+  if (vals.length < period + 1) return null;
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = vals[i] - vals[i - 1];
+    if (d >= 0) gain += d; else loss -= d;
+  }
+  let avgGain = gain / period, avgLoss = loss / period;
+  for (let i = period + 1; i < vals.length; i++) {
+    const d = vals[i] - vals[i - 1];
+    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100; // flat → neutral, all-gain → 100
+  const rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
 }
 
 function calcSMA(closes, period) {
@@ -1975,9 +2020,14 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
     const lastSig  = sigArr.length   ? sigArr[sigArr.length - 1]      : null;
     const lastHist = (lastMacd != null && lastSig != null) ? +(lastMacd - lastSig).toFixed(5) : null;
 
+    // ── Intraday RSI(14) on 1-min close — used for the RSI take-profit exit ──
+    let rsi14 = null;
+    try { const v = calcRSI(closes, 14); rsi14 = v != null ? +v.toFixed(1) : null; } catch (_) {}
+
     res.json({
       sym,
       bars: bars.length,
+      rsi14,
       dailyOpen, dailyHigh, dailyLow, lastClose, pctOfMove,
       // ── data.py indicators ─────────────────────────────────────────────────
       vwap:            currentVwap  != null ? +currentVwap.toFixed(4)  : null,

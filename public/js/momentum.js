@@ -58,15 +58,16 @@
       // Pillar 4: News catalyst required (breaking headline confirms the move)
       requireNewsCatalyst: true,
       // Pillar 5: Float — ideal < 5M shares (scores the supply point);
-      // hard ceiling 20M (anything above is rejected — too much supply)
-      maxFloat:       20_000_000,
+      // hard ceiling 10M (anything above is rejected — too much supply)
+      maxFloat:       10_000_000,
       // Minimum absolute volume sanity check (independent of pillars)
       minVolume:      100000,
       // Score threshold: max 7 — all 5 pillars = 6 pts, rvol≥10× adds 1 bonus
       minScore:       4,
       // Risk
       stopPercent:    5,        // 5% stop — backtest shows 2% is too tight for gap-up plays; avg intraday LOW is -6.6% from open
-      minRR:          2.0,      // 2:1 R:R → TP = 10% with 5% SL; backtest win rate 43.5% vs 33.3% break-even needed
+      takeProfitRsi:  75,       // exit when intraday RSI(14) reaches this level (momentum exhaustion)
+      minRR:          2.0,      // used for manual risk-panel TP display only
       // EMA trend
       emaFast:        9,
       emaSlow:        21,
@@ -85,10 +86,11 @@
           saved._migratedPrice3 = true;
           try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
         }
-        // Migration: old default float ceiling was 10M — now 20M (sub-5M still ideal)
-        if (saved.maxFloat === 10_000_000 && !saved._migratedFloat20) {
-          saved.maxFloat = 20_000_000;
-          saved._migratedFloat20 = true;
+        // Migration reversal: a brief interim build raised the ceiling to 20M —
+        // policy is 5M ideal / 10M max, so restore anyone that migration touched.
+        if (saved._migratedFloat20) {
+          if (saved.maxFloat === 20_000_000) saved.maxFloat = 10_000_000;
+          delete saved._migratedFloat20;
           try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
         }
         return { ...this.defaults, ...saved };
@@ -373,14 +375,14 @@
           pillar: true,
         },
         {
-          label:  '⑤ Float < 5M ideal · 20M max (supply)',
+          label:  '⑤ Float < 5M ideal · 10M max (supply)',
           value:  floatM ?? 'Unknown',
           note:   float == null
             ? 'Float data unavailable (Yahoo)'
             : float < 5_000_000  ? '+1 pt: low supply (< 5M) ✓'
-            : float < 20_000_000 ? 'Passes ceiling but no point (5–20M)'
-            : '✗ Float too high (> 20M)',
-          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 20_000_000 ? 'ok' : 'bad',
+            : float < 10_000_000 ? 'Passes ceiling but no point (5–10M)'
+            : '✗ Float too high (> 10M)',
+          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 10_000_000 ? 'ok' : 'bad',
           pillar: true,
         },
       ];
@@ -929,6 +931,7 @@
       setVal('mtMinScore',      cfg.minScore);
       setVal('mtMaxFloat',      cfg.maxFloat != null ? cfg.maxFloat / 1_000_000 : '');
       setVal('mtStopPct',       cfg.stopPercent);
+      setVal('mtTpRsi',         cfg.takeProfitRsi);
       setVal('mtMinRR',         cfg.minRR);
       // News required toggle
       const newsChk = $('mtRequireNews');
@@ -956,6 +959,7 @@
         maxFloat:            rawFloat != null ? rawFloat * 1_000_000 : this.config.maxFloat,
         requireNewsCatalyst: $('mtRequireNews')?.checked ?? this.config.requireNewsCatalyst,
         stopPercent:         n('mtStopPct'),
+        takeProfitRsi:       n('mtTpRsi')        ?? this.config.takeProfitRsi,
         minRR:               n('mtMinRR')        ?? this.config.minRR,
         universeMode:        uni,
       };
@@ -1742,7 +1746,8 @@
         this.addLog(row.sym, 'SKIP', 'No stop loss configured — set Stop Loss % in settings', 'warn');
         return;
       }
-      const tpPct = +(slPct * cfg.minRR).toFixed(2);
+      // Take profit: RSI-based exit (default 75) monitored by the position poller
+      const tpRsi = (cfg.takeProfitRsi != null && cfg.takeProfitRsi > 0) ? cfg.takeProfitRsi : 75;
 
       // ── Calculate position size from execution settings ──────────────────
       // BUG FIX: the server multiplies `amount` by `leverage` itself — sending a
@@ -1770,14 +1775,15 @@
       // Lock this symbol to prevent duplicate orders while request is in flight
       this._activeTrades.add(row.sym);
       this.addLog(row.sym, '→ AUTO-BUY',
-        `Bracket $${notional.toFixed(0)} · SL ${slPct}% · TP ${tpPct}% · ${AlpacaClient.mode.toUpperCase()}`, 'info');
+        `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · ${AlpacaClient.mode.toUpperCase()}`, 'info');
 
       try {
+        // OTO order: market buy + stop-loss leg. Take profit = RSI exit (poller).
         const resp = await fetch('/api/alpaca/order', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: baseAmount, slPct, tpPct, leverage }),
+          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: baseAmount, slPct, leverage }),
         });
         if (!resp.ok) {
           const e = await resp.json().catch(() => ({}));
@@ -1786,7 +1792,6 @@
         const result   = await resp.json();
         const shares   = result.shares ? parseInt(result.shares) : Math.floor(notional / entry);
         const stopPx   = +(entry * (1 - slPct / 100)).toFixed(2);
-        const tpPx     = +(entry * (1 + tpPct / 100)).toFixed(2);
         const riskAmt  = Math.abs(entry - stopPx) * shares;
 
         // Update daily counters
@@ -1795,8 +1800,8 @@
         this._renderDailyLimits();
 
         this.addLog(row.sym, '✓ AUTO-BUY',
-          `${shares} sh @ $${entry.toFixed(2)} · stop $${stopPx} · target $${tpPx}`, 'ok');
-        this.botPositions.set(row.sym, { entry, slPct, tpPct, shares, ts: Date.now() });
+          `${shares} sh @ $${entry.toFixed(2)} · stop $${stopPx} · exit RSI ≥${tpRsi}`, 'ok');
+        this.botPositions.set(row.sym, { entry, slPct, tpRsi, shares, ts: Date.now() });
         // Note: _activeTrades keeps row.sym locked until position closes (avoids re-entry while in trade)
       } catch (err) {
         this.addLog(row.sym, '✗ AUTO-BUY', err.message, 'err');
@@ -1817,22 +1822,60 @@
 
     async _pollPositions() {
       if (!AlpacaClient.connected) return;
+      // In-flight mutex — overlapping polls could each submit an RSI-exit sell
+      if (this._pollBusy) return;
+      this._pollBusy = true;
       try {
         const r = await fetch('/api/alpaca/positions', { credentials: 'include' });
         if (!r.ok) return;
         const positions = await r.json();
         this._renderPositionsPanel(Array.isArray(positions) ? positions : []);
 
-        // Detect bracket exits: bot-tracked symbol disappeared from open positions
+        // Detect stop-loss exits: bot-tracked symbol disappeared from open positions
         const heldSet = new Set((positions || []).map(p => p.symbol));
         for (const [sym] of this.botPositions) {
           if (!heldSet.has(sym)) {
-            this.addLog(sym, '✓ AUTO-EXIT', 'Bracket order closed position automatically', 'ok');
+            this.addLog(sym, '✓ AUTO-EXIT', 'Stop-loss order closed position', 'ok');
             this.botPositions.delete(sym);
             this._activeTrades.delete(sym); // unlock for re-entry
           }
         }
+
+        // ── RSI take-profit exit: sell when intraday RSI(14) ≥ configured level ──
+        if (this.botEnabled && this._isMarketOpen()) await this._checkRsiExits(positions || []);
       } catch (_) {}
+      finally { this._pollBusy = false; }
+    },
+
+    // Sell any bot position whose intraday RSI has reached its take-profit level
+    async _checkRsiExits(positions) {
+      for (const [sym, info] of this.botPositions) {
+        if (info._exiting) continue;
+        const pos = positions.find(p => p.symbol === sym);
+        if (!pos) continue;
+        const analysis = await MomentumAnalysis.fetch(sym);
+        const rsi = analysis?.rsi14;
+        if (rsi == null || rsi < (info.tpRsi ?? 75)) continue;
+        info._exiting = true; // prevent duplicate sells while request is in flight
+        try {
+          const qty      = parseFloat(pos.qty || 0);
+          const price    = parseFloat(pos.current_price || info.entry);
+          const notional = qty * price * 1.05; // buffer — server caps sells at held qty
+          const r = await fetch('/api/alpaca/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ symbol: sym, side: 'sell', amount: notional }),
+          });
+          if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Sell failed'); }
+          this.addLog(sym, '✓ TAKE PROFIT', `RSI ${rsi} ≥ ${info.tpRsi ?? 75} — sold ${qty} sh @ ~$${price.toFixed(2)}`, 'ok');
+          this.botPositions.delete(sym);
+          this._activeTrades.delete(sym);
+        } catch (err) {
+          info._exiting = false; // retry next poll
+          this.addLog(sym, '✗ TAKE PROFIT', err.message, 'err');
+        }
+      }
     },
 
     _renderPositionsPanel(positions) {
@@ -1849,7 +1892,7 @@
         const avg    = parseFloat(p.avg_entry_price  || 0);
         const isBot  = this.botPositions.has(p.symbol);
         const bInfo  = isBot ? this.botPositions.get(p.symbol) : null;
-        const meta   = bInfo ? `SL ${bInfo.slPct}% · TP ${bInfo.tpPct}%` : '—';
+        const meta   = bInfo ? `SL ${bInfo.slPct}% · TP RSI ${bInfo.tpRsi ?? 75}` : '—';
         return `<tr>
           <td style="font-weight:700">${isBot ? '<span title="Bot-managed">🤖</span> ' : ''}${p.symbol}</td>
           <td class="mt-r">${p.qty}</td>
@@ -1967,36 +2010,6 @@
         }
       });
 
-      // BUY INVERSE — no shorting on this platform. When you expect a drop,
-      // this buys the mapped inverse ETF (rises when the stock/market falls).
-      $('mtSellBtn')?.addEventListener('click', async () => {
-        const row   = this.selectedRow;
-        const rc    = this.riskCalc;
-        const limitMsg = this._checkDailyLimits();
-        if (limitMsg) return this._showTradeError(limitMsg);
-        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'INVERSE', 'No valid risk calc — set stop % or ATR', 'err');
-        if (!AlpacaClient.connected) return this.addLog(row.sym, 'INVERSE', 'Not connected to Alpaca', 'err');
-        const btn = $('mtSellBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Resolving…'; }
-        try {
-          // Resolve the inverse ETF for this symbol
-          const invResp = await fetch(`/api/inverse/${row.sym}`, { credentials: 'include' }).then(r => r.json());
-          if (!invResp?.ok) throw new Error('Could not resolve inverse ETF');
-          const invSym = invResp.inverse;
-          if (btn) btn.textContent = `Buying ${invSym}…`;
-          const notional = rc.shares * row.price; // same dollar exposure as planned
-          await AlpacaClient.placeSimpleOrder(invSym, 'buy', notional);
-          this.dailyTrades++;
-          this._renderDailyLimits();
-          this.addLog(row.sym, '↔ INVERSE', `${invResp.note} — bought $${notional.toFixed(0)} of ${invSym}`, 'info');
-          this._showTradeSuccess(`Bought $${notional.toFixed(0)} of ${invSym} (inverse of ${row.sym})`);
-        } catch (err) {
-          this.addLog(row.sym, 'INVERSE FAILED', err.message, 'err');
-          this._showTradeError(err.message);
-        } finally {
-          if (btn) { btn.disabled = false; btn.textContent = '▼ BUY INVERSE'; }
-        }
-      });
 
       // Bot ON/OFF toggle
       $('mtBotToggle')?.addEventListener('click', () => this._toggleBot());

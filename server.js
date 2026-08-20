@@ -10,6 +10,11 @@ const session      = require('express-session');
 const SQLiteStore  = require('connect-sqlite3')(session);
 const helmet       = require('helmet');
 const crypto       = require('crypto');
+const {
+  CATALYST_TERMS,
+  buildCatalystEvent,
+  dedupeEvents,
+} = require('./lib/catalyst-intel');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -2672,6 +2677,306 @@ app.get('/api/momentum/news/:sym', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[MomentumNews] error for', sym, e.message);
     res.json({ hasCatalyst: false, headline: null, articles: [], source: 'error' });
+  }
+});
+
+// ── GET /api/catalyst-intel — compact microcap/biotech catalyst feed ──────────
+// Intelligence only: this route never places orders and does not invent event dates.
+// It combines source-linked news with live Yahoo market data, applies deterministic
+// classification/scoring, and reports missing inputs rather than silently filling them.
+const _bciCache = { data: null, at: 0 };
+let _bciInflight = null;
+const _bciForceAt = new Map();
+const BCI_CACHE_MS = 4 * 60 * 1000;
+const BCI_FORCE_COOLDOWN_MS = 60 * 1000;
+const BCI_LOOKBACK_MS = 72 * 60 * 60 * 1000;
+
+function bciSafeUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : null;
+  } catch { return null; }
+}
+
+function bciExplicitSymbol(text = '') {
+  const value = String(text);
+  const exchange = value.match(/\b(?:NASDAQ|NYSE(?:\s+AMERICAN)?|AMEX)\s*[:\-]\s*([A-Z]{1,6})\b/i);
+  if (exchange) return { symbol: exchange[1].toUpperCase(), association: 'exchange' };
+  const cashTag = value.match(/\$([A-Z]{1,6})\b/);
+  if (cashTag) return { symbol: cashTag[1].toUpperCase(), association: 'cash-tag' };
+  return null;
+}
+
+function bciFreshEnough(dateValue, now = Date.now()) {
+  if (!dateValue) return true; // kept but explicitly marked unverified downstream
+  const at = new Date(dateValue).getTime();
+  return !Number.isFinite(at) || now - at <= BCI_LOOKBACK_MS;
+}
+
+async function bciFetchFmp(dataGaps, sources) {
+  if (!FMP_KEY) {
+    dataGaps.push('Financial Modeling Prep news source is not configured');
+    sources.push({ name: 'FMP', status: 'unavailable', count: 0 });
+    return [];
+  }
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/stock_news?limit=100&apikey=${FMP_KEY}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const rows = await r.json();
+    const articles = (Array.isArray(rows) ? rows : [])
+      .filter(n => n?.symbol && n?.title && CATALYST_TERMS.test(`${n.title} ${n.text || ''}`))
+      .filter(n => bciFreshEnough(n.publishedDate))
+      .map(n => ({
+        symbol: String(n.symbol).toUpperCase().replace(/[^A-Z.\-]/g, ''),
+        company: n.symbol,
+        headline: String(n.title),
+        summary: String(n.text || ''),
+        url: bciSafeUrl(n.url),
+        source: n.site || 'Financial Modeling Prep',
+        publishedAt: n.publishedDate || null,
+        association: 'provider',
+      }))
+      .filter(n => /^[A-Z]{1,6}$/.test(n.symbol));
+    sources.push({ name: 'FMP', status: 'live', count: articles.length });
+    return articles;
+  } catch (e) {
+    dataGaps.push(`FMP news unavailable (${e.message})`);
+    sources.push({ name: 'FMP', status: 'unavailable', count: 0 });
+    return [];
+  }
+}
+
+async function bciFetchNewsApi(dataGaps, sources) {
+  if (!NEWS_KEY) {
+    dataGaps.push('NewsAPI catalyst source is not configured');
+    sources.push({ name: 'NewsAPI', status: 'unavailable', count: 0 });
+    return [];
+  }
+  try {
+    const from = new Date(Date.now() - BCI_LOOKBACK_MS).toISOString();
+    const query = '("FDA approval" OR "clinical trial" OR PDUFA OR "Phase 2" OR "Phase 3" OR biotech OR pharmaceutical OR "registered direct offering" OR "public offering") AND (Nasdaq OR NYSE OR stock OR shares)';
+    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&from=${encodeURIComponent(from)}&language=en&sortBy=publishedAt&pageSize=100&apiKey=${NEWS_KEY}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    const articles = (payload.articles || []).flatMap(a => {
+      if (!a?.title || a.title === '[Removed]') return [];
+      const combined = `${a.title} ${a.description || ''}`;
+      if (!CATALYST_TERMS.test(combined) || !bciFreshEnough(a.publishedAt)) return [];
+      const association = bciExplicitSymbol(combined);
+      if (!association) return []; // never guess a ticker from ordinary capitalized words
+      return [{
+        symbol: association.symbol,
+        headline: String(a.title),
+        summary: String(a.description || ''),
+        url: bciSafeUrl(a.url),
+        source: a.source?.name || 'NewsAPI',
+        publishedAt: a.publishedAt || null,
+        association: association.association,
+      }];
+    });
+    sources.push({ name: 'NewsAPI', status: 'live', count: articles.length });
+    return articles;
+  } catch (e) {
+    dataGaps.push(`NewsAPI unavailable (${e.message})`);
+    sources.push({ name: 'NewsAPI', status: 'unavailable', count: 0 });
+    return [];
+  }
+}
+
+async function bciFetchYahooSmallCaps(dataGaps, sources) {
+  try {
+    const screenerUrl = 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?count=50&scrIds=small_cap_gainers';
+    const screenRes = await fetch(screenerUrl, {
+      headers: { ...YH, Accept: 'application/json' },
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!screenRes.ok) throw new Error(`screener HTTP ${screenRes.status}`);
+    const payload = await screenRes.json();
+    const quotes = payload?.finance?.result?.[0]?.quotes || [];
+    const candidates = quotes
+      .filter(q => /^[A-Z]{1,6}$/.test(q.symbol || ''))
+      .filter(q => {
+        const price = Number(q.regularMarketPrice);
+        const cap = Number(q.marketCap);
+        return price >= 0.5 && price <= 20 && (!Number.isFinite(cap) || (cap >= 20e6 && cap <= 1e9));
+      })
+      .slice(0, 24);
+
+    const articles = [];
+    for (let i = 0; i < candidates.length; i += 6) {
+      const chunk = candidates.slice(i, i + 6);
+      const settled = await Promise.allSettled(chunk.map(async q => {
+        const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q.symbol)}&quotesCount=0&newsCount=5`;
+        const r = await fetch(url, { headers: YH, signal: AbortSignal.timeout(7000) });
+        if (!r.ok) return [];
+        const d = await r.json();
+        return (d.news || [])
+          .filter(n => n?.title && CATALYST_TERMS.test(n.title))
+          .filter(n => bciFreshEnough(n.providerPublishTime ? n.providerPublishTime * 1000 : null))
+          .map(n => ({
+            symbol: q.symbol,
+            company: q.shortName || q.longName || q.symbol,
+            headline: String(n.title),
+            summary: '',
+            url: bciSafeUrl(n.link),
+            source: n.publisher || 'Yahoo Finance',
+            publishedAt: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
+            association: 'symbol-search',
+          }));
+      }));
+      for (const result of settled) {
+        if (result.status === 'fulfilled') articles.push(...result.value);
+      }
+    }
+    sources.push({ name: 'Yahoo small-cap news', status: 'live', count: articles.length });
+    return articles;
+  } catch (e) {
+    dataGaps.push(`Yahoo small-cap news unavailable (${e.message})`);
+    sources.push({ name: 'Yahoo small-cap news', status: 'unavailable', count: 0 });
+    return [];
+  }
+}
+
+function bciPrepareArticles(articles) {
+  return articles
+    .filter(a => a?.headline && /^[A-Z]{1,6}$/.test(a.symbol || ''))
+    .sort((a, b) => (new Date(b.publishedAt).getTime() || 0) - (new Date(a.publishedAt).getTime() || 0))
+    .slice(0, 160);
+}
+
+async function bciEnrichMarkets(articles, dataGaps) {
+  const symbols = [...new Set(articles.map(a => a.symbol))].slice(0, 28);
+  const marketBySymbol = new Map();
+  for (let i = 0; i < symbols.length; i += 6) {
+    const chunk = symbols.slice(i, i + 6);
+    const settled = await Promise.allSettled(chunk.map(async symbol => {
+      const quote = await yf.quote(symbol, {}, { validateResult: false });
+      const price = quote?.regularMarketPrice;
+      if (!Number.isFinite(price) || price < 0.5 || price > 20) return null;
+      const marketCap = Number.isFinite(quote.marketCap) ? quote.marketCap : null;
+      if (marketCap != null && (marketCap < 20e6 || marketCap > 1e9)) return null;
+      const floatData = await _fetchFloatData(symbol);
+      const avgVol = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? null;
+      const volume = quote.regularMarketVolume ?? null;
+      return {
+        symbol,
+        company: quote.shortName || quote.longName || symbol,
+        price,
+        changePct: Number.isFinite(quote.regularMarketChangePercent) ? +quote.regularMarketChangePercent.toFixed(2) : null,
+        volume,
+        relVol: volume != null && avgVol ? +(volume / avgVol).toFixed(2) : null,
+        marketCap,
+        float: floatData.float ?? quote.floatShares ?? null,
+        floatSource: floatData.floatSource ?? (quote.floatShares != null ? 'quote' : null),
+      };
+    }));
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value) {
+        marketBySymbol.set(result.value.symbol, result.value);
+      }
+    }
+  }
+  if (!marketBySymbol.size && articles.length) dataGaps.push('Market-data enrichment returned no qualifying $20M–$1B, $0.50–$20 symbols');
+  return marketBySymbol;
+}
+
+async function bciGeneratePayload() {
+  const dataGaps = [];
+  const sources = [];
+  const providerResults = await Promise.all([
+    bciFetchFmp(dataGaps, sources),
+    bciFetchNewsApi(dataGaps, sources),
+    bciFetchYahooSmallCaps(dataGaps, sources),
+  ]);
+  const availableSources = sources.filter(s => s.status === 'live').length;
+  if (!availableSources) {
+    const outage = new Error('All catalyst news providers are unavailable');
+    outage.sources = sources;
+    outage.dataGaps = dataGaps;
+    throw outage;
+  }
+
+  // Do not dedupe here: buildCatalystEvent + dedupeEvents must see every
+  // syndicated version so they can retain the strongest canonical source and
+  // preserve an honest duplicate count.
+  const articles = bciPrepareArticles(providerResults.flat());
+  const marketBySymbol = await bciEnrichMarkets(articles, dataGaps);
+  const now = Date.now();
+  const events = dedupeEvents(
+    articles
+      .filter(article => marketBySymbol.has(article.symbol))
+      .map(article => buildCatalystEvent(article, marketBySymbol.get(article.symbol), now))
+  )
+    .sort((a, b) => b.opportunityScore - a.opportunityScore || b.catalystScore - a.catalystScore)
+    .slice(0, 20)
+    .map(({ sourceScore, ...publicEvent }) => publicEvent);
+
+  return {
+    ok: true,
+    events,
+    updatedAt: new Date(now).toISOString(),
+    marketState: currentMarketState(),
+    cached: false,
+    stale: false,
+    sources,
+    dataGaps,
+    reviewOnly: true,
+  };
+}
+
+app.get('/api/catalyst-intel', requireAuth, async (req, res) => {
+  const now = Date.now();
+  let force = req.query.force === '1';
+  if (force) {
+    const forceKey = String(req.session.userId);
+    const lastForce = _bciForceAt.get(forceKey) || 0;
+    if (now - lastForce < BCI_FORCE_COOLDOWN_MS) force = false;
+    else {
+      _bciForceAt.set(forceKey, now);
+      if (_bciForceAt.size > 250) _bciForceAt.delete(_bciForceAt.keys().next().value);
+    }
+  }
+
+  if (!force && _bciCache.data && now - _bciCache.at < BCI_CACHE_MS) {
+    return res.json({ ..._bciCache.data, cached: true });
+  }
+  if (_bciInflight) {
+    try { return res.json({ ...(await _bciInflight), cached: true }); }
+    catch { /* let the current request use the stale/error path below */ }
+  }
+
+  _bciInflight = bciGeneratePayload();
+  try {
+    const payload = await _bciInflight;
+    _bciCache.data = payload;
+    _bciCache.at = Date.now();
+    res.json(payload);
+  } catch (e) {
+    console.error('[CatalystIntel]', e.message);
+    if (_bciCache.data) {
+      return res.json({
+        ..._bciCache.data,
+        cached: true,
+        stale: true,
+        sources: e.sources || _bciCache.data.sources || [],
+        dataGaps: [...new Set([...(e.dataGaps || _bciCache.data.dataGaps || []), `Refresh failed (${e.message})`])],
+      });
+    }
+    res.status(503).json({
+      ok: false,
+      events: [],
+      updatedAt: null,
+      marketState: currentMarketState(),
+      cached: false,
+      stale: true,
+      sources: e.sources || [],
+      dataGaps: e.dataGaps || [e.message],
+      error: 'Catalyst intelligence is temporarily unavailable',
+    });
+  } finally {
+    _bciInflight = null;
   }
 });
 

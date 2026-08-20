@@ -16,9 +16,13 @@
   let cdInterval  = null;
   let initialized = false;
   let filters     = { minPrice: null, maxPrice: null, minRelVol: null, minChg: null };
+  let bciEvents = [], bciView = 'top', bciTimer = null, bciLoading = false, bciInitialized = false;
 
   /* ── helpers ──────────────────────────────────────────────────────────────── */
   const $ = id => document.getElementById(id);
+  function bciCanFetch() {
+    return document.visibilityState === 'visible' && $('page-scanner')?.classList.contains('active');
+  }
 
   function fmtPrice(n) {
     if (n == null) return '--';
@@ -37,6 +41,126 @@
     if (n >= 1e9)  return (n / 1e9).toFixed(1)  + 'B';
     if (n >= 1e6)  return (n / 1e6).toFixed(0)  + 'M';
     return '--';
+  }
+  function bciEsc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function bciVal(value, suffix) {
+    return value == null || value === '' ? 'Unavailable' : bciEsc(String(value) + (suffix || ''));
+  }
+  function bciTime(value) {
+    if (!value) return 'Time unavailable';
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? bciEsc(value) : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+  }
+  function bciSafeHref(value) {
+    try {
+      const url = new URL(String(value || ''), window.location.origin);
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+    } catch { return null; }
+  }
+  function bciViewEvents() {
+    if (bciView === 'fda') return bciEvents.filter(e =>
+      (Array.isArray(e.views) && e.views.includes('fda'))
+      || /fda|clinical|trial|phase|drug|approval|\bind\b|pdufa|fast track|breakthrough|orphan/i.test((e.category || '') + ' ' + (e.headline || ''))
+    );
+    if (bciView === 'risk') return bciEvents.filter(e =>
+      (Array.isArray(e.views) && e.views.includes('risk'))
+      || (e.dilutionRisk && e.dilutionRisk !== 'NONE FOUND')
+      || /bearish/i.test(e.direction || '')
+      || (Array.isArray(e.riskFlags) && e.riskFlags.some(flag => !/unavailable|unverified/i.test(flag)))
+    );
+    return [...bciEvents].sort((a, b) => (b.opportunityScore ?? b.catalystScore ?? -Infinity) - (a.opportunityScore ?? a.catalystScore ?? -Infinity));
+  }
+  function renderBci() {
+    const grid = $('bciGrid'), meta = $('bciMeta');
+    if (!grid) return;
+    const events = bciViewEvents();
+    const payload = window._bciPayload || {};
+    if (meta) meta.innerHTML = [
+      payload.marketState ? `<span class="bci-pill">Market: ${bciEsc(payload.marketState)}</span>` : '',
+      payload.updatedAt ? `<span>Feed updated ${bciTime(payload.updatedAt)}</span>` : '',
+      payload.cached ? '<span class="bci-pill">Cached</span>' : '',
+      payload.stale ? '<span class="bci-pill bci-stale">Stale data</span>' : '',
+      Array.isArray(payload.sources) && payload.sources.length
+        ? `<span>Sources: ${bciEsc(payload.sources.map(s => typeof s === 'string' ? s : `${s.name} ${s.status === 'live' ? `(${s.count})` : '(unavailable)'}`).join(', '))}</span>`
+        : '',
+      Array.isArray(payload.dataGaps) && payload.dataGaps.length ? `<span>Gaps: ${bciEsc(payload.dataGaps.join(', '))}</span>` : ''
+    ].filter(Boolean).join('');
+    if (!events.length) {
+      grid.innerHTML = `<div class="bci-empty">${bciEvents.length ? 'No events match this view.' : 'No catalyst events available right now. Scanner data remains available above.'}</div>`;
+      return;
+    }
+    grid.innerHTML = events.map((e, i) => {
+      const pct = e.changePct == null ? null : Number(e.changePct);
+      const direction = String(e.direction || '').toLowerCase();
+      const riskFlags = Array.isArray(e.riskFlags) ? e.riskFlags : [];
+      const risk = e.dilutionRisk && e.dilutionRisk !== 'NONE FOUND' ? `Dilution ${bciEsc(e.dilutionRisk)}` : '';
+      const safeUrl = bciSafeHref(e.url);
+      return `<article class="bci-card" data-bci-index="${i}" tabindex="0" role="button" aria-label="Open ${bciEsc(e.symbol || 'catalyst')}">
+        <div class="bci-card-top"><span class="bci-symbol">${bciEsc(e.symbol || 'Unavailable')}</span><span class="bci-company">${bciEsc(e.company || 'Company unavailable')}</span><span class="bci-price">${fmtPrice(e.price)}</span></div>
+        <div class="bci-metrics"><span class="bci-metric">Chg <strong class="${pct > 0 ? 'bci-up' : pct < 0 ? 'bci-down' : ''}">${pct == null ? 'Unavailable' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%'}</strong></span><span class="bci-metric">Vol <strong>${fmtVol(e.volume)}</strong></span><span class="bci-metric">Rel <strong>${bciVal(e.relVol, '×')}</strong></span><span class="bci-metric">Cap <strong>${fmtMcap(e.marketCap)}</strong></span><span class="bci-metric">Float <strong>${fmtVol(e.float)}</strong></span></div>
+        <div class="bci-badges"><span class="bci-badge bci-category">${bciEsc(e.category || 'Unclassified')}</span><span class="bci-badge bci-score">Opportunity ${bciVal(e.opportunityScore)}</span><span class="bci-badge bci-score">Catalyst ${bciVal(e.catalystScore)}</span><span class="bci-badge bci-score">Explosive ${bciVal(e.explosivenessScore)}</span><span class="bci-badge bci-confidence">Confidence ${bciVal(e.confidence)}</span>${direction ? `<span class="bci-badge ${direction.includes('bearish') ? 'bci-direction-down' : direction === 'neutral' ? 'bci-direction-neutral' : 'bci-direction-up'}">${bciEsc(e.direction)}</span>` : ''}${risk ? `<span class="bci-badge bci-risk">${risk}</span>` : ''}</div>
+        <span class="bci-headline">${bciEsc(e.headline || 'Headline unavailable')}</span>
+        <details class="bci-detail"><summary>Why it matters &amp; risk</summary><p>${bciEsc(e.whyItMatters || 'Explanation unavailable.')}</p><p><strong>Flags:</strong> ${riskFlags.length ? bciEsc(riskFlags.join(' · ')) : 'No headline-based dilution flags found.'}</p></details>
+        <div class="bci-foot">${safeUrl ? `<a class="bci-source" href="${bciEsc(safeUrl)}" target="_blank" rel="noopener noreferrer">${bciEsc(e.source || 'Source')}</a>` : `<span class="bci-source">Source unavailable</span>`}<span>${bciTime(e.publishedAt)}${e.verified ? ' · Source-linked' : ' · Unverified'}${e.duplicateCount > 1 ? ` · ${bciEsc(e.duplicateCount)} reports merged` : ''}</span></div>
+      </article>`;
+    }).join('');
+    grid.querySelectorAll('.bci-card').forEach(card => {
+      const open = () => {
+        const e = events[Number(card.dataset.bciIndex)];
+        if (e && typeof window.openStock === 'function') window.openStock(e.symbol, { name: e.company, price: e.price, previousClose: e.changePct != null && Number(e.changePct) !== -100 ? Number(e.price) / (1 + Number(e.changePct) / 100) : e.price });
+      };
+      card.addEventListener('click', ev => { if (!ev.target.closest('a')) open(); });
+      card.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
+    });
+  }
+  async function fetchBci(force) {
+    if (bciLoading || !bciCanFetch()) return;
+    bciLoading = true;
+    const stateEl = $('bciState'), btn = $('bciRefresh');
+    if (stateEl) stateEl.textContent = 'Loading catalyst feed…';
+    if (btn) btn.disabled = true;
+    try {
+      const resp = await fetch('/api/catalyst-intel' + (force ? '?force=1' : ''), { credentials: 'include' });
+      if (resp.status === 401) throw new Error('Sign in required to view catalyst intelligence.');
+      if (!resp.ok) throw new Error(resp.status === 429 ? 'Provider rate limit; retry shortly.' : 'Catalyst provider unavailable.');
+      const data = await resp.json();
+      if (!data.ok && data.error) throw new Error(data.error);
+      window._bciPayload = data; bciEvents = Array.isArray(data.events) ? data.events : []; renderBci();
+      if (stateEl) stateEl.textContent = data.stale ? 'Showing stale feed' : `Updated ${bciTime(data.updatedAt)}`;
+    } catch (err) {
+      if (bciEvents.length) {
+        window._bciPayload = {
+          ...(window._bciPayload || {}),
+          stale: true,
+          dataGaps: [...new Set([...(window._bciPayload?.dataGaps || []), err.message || 'Refresh unavailable'])],
+        };
+        renderBci();
+        if (stateEl) stateEl.textContent = 'Showing last available feed';
+      } else {
+        if (stateEl) stateEl.textContent = 'Catalyst feed unavailable';
+        if ($('bciGrid')) $('bciGrid').innerHTML = `<div class="bci-error">${bciEsc(err.message || 'Unable to load catalyst intelligence.')} Scanner remains available above.</div>`;
+      }
+    } finally { bciLoading = false; if (btn) btn.disabled = false; }
+  }
+  function startBciTimer() {
+    clearInterval(bciTimer);
+    bciTimer = setInterval(() => { if (bciCanFetch()) fetchBci(false); }, 180000);
+  }
+  function initBci() {
+    if (bciInitialized) {
+      fetchBci(false);
+      startBciTimer();
+      return;
+    }
+    bciInitialized = true;
+    $('bciRefresh')?.addEventListener('click', () => fetchBci(true));
+    document.querySelectorAll('.bci-tab').forEach(tab => tab.addEventListener('click', () => {
+      bciView = tab.dataset.bciView; document.querySelectorAll('.bci-tab').forEach(t => t.classList.toggle('bci-active', t === tab)); renderBci();
+    }));
+    fetchBci(false);
+    startBciTimer();
   }
 
   /* ── filtering ────────────────────────────────────────────────────────────── */
@@ -189,6 +313,7 @@
 
     fetchData();
     startCountdown();
+    initBci();
 
     /* sortable column headers */
     document.querySelectorAll('.nsc-table .nsc-th[data-col]').forEach(th => {
@@ -223,6 +348,7 @@
       if (document.visibilityState === 'visible') {
         fetchData();
         startCountdown();
+        if (bciCanFetch()) fetchBci(false);
       }
     });
   }
@@ -231,6 +357,8 @@
   function pause() {
     clearInterval(cdInterval);
     cdInterval = null;
+    clearInterval(bciTimer);
+    bciTimer = null;
   }
 
   /* resume: refresh immediately + restart countdown */
@@ -238,6 +366,8 @@
     if (!initialized) { init(); return; }
     fetchData();
     startCountdown();
+    fetchBci(false);
+    startBciTimer();
   }
 
   window.stockScanner = { init, refresh: fetchData, pause, resume };

@@ -8,6 +8,7 @@
 //   4. Five-pillar scoring sanity (bounds, hard filters honored)
 //   5. Fail-closed safety gates (orders/bot without creds must refuse cleanly)
 //   6. AI Trade Game Plan shape check
+//   7. Biotech catalyst intelligence contract
 // Usage: node scripts/simulate.js
 // Exits 0 when all checks pass, 1 otherwise.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +111,28 @@ async function api(method, path, body) {
   }
   const gpBad = await api('GET', '/api/gameplan/NOTAREALTICKER123');
   check('bogus ticker → honest unavailable/error, no crash', gpBad.status === 200 ? (gpBad.j?.ok === false) : gpBad.status < 500 || gpBad.j?.error != null);
+
+  console.log('── 7. Biotech Catalyst Intelligence ──');
+  const catalyst = await api('GET', '/api/catalyst-intel');
+  check('catalyst feed responds without crashing', [200, 503].includes(catalyst.status));
+  check('catalyst feed always returns an events array', Array.isArray(catalyst.j?.events));
+  check('catalyst feed declares source/data-gap quality', Array.isArray(catalyst.j?.sources) && Array.isArray(catalyst.j?.dataGaps));
+  if (catalyst.j?.events?.length) {
+    check('catalyst event scores stay within 0–100', catalyst.j.events.every(e =>
+      ['catalystScore', 'explosivenessScore', 'confidence', 'opportunityScore']
+        .every(k => Number.isFinite(e[k]) && e[k] >= 0 && e[k] <= 100)
+    ));
+    check('catalyst events retain source and timestamp fields', catalyst.j.events.every(e =>
+      typeof e.source === 'string' && Object.hasOwn(e, 'publishedAt') && Object.hasOwn(e, 'verified')
+    ));
+  } else {
+    check('empty catalyst feed is honest about availability', catalyst.j?.ok === true || !!catalyst.j?.error);
+  }
+  const unauthCatalyst = await fetch(BASE + '/api/catalyst-intel');
+  check('catalyst feed rejects unauthenticated access', unauthCatalyst.status === 401);
+  const forceOne = await api('GET', '/api/catalyst-intel?force=1');
+  const forceTwo = await api('GET', '/api/catalyst-intel?force=1');
+  check('manual catalyst refresh is throttled back to cache', forceOne.status === 200 && forceTwo.status === 200 && forceTwo.j?.cached === true);
 
   console.log('\n══════════════════════════════════');
   console.log(`RESULT: ${pass} passed, ${fail} failed`);

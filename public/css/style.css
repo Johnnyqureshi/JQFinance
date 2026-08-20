@@ -7921,6 +7921,103 @@ option { background: var(--card); }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
+   BIOTECH CATALYST INTEL (bci-)
+   Compact research rail: dense, sourced, review-only.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.bci-module {
+  margin-top: 22px;
+  border: 1px solid #26384b;
+  border-radius: 9px;
+  background: #101820;
+  overflow: hidden;
+}
+.bci-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px 11px;
+  border-bottom: 1px solid #26384b;
+  background: linear-gradient(90deg, #152536, #101820);
+}
+.bci-head-main { min-width: 0; }
+.bci-kicker {
+  color: #d6a84f;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+.bci-title {
+  margin: 3px 0 0;
+  color: #edf3f7;
+  font-size: .98rem;
+  letter-spacing: .02em;
+}
+.bci-subtitle { color: #718294; font-size: .69rem; margin-top: 3px; }
+.bci-head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.bci-state { color: #8193a4; font-size: .67rem; white-space: nowrap; }
+.bci-refresh {
+  border: 1px solid #38526b; border-radius: 5px; background: #182b3d;
+  color: #c9d8e4; cursor: pointer; font-size: .7rem; font-weight: 700; padding: 6px 9px;
+}
+.bci-refresh:hover { background: #213b53; color: #fff; }
+.bci-refresh:disabled { opacity: .55; cursor: wait; }
+.bci-tabs {
+  display: flex; gap: 3px; padding: 9px 11px 0; border-bottom: 1px solid #1e2c39;
+}
+.bci-tab {
+  border: 0; border-bottom: 2px solid transparent; background: transparent;
+  color: #718294; cursor: pointer; font-size: .7rem; font-weight: 700;
+  padding: 7px 10px 8px; letter-spacing: .04em;
+}
+.bci-tab:hover { color: #d7e2ea; }
+.bci-tab.bci-active { color: #e0b45c; border-bottom-color: #d6a84f; }
+.bci-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px 14px;
+  padding: 9px 14px; color: #778a9b; font-size: .66rem;
+}
+.bci-pill { border: 1px solid #33485a; border-radius: 12px; padding: 3px 7px; color: #aabcca; }
+.bci-pill.bci-stale { color: #e0b45c; border-color: #735c2d; }
+.bci-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; padding: 0 10px 11px; }
+.bci-card {
+  min-width: 0; border: 1px solid #26384b; border-radius: 7px; background: #131f2a;
+  padding: 10px; cursor: pointer; transition: border-color .15s, background .15s, transform .15s;
+}
+.bci-card:hover { border-color: #59758e; background: #172735; transform: translateY(-1px); }
+.bci-card-top, .bci-card-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bci-symbol { color: #f0c66e; font-size: .86rem; font-weight: 800; letter-spacing: .05em; }
+.bci-company { overflow: hidden; color: #8fa1b0; font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }
+.bci-price { color: #dce7ee; font-size: .75rem; font-variant-numeric: tabular-nums; }
+.bci-up { color: #55c58a; } .bci-down { color: #e57769; }
+.bci-metrics { display: flex; flex-wrap: wrap; gap: 5px 11px; margin: 8px 0; color: #9fb0bd; font-size: .66rem; font-variant-numeric: tabular-nums; }
+.bci-metric strong { color: #d8e1e8; font-weight: 700; }
+.bci-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.bci-badge { border-radius: 3px; padding: 3px 5px; font-size: .61rem; font-weight: 800; letter-spacing: .03em; }
+.bci-score { color: #111b22; background: #d6a84f; }
+.bci-category { color: #d2dce4; background: #2c3742; }
+.bci-confidence { color: #b7d5e7; background: #203d50; }
+.bci-direction-up { color: #9be1bb; background: #18392d; } .bci-direction-down { color: #f0ada4; background: #432823; }
+.bci-direction-neutral { color: #d9c896; background: #3c3623; }
+.bci-risk { color: #f0c58d; background: #43351f; }
+.bci-headline { display: block; margin-top: 8px; overflow: hidden; color: #c2d0d9; font-size: .72rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.bci-detail { margin-top: 7px; color: #8295a4; font-size: .64rem; }
+.bci-detail summary { color: #91b5cc; cursor: pointer; font-weight: 700; }
+.bci-detail p { margin-top: 5px; line-height: 1.45; }
+.bci-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; color: #708393; font-size: .62rem; }
+.bci-source { overflow: hidden; color: #91b5cc; text-overflow: ellipsis; white-space: nowrap; }
+.bci-source:hover { color: #d6a84f; }
+.bci-empty, .bci-error { padding: 24px 14px; color: #8092a1; font-size: .75rem; text-align: center; }
+.bci-error { color: #df9b91; }
+.bci-context { padding: 9px 14px; border-top: 1px solid #26384b; color: #718294; font-size: .64rem; line-height: 1.4; }
+@media (max-width: 600px) {
+  .bci-head { align-items: flex-start; flex-direction: column; }
+  .bci-head-actions { width: 100%; justify-content: space-between; }
+  .bci-grid { grid-template-columns: 1fr; }
+  .bci-tabs { overflow-x: auto; }
+  .bci-tab { white-space: nowrap; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
    Simulator Status Panel
    ══════════════════════════════════════════════════════════════════════════════ */
 .at-sim-panel {

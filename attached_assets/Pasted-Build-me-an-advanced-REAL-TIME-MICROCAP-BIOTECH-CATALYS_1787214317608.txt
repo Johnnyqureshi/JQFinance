@@ -1,0 +1,840 @@
+Build me an advanced REAL-TIME MICROCAP & BIOTECH CATALYST TRADING INTELLIGENCE BOT.
+
+The goal is to identify small-cap and micro-cap stocks BEFORE or immediately AFTER major news catalysts that could cause large price movements.
+
+IMPORTANT:
+This is an intelligence/scanning system, NOT an autonomous trading system. Do NOT place trades automatically. The system should generate alerts, rankings, catalyst scores, risk assessments, and suggested price levels for human review.
+
+==================================================
+1. CORE OBJECTIVE
+==================================================
+
+Create a real-time stock catalyst scanner focused primarily on:
+
+- Micro-cap stocks
+- Small-cap biotech
+- Clinical-stage biotech
+- Pharmaceutical companies
+- Medical-device companies
+- AI/drug-discovery companies
+- Other low-float stocks capable of large percentage moves
+
+Prioritize companies with:
+
+Market cap:
+$20M–$1B
+
+Especially:
+$20M–$500M
+
+The system should identify catalysts that may cause:
++10%
++20%
++50%
++100%
+or greater moves.
+
+Do NOT simply search for popular stocks.
+
+The system should search for UNDER-THE-RADAR catalysts.
+
+==================================================
+2. NEWS SOURCES
+==================================================
+
+Build a modular news ingestion system capable of monitoring:
+
+- SEC filings
+- SEC 8-K filings
+- SEC 10-Q / 10-K
+- FDA announcements
+- FDA approval announcements
+- FDA clinical-hold announcements
+- FDA Fast Track designations
+- FDA Breakthrough Therapy designations
+- FDA Orphan Drug designations
+- ClinicalTrials.gov
+- Company press releases
+- GlobeNewswire
+- Business Wire
+- PR Newswire
+- Major financial news
+- Biotech news
+- Investor relations pages
+- Exchange/Nasdaq notices
+- Conference announcements
+- Earnings releases
+
+Use APIs where available.
+
+Use RSS feeds where APIs aren't available.
+
+Use web scraping only where legally/permissibly appropriate and design the system so individual sources can be added or removed easily.
+
+==================================================
+3. REAL-TIME SCANNING
+==================================================
+
+The scanner should continuously monitor new information.
+
+Target latency:
+
+As close to real-time as APIs permit.
+
+Every new article, filing, announcement, or event should be:
+
+1. Retrieved
+2. Timestamped
+3. Associated with a ticker
+4. Associated with a company
+5. Classified
+6. Given a catalyst score
+7. Given a confidence score
+8. Compared against current stock price/volume
+9. Sent through the alert engine
+
+Avoid duplicate news.
+
+If the same press release appears across multiple sources, merge it into one event.
+
+==================================================
+4. CATALYST CLASSIFICATION
+==================================================
+
+Classify catalysts into:
+
+VERY BULLISH:
+
+- FDA approval
+- Positive Phase 3 results
+- Positive Phase 2 results
+- Breakthrough Therapy designation
+- Fast Track designation
+- Major pharmaceutical partnership
+- Acquisition offer
+- Buyout
+- Major licensing agreement
+- Strong efficacy results
+- Successful clinical trial
+- Major revenue contract
+
+BULLISH:
+
+- FDA meeting scheduled
+- FDA acceptance of application
+- Orphan Drug designation
+- IND approval
+- Trial enrollment completion
+- Positive interim data
+- New institutional investment
+- Strategic partnership
+- Conference presentation with potentially important data
+
+NEUTRAL:
+
+- Routine earnings
+- Routine corporate updates
+- Management changes
+- Routine financing
+
+BEARISH:
+
+- Clinical trial failure
+- FDA rejection
+- FDA clinical hold
+- Safety concerns
+- Failed endpoint
+- Offering/dilution
+- Warrant exercise
+- Reverse split
+- Nasdaq delisting warning
+- Going-concern warning
+
+VERY BEARISH:
+
+- Complete clinical failure
+- FDA rejection of primary drug
+- Serious safety signal
+- Major fraud/accounting issue
+- Bankruptcy
+- Delisting
+
+==================================================
+5. CATALYST SCORE
+==================================================
+
+Create a 0–100 CATALYST SCORE.
+
+Example weighting:
+
+FDA approval = 95–100
+Positive Phase 3 = 90–100
+Major pharma partnership = 85–95
+Acquisition = 90–100
+Positive Phase 2 = 75–90
+Fast Track = 65–80
+Breakthrough Therapy = 75–90
+Orphan Drug = 55–70
+Clinical trial enrollment = 40–60
+Routine PR = 10–30
+
+The score must NOT be based solely on the type of catalyst.
+
+Also consider:
+
+- Market cap
+- Float
+- Average daily volume
+- Relative volume
+- Short interest
+- Days to cover
+- Cash balance
+- Cash burn
+- Upcoming financing risk
+- Existing warrants
+- Recent dilution
+- Historical volatility
+- Current price
+- Premarket movement
+- After-hours movement
+- Distance from 52-week high/low
+- Technical breakout
+- Catalyst credibility
+- Source credibility
+- Timing
+
+==================================================
+6. EXPLOSIVENESS SCORE
+==================================================
+
+Create a second score called:
+
+EXPLOSIVENESS SCORE: 0–100
+
+This estimates how capable the stock is of making a large percentage move.
+
+Example factors:
+
+LOW FLOAT:
+Higher score
+
+SMALL MARKET CAP:
+Higher score
+
+HIGH SHORT INTEREST:
+Higher score
+
+HIGH RELATIVE VOLUME:
+Higher score
+
+STRONG CATALYST:
+Higher score
+
+NEAR-TERM CATALYST:
+Higher score
+
+RECENT CONSOLIDATION:
+Higher score
+
+BREAKOUT:
+Higher score
+
+RECENT DILUTION:
+Lower score
+
+VERY LARGE MARKET CAP:
+Lower score
+
+LOW LIQUIDITY:
+Flag as HIGH RISK rather than automatically giving it a high score.
+
+==================================================
+7. FDA / CLINICAL TRIAL CALENDAR
+==================================================
+
+Build a dedicated upcoming catalyst calendar.
+
+Track:
+
+Ticker
+Company
+Drug
+Indication
+Phase
+Catalyst
+Expected date
+Exact date if available
+Source
+Probability/confidence
+Catalyst score
+
+Examples:
+
+PDUFA date
+Phase 2 readout
+Phase 3 readout
+FDA advisory committee
+Clinical trial completion
+Conference presentation
+
+Allow sorting by:
+
+TODAY
+NEXT 7 DAYS
+NEXT 30 DAYS
+NEXT 90 DAYS
+
+==================================================
+8. PREMARKET SCANNER
+==================================================
+
+Create a real-time premarket scanner.
+
+Look for:
+
+Price:
+$0.50–$20
+
+Market cap:
+$20M–$1B
+
+Relative volume:
+>2x
+
+Premarket gain:
+>5%
+
+Premarket gain:
+>10%
+
+Low float:
+Preferably <50M shares
+
+Then determine:
+
+Is there legitimate news?
+
+What caused the move?
+
+Is the catalyst confirmed?
+
+Is this potentially a pump?
+
+Is there dilution?
+
+Is there an offering?
+
+Is there an SEC filing?
+
+Is the move supported by volume?
+
+==================================================
+9. BREAKING NEWS DETECTOR
+==================================================
+
+Create a BREAKING NEWS alert system.
+
+When important news is detected, immediately display:
+
+🚨 BREAKING CATALYST
+
+Ticker:
+Company:
+Current Price:
+Market Cap:
+Float:
+Volume:
+Relative Volume:
+
+Catalyst:
+[description]
+
+Catalyst Score:
+XX/100
+
+Explosiveness:
+XX/100
+
+Bullish/Bearish:
+VERY BULLISH / BULLISH / NEUTRAL / BEARISH / VERY BEARISH
+
+Why it matters:
+[AI-generated explanation]
+
+Potential risks:
+[dilution, financing, clinical uncertainty, etc.]
+
+Source:
+[original source]
+
+Timestamp:
+[exact timestamp]
+
+==================================================
+10. AI NEWS ANALYSIS
+==================================================
+
+Use an LLM to analyze every significant catalyst.
+
+The AI must answer:
+
+1. What happened?
+2. Why does it matter?
+3. Is this genuinely new information?
+4. Is the news bullish or bearish?
+5. How significant is it?
+6. Could it materially change the company's valuation?
+7. Is the catalyst already priced into the stock?
+8. Is there dilution risk?
+9. Is this likely to create momentum?
+10. What could invalidate the bullish thesis?
+
+Do NOT allow the AI to blindly label every press release as bullish.
+
+==================================================
+11. PRICE ACTION CONFIRMATION
+==================================================
+
+Combine fundamental catalyst data with real-time market data.
+
+Track:
+
+Price
+Volume
+Relative volume
+VWAP
+Premarket high
+Premarket low
+Previous close
+52-week high
+52-week low
+Gap %
+ATR
+RSI
+Moving averages
+Support
+Resistance
+
+Identify:
+
+BREAKOUT
+BREAKDOWN
+VWAP RECLAIM
+VWAP LOSS
+PREMARKET HIGH BREAK
+52-WEEK HIGH BREAK
+CONSOLIDATION
+HIGH-VOLUME REVERSAL
+
+==================================================
+12. TRADE SETUP ENGINE
+==================================================
+
+DO NOT EXECUTE TRADES.
+
+Instead generate potential setups for human review.
+
+Example:
+
+TICKER: ABCD
+
+Catalyst: Positive Phase 2 data
+Catalyst Score: 91
+Explosiveness Score: 88
+
+Current price: $4.72
+
+Key levels:
+
+Premarket High: $5.10
+Resistance: $5.25
+Resistance: $5.80
+Support: $4.40
+VWAP: $4.65
+
+Potential setup:
+
+Break above $5.10 with volume.
+
+Potential targets:
+
+$5.25
+$5.80
+$6.50
+
+Invalidation:
+
+Below $4.40
+
+IMPORTANT:
+These are analytical levels, NOT guaranteed targets.
+
+==================================================
+13. DILUTION DETECTOR
+==================================================
+
+This is extremely important for microcaps.
+
+Automatically detect:
+
+ATM offerings
+Registered direct offerings
+PIPE financing
+Warrant exercises
+Convertible notes
+Shelf registrations
+Share increases
+Reverse splits
+Preferred stock issuance
+Recent offerings
+
+Display:
+
+⚠️ DILUTION RISK: HIGH
+
+Explain why.
+
+A strong catalyst combined with imminent dilution should significantly reduce the overall setup score.
+
+==================================================
+14. SHORT SQUEEZE DETECTOR
+==================================================
+
+Track:
+
+Short interest
+Float
+Days to cover
+Borrow availability if reliable data exists
+Utilization if available
+Relative volume
+Volume acceleration
+
+Create:
+
+SHORT SQUEEZE SCORE: 0–100
+
+But do NOT claim a squeeze is guaranteed.
+
+==================================================
+15. WATCHLIST
+==================================================
+
+Allow users to create watchlists.
+
+Example:
+
+🔥 HIGH PRIORITY
+🧬 BIOTECH
+💊 FDA
+🚨 BREAKING
+💰 M&A
+📊 LOW FLOAT
+⚠️ HIGH RISK
+
+Users can add/remove tickers.
+
+==================================================
+16. DASHBOARD
+==================================================
+
+Create a professional institutional-quality dashboard.
+
+Use a LIGHT theme.
+
+Design should look like:
+
+Bloomberg Terminal
++
+modern hedge fund research platform
++
+professional trading dashboard.
+
+Avoid clutter.
+
+Main dashboard should contain:
+
+TOP CATALYSTS
+
+BREAKING NEWS
+
+PREMARKET MOVERS
+
+UPCOMING FDA EVENTS
+
+BIOTECH CATALYST CALENDAR
+
+HIGH EXPLOSIVENESS STOCKS
+
+DILUTION ALERTS
+
+SHORT SQUEEZE WATCH
+
+MARKET STATUS
+
+==================================================
+17. ALERT SYSTEM
+==================================================
+
+Support:
+
+Browser alerts
+Desktop notifications where supported
+Email alerts
+Webhook alerts
+
+Allow configurable thresholds.
+
+Example:
+
+Notify me when:
+
+Catalyst Score >80
+
+AND
+
+Market Cap <$500M
+
+AND
+
+Relative Volume >2
+
+OR
+
+Breaking FDA news detected.
+
+==================================================
+18. DATABASE
+==================================================
+
+Use PostgreSQL if available.
+
+Create tables for:
+
+companies
+tickers
+news
+catalysts
+clinical_trials
+fda_events
+sec_filings
+price_data
+volume_data
+short_interest
+offerings
+alerts
+watchlists
+scores
+
+Store historical catalyst data so the system can eventually learn which catalysts historically produced the biggest moves.
+
+==================================================
+19. BACKTESTING / HISTORICAL ANALYSIS
+==================================================
+
+Create a historical catalyst analysis system.
+
+For every catalyst, record:
+
+Price immediately before catalyst
+Price 5 minutes after
+Price 15 minutes after
+Price 30 minutes after
+Price 1 hour after
+Price at close
+Next-day high
+Next-day low
+Maximum percentage gain
+Maximum percentage loss
+
+This will allow us to determine:
+
+Which catalysts actually produce large moves?
+
+Which catalyst types are overrated?
+
+Which market-cap ranges move the most?
+
+Which float ranges produce the largest squeezes?
+
+==================================================
+20. RANKING SYSTEM
+==================================================
+
+Create a master ranking:
+
+OVERALL OPPORTUNITY SCORE
+
+Formula should combine:
+
+Catalyst Score
+Explosiveness Score
+Technical Score
+Volume Score
+Timing Score
+Liquidity Score
+Risk Score
+
+Display:
+
+🔥 95–100 = EXTREME
+🔥 85–94 = VERY HIGH
+🟢 75–84 = HIGH
+🟡 60–74 = MODERATE
+🔴 <60 = LOW
+
+==================================================
+21. DATA QUALITY
+==================================================
+
+Every catalyst MUST display its source.
+
+Never fabricate:
+
+FDA dates
+Clinical results
+Market caps
+Float
+Short interest
+Partnerships
+Acquisitions
+Price targets
+Company announcements
+
+If information cannot be verified:
+
+Display:
+
+⚠️ UNVERIFIED
+
+If two sources disagree:
+
+Display the discrepancy.
+
+==================================================
+22. ERROR HANDLING
+==================================================
+
+The application must gracefully handle:
+
+API failures
+Rate limits
+Missing data
+Invalid tickers
+Duplicate news
+Unavailable short interest
+Market closed
+Premarket data unavailable
+After-hours data unavailable
+
+Do not crash the dashboard because one data provider fails.
+
+Build provider abstraction so APIs can be replaced easily.
+
+==================================================
+23. SECURITY
+==================================================
+
+Store API keys in environment variables.
+
+NEVER hard-code API keys.
+
+Create:
+
+.env.example
+
+with variables such as:
+
+DATABASE_URL=
+NEWS_API_KEY=
+FINANCIAL_DATA_API_KEY=
+SEC_API_KEY=
+OPENAI_API_KEY=
+
+Use secure server-side API calls.
+
+==================================================
+24. TECHNOLOGY
+==================================================
+
+Use a modern full-stack architecture.
+
+Preferred:
+
+Frontend:
+React / Next.js
+TypeScript
+Tailwind CSS
+
+Backend:
+Python FastAPI OR Node.js
+
+Database:
+PostgreSQL
+
+Real-time:
+WebSockets
+
+Charts:
+TradingView-style charts or a high-quality charting library
+
+Background jobs:
+Celery / Redis OR an appropriate job queue
+
+AI:
+Use an LLM abstraction layer so the model provider can be changed later.
+
+==================================================
+25. VERY IMPORTANT — MVP FIRST
+==================================================
+
+Do NOT attempt to build every feature at once.
+
+First build a functioning MVP containing:
+
+1. Stock universe
+2. News ingestion
+3. SEC/news catalyst detection
+4. FDA catalyst calendar
+5. Market data
+6. Catalyst scoring
+7. Explosiveness scoring
+8. Premarket scanner
+9. Breaking-news alerts
+10. Dashboard
+11. Watchlist
+12. Database
+
+Make sure this works end-to-end before adding advanced features.
+
+==================================================
+26. FINAL PRODUCT GOAL
+==================================================
+
+The final product should feel like a professional:
+
+MICROCAP CATALYST INTELLIGENCE TERMINAL
+
+Its primary purpose is:
+
+FIND THE NEWS.
+
+UNDERSTAND THE NEWS.
+
+IDENTIFY THE STOCK.
+
+MEASURE THE CATALYST.
+
+MEASURE THE EXPLOSIVENESS.
+
+CHECK FOR DILUTION.
+
+CHECK PRICE ACTION.
+
+RANK THE OPPORTUNITY.
+
+ALERT THE USER.
+
+Do NOT automatically trade.
+
+Build the application incrementally, test every component, and explain which APIs/data sources are required before implementing components that depend on unavailable credentials.

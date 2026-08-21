@@ -87,6 +87,33 @@ db.exec(`
     closed_at       TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS bot_trade_log (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    symbol              TEXT    NOT NULL,
+    entry_price         REAL    NOT NULL,
+    exit_price          REAL,
+    shares              REAL    NOT NULL,
+    pnl                 REAL,
+    mode                TEXT    NOT NULL DEFAULT 'paper',
+    status              TEXT    NOT NULL DEFAULT 'open',
+    stop_price          REAL,
+    take_profit_rsi     REAL,
+    entry_order_id      TEXT,
+    pending_exit_order_id TEXT,
+    pending_exit_reason TEXT,
+    exit_reason         TEXT,
+    timestamp           TEXT    NOT NULL DEFAULT (datetime('now')),
+    closed_at           TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_bot_trade_log_user_timestamp
+    ON bot_trade_log (user_id, timestamp DESC);
+  CREATE INDEX IF NOT EXISTS idx_bot_trade_log_open
+    ON bot_trade_log (user_id, symbol, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_trade_log_entry_order
+    ON bot_trade_log (user_id, entry_order_id)
+    WHERE entry_order_id IS NOT NULL;
 `);
 
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
@@ -103,6 +130,12 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN settled_cash REAL`,
   `ALTER TABLE auto_trade_log ADD COLUMN atr REAL`,
   `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
+  `ALTER TABLE bot_trade_log ADD COLUMN stop_price REAL`,
+  `ALTER TABLE bot_trade_log ADD COLUMN take_profit_rsi REAL`,
+  `ALTER TABLE bot_trade_log ADD COLUMN entry_order_id TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_order_id TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_reason TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN exit_reason TEXT`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 
 // Paper/shadow evidence is global to the frozen study, never tied to a broker
@@ -1980,7 +2013,9 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
       await new Promise(res => setTimeout(res, delay));
       return alpacaFetch(userId, path, opts, _attempt + 1);
     }
-    throw new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
+    const error = new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
+    error.alpacaTransient = true;
+    throw error;
   }
   clearTimeout(timeoutId);
   const isGet = !opts.method || opts.method === 'GET';
@@ -2000,9 +2035,17 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403)
-    throw new Error('Alpaca authentication failed — check your API credentials.');
-  if (!r.ok) throw new Error(data.message || `Alpaca error (${r.status})`);
+  if (r.status === 401 || r.status === 403) {
+    const error = new Error('Alpaca authentication failed — check your API credentials.');
+    error.alpacaStatus = r.status;
+    throw error;
+  }
+  if (!r.ok) {
+    const error = new Error(data.message || `Alpaca error (${r.status})`);
+    error.alpacaStatus = r.status;
+    error.alpacaTransient = r.status === 429 || r.status >= 500;
+    throw error;
+  }
   return data;
 }
 
@@ -2124,7 +2167,7 @@ app.get('/api/spy-levels', async (req, res) => {
 
 // Place order (market with optional TP/SL bracket)
 app.post('/api/alpaca/order', requireAuth, async (req, res) => {
-  const { symbol, side, amount, tpPct, slPct, leverage } = req.body || {};
+  const { symbol, side, amount, tpPct, slPct, leverage, clientOrderId } = req.body || {};
 
   // ── Input validation ───────────────────────────────────────────────────────
   if (!symbol || !side) return res.status(400).json({ error: 'symbol and side required.' });
@@ -2138,6 +2181,9 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   const tpNum  = parseFloat(tpPct)  || 0;
   const slNum  = parseFloat(slPct)  || 0;
   if (tpNum < 0 || slNum < 0) return res.status(400).json({ error: 'tpPct and slPct must be non-negative.' });
+  if (clientOrderId != null && !/^[A-Za-z0-9_-]{1,48}$/.test(String(clientOrderId))) {
+    return res.status(400).json({ error: 'Invalid client order ID.' });
+  }
 
   // ── NO-SHORT POLICY ─────────────────────────────────────────────────────────
   // This platform never opens short positions. A SELL order is only allowed to
@@ -2259,6 +2305,7 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
         time_in_force:  'day',
       };
     }
+    if (clientOrderId) orderBody.client_order_id = String(clientOrderId);
 
     const data = await alpacaFetch(req.session.userId, '/v2/orders', {
       method: 'POST',
@@ -2266,12 +2313,47 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
     });
     res.json({ ok: true, order: data, shares: orderBody.qty || null, price, leverage: lev });
   } catch (e) {
-    const status = e.message.includes('authentication') ? 401 : 400;
+    // A timeout or broker-side failure after a POST is ambiguous: Alpaca may
+    // have accepted the client_order_id. Keep that outcome distinguishable so
+    // the browser preserves the journal row and reconciles the exact order.
+    const status = e.alpacaTransient ? 503
+      : e.alpacaStatus || (e.message.includes('authentication') ? 401 : 400);
     res.status(status).json({ error: e.message });
   }
 });
 
 // Cancel order
+app.get('/api/alpaca/order/by-client/:clientOrderId', requireAuth, async (req, res) => {
+  if (!/^[A-Za-z0-9_-]{1,48}$/.test(req.params.clientOrderId)) {
+    return res.status(400).json({ error: 'Invalid client order ID.' });
+  }
+  try {
+    const clientOrderId = encodeURIComponent(req.params.clientOrderId);
+    res.json(await alpacaFetch(
+      req.session.userId,
+      `/v2/orders:by_client_order_id?client_order_id=${clientOrderId}&nested=true`,
+      { method: 'GET' }
+    ));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/alpaca/order/:id', requireAuth, async (req, res) => {
+  if (!/^[a-f0-9\-]{10,40}$/i.test(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid order ID.' });
+  }
+  try {
+    res.json(await alpacaFetch(
+      req.session.userId,
+      `/v2/orders/${req.params.id}?nested=true`,
+      { method: 'GET' }
+    ));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
   if (!/^[a-f0-9\-]{10,40}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid order ID.' });
   try { await alpacaFetch(req.session.userId, `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
@@ -2284,6 +2366,284 @@ app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
   if (!/^[A-Z0-9.\-]{1,12}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol.' });
   try { res.json(await alpacaFetch(req.session.userId, `/v2/positions/${sym}`, { method: 'DELETE' })); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Persistent Momentum bot trade journal ──────────────────────────────────────
+// A journal row is opened when an AUTO-BUY is accepted and finalized when the bot
+// observes the position close. This makes performance survive page reloads while
+// keeping manual orders out of the bot-specific results.
+function botTradePerformance(userId, todayOnly = false) {
+  const dateFilter = todayOnly
+    ? `AND date(closed_at, 'localtime') = date('now', 'localtime')`
+    : '';
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total_trades,
+      COALESCE(SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END), 0) AS wins,
+      AVG(CASE WHEN pnl > 0 THEN pnl END) AS average_gain,
+      AVG(CASE WHEN pnl < 0 THEN pnl END) AS average_loss,
+      COALESCE(SUM(pnl), 0) AS total_realized_pnl
+    FROM bot_trade_log
+    WHERE user_id = ?
+      AND status = 'closed'
+      AND exit_price IS NOT NULL
+      ${dateFilter}
+  `).get(userId);
+  const totalTrades = Number(row?.total_trades || 0);
+  const wins = Number(row?.wins || 0);
+  return {
+    totalTrades,
+    winRate: totalTrades ? +(wins / totalTrades * 100).toFixed(2) : 0,
+    averageGain: row?.average_gain == null ? null : Number(row.average_gain),
+    averageLoss: row?.average_loss == null ? null : Number(row.average_loss),
+    totalRealizedPnl: Number(row?.total_realized_pnl || 0),
+  };
+}
+
+app.get('/api/bot-trades', requireAuth, (req, res) => {
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, 250))
+    : 100;
+  const userId = req.session.userId;
+  const openTrades = db.prepare(`
+    SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
+           stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
+           pending_exit_reason, exit_reason, timestamp, closed_at
+    FROM bot_trade_log
+    WHERE user_id = ? AND status = 'open'
+    ORDER BY timestamp DESC, id DESC
+  `).all(userId);
+  const history = db.prepare(`
+    SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
+           stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
+           pending_exit_reason, exit_reason, timestamp, closed_at
+    FROM bot_trade_log
+    WHERE user_id = ? AND status <> 'open'
+    ORDER BY COALESCE(closed_at, timestamp) DESC, id DESC
+    LIMIT ?
+  `).all(userId, limit);
+  const trades = [...openTrades, ...history].sort((a, b) =>
+    String(b.closed_at || b.timestamp).localeCompare(String(a.closed_at || a.timestamp)) || b.id - a.id
+  );
+
+  res.json({
+    trades,
+    performance: {
+      today: botTradePerformance(userId, true),
+      allTime: botTradePerformance(userId),
+    },
+  });
+});
+
+app.post('/api/bot-trades', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const userId = req.session.userId;
+  const action = String(body.action || body.event || '').trim().toLowerCase();
+  const isEntry = ['buy', 'entry', 'auto-buy', 'auto_buy'].includes(action);
+  const isExit = ['exit', 'close', 'sell', 'auto-exit', 'auto_exit'].includes(action);
+  const isEntrySync = ['sync', 'sync-entry', 'sync_entry'].includes(action);
+  const isExitPending = ['submit-exit', 'submit_exit', 'pending-exit', 'pending_exit'].includes(action);
+  const isClearExitPending = ['clear-exit', 'clear_exit', 'clear-pending-exit', 'clear_pending_exit'].includes(action);
+  const isVoid = ['void', 'cancel', 'cancel-entry'].includes(action);
+  const symbol = String(body.symbol || '').trim().toUpperCase();
+
+  if (!isEntry && !isExit && !isEntrySync && !isExitPending && !isClearExitPending && !isVoid) {
+    return res.status(400).json({ error: 'action must be a buy/entry, entry sync, exit event, or void event.' });
+  }
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol.' });
+  }
+
+  if (isVoid) {
+    const requestedTradeId = Number.parseInt(body.tradeId, 10);
+    if (!Number.isInteger(requestedTradeId) || requestedTradeId <= 0) {
+      return res.status(400).json({ error: 'tradeId is required to void an open trade.' });
+    }
+    const openTrade = db.prepare(`
+      SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+    `).get(requestedTradeId, userId, symbol);
+    if (!openTrade) {
+      return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) : 'Entry order was not accepted';
+    db.prepare(`UPDATE bot_trade_log SET status='void', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
+      .run(reason, openTrade.id);
+    const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(openTrade.id);
+    return res.json({
+      trade,
+      performance: {
+        today: botTradePerformance(userId, true),
+        allTime: botTradePerformance(userId),
+      },
+    });
+  }
+
+  if (isExitPending || isClearExitPending) {
+    const requestedTradeId = Number.parseInt(body.tradeId, 10);
+    if (!Number.isInteger(requestedTradeId) || requestedTradeId <= 0) {
+      return res.status(400).json({ error: 'tradeId is required to update an exit order.' });
+    }
+    const openTrade = db.prepare(`
+      SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+    `).get(requestedTradeId, userId, symbol);
+    if (!openTrade) {
+      return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
+    }
+    if (isExitPending) {
+      const exitOrderId = typeof body.exitOrderId === 'string' ? body.exitOrderId.trim() : '';
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(exitOrderId)) {
+        return res.status(400).json({ error: 'exitOrderId is required for a pending exit.' });
+      }
+      const reason = typeof body.exitReason === 'string'
+        ? body.exitReason.trim().slice(0, 200)
+        : 'Broker exit submitted';
+      db.prepare(`
+        UPDATE bot_trade_log SET pending_exit_order_id=?, pending_exit_reason=? WHERE id=?
+      `).run(exitOrderId, reason, openTrade.id);
+    } else {
+      db.prepare(`
+        UPDATE bot_trade_log SET pending_exit_order_id=NULL, pending_exit_reason=NULL WHERE id=?
+      `).run(openTrade.id);
+    }
+    const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(openTrade.id);
+    return res.json({
+      trade,
+      performance: {
+        today: botTradePerformance(userId, true),
+        allTime: botTradePerformance(userId),
+      },
+    });
+  }
+
+  if (isEntry || isEntrySync) {
+    const entryPrice = Number(body.entryPrice);
+    const shares = Number(body.shares);
+    const requestedTradeId = Number.parseInt(body.tradeId, 10);
+    if (isEntrySync) {
+      if (!Number.isInteger(requestedTradeId) || requestedTradeId <= 0) {
+        return res.status(400).json({ error: 'tradeId is required to sync an open trade.' });
+      }
+      if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(shares) || shares <= 0) {
+        return res.status(400).json({ error: 'entryPrice and shares must be positive numbers.' });
+      }
+      const openTrade = db.prepare(`
+        SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+      `).get(requestedTradeId, userId, symbol);
+      if (!openTrade) {
+        return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
+      }
+      db.prepare('UPDATE bot_trade_log SET entry_price=?, shares=? WHERE id=?')
+        .run(entryPrice, shares, openTrade.id);
+      const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(openTrade.id);
+      return res.json({
+        trade,
+        performance: {
+          today: botTradePerformance(userId, true),
+          allTime: botTradePerformance(userId),
+        },
+      });
+    }
+
+    const stopPrice = body.stopPrice == null ? null : Number(body.stopPrice);
+    const takeProfitRsi = body.takeProfitRsi == null ? null : Number(body.takeProfitRsi);
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+      return res.status(400).json({ error: 'entryPrice must be a positive number.' });
+    }
+    if (!Number.isFinite(shares) || shares <= 0) {
+      return res.status(400).json({ error: 'shares must be a positive number.' });
+    }
+    if (stopPrice != null && (!Number.isFinite(stopPrice) || stopPrice <= 0)) {
+      return res.status(400).json({ error: 'stopPrice must be a positive number when provided.' });
+    }
+    if (takeProfitRsi != null && (!Number.isFinite(takeProfitRsi) || takeProfitRsi <= 0 || takeProfitRsi > 100)) {
+      return res.status(400).json({ error: 'takeProfitRsi must be between 0 and 100 when provided.' });
+    }
+
+    const entryOrderId = typeof body.entryOrderId === 'string'
+      ? body.entryOrderId.trim().slice(0, 100)
+      : null;
+    if (entryOrderId) {
+      const existing = db.prepare(`
+        SELECT * FROM bot_trade_log WHERE user_id=? AND entry_order_id=?
+      `).get(userId, entryOrderId);
+      if (existing) {
+        return res.json({
+          trade: existing,
+          performance: {
+            today: botTradePerformance(userId, true),
+            allTime: botTradePerformance(userId),
+          },
+        });
+      }
+    }
+    const modeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
+    const mode = modeRow?.mode === 'live' ? 'live' : 'paper';
+    const result = db.prepare(`
+      INSERT INTO bot_trade_log
+        (user_id, symbol, entry_price, shares, mode, stop_price, take_profit_rsi, entry_order_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId, symbol, entryPrice, shares, mode, stopPrice, takeProfitRsi,
+      entryOrderId
+    );
+    const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(result.lastInsertRowid);
+    return res.status(201).json({
+      trade,
+      performance: {
+        today: botTradePerformance(userId, true),
+        allTime: botTradePerformance(userId),
+      },
+    });
+  }
+
+  const exitPrice = Number(body.exitPrice);
+  if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+    return res.status(400).json({ error: 'exitPrice must be a positive number.' });
+  }
+  const brokerEntryPrice = body.entryPrice == null ? null : Number(body.entryPrice);
+  const brokerExitShares = body.shares == null ? null : Number(body.shares);
+  if (brokerEntryPrice != null && (!Number.isFinite(brokerEntryPrice) || brokerEntryPrice <= 0)) {
+    return res.status(400).json({ error: 'entryPrice must be a positive number when provided.' });
+  }
+  if (brokerExitShares != null && (!Number.isFinite(brokerExitShares) || brokerExitShares <= 0)) {
+    return res.status(400).json({ error: 'shares must be a positive number when provided.' });
+  }
+  const requestedTradeId = Number.parseInt(body.tradeId, 10);
+  const trade = Number.isInteger(requestedTradeId) && requestedTradeId > 0
+    ? db.prepare(`
+        SELECT * FROM bot_trade_log
+        WHERE id=? AND user_id=? AND symbol=? AND status='open'
+      `).get(requestedTradeId, userId, symbol)
+    : db.prepare(`
+        SELECT * FROM bot_trade_log
+        WHERE user_id=? AND symbol=? AND status='open'
+        ORDER BY id DESC LIMIT 1
+      `).get(userId, symbol);
+  if (!trade) {
+    return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
+  }
+
+  const finalEntryPrice = brokerEntryPrice ?? Number(trade.entry_price);
+  const finalShares = brokerExitShares ?? Number(trade.shares);
+  const pnl = +((exitPrice - finalEntryPrice) * finalShares).toFixed(6);
+  const exitReason = typeof body.exitReason === 'string'
+    ? body.exitReason.trim().slice(0, 200)
+    : null;
+  db.prepare(`
+    UPDATE bot_trade_log
+    SET entry_price=?, shares=?, exit_price=?, pnl=?, status='closed',
+        pending_exit_order_id=NULL, pending_exit_reason=NULL, exit_reason=?, closed_at=datetime('now')
+    WHERE id=?
+  `).run(finalEntryPrice, finalShares, exitPrice, pnl, exitReason, trade.id);
+  const closedTrade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(trade.id);
+  res.json({
+    trade: closedTrade,
+    performance: {
+      today: botTradePerformance(userId, true),
+      allTime: botTradePerformance(userId),
+    },
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

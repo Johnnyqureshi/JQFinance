@@ -18,6 +18,12 @@
     n == null || isNaN(n) ? '--'
       : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   const fmtDollar = n => (n == null ? '--' : '$' + fmt(n));
+   const escapeHtml = value => String(value ?? '')
+     .replace(/&/g, '&amp;')
+     .replace(/</g, '&lt;')
+     .replace(/>/g, '&gt;')
+     .replace(/"/g, '&quot;')
+     .replace(/'/g, '&#039;');
   const fmtVol = v => {
     if (!v && v !== 0) return '--';
     if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
@@ -936,6 +942,7 @@
     tradeAnalysis: null,   // intraday MACD + candle analysis from /api/momentum/analysis/:sym
     riskCalc:      null,
     log:           [],
+    tradeJournal:   [],
     config:        null,
     countdownTimer: null,
     countdown:     0,
@@ -960,6 +967,11 @@
       this._renderConfigPanel();
       this._resetDailyIfNeeded();
       this._loadValidationReport();
+      this._loadBotTrades().then(() => {
+        // Recovery monitor only reconciles saved bot trades; it does not open
+        // new positions until the user explicitly starts automation.
+        if (this.botPositions.size) this._startPositionMonitor();
+      });
       AlpacaClient.checkConnection().then(() => {
         this._renderStatus();
         this._renderBotStatus();
@@ -1769,10 +1781,338 @@
         `${shares} shares @ ~${fmtDollar(entryPrice)} · stop ${fmtDollar(stopPrice)}`, 'ok');
     },
 
-    /* ── Activity log ────────────────────────────────────────────────────── */
+    /* ── Persistent bot journal + activity log ───────────────────────────── */
+    _formatJournalTime(timestamp) {
+      if (!timestamp) return '—';
+      const normalized = String(timestamp).includes('T')
+        ? timestamp
+        : String(timestamp).replace(' ', 'T') + 'Z';
+      const date = new Date(normalized);
+      return Number.isNaN(date.getTime())
+        ? String(timestamp)
+        : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    },
+
+    _formatPnl(value) {
+      const amount = Number(value);
+      if (!Number.isFinite(amount)) return '—';
+      return `${amount >= 0 ? '+' : '−'}$${Math.abs(amount).toFixed(2)}`;
+    },
+
+    _journalEvents(trades) {
+      return (Array.isArray(trades) ? trades : []).filter(trade =>
+        trade.status === 'open' || trade.status === 'closed'
+      ).flatMap(trade => {
+        const entry = {
+          id: `trade-${trade.id}-entry`,
+          sym: trade.symbol,
+          action: '✓ AUTO-BUY',
+          details: `${fmt(trade.shares, 4)} sh @ ${fmtDollar(trade.entry_price)} · ${(trade.mode || 'paper').toUpperCase()}`,
+          status: 'ok',
+          time: this._formatJournalTime(trade.timestamp),
+          sortTime: new Date(String(trade.timestamp).replace(' ', 'T') + 'Z').getTime() || 0,
+        };
+        if (trade.status !== 'closed' || trade.exit_price == null) return [entry];
+        const exitTime = trade.closed_at || trade.timestamp;
+        return [
+          entry,
+          {
+            id: `trade-${trade.id}-exit`,
+            sym: trade.symbol,
+            action: '✓ AUTO-EXIT',
+            details: `${fmt(trade.shares, 4)} sh @ ${fmtDollar(trade.exit_price)} · P&L ${this._formatPnl(trade.pnl)}${trade.exit_reason ? ` · ${escapeHtml(trade.exit_reason)}` : ''}`,
+            status: Number(trade.pnl) < 0 ? 'err' : 'ok',
+            time: this._formatJournalTime(exitTime),
+            sortTime: new Date(String(exitTime).replace(' ', 'T') + 'Z').getTime() || 0,
+          },
+        ];
+      }).sort((a, b) => b.sortTime - a.sortTime).slice(0, 100);
+    },
+
+    _renderPerformance(performance) {
+      const renderPeriod = (prefix, stats = {}) => {
+        const set = (id, value, tone = '') => {
+          const el = $(id);
+          if (!el) return;
+          el.textContent = value;
+          el.className = `mt-performance-value${tone ? ` ${tone}` : ''}`;
+        };
+        const total = Number(stats.totalTrades || 0);
+        const winRate = Number(stats.winRate || 0);
+        const gain = stats.averageGain;
+        const loss = stats.averageLoss;
+        const pnl = Number(stats.totalRealizedPnl || 0);
+        set(`mtPerf${prefix}Total`, String(total));
+        set(`mtPerf${prefix}WinRate`, total ? `${winRate.toFixed(1)}%` : '—', total && winRate >= 50 ? 'mt-up' : '');
+        set(`mtPerf${prefix}Gain`, gain == null ? '—' : this._formatPnl(gain), Number(gain) > 0 ? 'mt-up' : '');
+        set(`mtPerf${prefix}Loss`, loss == null ? '—' : this._formatPnl(loss), Number(loss) < 0 ? 'mt-dn' : '');
+        set(`mtPerf${prefix}Pnl`, total ? this._formatPnl(pnl) : '—', total ? (pnl >= 0 ? 'mt-up' : 'mt-dn') : '');
+      };
+      renderPeriod('Today', performance?.today);
+      renderPeriod('All', performance?.allTime);
+    },
+
+    _hydrateOpenBotPositions(trades) {
+      (Array.isArray(trades) ? trades : []).filter(trade => trade.status === 'open').forEach(trade => {
+        const entry = Number(trade.entry_price);
+        const shares = Number(trade.shares);
+        if (!trade.symbol || !Number.isFinite(entry) || !Number.isFinite(shares)) return;
+        const stopPx = Number(trade.stop_price);
+        const entryOrderId = trade.entry_order_id || null;
+        const usesClientOrderId = String(entryOrderId || '').startsWith('mt-');
+        this.botPositions.set(trade.symbol, {
+          tradeId: trade.id,
+          entryOrderId,
+          brokerOrderId: entryOrderId && !usesClientOrderId ? entryOrderId : null,
+          // Each rehydrated entry is reconciled once before it can be treated
+          // as an exited position. This catches delayed/rejected submissions.
+          submissionPending: Boolean(entryOrderId),
+          pendingExit: trade.pending_exit_order_id ? {
+            clientOrderId: trade.pending_exit_order_id,
+            reason: trade.pending_exit_reason || 'Broker exit submitted',
+          } : null,
+          entry,
+          shares,
+          stopPx: trade.stop_price != null && Number.isFinite(stopPx) && stopPx > 0 ? stopPx : null,
+          slPct: trade.stop_price != null && Number.isFinite(stopPx) && stopPx > 0
+            ? +((entry - stopPx) / entry * 100).toFixed(2)
+            : null,
+          tpRsi: Number(trade.take_profit_rsi) || this.config?.takeProfitRsi || 75,
+          lastPrice: entry,
+          entrySynced: false,
+          ts: new Date(String(trade.timestamp).replace(' ', 'T') + 'Z').getTime() || Date.now(),
+        });
+        this._activeTrades.add(trade.symbol);
+      });
+    },
+
+    async _loadBotTrades() {
+      try {
+        const response = await fetch('/api/bot-trades?limit=100', { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        this.tradeJournal = Array.isArray(data.trades) ? data.trades : [];
+        this._hydrateOpenBotPositions(this.tradeJournal);
+        this.log = this._journalEvents(this.tradeJournal);
+        this._renderLog();
+        this._renderPerformance(data.performance);
+      } catch (error) {
+        console.warn('[Momentum] Could not load bot trade journal:', error.message);
+      }
+    },
+
+    async _persistBotTrade(payload) {
+      try {
+        const response = await fetch('/api/bot-trades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || `Journal request failed (${response.status})`);
+        }
+        const data = await response.json();
+        if (data.trade?.id) {
+          const index = this.tradeJournal.findIndex(trade => trade.id === data.trade.id);
+          if (index >= 0) this.tradeJournal.splice(index, 1, data.trade);
+          else this.tradeJournal.unshift(data.trade);
+          const info = this.botPositions.get(data.trade.symbol);
+          if (info) {
+            info.tradeId = data.trade.id;
+            info.entryOrderId = data.trade.entry_order_id || info.entryOrderId || null;
+          }
+        }
+        this._renderPerformance(data.performance);
+        return data.trade;
+      } catch (error) {
+        console.warn('[Momentum] Could not persist bot trade:', error.message);
+        return null;
+      }
+    },
+
+    async _syncOpenTradeFromPosition(sym, info, position) {
+      if (!info.tradeId) return;
+      const entryPrice = Number(position.avg_entry_price);
+      const shares = Number(position.qty);
+      if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(shares) || shares <= 0) return;
+      const changed = !info.entrySynced ||
+        Math.abs(Number(info.entry) - entryPrice) > 0.000001 ||
+        Math.abs(Number(info.shares) - shares) > 0.000001;
+      if (!changed) return;
+      const trade = await this._persistBotTrade({
+        action: 'sync-entry',
+        tradeId: info.tradeId,
+        symbol: sym,
+        entryPrice,
+        shares,
+      });
+      if (trade) {
+        info.entry = entryPrice;
+        info.shares = shares;
+        info.entrySynced = true;
+      }
+    },
+
+    async _getFilledExitOrder(sym, info, orderId = null, clientOrderId = null) {
+      const endpoint = orderId
+        ? `/api/alpaca/order/${encodeURIComponent(orderId)}`
+        : clientOrderId
+          ? `/api/alpaca/order/by-client/${encodeURIComponent(clientOrderId)}`
+        : info.brokerOrderId
+          ? `/api/alpaca/order/${encodeURIComponent(info.brokerOrderId)}`
+          : info.entryOrderId
+            ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}`
+            : null;
+      if (!endpoint) return null;
+      try {
+        const response = await fetch(endpoint, { credentials: 'include' });
+        if (!response.ok) return null;
+        const order = await response.json();
+        const orders = [order, ...(Array.isArray(order.legs) ? order.legs : [])];
+        const filledExit = orders.find(candidate =>
+          candidate?.side === 'sell' &&
+          String(candidate.status || '').toLowerCase() === 'filled' &&
+          Number(candidate.filled_avg_price) > 0 &&
+          Number(candidate.filled_qty) > 0
+        );
+        if (!filledExit) return null;
+        const filledEntry = orders.find(candidate =>
+          candidate?.side === 'buy' &&
+          String(candidate.status || '').toLowerCase() === 'filled' &&
+          Number(candidate.filled_avg_price) > 0 &&
+          Number(candidate.filled_qty) > 0
+        );
+        return {
+          exitPrice: Number(filledExit.filled_avg_price),
+          shares: Number(filledExit.filled_qty),
+          entryPrice: filledEntry ? Number(filledEntry.filled_avg_price) : null,
+          entryShares: filledEntry ? Number(filledEntry.filled_qty) : null,
+          reason: info.pendingExit?.reason ||
+            (['stop', 'stop_limit'].includes(filledExit.type) ? 'Stop-loss order filled' : 'Broker exit order filled'),
+        };
+      } catch (_) {
+        return null;
+      }
+    },
+
+    async _reconcilePendingSubmission(sym, info) {
+      if (!info.submissionPending || !info.entryOrderId) return false;
+      try {
+        const usesClientOrderId = String(info.entryOrderId).startsWith('mt-');
+        const endpoint = usesClientOrderId
+          ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}`
+          : `/api/alpaca/order/${encodeURIComponent(info.entryOrderId)}`;
+        const response = await fetch(
+          endpoint,
+          { credentials: 'include' }
+        );
+        if (!response.ok) return false;
+        const order = await response.json();
+        const status = String(order.status || '').toLowerCase();
+        if (['canceled', 'rejected', 'expired'].includes(status)) {
+          const trade = await this._persistBotTrade({
+            action: 'void',
+            tradeId: info.tradeId,
+            symbol: sym,
+            reason: `Broker entry ${status}`,
+          });
+          if (!trade) return false;
+          this.botPositions.delete(sym);
+          this._activeTrades.delete(sym);
+          this.addLog(sym, '✗ AUTO-BUY', `Broker entry ${status}`, 'err');
+          return false;
+        }
+        info.brokerOrderId = order.id || null;
+        if (status !== 'filled') return false;
+        const entryPrice = Number(order.filled_avg_price);
+        const shares = Number(order.filled_qty);
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(shares) || shares <= 0) {
+          return false;
+        }
+        const trade = await this._persistBotTrade({
+          action: 'sync-entry',
+          tradeId: info.tradeId,
+          symbol: sym,
+          entryPrice,
+          shares,
+        });
+        if (!trade) return false;
+        info.entry = entryPrice;
+        info.shares = shares;
+        info.entrySynced = true;
+        info.submissionPending = false;
+        this.addLog(sym, 'AUTO-BUY CONFIRMED', 'Broker filled the saved client order; waiting for position data', 'info');
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
+    async _finalizeBotExit(sym, info, exit) {
+      const exitPrice = Number(exit?.exitPrice);
+      if (!Number.isFinite(exitPrice) || exitPrice <= 0) return false;
+      const actualShares = Number(exit?.shares);
+      if (Number.isFinite(actualShares) && actualShares > 0) info.shares = actualShares;
+      const trade = await this._persistBotTrade({
+        action: 'exit',
+        tradeId: info.tradeId,
+        symbol: sym,
+        exitPrice,
+        entryPrice: Number.isFinite(Number(exit?.entryPrice)) ? Number(exit.entryPrice) : undefined,
+        shares: Number.isFinite(actualShares) && actualShares > 0 ? actualShares : undefined,
+        exitReason: exit.reason || 'Broker exit order filled',
+      });
+      if (!trade) return false;
+
+      const pnl = Number(trade.pnl);
+      this.addLog(sym, '✓ AUTO-EXIT',
+        `${fmt(trade.shares, 4)} sh @ ${fmtDollar(trade.exit_price)} · P&L ${this._formatPnl(pnl)} · ${trade.exit_reason || 'Broker exit order filled'}`,
+        pnl < 0 ? 'err' : 'ok');
+      this.botPositions.delete(sym);
+      this._activeTrades.delete(sym);
+      this._setExitCooldown(sym);
+      if (!this.botEnabled && !this.botPositions.size) this._stopPositionMonitor();
+      return true;
+    },
+
+    async _reconcilePendingExits() {
+      for (const [sym, info] of this.botPositions) {
+        if (!info.pendingExit?.orderId && !info.pendingExit?.clientOrderId) continue;
+        const exit = await this._getFilledExitOrder(
+          sym, info, info.pendingExit.orderId, info.pendingExit.clientOrderId
+        );
+        if (exit) {
+          await this._finalizeBotExit(sym, info, exit);
+          continue;
+        }
+        try {
+          const endpoint = info.pendingExit.orderId
+            ? `/api/alpaca/order/${encodeURIComponent(info.pendingExit.orderId)}`
+            : `/api/alpaca/order/by-client/${encodeURIComponent(info.pendingExit.clientOrderId)}`;
+          const response = await fetch(endpoint, { credentials: 'include' });
+          if (!response.ok) continue;
+          const order = await response.json();
+          const status = String(order.status || '').toLowerCase();
+          if (['canceled', 'rejected', 'expired'].includes(status)) {
+            const cleared = await this._persistBotTrade({
+              action: 'clear-exit',
+              tradeId: info.tradeId,
+              symbol: sym,
+            });
+            if (!cleared) continue;
+            this.addLog(sym, 'EXIT NOT FILLED', `Broker marked exit ${status}; position remains monitored`, 'err');
+            delete info.pendingExit;
+            info._exiting = false;
+          }
+        } catch (_) {}
+      }
+    },
+
     addLog(sym, action, details, status = 'ok') {
       this.log.unshift({ sym, action, details, status, time: new Date().toLocaleTimeString() });
-      if (this.log.length > 30) this.log.pop();
+      if (this.log.length > 100) this.log.pop();
       this._renderLog();
     },
 
@@ -1803,6 +2143,12 @@
     },
     _getPosMode()  { return $('tsBtnPct')?.classList.contains('active') ? 'pct' : 'fixed'; },
     _getPosValue() { return parseFloat($('tsPositionValue')?.value) || 15; },
+    _newJournalOrderId() {
+      const suffix = globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      return `mt-${suffix}`.slice(0, 48);
+    },
 
     // ── Market-hours helper (mirrors server isMarketOpen) ─────────────────
     _isMarketOpen() {
@@ -1963,22 +2309,66 @@
       this.addLog(row.sym, '→ AUTO-BUY',
         `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · ${AlpacaClient.mode.toUpperCase()}`, 'info');
 
+      let journalTrade = null;
+      let journalOrderId = null;
       try {
+        // Write the durable journal entry before submitting a broker order. If
+        // SQLite is unavailable, fail closed rather than place an untracked buy.
+        journalOrderId = this._newJournalOrderId();
+        const estimatedShares = Math.floor(notional / entry);
+        const estimatedStopPx = +(entry * (1 - slPct / 100)).toFixed(2);
+        journalTrade = await this._persistBotTrade({
+          action: 'buy',
+          symbol: row.sym,
+          entryPrice: entry,
+          shares: estimatedShares,
+          stopPrice: estimatedStopPx,
+          takeProfitRsi: tpRsi,
+          entryOrderId: journalOrderId,
+          mode: AlpacaClient.mode,
+        });
+        if (!journalTrade) {
+          this.addLog(row.sym, 'AUTO-BUY BLOCKED', 'Trade journal is unavailable; broker order was not submitted', 'err');
+          this._activeTrades.delete(row.sym);
+          return;
+        }
+        this.botPositions.set(row.sym, {
+          tradeId: journalTrade.id,
+          entry: entry,
+          slPct,
+          tpRsi,
+          shares: estimatedShares,
+          stopPx: estimatedStopPx,
+          lastPrice: entry,
+          entryOrderId: journalOrderId,
+          entrySynced: false,
+          ts: Date.now(),
+        });
+
         // OTO order: market buy + stop-loss leg. Take profit = RSI exit (poller).
         const resp = await fetch('/api/alpaca/order', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ symbol: row.sym, side: 'buy', amount: baseAmount, slPct, leverage }),
+          body: JSON.stringify({
+            symbol: row.sym, side: 'buy', amount: baseAmount, slPct, leverage,
+            clientOrderId: journalOrderId,
+          }),
         });
         if (!resp.ok) {
           const e = await resp.json().catch(() => ({}));
-          throw new Error(e.error || 'Order failed');
+          const error = new Error(e.error || 'Order failed');
+          // A 4xx response is a definitive rejection from this application.
+          // Network failures and 5xx responses are ambiguous: Alpaca may have
+          // accepted the client_order_id even though this browser missed it.
+          error.definitive = resp.status >= 400 && resp.status < 500;
+          throw error;
         }
-        const result   = await resp.json();
-        const shares   = result.shares ? parseInt(result.shares) : Math.floor(notional / entry);
-        const stopPx   = +(entry * (1 - slPct / 100)).toFixed(2);
-        const riskAmt  = Math.abs(entry - stopPx) * shares;
+        const result     = await resp.json();
+        const entryPrice = Number(result.price) || entry;
+        const shares     = result.shares ? parseFloat(result.shares) : Math.floor(notional / entryPrice);
+        const stopPx     = +(entryPrice * (1 - slPct / 100)).toFixed(2);
+        const riskAmt    = Math.abs(entryPrice - stopPx) * shares;
 
         // Update daily counters
         this.dailyTrades++;
@@ -1986,12 +2376,39 @@
         this._renderDailyLimits();
 
         this.addLog(row.sym, '✓ AUTO-BUY',
-          `${shares} sh @ $${entry.toFixed(2)} · stop $${stopPx} · exit RSI ≥${tpRsi}`, 'ok');
-        this.botPositions.set(row.sym, { entry, slPct, tpRsi, shares, ts: Date.now() });
+          `${shares} sh @ $${entryPrice.toFixed(2)} · stop $${stopPx} · exit RSI ≥${tpRsi}`, 'ok');
+        const info = this.botPositions.get(row.sym);
+        if (info) {
+          info.entry = entryPrice;
+          info.shares = shares;
+          info.stopPx = stopPx;
+          info.brokerOrderId = result.order?.id || null;
+          // Alpaca can acknowledge a market entry before it fills. Reconcile
+          // this parent order until it is filled or terminal before treating a
+          // missing position as an exit.
+          info.submissionPending = true;
+        }
         // Note: _activeTrades keeps row.sym locked until position closes (avoids re-entry while in trade)
       } catch (err) {
-        this.addLog(row.sym, '✗ AUTO-BUY', err.message, 'err');
-        this._activeTrades.delete(row.sym); // unlock on failure so next scan can retry
+        const info = this.botPositions.get(row.sym);
+        if (journalTrade?.id && err.definitive) {
+          await this._persistBotTrade({
+            action: 'void',
+            tradeId: journalTrade.id,
+            symbol: row.sym,
+            reason: `Broker entry rejected: ${err.message}`,
+          });
+          if (info) this.botPositions.delete(row.sym);
+          this.addLog(row.sym, '✗ AUTO-BUY', err.message, 'err');
+          this._activeTrades.delete(row.sym); // unlock after a definitive rejection
+        } else if (journalTrade?.id && info) {
+          info.submissionPending = true;
+          this.addLog(row.sym, 'AUTO-BUY PENDING',
+            'Broker response was interrupted; reconciling the saved client order before any retry', 'info');
+        } else {
+          this.addLog(row.sym, '✗ AUTO-BUY', err.message, 'err');
+          this._activeTrades.delete(row.sym);
+        }
       }
     },
 
@@ -2017,14 +2434,38 @@
         const positions = await r.json();
         this._renderPositionsPanel(Array.isArray(positions) ? positions : []);
 
+        // Keep the latest broker price while a bot position is open so a stop-loss
+        // closure detected on the next poll has a defensible exit value.
+        const positionsBySymbol = new Map((positions || []).map(position => [position.symbol, position]));
+        for (const [sym, info] of this.botPositions) {
+          if (info.submissionPending) {
+            await this._reconcilePendingSubmission(sym, info);
+            continue;
+          }
+          const position = positionsBySymbol.get(sym);
+          if (!position) continue;
+          const currentPrice = Number(position.current_price);
+          if (Number.isFinite(currentPrice) && currentPrice > 0) info.lastPrice = currentPrice;
+          const pnl = Number(position.unrealized_pl);
+          if (Number.isFinite(pnl)) info.lastPnl = pnl;
+          await this._syncOpenTradeFromPosition(sym, info, position);
+        }
+
+        // A submitted RSI exit is not realized until Alpaca reports a fill.
+        await this._reconcilePendingExits();
+
         // Detect stop-loss exits: bot-tracked symbol disappeared from open positions
         const heldSet = new Set((positions || []).map(p => p.symbol));
-        for (const [sym] of this.botPositions) {
+        for (const [sym, info] of this.botPositions) {
+          if (info.submissionPending) continue;
           if (!heldSet.has(sym)) {
-            this.addLog(sym, '✓ AUTO-EXIT', 'Stop-loss order closed position', 'ok');
-            this.botPositions.delete(sym);
-            this._activeTrades.delete(sym);
-            this._setExitCooldown(sym);
+            const exit = await this._getFilledExitOrder(sym, info);
+            if (exit) {
+              await this._finalizeBotExit(sym, info, exit);
+            } else if (!info._missingExitLogged) {
+              info._missingExitLogged = true;
+              this.addLog(sym, 'EXIT PENDING', 'Position closed; waiting for Alpaca fill confirmation before recording P&L', 'info');
+            }
           }
         }
 
@@ -2043,7 +2484,7 @@
     // Sell any bot position whose intraday RSI has reached its take-profit level
     async _checkRsiExits(positions) {
       for (const [sym, info] of this.botPositions) {
-        if (info._exiting) continue;
+        if (info._exiting || info.pendingExit) continue;
         const pos = positions.find(p => p.symbol === sym);
         if (!pos) continue;
         const analysis = await MomentumAnalysis.fetch(sym);
@@ -2054,20 +2495,56 @@
           const qty      = parseFloat(pos.qty || 0);
           const price    = parseFloat(pos.current_price || info.entry);
           const notional = qty * price * 1.05; // buffer — server caps sells at held qty
+          const reason = `RSI take-profit (${rsi} ≥ ${info.tpRsi ?? 75})`;
+          const exitClientOrderId = this._newJournalOrderId();
+          const pending = await this._persistBotTrade({
+            action: 'submit-exit',
+            tradeId: info.tradeId,
+            symbol: sym,
+            exitOrderId: exitClientOrderId,
+            exitReason: reason,
+          });
+          if (!pending) throw new Error('Trade journal is unavailable; exit order was not submitted');
+          info.pendingExit = { clientOrderId: exitClientOrderId, reason };
           const r = await fetch('/api/alpaca/order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ symbol: sym, side: 'sell', amount: notional }),
+            body: JSON.stringify({
+              symbol: sym, side: 'sell', amount: notional, clientOrderId: exitClientOrderId,
+            }),
           });
-          if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Sell failed'); }
-          this.addLog(sym, '✓ TAKE PROFIT', `RSI ${rsi} ≥ ${info.tpRsi ?? 75} — sold ${qty} sh @ ~$${price.toFixed(2)}`, 'ok');
-          this.botPositions.delete(sym);
-          this._activeTrades.delete(sym);
-          this._setExitCooldown(sym);
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            const error = new Error(e.error || 'Sell failed');
+            error.definitive = r.status >= 400 && r.status < 500;
+            throw error;
+          }
+          const result = await r.json();
+          const orderId = result.order?.id;
+          if (!orderId) throw new Error('Broker did not return an exit order ID');
+          info.pendingExit = {
+            orderId,
+            clientOrderId: exitClientOrderId,
+            reason,
+          };
+          this.addLog(sym, 'AUTO-EXIT SUBMITTED',
+            `RSI ${rsi} ≥ ${info.tpRsi ?? 75} — waiting for broker fill confirmation`, 'info');
         } catch (err) {
-          info._exiting = false; // retry next poll
-          this.addLog(sym, '✗ TAKE PROFIT', err.message, 'err');
+          if (err.definitive && info.pendingExit?.clientOrderId) {
+            const cleared = await this._persistBotTrade({
+              action: 'clear-exit',
+              tradeId: info.tradeId,
+              symbol: sym,
+            });
+            if (cleared) delete info.pendingExit;
+          }
+          info._exiting = Boolean(info.pendingExit);
+          this.addLog(sym, info.pendingExit ? 'AUTO-EXIT PENDING' : '✗ TAKE PROFIT',
+            info.pendingExit
+              ? 'Broker response was interrupted; reconciling the saved exit order'
+              : err.message,
+            info.pendingExit ? 'info' : 'err');
         }
       }
     },
@@ -2114,7 +2591,7 @@
         this.run(); // trigger an immediate scan + trade cycle
       } else {
         this.addLog('BOT', '⏹ Auto-trading OFF', 'Manual mode — open positions remain, Alpaca brackets still active', 'info');
-        this._stopPositionMonitor();
+        if (!this.botPositions.size) this._stopPositionMonitor();
       }
     },
 

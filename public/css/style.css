@@ -9558,6 +9558,102 @@ option { background: var(--card); }
 .mt-trade-sell:hover  { background: rgba(232,69,69,.22); }
 .mt-trade-sell:disabled { opacity: .5; cursor: not-allowed; }
 
+/* ── Persistent bot performance ─────────────────────────────────────────── */
+.mt-performance-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.mt-performance-header {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.mt-performance-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--t1);
+}
+.mt-performance-title svg { color: var(--teal); }
+.mt-performance-sub {
+  margin-left: auto;
+  color: var(--t3);
+  font-size: .7rem;
+}
+.mt-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.mt-performance-period + .mt-performance-period {
+  border-left: 1px solid var(--border);
+}
+.mt-performance-period-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 14px;
+  color: var(--t1);
+  font-size: .78rem;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+}
+.mt-performance-period-head span {
+  color: var(--t3);
+  font-size: .66rem;
+  font-weight: 400;
+}
+.mt-performance-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.mt-performance-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px 14px;
+  border-right: 1px solid var(--border);
+}
+.mt-performance-metrics > div:last-child { border-right: none; }
+.mt-performance-metrics span {
+  color: var(--t3);
+  font-size: .65rem;
+  line-height: 1.2;
+}
+.mt-performance-value {
+  color: var(--t1);
+  font-size: .84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mt-performance-value.mt-up { color: var(--teal); }
+.mt-performance-value.mt-dn { color: var(--red); }
+.mt-performance-pnl { background: rgba(29,214,163,.035); }
+@media (max-width: 820px) {
+  .mt-performance-grid { grid-template-columns: 1fr; }
+  .mt-performance-period + .mt-performance-period {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .mt-performance-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mt-performance-metrics > div:nth-child(3) { border-right: none; }
+  .mt-performance-metrics > div:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
+}
+@media (max-width: 500px) {
+  .mt-performance-header { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .mt-performance-sub { margin-left: 0; }
+  .mt-performance-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mt-performance-metrics > div { border-bottom: 1px solid var(--border); }
+  .mt-performance-metrics > div:nth-child(even) { border-right: none; }
+  .mt-performance-metrics > div:last-child { border-bottom: none; }
+}
+
 /* ── Activity log ────────────────────────────────────────────────────────── */
 .mt-log-section {
   background: var(--card);

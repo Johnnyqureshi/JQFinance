@@ -1225,6 +1225,39 @@
       </div>
     </div>
 
+    <!-- ── Persistent bot performance ─────────────────────────────────── -->
+    <section class="mt-performance-section" aria-labelledby="mtPerformanceTitle">
+      <div class="mt-performance-header">
+        <span class="mt-performance-title" id="mtPerformanceTitle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-5 3 3 5-7"/></svg>
+          Performance
+        </span>
+        <span class="mt-performance-sub">Realized automated trades · persisted journal</span>
+      </div>
+      <div class="mt-performance-grid" aria-live="polite">
+        <div class="mt-performance-period">
+          <div class="mt-performance-period-head">Today <span>closed trades</span></div>
+          <div class="mt-performance-metrics">
+            <div><span>Total trades</span><strong class="mt-performance-value" id="mtPerfTodayTotal">—</strong></div>
+            <div><span>Win rate</span><strong class="mt-performance-value" id="mtPerfTodayWinRate">—</strong></div>
+            <div><span>Average gain</span><strong class="mt-performance-value" id="mtPerfTodayGain">—</strong></div>
+            <div><span>Average loss</span><strong class="mt-performance-value" id="mtPerfTodayLoss">—</strong></div>
+            <div class="mt-performance-pnl"><span>Realized P&amp;L</span><strong class="mt-performance-value" id="mtPerfTodayPnl">—</strong></div>
+          </div>
+        </div>
+        <div class="mt-performance-period">
+          <div class="mt-performance-period-head">All time <span>closed trades</span></div>
+          <div class="mt-performance-metrics">
+            <div><span>Total trades</span><strong class="mt-performance-value" id="mtPerfAllTotal">—</strong></div>
+            <div><span>Win rate</span><strong class="mt-performance-value" id="mtPerfAllWinRate">—</strong></div>
+            <div><span>Average gain</span><strong class="mt-performance-value" id="mtPerfAllGain">—</strong></div>
+            <div><span>Average loss</span><strong class="mt-performance-value" id="mtPerfAllLoss">—</strong></div>
+            <div class="mt-performance-pnl"><span>Realized P&amp;L</span><strong class="mt-performance-value" id="mtPerfAllPnl">—</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Activity log (main.py run loop output) ──────────────────────── -->
     <div class="mt-log-section">
       <div class="mt-log-header">

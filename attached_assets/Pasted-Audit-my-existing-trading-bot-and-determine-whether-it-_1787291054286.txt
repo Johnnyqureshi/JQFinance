@@ -1,0 +1,360 @@
+Audit my existing trading bot and determine whether it already has the following PREMARKET STOCK SCANNING capabilities.
+
+IMPORTANT:
+
+* Do NOT rebuild features that already work.
+* First inspect the existing codebase, database, APIs, UI, scheduled jobs, and configuration.
+* Identify what already exists, what is partially implemented, and what is missing.
+* Then implement only the missing functionality.
+* Keep the existing architecture and coding style where practical.
+* Do not break existing trading, portfolio, alert, or prediction functionality.
+* Use paper/simulation data only for testing unless live trading is explicitly enabled elsewhere.
+
+PREMARKET SCANNER FEATURES TO CHECK AND IMPLEMENT:
+
+1. PREMARKET GAINERS
+
+* Find stocks with significant premarket percentage gains.
+* Track current premarket price, previous close, and percentage change.
+* Allow configurable minimum gain, such as +3%, +5%, +10%.
+
+2. PREMARKET VOLUME
+
+* Track premarket volume.
+* Calculate relative volume when historical data is available.
+* Identify unusual premarket volume.
+* Rank stocks by volume and relative volume.
+
+3. NEWS/CATALYST DETECTION
+    Identify recent catalysts including:
+
+* Earnings
+* Earnings guidance
+* FDA/biotech announcements
+* Clinical trial results
+* SEC filings
+* Analyst upgrades/downgrades
+* Price-target changes
+* M&A
+* Partnerships
+* Contracts
+* Government/regulatory announcements
+* Product launches
+* Major company announcements
+
+Each stock should display the catalyst and source/time when available.
+
+4. UNUSUAL OPTIONS ACTIVITY
+    If the available market-data provider supports it:
+
+* Detect unusual call/put volume.
+* Detect unusual open interest.
+* Detect large options trades.
+* Calculate call/put activity where possible.
+
+If the current API does not support options data, clearly mark this feature as unavailable rather than inventing data.
+
+5. SHORT-SQUEEZE DATA
+    When available, collect:
+
+* Short interest
+* Short float %
+* Float
+* Average volume
+* Days to cover
+
+Use this as a secondary scoring factor rather than automatically labeling something a squeeze.
+
+6. TECHNICAL SETUPS
+    Calculate:
+
+* VWAP
+* Premarket high
+* Premarket low
+* Previous day’s high
+* Previous day’s low
+* Previous close
+* Support levels
+* Resistance levels
+* Breakout levels
+* RSI
+* Moving averages when enough historical data exists
+
+Detect setups such as:
+
+* Premarket breakout
+* Resistance breakout
+* VWAP reclaim
+* VWAP rejection
+* Gap-and-go
+* Gap-fill setup
+* High-of-day breakout
+
+7. SECTOR MOMENTUM
+    Determine whether the stock’s sector is also moving.
+
+Examples:
+
+* Semiconductors
+* AI
+* Biotech
+* Energy
+* Financials
+* Crypto
+* Silver/gold/mining
+* EV
+* Defense
+
+Give additional confidence when the individual stock and its sector are moving together.
+
+8. SENTIMENT
+    When reliable news/social sentiment data is available:
+
+* Calculate bullish/bearish sentiment.
+* Do not rely exclusively on social-media sentiment.
+* Show the underlying sources when possible.
+
+9. STOCK QUALITY FILTER
+    Allow configurable filters for:
+
+* Market cap
+* Share price
+* Average volume
+* Premarket volume
+* Float
+* Minimum liquidity
+
+Prevent extremely illiquid stocks from automatically receiving high scores simply because they moved a lot.
+
+10. PREMARKET SCORE
+
+Create a 0–100 score.
+
+Suggested weighting:
+
+Catalyst: 20%
+Premarket momentum: 15%
+Relative volume: 15%
+Technical setup: 15%
+Liquidity/volume quality: 10%
+Sector momentum: 10%
+Options activity: 5%
+Short-interest potential: 5%
+Sentiment: 5%
+
+If a data category is unavailable, dynamically redistribute its weight among available categories rather than fabricating information.
+
+11. THREE RANKINGS
+
+Create three separate rankings:
+
+A. MOMENTUM / DAY TRADE
+Focus on:
+
+* Strong catalyst
+* Premarket momentum
+* Relative volume
+* Technical breakout
+* Liquidity
+
+B. SWING / UNDERVALUED
+Focus on:
+
+* Valuation
+* Earnings/revenue growth
+* Analyst expectations
+* Sector strength
+* Technical setup
+
+C. BIOTECH / CATALYST
+Focus on:
+
+* FDA events
+* Clinical trial results
+* Regulatory decisions
+* Partnerships
+* Earnings
+* Unusual volume
+* Short interest
+
+12. TOP 10 PREMARKET DASHBOARD
+
+Create a dashboard showing:
+
+Rank
+Ticker
+Company
+Price
+Premarket %
+Premarket Volume
+Relative Volume
+Market Cap
+Float
+Catalyst
+Catalyst Time
+Sector
+Technical Setup
+Short Interest
+Options Activity
+Sentiment
+Overall Score
+
+Each stock should have a clear explanation:
+
+“WHY THIS STOCK?”
+
+Example:
+
+WHY THIS STOCK:
+Strong earnings catalyst + 8x relative volume + breaking premarket resistance + strong semiconductor sector momentum.
+
+RISKS:
+Already extended + low float + high volatility.
+
+13. ALERTS
+
+Add configurable alerts for:
+
+* New stock entering Top 10
+* Premarket gain above threshold
+* Volume spike
+* New major catalyst
+* Resistance breakout
+* VWAP reclaim
+* Unusual options activity
+* Large score increase
+
+14. AUTOMATIC PREMARKET REFRESH
+
+The scanner should automatically refresh during premarket trading.
+
+Use the appropriate US market timezone and account for daylight-saving changes.
+
+Suggested schedule:
+7:00 AM ET → begin scanning
+8:00 AM ET → increase scan frequency
+9:00 AM ET → high-frequency scanning
+9:25 AM ET → final premarket ranking
+9:30 AM ET → transition to regular-market scanner
+
+Do not hard-code UTC offsets incorrectly.
+
+15. DATA SOURCES
+
+Inspect the existing project and determine which market/news APIs are already configured.
+
+Prefer existing APIs before adding new dependencies.
+
+For missing data, determine the best compatible API/source based on the application’s current architecture.
+
+Never fabricate:
+
+* Prices
+* Volume
+* News
+* Options data
+* Short interest
+* Analyst ratings
+* Sentiment
+* Technical indicators
+
+Clearly label unavailable data.
+
+16. HISTORICAL BACKTESTING
+
+If the architecture supports historical market data, create a way to test the scoring system against historical premarket data.
+
+Track:
+
+* Stocks selected
+* Score
+* Entry price
+* Subsequent high
+* Subsequent low
+* Close
+* Maximum favorable excursion
+* Maximum adverse excursion
+
+This is for research/testing only and must NOT claim that the strategy is profitable without sufficient statistical evidence.
+
+17. DATABASE
+
+Inspect the existing database.
+
+If necessary, create appropriate tables/models for:
+
+* Premarket scans
+* Stock scores
+* Catalysts
+* Technical levels
+* Alerts
+* Historical scanner results
+
+Avoid duplicate records.
+
+18. UI/UX
+
+If the project already has a dashboard, integrate this into it rather than creating a separate disconnected application.
+
+Make the dashboard clean and professional.
+
+Prioritize:
+
+* Top 10 stocks
+* Score
+* Catalyst
+* Premarket %
+* Relative volume
+* Technical setup
+* Risk warnings
+
+Do not overwhelm the screen with unnecessary information.
+
+19. RELIABILITY
+
+Add:
+
+* API error handling
+* Rate-limit handling
+* Retry logic
+* Logging
+* Missing-data handling
+* Duplicate prevention
+* Timeout handling
+
+The scanner should continue operating if one data source temporarily fails.
+
+20. FINAL AUDIT
+
+After implementation:
+
+Run tests and verify every feature.
+
+Then give me a report with exactly these sections:
+
+IMPLEMENTED
+
+* Features that now work
+
+ALREADY EXISTED
+
+* Features that were already present
+
+NOT AVAILABLE
+
+* Features that cannot currently work because the required data/API is unavailable
+
+CHANGED
+
+* Files and major changes made
+
+TEST RESULTS
+
+* Tests performed and results
+
+NEXT STEPS
+
+* Highest-value improvements still recommended
+
+MOST IMPORTANT:
+Do not simply tell me what I should build. Inspect the actual Replit project and implement the missing functionality.

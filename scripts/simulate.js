@@ -9,6 +9,7 @@
 //   5. Fail-closed safety gates (orders/bot without creds must refuse cleanly)
 //   6. AI Trade Game Plan shape check
 //   7. Biotech catalyst intelligence contract
+//   8. Paper-only strategy validation + live shadow comparison contracts
 // Usage: node scripts/simulate.js
 // Exits 0 when all checks pass, 1 otherwise.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +134,45 @@ async function api(method, path, body) {
   const forceOne = await api('GET', '/api/catalyst-intel?force=1');
   const forceTwo = await api('GET', '/api/catalyst-intel?force=1');
   check('manual catalyst refresh is throttled back to cache', forceOne.status === 200 && forceTwo.status === 200 && forceTwo.j?.cached === true);
+
+  console.log('── 8. Paper-only Strategy Validation ──');
+  const validation = await api('GET', '/api/momentum/strategy-validation');
+  check('strategy validation report returns 200', validation.status === 200);
+  check('strategy validation is explicitly paper-only', validation.j?.mode === 'PAPER_ONLY');
+  check('strategy validation cannot alter live orders', validation.j?.liveOrdersChanged === false);
+  check('strategy validation reports a promotion decision',
+    ['NO_PROMOTION', 'PROMOTED_TO_PAPER'].includes(validation.j?.promotionStatus),
+    `status=${validation.j?.promotionStatus}`);
+  check('strategy validation includes held-out metrics',
+    Number.isFinite(validation.j?.testMetrics?.n) && Number.isFinite(validation.j?.testMetrics?.netExpectancy));
+  check('strategy validation exposes its held-out confidence interval',
+    Number.isFinite(validation.j?.testConfidenceInterval?.lo)
+      && Number.isFinite(validation.j?.testConfidenceInterval?.hi));
+  check('strategy validation exposes immutable input identity',
+    /^[a-f0-9]{64}$/.test(validation.j?.inputSha256 || ''));
+  check('strategy validation exposes a locked experiment identity',
+    /^[a-f0-9]{64}$/.test(validation.j?.experimentSha256 || '')
+      && /^node scripts\/validate-strategy\.js --experiment reports\/data\//.test(validation.j?.replayCommand || ''));
+  check('insufficient historical samples remain non-evaluable',
+    validation.j?.sampleAdequate === false
+      && validation.j?.strategyEvaluable === false
+      && validation.j?.promotionStatus === 'NO_PROMOTION');
+  const shadow = await api('GET', '/api/momentum/paper-comparison');
+  check('paper shadow comparison returns 200', shadow.status === 200 && shadow.j?.available === true);
+  check('paper shadow comparison cannot enable execution',
+    shadow.j?.mode === 'PAPER_ONLY' && shadow.j?.liveExecutionAllowed === false);
+  check('paper shadow stores paired baseline and selected decisions',
+    Number.isFinite(shadow.j?.pairedDecisions)
+      && Number.isFinite(shadow.j?.baseline?.decisions?.decisions)
+      && Number.isFinite(shadow.j?.selected?.decisions?.decisions));
+  check('paper shadow keeps an inadequate study baseline-only',
+    shadow.j?.sampleAdequate === false
+      && shadow.j?.strategyEvaluable === false
+      && shadow.j?.shadowState === 'ACTIVE_BASELINE_ONLY');
+  const unauthValidation = await fetch(BASE + '/api/momentum/strategy-validation');
+  check('strategy validation rejects unauthenticated access', unauthValidation.status === 401);
+  const unauthShadow = await fetch(BASE + '/api/momentum/paper-comparison');
+  check('paper shadow comparison rejects unauthenticated access', unauthShadow.status === 401);
 
   console.log('\n══════════════════════════════════');
   console.log(`RESULT: ${pass} passed, ${fail} failed`);

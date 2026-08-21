@@ -8482,6 +8482,110 @@ option { background: var(--card); }
 .mt-dl-hit strong { color: var(--red); }
 .mt-dl-warn { color: var(--red); font-weight: 700; text-transform: uppercase; font-size: .65rem; }
 
+/* Paper-only walk-forward evidence */
+.mt-validation {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.1fr) minmax(360px, 1.4fr);
+  gap: 14px 24px;
+  align-items: center;
+  padding: 16px 20px;
+  background:
+    linear-gradient(110deg, rgba(93, 92, 222, .10), transparent 42%),
+    var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.mt-validation-kicker {
+  margin-bottom: 4px;
+  color: var(--t3);
+  font-size: .63rem;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.mt-validation-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.mt-validation-title-row h3 {
+  margin: 0;
+  color: var(--t1);
+  font-size: .94rem;
+  line-height: 1.2;
+}
+.mt-validation-copy p {
+  margin: 5px 0 0;
+  max-width: 620px;
+  color: var(--t2);
+  font-size: .72rem;
+  line-height: 1.45;
+}
+.mt-validation-status {
+  padding: 3px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  color: var(--t2);
+  background: var(--card2);
+  font-size: .59rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+.mt-validation-status--loading,
+.mt-validation-status--missing { color: var(--t3); }
+.mt-validation-status--blocked {
+  color: var(--red);
+  border-color: rgba(255, 91, 106, .35);
+  background: rgba(255, 91, 106, .08);
+}
+.mt-validation-status--candidate {
+  color: var(--teal);
+  border-color: var(--teal-bdr);
+  background: rgba(29, 214, 163, .08);
+}
+.mt-validation-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
+  gap: 8px;
+}
+.mt-validation-metric {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(10, 14, 25, .32);
+}
+.mt-validation-metric span {
+  display: block;
+  margin-bottom: 4px;
+  overflow: hidden;
+  color: var(--t3);
+  font-size: .6rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mt-validation-metric strong { color: var(--t1); font-size: .84rem; }
+.mt-validation-positive { color: var(--teal) !important; }
+.mt-validation-negative { color: var(--red) !important; }
+.mt-validation-details {
+  grid-column: 1 / -1;
+  color: var(--t3);
+  font-size: .66rem;
+}
+.mt-validation-details summary {
+  width: fit-content;
+  color: var(--t2);
+  cursor: pointer;
+}
+.mt-validation-details div { margin-top: 7px; line-height: 1.45; }
+@media (max-width: 900px) {
+  .mt-validation { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .mt-validation { padding: 14px 12px; }
+  .mt-validation-metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* ── Alpaca mode switcher (Paper ↔ Live pill bar) ──────────────────────────── */
 .at-mode-switcher {
   display: flex;

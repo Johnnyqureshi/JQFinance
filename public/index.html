@@ -947,6 +947,44 @@
     <!-- ── Daily limits status bar ─────────────────────────────────────── -->
     <div class="mt-daily-bar" id="mtDailyLimits"></div>
 
+    <!-- ── Paper-only strategy evidence ────────────────────────────────── -->
+    <section class="mt-validation" id="mtValidation" aria-labelledby="mtValidationTitle">
+      <div class="mt-validation-copy">
+        <div class="mt-validation-kicker">Strategy evidence · paper only</div>
+        <div class="mt-validation-title-row">
+          <h3 id="mtValidationTitle">Historical validation</h3>
+          <span class="mt-validation-status mt-validation-status--loading" id="mtValidationStatus">Loading…</span>
+        </div>
+        <p id="mtValidationNote">Checking the latest walk-forward report. This report cannot enable live trading.</p>
+      </div>
+      <div class="mt-validation-metrics" aria-live="polite">
+        <div class="mt-validation-metric">
+          <span>Held-out trades</span>
+          <strong id="mtValidationTrades">—</strong>
+        </div>
+        <div class="mt-validation-metric">
+          <span>Win rate</span>
+          <strong id="mtValidationWinRate">—</strong>
+        </div>
+        <div class="mt-validation-metric">
+          <span>After-cost expectancy</span>
+          <strong id="mtValidationExpectancy">—</strong>
+        </div>
+        <div class="mt-validation-metric">
+          <span>Profit factor</span>
+          <strong id="mtValidationProfitFactor">—</strong>
+        </div>
+        <div class="mt-validation-metric">
+          <span>Live shadow pairs</span>
+          <strong id="mtValidationShadowPairs">—</strong>
+        </div>
+      </div>
+      <details class="mt-validation-details">
+        <summary>What this result can and cannot prove</summary>
+        <div id="mtValidationCaveats">Point-in-time news, float, Level 2, tape, and options-flow history are never invented.</div>
+      </details>
+    </section>
+
     <!-- ── Main body: scanner + detail panels ──────────────────────────── -->
     <div class="mt-body">
 

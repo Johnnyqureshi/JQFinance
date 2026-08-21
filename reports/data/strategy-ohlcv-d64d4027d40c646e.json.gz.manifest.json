@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "inputSha256": "d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2",
+  "retrievedAt": "2026-08-21T03:33:45.835Z",
+  "snapshotPath": "reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
+  "replayCommand": "node scripts/validate-strategy.js --snapshot reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
+  "payload": {
+    "provider": "alpaca",
+    "feed": "IEX historical 5-minute bars",
+    "requestedDays": 120,
+    "requestedSymbols": 100,
+    "barCount": 575154
+  }
+}

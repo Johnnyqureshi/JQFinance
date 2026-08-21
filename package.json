@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/strategy-validator.test.js && node tests/strategy-validation-runner.test.js && node tests/paper-shadow.test.js && node tests/catalyst-intel.test.js && node tests/momentum-news.test.js",
+    "validate:strategy": "node scripts/validate-strategy.js"
   },
   "keywords": [],
   "author": "",

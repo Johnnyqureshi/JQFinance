@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "studyId": "2a99ae2173ed",
+  "experimentSha256": "2a99ae2173edd0bfb311669bf15da4d9222f8b8b34867ebd3941e96c81c438fa",
+  "experimentPath": "reports/data/strategy-experiment-2a99ae2173ed.json",
+  "generatedAt": "2026-08-21T04:02:58.370Z",
+  "mode": "PAPER_ONLY",
+  "liveExecutionAllowed": false,
+  "status": "NO_PROMOTION",
+  "selectionOutcome": "BASELINE_RETAINED",
+  "selectedName": "baseline",
+  "config": {
+    "version": 2,
+    "maxConcurrentLongs": 2,
+    "maxTradesPerDay": 5,
+    "halfSpreadPct": 0.15,
+    "slippagePct": 0.2,
+    "startingEquity": 25000,
+    "positionPct": 10,
+    "fixedNotional": null,
+    "leverage": 1,
+    "maxRiskPct": 1,
+    "maxDailyRiskPct": 3,
+    "stopPct": 5,
+    "takeProfitRsiLevel": 75,
+    "maxHoldBars": 78,
+    "cooldownBars": 3,
+    "enforceMarketHours": true,
+    "entryStartMinutesET": 575,
+    "entryEndMinutesET": 950,
+    "gates": {
+      "priceRange": true,
+      "minGainPct": true,
+      "minRelVol": true,
+      "minScore": true,
+      "maxGainPct": false,
+      "requireAboveVwap": false,
+      "requireMacdBullish": false,
+      "requireBreakout20": false,
+      "rejectBearishDump": false,
+      "marketRegimeBullish": false,
+      "newsCatalyst": false,
+      "floatShares": false,
+      "level2Tape": false,
+      "optionsFlow": false
+    },
+    "minPrice": 3,
+    "maxPrice": 20,
+    "minGainPct": 10,
+    "maxGainPct": null,
+    "minRelVol": 5,
+    "minScore": 4,
+    "dumpCandlePct": -8,
+    "benchmarkSymbol": "SPY",
+    "rsiPeriod": 14,
+    "macdFast": 12,
+    "macdSlow": 26,
+    "macdSignal": 9,
+    "devFrac": 0.6,
+    "valFrac": 0.2,
+    "bootstrapReps": 2000,
+    "bootstrapSeed": 42,
+    "promotionMinValTrades": 30,
+    "promotionMinTestTrades": 30,
+    "mode": "PAPER_ONLY",
+    "_mandatoryGates": [
+      "noShorts",
+      "marketHours",
+      "stopProtection",
+      "positionCap",
+      "dailyTradeCap"
+    ]
+  },
+  "promotionChecks": {
+    "minValidationTrades": {
+      "required": 30,
+      "actual": 0,
+      "pass": false
+    },
+    "minTestTrades": {
+      "required": 30,
+      "actual": 6,
+      "pass": false
+    },
+    "positiveAfterCostExpectancy": {
+      "required": "> 0",
+      "actual": -35.360715389520706,
+      "pass": false
+    },
+    "profitFactorGe1": {
+      "required": ">= 1",
+      "actual": "val:0.00 test:0.71",
+      "pass": false
+    },
+    "maxDrawdownNotWorse": {
+      "required": "<= baseline 739.83",
+      "actual": 739.8335123371216,
+      "pass": true
+    },
+    "ciLoNonNegative": {
+      "required": ">= 0 in validation and test",
+      "actual": "val:0 test:-244.6006631248749",
+      "pass": false
+    }
+  },
+  "note": "Validation output only. The live trading path does not read this file."
+}

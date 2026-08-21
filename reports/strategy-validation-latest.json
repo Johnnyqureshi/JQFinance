@@ -1,0 +1,6098 @@
+{
+  "studyId": "2a99ae2173ed",
+  "generatedAt": "2026-08-21T04:02:58.370Z",
+  "contractVersion": 2,
+  "mode": "PAPER_ONLY",
+  "inputSnapshot": {
+    "inputSha256": "d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2",
+    "snapshotPath": "reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
+    "loadCommand": "node scripts/validate-strategy.js --snapshot reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
+    "retrievedAt": "2026-08-21T03:33:45.835Z",
+    "loadedFromArchive": true,
+    "immutable": true
+  },
+  "experiment": {
+    "experimentSha256": "2a99ae2173edd0bfb311669bf15da4d9222f8b8b34867ebd3941e96c81c438fa",
+    "experimentPath": "reports/data/strategy-experiment-2a99ae2173ed.json",
+    "replayCommand": "node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-2a99ae2173ed.json",
+    "configLocked": true,
+    "sourceHashes": {
+      "validatorSha256": "b7655bcce504b6c4b61a523f2a86fd056ae07dc09d60907629686220b4832727",
+      "runnerSha256": "a91cf7a98dd0266ed07caaaa81bdd412192c34c69026364a37e0d18407932d81"
+    }
+  },
+  "dataQuality": {
+    "provider": "alpaca",
+    "feed": "IEX historical 5-minute bars",
+    "credentialSource": "archived-snapshot",
+    "requestedDays": 120,
+    "requestedSymbols": 100,
+    "receivedSymbols": 100,
+    "missingSymbols": [],
+    "barCount": 575154,
+    "firstBar": "2026-04-23T12:00:00.000Z",
+    "lastBar": "2026-08-20T20:55:00.000Z",
+    "universeSource": "current-most-actives+market-movers-plus-curated",
+    "universeBias": "Uses current/curated membership, not point-in-time historical universe membership. Results may contain survivorship and selection bias.",
+    "dataGaps": [
+      "Uses current/curated membership, not point-in-time historical universe membership. Results may contain survivorship and selection bias.",
+      "No point-in-time historical news catalyst archive was available; the news gate is declared unavailable.",
+      "No point-in-time float/share-count archive was available; the float gate is declared unavailable.",
+      "No Level 2 order book, tape, halt queue, or options-flow history was available.",
+      "IEX/Yahoo OHLCV bars cannot reproduce exact exchange queue position or partial fills.",
+      "The replay forces a time exit after 78 observed 5-minute bars. The current live bot may hold longer until its stop or RSI exit, so overnight behavior is not treated as an exact match.",
+      "The historical replay is evidence for paper testing, not a guarantee of future performance."
+    ]
+  },
+  "signalContract": {
+    "symbolCount": 99,
+    "signalCount": 10339,
+    "prefilterApplied": true,
+    "benchmarkSymbol": "SPY",
+    "volumeLookbackSessions": 20,
+    "minHistorySessions": 5,
+    "generatedAt": 1787284942928,
+    "unavailableGates": [
+      "news_catalyst",
+      "float_shares",
+      "level2_tape",
+      "options_flow"
+    ],
+    "note": "news_catalyst and float_shares are not synthesised. Relative volume uses only the prior rolling completed sessions. marketRegime classifies the latest completed benchmark session strictly before each candidate date."
+  },
+  "executionModel": {
+    "nextBarFill": true,
+    "conservativeSameBarPriority": "STOP > TIME EXIT > RSI EXIT",
+    "gapBelowStopFillsAtBarOpen": true,
+    "maxConcurrentLongs": 2,
+    "maxTradesPerDay": 5,
+    "halfSpreadPctOneWay": 0.15,
+    "slippagePctOneWay": 0.2,
+    "holdingPeriod": "Force exit after 78 observed 5-minute bars; a late entry can carry overnight until that limit",
+    "liveHoldingDifferenceDeclared": true,
+    "noShorts": true,
+    "liveOrdersChanged": false,
+    "splitBarBoundariesEnforced": true,
+    "periodEndExitReason": "PERIOD_END"
+  },
+  "walkForward": {
+    "contractVersion": 2,
+    "mode": "PAPER_ONLY",
+    "splitAudit": {
+      "totalSessions": 75,
+      "devSessions": [
+        "2026-04-30",
+        "2026-05-01",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14",
+        "2026-05-15",
+        "2026-05-18",
+        "2026-05-19",
+        "2026-05-20",
+        "2026-05-21",
+        "2026-05-22",
+        "2026-05-26",
+        "2026-05-27",
+        "2026-05-28",
+        "2026-05-29",
+        "2026-06-01",
+        "2026-06-02",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-08",
+        "2026-06-09",
+        "2026-06-10",
+        "2026-06-11",
+        "2026-06-12",
+        "2026-06-15",
+        "2026-06-16",
+        "2026-06-17",
+        "2026-06-18",
+        "2026-06-22",
+        "2026-06-23",
+        "2026-06-24",
+        "2026-06-25",
+        "2026-06-26",
+        "2026-06-29",
+        "2026-06-30",
+        "2026-07-01",
+        "2026-07-02",
+        "2026-07-06",
+        "2026-07-08"
+      ],
+      "valSessions": [
+        "2026-07-09",
+        "2026-07-10",
+        "2026-07-13",
+        "2026-07-14",
+        "2026-07-15",
+        "2026-07-16",
+        "2026-07-17",
+        "2026-07-20",
+        "2026-07-21",
+        "2026-07-22",
+        "2026-07-24",
+        "2026-07-27",
+        "2026-07-28",
+        "2026-07-29",
+        "2026-07-30"
+      ],
+      "testSessions": [
+        "2026-07-31",
+        "2026-08-03",
+        "2026-08-04",
+        "2026-08-05",
+        "2026-08-06",
+        "2026-08-07",
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20"
+      ],
+      "testNeverUsedForSelection": true
+    },
+    "baseline": {
+      "dev": {
+        "contractVersion": 2,
+        "n": 2,
+        "winCount": 0,
+        "lossCount": 2,
+        "winRate": 0,
+        "avgWin": 0,
+        "avgLoss": -132.88651963650005,
+        "netExpectancy": -132.88651963650005,
+        "profitFactor": 0,
+        "totalPnl": -265.7730392730001,
+        "avgHoldBars": 2,
+        "turnover": 2,
+        "avgMae": -261.20161999999993,
+        "avgMfe": 0,
+        "maxDrawdown": 265.7730392730009,
+        "exitReasons": {
+          "STOP": 2
+        },
+        "monthly": {
+          "2026-05": {
+            "count": 2,
+            "pnl": -265.7730392730001,
+            "wins": 0,
+            "winRate": 0
+          }
+        },
+        "byGroup": {
+          "stock": {
+            "count": 2,
+            "pnl": -265.7730392730001,
+            "wins": 0,
+            "losses": 2,
+            "winRate": 0,
+            "netExpectancy": -132.88651963650005,
+            "profitFactor": 0,
+            "maxDrawdown": 265.7730392730001
+          },
+          "long_leveraged_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "inverse_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "other_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        },
+        "byRegime": {
+          "BULLISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "BEARISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "UNKNOWN": {
+            "count": 2,
+            "pnl": -265.7730392730001,
+            "wins": 0,
+            "losses": 2,
+            "winRate": 0,
+            "netExpectancy": -132.88651963650005,
+            "profitFactor": 0,
+            "maxDrawdown": 265.7730392730001
+          }
+        }
+      },
+      "val": {
+        "contractVersion": 2,
+        "n": 0,
+        "winCount": 0,
+        "lossCount": 0,
+        "winRate": 0,
+        "avgWin": 0,
+        "avgLoss": 0,
+        "netExpectancy": 0,
+        "profitFactor": 0,
+        "totalPnl": 0,
+        "avgHoldBars": 0,
+        "turnover": 0,
+        "avgMae": 0,
+        "avgMfe": 0,
+        "maxDrawdown": 0,
+        "exitReasons": {},
+        "monthly": {},
+        "byGroup": {
+          "stock": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "long_leveraged_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "inverse_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "other_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        },
+        "byRegime": {
+          "BULLISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "BEARISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "UNKNOWN": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        }
+      },
+      "test": {
+        "contractVersion": 2,
+        "n": 6,
+        "winCount": 3,
+        "lossCount": 3,
+        "winRate": 0.5,
+        "avgWin": 175.8897400000002,
+        "avgLoss": -246.6111707790416,
+        "netExpectancy": -35.360715389520706,
+        "profitFactor": 0.7132269776927245,
+        "totalPnl": -212.16429233712427,
+        "avgHoldBars": 10,
+        "turnover": 6,
+        "avgMae": -234.17296249999984,
+        "avgMfe": 175.60675916666673,
+        "maxDrawdown": 739.8335123371216,
+        "exitReasons": {
+          "RSI_EXIT": 2,
+          "STOP": 3,
+          "PERIOD_END": 1
+        },
+        "monthly": {
+          "2026-08": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "winRate": 0.5
+          }
+        },
+        "byGroup": {
+          "stock": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "losses": 3,
+            "winRate": 0.5,
+            "netExpectancy": -35.36071538952071,
+            "profitFactor": 0.7132269776927245,
+            "maxDrawdown": 727.9651723371245
+          },
+          "long_leveraged_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "inverse_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "other_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        },
+        "byRegime": {
+          "BULLISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "BEARISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "UNKNOWN": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "losses": 3,
+            "winRate": 0.5,
+            "netExpectancy": -35.36071538952071,
+            "profitFactor": 0.7132269776927245,
+            "maxDrawdown": 727.9651723371245
+          }
+        }
+      }
+    },
+    "ablationResults": [
+      {
+        "name": "remove_price_gate",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": false,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 7,
+          "winCount": 3,
+          "lossCount": 4,
+          "winRate": 0.42857142857142855,
+          "avgWin": 203.48416333333327,
+          "avgLoss": -136.8654310141406,
+          "netExpectancy": 8.998680849062495,
+          "profitFactor": 1.1150596711614662,
+          "totalPnl": 62.990765943437395,
+          "avgHoldBars": 7.428571428571429,
+          "turnover": 7,
+          "avgMae": -94.53407285714289,
+          "avgMfe": 196.09327035714279,
+          "maxDrawdown": 267.81504336000216,
+          "exitReasons": {
+            "STOP": 4,
+            "RSI_EXIT": 3
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 4,
+              "pnl": -76.93380835999966,
+              "wins": 1,
+              "winRate": 0.25
+            },
+            "2026-06": {
+              "count": 3,
+              "pnl": 139.92457430343705,
+              "wins": 2,
+              "winRate": 0.6666666666666666
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 7,
+              "pnl": 62.990765943437395,
+              "wins": 3,
+              "losses": 4,
+              "winRate": 0.42857142857142855,
+              "netExpectancy": 8.998680849062485,
+              "profitFactor": 1.1150596711614662,
+              "maxDrawdown": 267.8150433599998
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 3,
+              "pnl": 139.92457430343705,
+              "wins": 2,
+              "losses": 1,
+              "winRate": 0.6666666666666666,
+              "netExpectancy": 46.64152476781235,
+              "profitFactor": 2.042196041881045,
+              "maxDrawdown": 134.25936069656257
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 4,
+              "pnl": -76.93380835999966,
+              "wins": 1,
+              "losses": 3,
+              "winRate": 0.25,
+              "netExpectancy": -19.233452089999915,
+              "profitFactor": 0.8138108220524102,
+              "maxDrawdown": 267.8150433599998
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "remove_gain_gate",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": false,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "remove_relative_volume_gate",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": false,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "remove_score_gate",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": false,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 5,
+          "winCount": 0,
+          "lossCount": 5,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -112.67363102189992,
+          "netExpectancy": -112.67363102189992,
+          "profitFactor": 0,
+          "totalPnl": -563.3681551094996,
+          "avgHoldBars": 12.4,
+          "turnover": 5,
+          "avgMae": -168.06098999999992,
+          "avgMfe": 18.927830000000007,
+          "maxDrawdown": 563.368155109496,
+          "exitReasons": {
+            "STOP": 4,
+            "SESSION_END": 1
+          },
+          "monthly": {
+            "2026-04": {
+              "count": 1,
+              "pnl": -133.0705996695,
+              "wins": 0,
+              "winRate": 0
+            },
+            "2026-05": {
+              "count": 4,
+              "pnl": -430.29755543999966,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 5,
+              "pnl": -563.3681551094996,
+              "wins": 0,
+              "losses": 5,
+              "winRate": 0,
+              "netExpectancy": -112.67363102189992,
+              "profitFactor": 0,
+              "maxDrawdown": 563.3681551094996
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 5,
+              "pnl": -563.3681551094996,
+              "wins": 0,
+              "losses": 5,
+              "winRate": 0,
+              "netExpectancy": -112.67363102189992,
+              "profitFactor": 0,
+              "maxDrawdown": 563.3681551094996
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "raise_min_gain_to_15pct",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 15,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "raise_min_relative_volume_to_7_5x",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 7.5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "require_score_5",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 5,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "cap_extended_gain_at_30pct",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": true,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": 30,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "require_price_above_vwap",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": true,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "require_macd_12_26_9_bullish",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": true,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "require_20_bar_breakout",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": true,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "reject_large_bearish_bar",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": true,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "require_prior_spy_bullish_regime",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": true,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "enter_0935_to_1100_et",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 660,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "enter_1000_to_1550_et",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 600,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "tighten_stop_to_3pct",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 3,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -93.96493241010012,
+          "netExpectancy": -93.96493241010012,
+          "profitFactor": 0,
+          "totalPnl": -187.92986482020024,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.29207999999994,
+          "avgMfe": 0,
+          "maxDrawdown": 187.92986482019842,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -187.92986482020024,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -187.92986482020024,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -93.96493241010012,
+              "profitFactor": 0,
+              "maxDrawdown": 187.92986482020024
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -187.92986482020024,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -93.96493241010012,
+              "profitFactor": 0,
+              "maxDrawdown": 187.92986482020024
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "widen_stop_to_7pct",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 7,
+          "takeProfitRsiLevel": 75,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -167.23118001689983,
+          "netExpectancy": -167.23118001689983,
+          "profitFactor": 0,
+          "totalPnl": -334.46236003379965,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.0206999999999,
+          "avgMfe": 0,
+          "maxDrawdown": 334.4623600337982,
+          "exitReasons": {
+            "STOP": 1,
+            "RSI_EXIT": 1
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -334.46236003379965,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -334.46236003379965,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -167.23118001689983,
+              "profitFactor": 0,
+              "maxDrawdown": 334.46236003379965
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -334.46236003379965,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -167.23118001689983,
+              "profitFactor": 0,
+              "maxDrawdown": 334.46236003379965
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "exit_at_rsi_70",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 70,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -91.92250098199999,
+          "netExpectancy": -91.92250098199999,
+          "profitFactor": 0,
+          "totalPnl": -183.84500196399998,
+          "avgHoldBars": 1.5,
+          "turnover": 2,
+          "avgMae": -105.7975399999999,
+          "avgMfe": 0,
+          "maxDrawdown": 183.8450019640004,
+          "exitReasons": {
+            "RSI_EXIT": 1,
+            "STOP": 1
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -183.84500196399998,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -183.84500196399998,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -91.92250098199999,
+              "profitFactor": 0,
+              "maxDrawdown": 183.84500196399998
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -183.84500196399998,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -91.92250098199999,
+              "profitFactor": 0,
+              "maxDrawdown": 183.84500196399998
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      },
+      {
+        "name": "exit_at_rsi_80",
+        "config": {
+          "version": 2,
+          "maxConcurrentLongs": 2,
+          "maxTradesPerDay": 5,
+          "halfSpreadPct": 0.15,
+          "slippagePct": 0.2,
+          "startingEquity": 25000,
+          "positionPct": 10,
+          "fixedNotional": null,
+          "leverage": 1,
+          "maxRiskPct": 1,
+          "maxDailyRiskPct": 3,
+          "stopPct": 5,
+          "takeProfitRsiLevel": 80,
+          "maxHoldBars": 78,
+          "cooldownBars": 3,
+          "enforceMarketHours": true,
+          "entryStartMinutesET": 575,
+          "entryEndMinutesET": 950,
+          "gates": {
+            "priceRange": true,
+            "minGainPct": true,
+            "minRelVol": true,
+            "minScore": true,
+            "maxGainPct": false,
+            "requireAboveVwap": false,
+            "requireMacdBullish": false,
+            "requireBreakout20": false,
+            "rejectBearishDump": false,
+            "marketRegimeBullish": false,
+            "newsCatalyst": false,
+            "floatShares": false,
+            "level2Tape": false,
+            "optionsFlow": false
+          },
+          "minPrice": 3,
+          "maxPrice": 20,
+          "minGainPct": 10,
+          "maxGainPct": null,
+          "minRelVol": 5,
+          "minScore": 4,
+          "dumpCandlePct": -8,
+          "benchmarkSymbol": "SPY",
+          "rsiPeriod": 14,
+          "macdFast": 12,
+          "macdSlow": 26,
+          "macdSignal": 9,
+          "devFrac": 0.6,
+          "valFrac": 0.2,
+          "bootstrapReps": 2000,
+          "bootstrapSeed": 42,
+          "promotionMinValTrades": 30,
+          "promotionMinTestTrades": 30,
+          "mode": "PAPER_ONLY",
+          "_mandatoryGates": [
+            "noShorts",
+            "marketHours",
+            "stopProtection",
+            "positionCap",
+            "dailyTradeCap"
+          ]
+        },
+        "devMetrics": {
+          "contractVersion": 2,
+          "n": 2,
+          "winCount": 0,
+          "lossCount": 2,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": -132.88651963650005,
+          "netExpectancy": -132.88651963650005,
+          "profitFactor": 0,
+          "totalPnl": -265.7730392730001,
+          "avgHoldBars": 2,
+          "turnover": 2,
+          "avgMae": -261.20161999999993,
+          "avgMfe": 0,
+          "maxDrawdown": 265.7730392730009,
+          "exitReasons": {
+            "STOP": 2
+          },
+          "monthly": {
+            "2026-05": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "winRate": 0
+            }
+          },
+          "byGroup": {
+            "stock": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 2,
+              "pnl": -265.7730392730001,
+              "wins": 0,
+              "losses": 2,
+              "winRate": 0,
+              "netExpectancy": -132.88651963650005,
+              "profitFactor": 0,
+              "maxDrawdown": 265.7730392730001
+            }
+          }
+        },
+        "valMetrics": {
+          "contractVersion": 2,
+          "n": 0,
+          "winCount": 0,
+          "lossCount": 0,
+          "winRate": 0,
+          "avgWin": 0,
+          "avgLoss": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "totalPnl": 0,
+          "avgHoldBars": 0,
+          "turnover": 0,
+          "avgMae": 0,
+          "avgMfe": 0,
+          "maxDrawdown": 0,
+          "exitReasons": {},
+          "monthly": {},
+          "byGroup": {
+            "stock": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "long_leveraged_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "inverse_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "other_etf": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          },
+          "byRegime": {
+            "BULLISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "BEARISH": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            },
+            "UNKNOWN": {
+              "count": 0,
+              "pnl": 0,
+              "wins": 0,
+              "losses": 0,
+              "winRate": 0,
+              "netExpectancy": 0,
+              "profitFactor": 0,
+              "maxDrawdown": 0
+            }
+          }
+        },
+        "valCI": {
+          "mean": 0,
+          "lo": 0,
+          "hi": 0,
+          "n": 0,
+          "reps": 2000
+        }
+      }
+    ],
+    "selectionAudit": {
+      "selectedName": "baseline",
+      "selectionCriteria": "max validation net expectancy",
+      "testNeverUsedForSelection": true,
+      "valMetrics": {
+        "contractVersion": 2,
+        "n": 0,
+        "winCount": 0,
+        "lossCount": 0,
+        "winRate": 0,
+        "avgWin": 0,
+        "avgLoss": 0,
+        "netExpectancy": 0,
+        "profitFactor": 0,
+        "totalPnl": 0,
+        "avgHoldBars": 0,
+        "turnover": 0,
+        "avgMae": 0,
+        "avgMfe": 0,
+        "maxDrawdown": 0,
+        "exitReasons": {},
+        "monthly": {},
+        "byGroup": {
+          "stock": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "long_leveraged_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "inverse_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "other_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        },
+        "byRegime": {
+          "BULLISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "BEARISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "UNKNOWN": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        }
+      },
+      "valCI": {
+        "mean": 0,
+        "lo": 0,
+        "hi": 0,
+        "n": 0,
+        "reps": 2000
+      },
+      "rankedCandidates": [
+        {
+          "name": "baseline",
+          "valNetExpectancy": 0,
+          "valN": 0
+        }
+      ]
+    },
+    "frozenConfig": {
+      "version": 2,
+      "maxConcurrentLongs": 2,
+      "maxTradesPerDay": 5,
+      "halfSpreadPct": 0.15,
+      "slippagePct": 0.2,
+      "startingEquity": 25000,
+      "positionPct": 10,
+      "fixedNotional": null,
+      "leverage": 1,
+      "maxRiskPct": 1,
+      "maxDailyRiskPct": 3,
+      "stopPct": 5,
+      "takeProfitRsiLevel": 75,
+      "maxHoldBars": 78,
+      "cooldownBars": 3,
+      "enforceMarketHours": true,
+      "entryStartMinutesET": 575,
+      "entryEndMinutesET": 950,
+      "gates": {
+        "priceRange": true,
+        "minGainPct": true,
+        "minRelVol": true,
+        "minScore": true,
+        "maxGainPct": false,
+        "requireAboveVwap": false,
+        "requireMacdBullish": false,
+        "requireBreakout20": false,
+        "rejectBearishDump": false,
+        "marketRegimeBullish": false,
+        "newsCatalyst": false,
+        "floatShares": false,
+        "level2Tape": false,
+        "optionsFlow": false
+      },
+      "minPrice": 3,
+      "maxPrice": 20,
+      "minGainPct": 10,
+      "maxGainPct": null,
+      "minRelVol": 5,
+      "minScore": 4,
+      "dumpCandlePct": -8,
+      "benchmarkSymbol": "SPY",
+      "rsiPeriod": 14,
+      "macdFast": 12,
+      "macdSlow": 26,
+      "macdSignal": 9,
+      "devFrac": 0.6,
+      "valFrac": 0.2,
+      "bootstrapReps": 2000,
+      "bootstrapSeed": 42,
+      "promotionMinValTrades": 30,
+      "promotionMinTestTrades": 30,
+      "mode": "PAPER_ONLY",
+      "_mandatoryGates": [
+        "noShorts",
+        "marketHours",
+        "stopProtection",
+        "positionCap",
+        "dailyTradeCap"
+      ]
+    },
+    "testResults": {
+      "metrics": {
+        "contractVersion": 2,
+        "n": 6,
+        "winCount": 3,
+        "lossCount": 3,
+        "winRate": 0.5,
+        "avgWin": 175.8897400000002,
+        "avgLoss": -246.6111707790416,
+        "netExpectancy": -35.360715389520706,
+        "profitFactor": 0.7132269776927245,
+        "totalPnl": -212.16429233712427,
+        "avgHoldBars": 10,
+        "turnover": 6,
+        "avgMae": -234.17296249999984,
+        "avgMfe": 175.60675916666673,
+        "maxDrawdown": 739.8335123371216,
+        "exitReasons": {
+          "RSI_EXIT": 2,
+          "STOP": 3,
+          "PERIOD_END": 1
+        },
+        "monthly": {
+          "2026-08": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "winRate": 0.5
+          }
+        },
+        "byGroup": {
+          "stock": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "losses": 3,
+            "winRate": 0.5,
+            "netExpectancy": -35.36071538952071,
+            "profitFactor": 0.7132269776927245,
+            "maxDrawdown": 727.9651723371245
+          },
+          "long_leveraged_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "inverse_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "other_etf": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          }
+        },
+        "byRegime": {
+          "BULLISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "BEARISH": {
+            "count": 0,
+            "pnl": 0,
+            "wins": 0,
+            "losses": 0,
+            "winRate": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "maxDrawdown": 0
+          },
+          "UNKNOWN": {
+            "count": 6,
+            "pnl": -212.16429233712427,
+            "wins": 3,
+            "losses": 3,
+            "winRate": 0.5,
+            "netExpectancy": -35.36071538952071,
+            "profitFactor": 0.7132269776927245,
+            "maxDrawdown": 727.9651723371245
+          }
+        }
+      },
+      "ci": {
+        "mean": -35.36071538952071,
+        "lo": -244.6006631248749,
+        "hi": 167.1312376042292,
+        "n": 6,
+        "reps": 2000
+      },
+      "trades": [
+        {
+          "symbol": "BIVI",
+          "entryTime": 1786543500000,
+          "exitTime": 1786543800000,
+          "entryPrice": 3.060675,
+          "exitPrice": 3.3183450000000003,
+          "stopPrice": 2.9076412499999997,
+          "qty": 816,
+          "notional": 2497.5108,
+          "grossPnl": 210.2587200000004,
+          "netPnl": 210.2587200000004,
+          "netPnlPct": 8.41873116224364,
+          "win": true,
+          "exitReason": "RSI_EXIT",
+          "mae": -90.3107999999997,
+          "mfe": 358.48920000000015,
+          "holdBars": 1,
+          "marketRegime": "NEUTRAL"
+        },
+        {
+          "symbol": "BIVI",
+          "entryTime": 1786545000000,
+          "exitTime": 1786545300000,
+          "entryPrice": 3.261375,
+          "exitPrice": 3.657155,
+          "stopPrice": 3.09830625,
+          "qty": 772,
+          "notional": 2517.7815,
+          "grossPnl": 305.54215999999985,
+          "netPnl": 305.54215999999985,
+          "netPnlPct": 12.135372350618981,
+          "win": true,
+          "exitReason": "RSI_EXIT",
+          "mae": -116.8615000000002,
+          "mfe": 338.61850000000004,
+          "holdBars": 1,
+          "marketRegime": "NEUTRAL"
+        },
+        {
+          "symbol": "BIVI",
+          "entryTime": 1786546500000,
+          "exitTime": 1786547100000,
+          "entryPrice": 3.120885,
+          "exitPrice": 2.954463807375,
+          "stopPrice": 2.9648407499999996,
+          "qty": 817,
+          "notional": 2549.763045,
+          "grossPnl": -135.96611437462508,
+          "netPnl": -135.96611437462508,
+          "netPnlPct": -5.332500000000003,
+          "win": false,
+          "exitReason": "STOP",
+          "mae": -343.8630449999998,
+          "mfe": 195.35695499999997,
+          "holdBars": 2,
+          "marketRegime": "NEUTRAL"
+        },
+        {
+          "symbol": "SGLY",
+          "entryTime": 1787233800000,
+          "exitTime": 1787234100000,
+          "entryPrice": 3.8133,
+          "exitPrice": 3.6099557775,
+          "stopPrice": 3.622635,
+          "qty": 665,
+          "notional": 2535.8445,
+          "grossPnl": -135.22390796249982,
+          "netPnl": -135.22390796249982,
+          "netPnlPct": -5.3324999999999925,
+          "win": false,
+          "exitReason": "STOP",
+          "mae": -228.2944999999998,
+          "mfe": 0,
+          "holdBars": 1,
+          "marketRegime": "NEUTRAL"
+        },
+        {
+          "symbol": "SGLY",
+          "entryTime": 1787235300000,
+          "exitTime": 1787255700000,
+          "entryPrice": 3.4118999999999997,
+          "exitPrice": 3.42796,
+          "stopPrice": 3.2413049999999997,
+          "qty": 739,
+          "notional": 2521.3941,
+          "grossPnl": 11.868340000000302,
+          "netPnl": 11.868340000000302,
+          "netPnlPct": 0.4707054720243973,
+          "win": true,
+          "exitReason": "PERIOD_END",
+          "mae": -90.08409999999976,
+          "mfe": 161.17590000000013,
+          "holdBars": 54,
+          "marketRegime": "NEUTRAL"
+        },
+        {
+          "symbol": "GYGY",
+          "entryTime": 1787243400000,
+          "exitTime": 1787243700000,
+          "entryPrice": 3.401865,
+          "exitPrice": 2.77027,
+          "stopPrice": 3.2317717499999996,
+          "qty": 742,
+          "notional": 2524.18383,
+          "grossPnl": -468.64348999999993,
+          "netPnl": -468.64348999999993,
+          "netPnlPct": -18.5661394558573,
+          "win": false,
+          "exitReason": "STOP",
+          "mae": -535.6238299999998,
+          "mfe": 0,
+          "holdBars": 1,
+          "marketRegime": "NEUTRAL"
+        }
+      ]
+    },
+    "promotionChecks": {
+      "minValidationTrades": {
+        "required": 30,
+        "actual": 0,
+        "pass": false
+      },
+      "minTestTrades": {
+        "required": 30,
+        "actual": 6,
+        "pass": false
+      },
+      "positiveAfterCostExpectancy": {
+        "required": "> 0",
+        "actual": -35.360715389520706,
+        "pass": false
+      },
+      "profitFactorGe1": {
+        "required": ">= 1",
+        "actual": "val:0.00 test:0.71",
+        "pass": false
+      },
+      "maxDrawdownNotWorse": {
+        "required": "<= baseline 739.83",
+        "actual": 739.8335123371216,
+        "pass": true
+      },
+      "ciLoNonNegative": {
+        "required": ">= 0 in validation and test",
+        "actual": "val:0 test:-244.6006631248749",
+        "pass": false
+      }
+    },
+    "promoted": false,
+    "promotionStatus": "NO_PROMOTION",
+    "selectionOutcome": "BASELINE_RETAINED",
+    "promotionReasons": [
+      "No eligible ablation beat the baseline on validation; live strategy unchanged"
+    ]
+  },
+  "fullBaseline": {
+    "metrics": {
+      "contractVersion": 2,
+      "n": 8,
+      "winCount": 3,
+      "lossCount": 5,
+      "winRate": 0.375,
+      "avgWin": 174.10973333333354,
+      "avgLoss": -199.52651826379997,
+      "netExpectancy": -59.41292391487491,
+      "profitFactor": 0.5235687010880564,
+      "totalPnl": -475.30339131899945,
+      "avgHoldBars": 8,
+      "turnover": 8,
+      "avgMae": -239.06566624999988,
+      "avgMfe": 130.36727750000003,
+      "maxDrawdown": 731.8595520460003,
+      "exitReasons": {
+        "STOP": 5,
+        "RSI_EXIT": 2,
+        "END_OF_DATA": 1
+      },
+      "monthly": {
+        "2026-05": {
+          "count": 2,
+          "pnl": -265.7730392730001,
+          "wins": 0,
+          "winRate": 0
+        },
+        "2026-08": {
+          "count": 6,
+          "pnl": -209.53035204599934,
+          "wins": 3,
+          "winRate": 0.5
+        }
+      },
+      "byGroup": {
+        "stock": {
+          "count": 8,
+          "pnl": -475.30339131899945,
+          "wins": 3,
+          "losses": 5,
+          "winRate": 0.375,
+          "netExpectancy": -59.41292391487493,
+          "profitFactor": 0.5235687010880564,
+          "maxDrawdown": 720.1036320459996
+        },
+        "long_leveraged_etf": {
+          "count": 0,
+          "pnl": 0,
+          "wins": 0,
+          "losses": 0,
+          "winRate": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "maxDrawdown": 0
+        },
+        "inverse_etf": {
+          "count": 0,
+          "pnl": 0,
+          "wins": 0,
+          "losses": 0,
+          "winRate": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "maxDrawdown": 0
+        },
+        "other_etf": {
+          "count": 0,
+          "pnl": 0,
+          "wins": 0,
+          "losses": 0,
+          "winRate": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "maxDrawdown": 0
+        }
+      },
+      "byRegime": {
+        "BULLISH": {
+          "count": 0,
+          "pnl": 0,
+          "wins": 0,
+          "losses": 0,
+          "winRate": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "maxDrawdown": 0
+        },
+        "BEARISH": {
+          "count": 0,
+          "pnl": 0,
+          "wins": 0,
+          "losses": 0,
+          "winRate": 0,
+          "netExpectancy": 0,
+          "profitFactor": 0,
+          "maxDrawdown": 0
+        },
+        "UNKNOWN": {
+          "count": 8,
+          "pnl": -475.30339131899945,
+          "wins": 3,
+          "losses": 5,
+          "winRate": 0.375,
+          "netExpectancy": -59.41292391487493,
+          "profitFactor": 0.5235687010880564,
+          "maxDrawdown": 720.1036320459996
+        }
+      }
+    },
+    "candidateCount": 10339,
+    "filledCount": 8,
+    "rejectionCounts": {
+      "REL_VOL": 3310,
+      "GAIN_PCT": 4638,
+      "PRICE_RANGE": 1429,
+      "SCORE": 46,
+      "OUTSIDE_ENTRY_WINDOW": 428,
+      "OUTSIDE_MARKET_HOURS": 368,
+      "FILLED": 8,
+      "SYMBOL_ALREADY_OPEN": 70,
+      "COOLDOWN": 13,
+      "MAX_POSITIONS": 29
+    }
+  },
+  "artifacts": {
+    "report": "reports/strategy-validation-latest.json",
+    "summary": "reports/strategy-validation-latest.md",
+    "decisions": "reports/strategy-decisions-latest.jsonl.gz",
+    "trades": "reports/strategy-trades-latest.csv",
+    "inputSnapshot": "reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
+    "experiment": "reports/data/strategy-experiment-2a99ae2173ed.json"
+  }
+}

@@ -2,6 +2,7 @@ require('dotenv').config();
 const express      = require('express');
 const cors         = require('cors');
 const path         = require('path');
+const fs           = require('fs');
 const fetch        = require('node-fetch');
 const YahooFinance = require('yahoo-finance2').default;
 const Database     = require('better-sqlite3');
@@ -15,6 +16,7 @@ const {
   buildCatalystEvent,
   dedupeEvents,
 } = require('./lib/catalyst-intel');
+const { createPaperShadow } = require('./lib/paper-shadow');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -102,6 +104,14 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN atr REAL`,
   `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
+
+// Paper/shadow evidence is global to the frozen study, never tied to a broker
+// account and never capable of submitting an order.
+const paperShadow = createPaperShadow({
+  db,
+  rootDir: __dirname,
+  resolveMarketRegime: () => resolvePaperMarketRegime(),
+});
 
 // ── DB migration: upgrade alpaca_creds to composite (user_id, mode) PK ────────
 // Allows separate paper + live credentials to coexist for the same user.
@@ -1070,6 +1080,11 @@ app.post('/api/scanner-batch', async (req, res) => {
     out.push(...settled.map(r => r.value).filter(Boolean));
   }
   res.json({ results: out });
+  // Feed the exact same observed rows into the order-free shadow comparator.
+  // It records paired baseline/selected decisions and hypothetical outcomes;
+  // this path has no broker client and cannot place an order.
+  paperShadow.ingest(out, { snapshotAt: Date.now() })
+    .catch(error => console.error('[PaperShadow]', error.message));
 });
 
 // ── GET /api/signal/:symbol (scanner intelligence panel signal) ────────────────
@@ -2359,6 +2374,28 @@ async function fetchOHLCV(symbol, limit = 120) {
   return bars.slice(-limit);
 }
 
+let _paperRegimeCache = { at: 0, value: null };
+async function resolvePaperMarketRegime() {
+  const now = Date.now();
+  if (_paperRegimeCache.value && now - _paperRegimeCache.at < 5 * 60 * 1000) {
+    return _paperRegimeCache.value;
+  }
+  try {
+    const bars = await fetchOHLCV('SPY', 30);
+    const closes = (bars || []).map(bar => Number(bar.c)).filter(Number.isFinite);
+    if (closes.length < 20) return null;
+    const prior = closes.slice(-21, -1);
+    const basis = prior.length >= 20 ? prior : closes.slice(-20);
+    const sma20 = basis.reduce((sum, value) => sum + value, 0) / basis.length;
+    const last = closes.at(-1);
+    const value = last >= sma20 ? 'BULLISH' : 'BEARISH';
+    _paperRegimeCache = { at: now, value };
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 
 
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
@@ -2453,6 +2490,71 @@ const MASTER_UNIVERSE = [
 ];
 
 
+
+// ── Latest paper-only walk-forward validation report ─────────────────────────
+// Read-only: this route cannot alter scanner settings or submit broker orders.
+app.get('/api/momentum/strategy-validation', requireAuth, (req, res) => {
+  const reportPath = path.join(__dirname, 'reports', 'strategy-validation-latest.json');
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!fs.existsSync(reportPath)) {
+      return res.json({ available: false, mode: 'PAPER_ONLY' });
+    }
+    const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    const walkForward = report.walkForward || {};
+    const checks = walkForward.promotionChecks || {};
+    return res.json({
+      available: true,
+      studyId: report.studyId,
+      generatedAt: report.generatedAt,
+      mode: 'PAPER_ONLY',
+      promotionStatus: walkForward.promotionStatus || 'NO_PROMOTION',
+      selectionOutcome: walkForward.selectionOutcome || null,
+      selectedName: walkForward.selectionAudit?.selectedName || 'baseline',
+      testMetrics: walkForward.testResults?.metrics || {},
+      testConfidenceInterval: walkForward.testResults?.ci || null,
+      inputSha256: report.inputSnapshot?.inputSha256 || null,
+      snapshotPath: report.inputSnapshot?.snapshotPath || null,
+      experimentSha256: report.experiment?.experimentSha256 || null,
+      replayCommand: report.experiment?.replayCommand || null,
+      failedChecks: Object.entries(checks)
+        .filter(([, check]) => !check?.pass)
+        .map(([name]) => name),
+      sampleAdequate: !!checks.minValidationTrades?.pass && !!checks.minTestTrades?.pass,
+      strategyEvaluable: walkForward.promotionStatus === 'PROMOTED_TO_PAPER'
+        && !!checks.minValidationTrades?.pass
+        && !!checks.minTestTrades?.pass,
+      provider: report.dataQuality?.provider || 'unknown',
+      feed: report.dataQuality?.feed || 'historical OHLCV',
+      receivedSymbols: report.dataQuality?.receivedSymbols || 0,
+      barCount: report.dataQuality?.barCount || 0,
+      primaryCaveat: report.dataQuality?.dataGaps?.[0]
+        || 'Historical results do not guarantee future performance.',
+      liveOrdersChanged: false,
+    });
+  } catch (error) {
+    console.error('Strategy validation report read error:', error.message);
+    return res.status(500).json({ error: 'Validation report could not be read' });
+  }
+});
+
+// ── Live paper/shadow comparison ──────────────────────────────────────────────
+// Read-only summary of hypothetical decisions/outcomes observed by scanner
+// requests. The service has no Alpaca dependency and cannot submit orders.
+app.get('/api/momentum/paper-comparison', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    return res.json(paperShadow.summary());
+  } catch (error) {
+    console.error('[PaperShadow] summary:', error.message);
+    return res.status(503).json({
+      available: false,
+      mode: 'PAPER_ONLY',
+      liveExecutionAllowed: false,
+      error: 'Paper comparison is temporarily unavailable',
+    });
+  }
+});
 
 // ── GET /api/bots/status — SPY gate + PDT state for the logged-in user ────────
 // ── Momentum: intraday analysis (MACD, candle patterns, move %) ──────────────

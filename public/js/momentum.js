@@ -959,11 +959,79 @@
       this._bindEvents();
       this._renderConfigPanel();
       this._resetDailyIfNeeded();
+      this._loadValidationReport();
       AlpacaClient.checkConnection().then(() => {
         this._renderStatus();
         this._renderBotStatus();
         this.run();
       });
+    },
+
+    async _loadValidationReport() {
+      const status = $('mtValidationStatus');
+      const note = $('mtValidationNote');
+      if (!status || !note) return;
+      try {
+        const [response, shadowResponse] = await Promise.all([
+          fetch('/api/momentum/strategy-validation', { cache: 'no-store' }),
+          fetch('/api/momentum/paper-comparison', { cache: 'no-store' }),
+        ]);
+        if (!response.ok) throw new Error(`Report request failed (${response.status})`);
+        const report = await response.json();
+        const shadow = shadowResponse.ok ? await shadowResponse.json() : null;
+        if (!report.available) {
+          status.textContent = 'NOT RUN';
+          status.className = 'mt-validation-status mt-validation-status--missing';
+          note.textContent = 'No historical walk-forward report exists yet. Live trading remains unchanged.';
+          return;
+        }
+
+        const metrics = report.testMetrics || {};
+        const positive = Number(metrics.netExpectancy) > 0;
+        status.textContent = !report.sampleAdequate
+          ? 'INSUFFICIENT SAMPLE'
+          : report.promotionStatus === 'PROMOTED_TO_PAPER'
+            ? 'PAPER CANDIDATE'
+            : 'NO PROMOTION';
+        status.className = `mt-validation-status ${
+          report.strategyEvaluable
+            ? 'mt-validation-status--candidate'
+            : 'mt-validation-status--blocked'
+        }`;
+        const shadowLabel = shadow?.available
+          ? `${shadow.pairedDecisions || 0} paired live shadow decisions recorded`
+          : 'live shadow evidence unavailable';
+        note.textContent = report.strategyEvaluable
+          ? `${report.selectedName} passed the configured validation checks. It remains paper-only.`
+          : `No strategy change is evaluable or promoted. ${shadowLabel}; selected result remains ${report.selectedName}.`;
+
+        const trades = $('mtValidationTrades');
+        const winRate = $('mtValidationWinRate');
+        const expectancy = $('mtValidationExpectancy');
+        const profitFactor = $('mtValidationProfitFactor');
+        const shadowPairs = $('mtValidationShadowPairs');
+        if (trades) trades.textContent = String(metrics.n ?? 0);
+        if (winRate) winRate.textContent = `${((Number(metrics.winRate) || 0) * 100).toFixed(1)}%`;
+        if (expectancy) {
+          expectancy.textContent = `${positive ? '+' : ''}$${(Number(metrics.netExpectancy) || 0).toFixed(2)}`;
+          expectancy.className = positive ? 'mt-validation-positive' : 'mt-validation-negative';
+        }
+        if (profitFactor) profitFactor.textContent = Number.isFinite(Number(metrics.profitFactor))
+          ? Number(metrics.profitFactor).toFixed(2)
+          : String(metrics.profitFactor ?? '—');
+        if (shadowPairs) shadowPairs.textContent = String(shadow?.pairedDecisions ?? 0);
+
+        const caveats = $('mtValidationCaveats');
+        if (caveats) {
+          const failures = (report.failedChecks || []).join(', ') || 'none';
+          const shadowCaveat = shadow?.caveat ? ` ${shadow.caveat}` : '';
+          caveats.textContent = `${report.provider} ${report.feed}; ${report.receivedSymbols} symbols, ${report.barCount.toLocaleString()} bars. Failed checks: ${failures}. ${report.primaryCaveat}${shadowCaveat}`;
+        }
+      } catch (error) {
+        status.textContent = 'UNAVAILABLE';
+        status.className = 'mt-validation-status mt-validation-status--missing';
+        note.textContent = 'The validation report could not be loaded. Live trading remains unchanged.';
+      }
     },
 
     /* ── Public pipeline entry — mirrors main.py's run() ─────────────────── */

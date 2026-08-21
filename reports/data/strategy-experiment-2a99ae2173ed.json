@@ -1,0 +1,343 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 2,
+  "inputSnapshot": {
+    "inputSha256": "d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2",
+    "snapshotPath": "reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz"
+  },
+  "baseConfig": {
+    "version": 2,
+    "maxConcurrentLongs": 2,
+    "maxTradesPerDay": 5,
+    "halfSpreadPct": 0.15,
+    "slippagePct": 0.2,
+    "startingEquity": 25000,
+    "positionPct": 10,
+    "fixedNotional": null,
+    "leverage": 1,
+    "maxRiskPct": 1,
+    "maxDailyRiskPct": 3,
+    "stopPct": 5,
+    "takeProfitRsiLevel": 75,
+    "maxHoldBars": 78,
+    "cooldownBars": 3,
+    "enforceMarketHours": true,
+    "entryStartMinutesET": 575,
+    "entryEndMinutesET": 950,
+    "gates": {
+      "priceRange": true,
+      "minGainPct": true,
+      "minRelVol": true,
+      "minScore": true,
+      "maxGainPct": false,
+      "requireAboveVwap": false,
+      "requireMacdBullish": false,
+      "requireBreakout20": false,
+      "rejectBearishDump": false,
+      "marketRegimeBullish": false,
+      "newsCatalyst": false,
+      "floatShares": false,
+      "level2Tape": false,
+      "optionsFlow": false
+    },
+    "minPrice": 3,
+    "maxPrice": 20,
+    "minGainPct": 10,
+    "maxGainPct": null,
+    "minRelVol": 5,
+    "minScore": 4,
+    "dumpCandlePct": -8,
+    "benchmarkSymbol": "SPY",
+    "rsiPeriod": 14,
+    "macdFast": 12,
+    "macdSlow": 26,
+    "macdSignal": 9,
+    "devFrac": 0.6,
+    "valFrac": 0.2,
+    "bootstrapReps": 2000,
+    "bootstrapSeed": 42,
+    "promotionMinValTrades": 30,
+    "promotionMinTestTrades": 30,
+    "mode": "PAPER_ONLY",
+    "_mandatoryGates": [
+      "noShorts",
+      "marketHours",
+      "stopProtection",
+      "positionCap",
+      "dailyTradeCap"
+    ]
+  },
+  "variants": [
+    {
+      "name": "remove_price_gate",
+      "configOverride": {
+        "gates": {
+          "priceRange": false,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "remove_gain_gate",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": false,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "remove_relative_volume_gate",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": false,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "remove_score_gate",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": false,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "raise_min_gain_to_15pct",
+      "configOverride": {
+        "minGainPct": 15
+      }
+    },
+    {
+      "name": "raise_min_relative_volume_to_7_5x",
+      "configOverride": {
+        "minRelVol": 7.5
+      }
+    },
+    {
+      "name": "require_score_5",
+      "configOverride": {
+        "minScore": 5
+      }
+    },
+    {
+      "name": "cap_extended_gain_at_30pct",
+      "configOverride": {
+        "maxGainPct": 30,
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": true,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "require_price_above_vwap",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": true,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "require_macd_12_26_9_bullish",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": true,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "require_20_bar_breakout",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": true,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "reject_large_bearish_bar",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": true,
+          "marketRegimeBullish": false,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "require_prior_spy_bullish_regime",
+      "configOverride": {
+        "gates": {
+          "priceRange": true,
+          "minGainPct": true,
+          "minRelVol": true,
+          "minScore": true,
+          "maxGainPct": false,
+          "requireAboveVwap": false,
+          "requireMacdBullish": false,
+          "requireBreakout20": false,
+          "rejectBearishDump": false,
+          "marketRegimeBullish": true,
+          "newsCatalyst": false,
+          "floatShares": false,
+          "level2Tape": false,
+          "optionsFlow": false
+        }
+      }
+    },
+    {
+      "name": "enter_0935_to_1100_et",
+      "configOverride": {
+        "entryStartMinutesET": 575,
+        "entryEndMinutesET": 660
+      }
+    },
+    {
+      "name": "enter_1000_to_1550_et",
+      "configOverride": {
+        "entryStartMinutesET": 600,
+        "entryEndMinutesET": 950
+      }
+    },
+    {
+      "name": "tighten_stop_to_3pct",
+      "configOverride": {
+        "stopPct": 3
+      }
+    },
+    {
+      "name": "widen_stop_to_7pct",
+      "configOverride": {
+        "stopPct": 7
+      }
+    },
+    {
+      "name": "exit_at_rsi_70",
+      "configOverride": {
+        "takeProfitRsiLevel": 70
+      }
+    },
+    {
+      "name": "exit_at_rsi_80",
+      "configOverride": {
+        "takeProfitRsiLevel": 80
+      }
+    }
+  ],
+  "sourceHashes": {
+    "validatorSha256": "b7655bcce504b6c4b61a523f2a86fd056ae07dc09d60907629686220b4832727",
+    "runnerSha256": "a91cf7a98dd0266ed07caaaa81bdd412192c34c69026364a37e0d18407932d81"
+  }
+}

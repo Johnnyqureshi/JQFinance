@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 2,
+  "diagnosticId": "STOP_FREE_ENTRY_EXIT_ISOLATION",
+  "baseExperimentSha256": "7488c74ceda87fb85747ae3c12b098ecead741b1399c4e1d34795f31c2c372de",
+  "baseExperimentPath": "reports/data/strategy-experiment-7488c74ceda8.json",
+  "inputSha256": "d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2",
+  "sourceHashes": {
+    "validatorSha256": "5cb79f53be8f9260a44feb86f25032b85baba5432355aec096e21499e8816e8a",
+    "runnerSha256": "c33ad16fa77ad6d2f152ea6e80d1eba1d85327f6488d287b3e213210e18ecb62"
+  }
+}

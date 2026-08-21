@@ -14,6 +14,7 @@
  *   node scripts/validate-strategy.js --provider yahoo --days 55
  *   node scripts/validate-strategy.js --snapshot reports/data/strategy-ohlcv-<hash>.json.gz
  *   node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-<hash>.json
+ *   node scripts/validate-strategy.js --diagnostic-stop-free --experiment reports/data/strategy-experiment-<hash>.json
  */
 
 require('dotenv').config();
@@ -29,6 +30,7 @@ const {
   createConfig,
   replaySession,
   runWalkForwardValidation,
+  runStopFreeDiagnostic,
 } = require('../lib/strategy-validator');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -551,16 +553,93 @@ ${gaps}
 `;
 }
 
+function stopFreeDiagnosticIdentity(experiment, inputSnapshot, sourceHashes = currentSourceHashes()) {
+  const payload = {
+    schemaVersion: 1,
+    contractVersion: CONTRACT_VERSION,
+    diagnosticId: 'STOP_FREE_ENTRY_EXIT_ISOLATION',
+    baseExperimentSha256: experiment.experimentSha256,
+    baseExperimentPath: experiment.experimentPath,
+    inputSha256: inputSnapshot.inputSha256,
+    sourceHashes,
+  };
+  const diagnosticSha256 = sha256(safeJson(payload, 0));
+  const diagnosticId = diagnosticSha256.slice(0, 12);
+  return {
+    payload,
+    diagnosticSha256,
+    diagnosticId,
+    manifestPath: path.join('reports', 'data', `strategy-stop-free-diagnostic-${diagnosticId}.json`),
+    replayCommand: `node scripts/validate-strategy.js --diagnostic-stop-free --experiment ${experiment.experimentPath}`,
+  };
+}
+
+function stopFreeDiagnosticMarkdown(report) {
+  const rows = ['dev', 'val', 'test'].map(period => {
+    const r = report.diagnostic.periods[period];
+    return `| ${period === 'test' ? 'Untouched test' : period === 'dev' ? 'Development' : 'Validation'} | `
+      + `${r.baseline.n} | ${pct(r.baseline.winRate)} | ${money(r.baseline.netExpectancy)} | `
+      + `${r.stopFree.n} | ${pct(r.stopFree.winRate)} | ${money(r.stopFree.netExpectancy)} | `
+      + `${r.stopFree.profitFactor} | ${money(r.stopFree.worstMae)} | ${money(r.stopFree.maxDrawdown)} | `
+      + `${r.comparison.ignoredStopTradeCount} / ${r.comparison.ignoredStopBreaches} |`;
+  }).join('\n');
+  const assessment = report.diagnostic.assessment;
+  return `# Stop-Free Entry/Exit Diagnostic
+
+Generated: ${report.generatedAt}
+Mode: **PAPER_ONLY — DIAGNOSTIC ONLY**
+Base study: \`${report.baseStudyId}\`
+Base experiment SHA-256: \`${report.baseExperiment.experimentSha256}\`
+Diagnostic SHA-256: \`${report.diagnosticIdentity.diagnosticSha256}\`
+Exact replay: \`${report.diagnosticIdentity.replayCommand}\`
+
+## What was held constant
+
+- The same entry signals, gates, next-bar fills, spread, slippage, and stop-based sizing.
+- The same RSI, session, max-hold, and split-boundary exits.
+- Only stop-triggered exits were suppressed. This cannot enable live execution and is not eligible for promotion.
+
+## Results
+
+| Period | Baseline trades | Baseline win rate | Baseline expectancy | Stop-free trades | Stop-free win rate | Stop-free expectancy | Stop-free PF | Stop-free worst MAE | Stop-free max drawdown | Stop-hit trades / bars below stop |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+${rows}
+
+## Assessment
+
+**${assessment.status}**
+
+${assessment.conclusion}
+
+The stop-free replay is a counterfactual risk diagnostic, not a trading recommendation. The active paper configuration and live order path were not changed.
+`;
+}
+
+function writeStopFreeDiagnosticArtifacts(rootDir, diagnosticReport, identity) {
+  const reportDir = path.join(rootDir, 'reports');
+  const versionedReport = path.join(reportDir, `strategy-stop-free-diagnostic-${identity.diagnosticId}.json`);
+  const latestReport = path.join(reportDir, 'strategy-stop-free-diagnostic-latest.json');
+  const latestSummary = path.join(reportDir, 'strategy-stop-free-diagnostic-latest.md');
+  atomicWrite(path.join(rootDir, identity.manifestPath), safeJson(identity.payload) + '\n');
+  atomicWrite(versionedReport, safeJson(diagnosticReport) + '\n');
+  atomicWrite(latestReport, safeJson(diagnosticReport) + '\n');
+  atomicWrite(latestSummary, stopFreeDiagnosticMarkdown(diagnosticReport));
+  return { versionedReport, latestReport, latestSummary };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   let lockedExperiment = null;
   if (args.experiment) {
-    const conflicting = Object.keys(args).filter(key => key !== 'experiment');
+    const conflicting = Object.keys(args).filter(key => key !== 'experiment' && key !== 'diagnostic-stop-free');
     if (conflicting.length) {
       throw new Error(`--experiment rejects conflicting flags: ${conflicting.map(key => `--${key}`).join(', ')}`);
     }
     lockedExperiment = loadExperimentManifest(args.experiment);
     args.snapshot = lockedExperiment.payload.inputSnapshot.snapshotPath;
+  }
+  if (args['diagnostic-stop-free'] && !lockedExperiment) {
+    throw new Error('--diagnostic-stop-free requires a locked --experiment manifest');
   }
   let days = toInt(args.days, DEFAULT_DAYS, 30, 730);
   const maxSymbols = toInt(args['max-symbols'], DEFAULT_MAX_SYMBOLS, 2, 250);
@@ -670,6 +749,47 @@ async function main() {
     ? lockedExperiment.payload.variants
     : ablations(baseConfig);
   const experiment = lockedExperiment || saveExperimentManifest(inputSnapshot, baseConfig, variants);
+  if (args['diagnostic-stop-free']) {
+    const diagnostic = runStopFreeDiagnostic(built.signals, barsMap, baseConfig);
+    const identity = stopFreeDiagnosticIdentity(experiment, inputSnapshot);
+    const diagnosticReport = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      mode: 'PAPER_ONLY',
+      liveExecutionAllowed: false,
+      promotionEligible: false,
+      baseStudyId: experiment.studyId,
+      inputSnapshot: {
+        inputSha256: inputSnapshot.inputSha256,
+        snapshotPath: inputSnapshot.snapshotPath,
+        immutable: true,
+      },
+      baseExperiment: {
+        experimentSha256: experiment.experimentSha256,
+        experimentPath: experiment.experimentPath,
+        replayCommand: experiment.replayCommand,
+      },
+      diagnosticIdentity: {
+        diagnosticSha256: identity.diagnosticSha256,
+        manifestPath: identity.manifestPath,
+        replayCommand: identity.replayCommand,
+        sourceHashes: identity.payload.sourceHashes,
+      },
+      diagnostic,
+      note: 'Separate counterfactual diagnostic. It does not modify paper-strategy.json or any live order behavior.',
+    };
+    const artifacts = writeStopFreeDiagnosticArtifacts(ROOT, diagnosticReport, identity);
+    console.log('');
+    console.log('════════════════════════════════════════════════════');
+    console.log(`Diagnostic: ${identity.diagnosticId}`);
+    console.log(`Status:     ${diagnostic.assessment.status}`);
+    console.log(`Test win:   ${pct(diagnostic.periods.test.stopFree.winRate)}`);
+    console.log(`Test expect:${money(diagnostic.periods.test.stopFree.netExpectancy)} after costs`);
+    console.log(`Report:     ${path.relative(ROOT, artifacts.latestReport)}`);
+    console.log(`Replay:     ${identity.replayCommand}`);
+    console.log('Paper strategy and live orders: UNCHANGED');
+    return;
+  }
   console.log(`[validator] replaying ${built.signals.length.toLocaleString()} decisions across ${variants.length} one-at-a-time ablations`);
   const walkForward = runWalkForwardValidation(built.signals, barsMap, baseConfig, variants);
   const fullBaseline = replaySession(built.signals, barsMap, baseConfig);
@@ -809,6 +929,8 @@ if (require.main === module) {
 module.exports = {
   buildExperimentPayload,
   experimentIdentity,
+  stopFreeDiagnosticIdentity,
+  writeStopFreeDiagnosticArtifacts,
   parseArgs,
   safeJson,
 };

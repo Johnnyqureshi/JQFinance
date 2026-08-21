@@ -1,6 +1,6 @@
 {
-  "studyId": "2a99ae2173ed",
-  "generatedAt": "2026-08-21T04:02:58.370Z",
+  "studyId": "7488c74ceda8",
+  "generatedAt": "2026-08-21T04:30:44.364Z",
   "contractVersion": 2,
   "mode": "PAPER_ONLY",
   "inputSnapshot": {
@@ -12,13 +12,13 @@
     "immutable": true
   },
   "experiment": {
-    "experimentSha256": "2a99ae2173edd0bfb311669bf15da4d9222f8b8b34867ebd3941e96c81c438fa",
-    "experimentPath": "reports/data/strategy-experiment-2a99ae2173ed.json",
-    "replayCommand": "node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-2a99ae2173ed.json",
+    "experimentSha256": "7488c74ceda87fb85747ae3c12b098ecead741b1399c4e1d34795f31c2c372de",
+    "experimentPath": "reports/data/strategy-experiment-7488c74ceda8.json",
+    "replayCommand": "node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-7488c74ceda8.json",
     "configLocked": true,
     "sourceHashes": {
-      "validatorSha256": "b7655bcce504b6c4b61a523f2a86fd056ae07dc09d60907629686220b4832727",
-      "runnerSha256": "a91cf7a98dd0266ed07caaaa81bdd412192c34c69026364a37e0d18407932d81"
+      "validatorSha256": "5cb79f53be8f9260a44feb86f25032b85baba5432355aec096e21499e8816e8a",
+      "runnerSha256": "c33ad16fa77ad6d2f152ea6e80d1eba1d85327f6488d287b3e213210e18ecb62"
     }
   },
   "dataQuality": {
@@ -51,7 +51,7 @@
     "benchmarkSymbol": "SPY",
     "volumeLookbackSessions": 20,
     "minHistorySessions": 5,
-    "generatedAt": 1787284942928,
+    "generatedAt": 1787286606782,
     "unavailableGates": [
       "news_catalyst",
       "float_shares",
@@ -179,6 +179,7 @@
         "turnover": 2,
         "avgMae": -261.20161999999993,
         "avgMfe": 0,
+        "worstMae": -378.7527599999999,
         "maxDrawdown": 265.7730392730009,
         "exitReasons": {
           "STOP": 2
@@ -281,6 +282,7 @@
         "turnover": 0,
         "avgMae": 0,
         "avgMfe": 0,
+        "worstMae": 0,
         "maxDrawdown": 0,
         "exitReasons": {},
         "monthly": {},
@@ -374,6 +376,7 @@
         "turnover": 6,
         "avgMae": -234.17296249999984,
         "avgMfe": 175.60675916666673,
+        "worstMae": -535.6238299999998,
         "maxDrawdown": 739.8335123371216,
         "exitReasons": {
           "RSI_EXIT": 2,
@@ -544,6 +547,7 @@
           "turnover": 7,
           "avgMae": -94.53407285714289,
           "avgMfe": 196.09327035714279,
+          "worstMae": -157.46141249999974,
           "maxDrawdown": 267.81504336000216,
           "exitReasons": {
             "STOP": 4,
@@ -653,6 +657,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -818,6 +823,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -920,6 +926,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -1085,6 +1092,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -1187,6 +1195,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -1352,6 +1361,7 @@
           "turnover": 5,
           "avgMae": -168.06098999999992,
           "avgMfe": 18.927830000000007,
+          "worstMae": -374.2491599999999,
           "maxDrawdown": 563.368155109496,
           "exitReasons": {
             "STOP": 4,
@@ -1461,6 +1471,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -1626,6 +1637,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -1728,6 +1740,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -1893,6 +1906,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -1995,6 +2009,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -2160,6 +2175,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -2262,6 +2278,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -2427,6 +2444,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -2520,6 +2538,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -2685,6 +2704,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -2787,6 +2807,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -2952,6 +2973,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -3054,6 +3076,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -3219,6 +3242,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -3312,6 +3336,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -3477,6 +3502,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -3579,6 +3605,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -3744,6 +3771,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -3837,6 +3865,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -4002,6 +4031,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -4095,6 +4125,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -4260,6 +4291,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -4362,6 +4394,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -4527,6 +4560,7 @@
           "turnover": 2,
           "avgMae": -261.29207999999994,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 187.92986482019842,
           "exitReasons": {
             "STOP": 2
@@ -4629,6 +4663,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -4794,6 +4829,7 @@
           "turnover": 2,
           "avgMae": -261.0206999999999,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 334.4623600337982,
           "exitReasons": {
             "STOP": 1,
@@ -4897,6 +4933,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -5062,6 +5099,7 @@
           "turnover": 2,
           "avgMae": -105.7975399999999,
           "avgMfe": 0,
+          "worstMae": -144.01232,
           "maxDrawdown": 183.8450019640004,
           "exitReasons": {
             "RSI_EXIT": 1,
@@ -5165,6 +5203,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -5330,6 +5369,7 @@
           "turnover": 2,
           "avgMae": -261.20161999999993,
           "avgMfe": 0,
+          "worstMae": -378.7527599999999,
           "maxDrawdown": 265.7730392730009,
           "exitReasons": {
             "STOP": 2
@@ -5432,6 +5472,7 @@
           "turnover": 0,
           "avgMae": 0,
           "avgMfe": 0,
+          "worstMae": 0,
           "maxDrawdown": 0,
           "exitReasons": {},
           "monthly": {},
@@ -5538,6 +5579,7 @@
         "turnover": 0,
         "avgMae": 0,
         "avgMfe": 0,
+        "worstMae": 0,
         "maxDrawdown": 0,
         "exitReasons": {},
         "monthly": {},
@@ -5709,6 +5751,7 @@
         "turnover": 6,
         "avgMae": -234.17296249999984,
         "avgMfe": 175.60675916666673,
+        "worstMae": -535.6238299999998,
         "maxDrawdown": 739.8335123371216,
         "exitReasons": {
           "RSI_EXIT": 2,
@@ -5823,7 +5866,9 @@
           "mae": -90.3107999999997,
           "mfe": 358.48920000000015,
           "holdBars": 1,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         },
         {
           "symbol": "BIVI",
@@ -5842,7 +5887,9 @@
           "mae": -116.8615000000002,
           "mfe": 338.61850000000004,
           "holdBars": 1,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         },
         {
           "symbol": "BIVI",
@@ -5861,7 +5908,9 @@
           "mae": -343.8630449999998,
           "mfe": 195.35695499999997,
           "holdBars": 2,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         },
         {
           "symbol": "SGLY",
@@ -5880,7 +5929,9 @@
           "mae": -228.2944999999998,
           "mfe": 0,
           "holdBars": 1,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         },
         {
           "symbol": "SGLY",
@@ -5899,7 +5950,9 @@
           "mae": -90.08409999999976,
           "mfe": 161.17590000000013,
           "holdBars": 54,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         },
         {
           "symbol": "GYGY",
@@ -5918,7 +5971,9 @@
           "mae": -535.6238299999998,
           "mfe": 0,
           "holdBars": 1,
-          "marketRegime": "NEUTRAL"
+          "marketRegime": "NEUTRAL",
+          "ignoredStopBreaches": 0,
+          "firstIgnoredStopTime": null
         }
       ]
     },
@@ -5977,6 +6032,7 @@
       "turnover": 8,
       "avgMae": -239.06566624999988,
       "avgMfe": 130.36727750000003,
+      "worstMae": -529.8489099999998,
       "maxDrawdown": 731.8595520460003,
       "exitReasons": {
         "STOP": 5,
@@ -6093,6 +6149,6 @@
     "decisions": "reports/strategy-decisions-latest.jsonl.gz",
     "trades": "reports/strategy-trades-latest.csv",
     "inputSnapshot": "reports/data/strategy-ohlcv-d64d4027d40c646e.json.gz",
-    "experiment": "reports/data/strategy-experiment-2a99ae2173ed.json"
+    "experiment": "reports/data/strategy-experiment-7488c74ceda8.json"
   }
 }

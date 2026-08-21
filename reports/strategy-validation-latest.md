@@ -1,11 +1,11 @@
 # Strategy Validation Report
 
-Generated: 2026-08-21T04:02:58.370Z
-Study: 2a99ae2173ed
+Generated: 2026-08-21T04:30:44.364Z
+Study: 7488c74ceda8
 Mode: **PAPER_ONLY**
 Input SHA-256: `d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2`
-Experiment SHA-256: `2a99ae2173edd0bfb311669bf15da4d9222f8b8b34867ebd3941e96c81c438fa`
-Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-2a99ae2173ed.json`
+Experiment SHA-256: `7488c74ceda87fb85747ae3c12b098ecead741b1399c4e1d34795f31c2c372de`
+Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-7488c74ceda8.json`
 
 ## Decision
 

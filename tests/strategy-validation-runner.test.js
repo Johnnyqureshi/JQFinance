@@ -1,10 +1,15 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { createConfig } = require('../lib/strategy-validator');
 const {
   buildExperimentPayload,
   experimentIdentity,
+  stopFreeDiagnosticIdentity,
+  writeStopFreeDiagnosticArtifacts,
   safeJson,
 } = require('../scripts/validate-strategy');
 
@@ -84,6 +89,63 @@ test('changing validator source identity changes the experiment identity', () =>
     validatorSha256: 'd'.repeat(64),
   });
   assert.notStrictEqual(experimentIdentity(original).studyId, experimentIdentity(changed).studyId);
+});
+
+test('stop-free diagnostic identity is bound to its baseline experiment and source', () => {
+  const experiment = {
+    experimentSha256: 'e'.repeat(64),
+    experimentPath: 'reports/data/strategy-experiment-eeeeeeeeeeee.json',
+  };
+  const identity = stopFreeDiagnosticIdentity(experiment, input, sourceHashes);
+  assert(/^[a-f0-9]{64}$/.test(identity.diagnosticSha256));
+  assert(identity.replayCommand.includes('--diagnostic-stop-free --experiment'));
+  assert.strictEqual(identity.payload.baseExperimentSha256, experiment.experimentSha256);
+  const changed = stopFreeDiagnosticIdentity(
+    { ...experiment, experimentSha256: 'f'.repeat(64) },
+    input,
+    sourceHashes,
+  );
+  assert.notStrictEqual(changed.diagnosticId, identity.diagnosticId);
+});
+
+test('stop-free diagnostic artifacts never write the frozen paper configuration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-stop-free-'));
+  const configPath = path.join(root, 'config', 'paper-strategy.json');
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  const sentinel = '{"mode":"PAPER_ONLY","sentinel":true}\n';
+  fs.writeFileSync(configPath, sentinel);
+  const metric = {
+    n: 1, winRate: 0, netExpectancy: -1, profitFactor: 0,
+    worstMae: -5, maxDrawdown: 5,
+  };
+  const report = {
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    baseStudyId: 'baseline-study',
+    baseExperiment: { experimentSha256: 'e'.repeat(64) },
+    diagnosticIdentity: {
+      diagnosticSha256: 'f'.repeat(64),
+      replayCommand: 'node scripts/validate-strategy.js --diagnostic-stop-free --experiment reports/data/example.json',
+    },
+    diagnostic: {
+      periods: Object.fromEntries(['dev', 'val', 'test'].map(period => [period, {
+        baseline: metric,
+        stopFree: metric,
+        comparison: { ignoredStopTradeCount: 1, ignoredStopBreaches: 2 },
+      }])),
+      assessment: { status: 'INSUFFICIENT_SAMPLE', conclusion: 'Diagnostic only.' },
+    },
+  };
+  const identity = {
+    diagnosticId: 'abcdef123456',
+    manifestPath: 'reports/data/strategy-stop-free-diagnostic-abcdef123456.json',
+    payload: { schemaVersion: 1 },
+  };
+  const artifacts = writeStopFreeDiagnosticArtifacts(root, report, identity);
+  assert.strictEqual(fs.readFileSync(configPath, 'utf8'), sentinel);
+  assert(fs.existsSync(artifacts.latestReport));
+  assert(fs.existsSync(artifacts.latestSummary));
+  assert(fs.existsSync(path.join(root, identity.manifestPath)));
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 if (process.exitCode) {

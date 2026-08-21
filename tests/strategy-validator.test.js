@@ -43,6 +43,7 @@ const {
   ablationRun,
   buildPointInTimeSignals,
   runWalkForwardValidation,
+  runStopFreeDiagnostic,
   instrumentGroup,
 } = require('../lib/strategy-validator');
 
@@ -491,6 +492,57 @@ test('sell costs applied to all non-stop exits (RSI / max-hold)', () => {
   assert(exitBar, 'exit bar not found');
   assert(trades[0].exitPrice < exitBar.c,
     `exitPrice ${trades[0].exitPrice} should be < barClose ${exitBar.c} (sell costs applied)`);
+});
+
+test('stop-free diagnostic suppresses only stop exits and remains paper-only', () => {
+  function diagnosticBars(symbol, base) {
+    return [
+      { symbol, t: base,                 o: 10, h: 10.2, l: 9.9, c: 10,   v: 500000 },
+      { symbol, t: base + 5 * 60000,    o: 10, h: 10.2, l: 9.9, c: 10,   v: 500000 },
+      { symbol, t: base + 10 * 60000,   o: 10, h: 10.1, l: 9.0, c: 9.8,  v: 500000 },
+      { symbol, t: base + 15 * 60000,   o: 9.8, h: 10.1, l: 9.6, c: 10,  v: 500000 },
+      { symbol, t: base + 20 * 60000,   o: 10, h: 10.3, l: 9.9, c: 10.2, v: 500000 },
+    ];
+  }
+  const day = 24 * 60 * 60 * 1000;
+  const barsMap = {
+    DIAGA: diagnosticBars('DIAGA', SESSION_START_MS),
+    DIAGB: diagnosticBars('DIAGB', SESSION_START_MS + day),
+    DIAGC: diagnosticBars('DIAGC', SESSION_START_MS + 2 * day),
+  };
+  const cfg = createConfig({
+    stopPct: 5,
+    takeProfitRsiLevel: 101,
+    maxHoldBars: 3,
+    halfSpreadPct: 0,
+    slippagePct: 0,
+    devFrac: 0.34,
+    valFrac: 0.33,
+  });
+  const originalConfig = JSON.stringify(cfg);
+  const signals = [
+    makeSignal('DIAGA', 0),
+    makeSignal('DIAGB', 0, { tMs: SESSION_START_MS + day }),
+    makeSignal('DIAGC', 0, { tMs: SESSION_START_MS + 2 * day }),
+  ];
+  const baseline = replaySession([signals[0]], barsMap, cfg);
+  assert.strictEqual(baseline.trades[0].exitReason, 'STOP');
+
+  const diagnostic = runStopFreeDiagnostic(signals, barsMap, cfg);
+  assert.strictEqual(diagnostic.mode, 'PAPER_ONLY');
+  assert.strictEqual(diagnostic.liveExecutionAllowed, false);
+  assert.strictEqual(diagnostic.promotionEligible, false);
+  assert.strictEqual(diagnostic.stopExitSuppressed, true);
+  assert.strictEqual(
+    diagnostic.periods.dev.stopFree.n,
+    diagnostic.periods.dev.baseline.n,
+    'diagnostic must replay the protected baseline entries rather than alter entry selection',
+  );
+  assert.strictEqual(diagnostic.periods.dev.stopFree.exitReasons.STOP || 0, 0);
+  assert.strictEqual(diagnostic.periods.dev.stopFreeTrades[0].exitReason, 'MAX_HOLD');
+  assert(diagnostic.periods.dev.stopFreeTrades[0].ignoredStopBreaches > 0);
+  assert(diagnostic.periods.dev.stopFree.worstMae < 0);
+  assert.strictEqual(JSON.stringify(cfg), originalConfig, 'diagnostic must not mutate frozen config');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

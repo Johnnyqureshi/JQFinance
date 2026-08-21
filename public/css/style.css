@@ -8197,18 +8197,19 @@ option { background: var(--card); }
 .at-clear-log-btn:disabled { opacity: .4; cursor: default; }
 
 .at-close-all-btn {
-  font-size: .67rem;
-  font-weight: 600;
-  background: transparent;
-  border: 1px solid #3d1f1f;
-  color: #f85149;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  background: rgba(248,81,73,.13);
+  border: 1px solid rgba(248,81,73,.7);
+  color: #ff7b72;
   border-radius: 5px;
-  padding: 2px 9px;
+  padding: 4px 10px;
   cursor: pointer;
-  margin-left: auto;
-  transition: background .15s, border-color .15s;
+  margin-left: 0;
+  transition: background .15s, border-color .15s, color .15s;
 }
-.at-close-all-btn:hover { background: #1a0a0a; border-color: #f85149; }
+.at-close-all-btn:hover:not(:disabled) { background: rgba(248,81,73,.24); border-color: #ff7b72; color: #fff; }
 .at-close-all-btn:disabled { opacity: .4; cursor: default; }
 
 .at-whale-bias-bull { color: #3fb950; font-weight: 700; }

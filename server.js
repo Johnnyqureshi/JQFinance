@@ -17,6 +17,7 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { createPaperShadow } = require('./lib/paper-shadow');
+const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -2049,6 +2050,53 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   return data;
 }
 
+// Emergency liquidation is coordinated server-side so an order accepted just
+// before a browser kill switch cannot fill after the account has been closed.
+const alpacaEmergencyFlattenLocks = new Set();
+const alpacaOrderRequestsInFlight = new Map();
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function isAlpacaFlattening(userId) {
+  return alpacaEmergencyFlattenLocks.has(userId);
+}
+
+function beginAlpacaOrderRequest(userId) {
+  alpacaOrderRequestsInFlight.set(userId, (alpacaOrderRequestsInFlight.get(userId) || 0) + 1);
+}
+
+function endAlpacaOrderRequest(userId) {
+  const remaining = (alpacaOrderRequestsInFlight.get(userId) || 1) - 1;
+  if (remaining > 0) alpacaOrderRequestsInFlight.set(userId, remaining);
+  else alpacaOrderRequestsInFlight.delete(userId);
+}
+
+async function waitForAlpacaOrderRequests(userId, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while ((alpacaOrderRequestsInFlight.get(userId) || 0) > 0) {
+    if (Date.now() >= deadline) {
+      throw new Error('A broker order submission did not settle before emergency liquidation.');
+    }
+    await sleep(50);
+  }
+}
+
+async function listAlpacaOpenOrders(userId) {
+  const orders = await alpacaFetch(userId, '/v2/orders?limit=500&status=open');
+  return Array.isArray(orders) ? orders : [];
+}
+
+async function cancelAlpacaOpenOrders(userId, orders) {
+  return Promise.all((Array.isArray(orders) ? orders : []).map(async order => {
+    try {
+      await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' });
+      return { id: order.id, ok: true };
+    } catch (error) {
+      return { id: order.id, ok: false, error: error.message };
+    }
+  }));
+}
+
 // Save credentials — stores the key pair for the given mode, sets it as active
 app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const { apiKey, apiSecret, mode } = req.body || {};
@@ -2149,12 +2197,32 @@ app.get('/api/alpaca/orders', requireAuth, async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Close ALL open positions at market price
+// Emergency account flatten: reject new orders, cancel every open order, then
+// close positions and verify the broker reports no positions or open orders.
 app.delete('/api/alpaca/positions', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  if (isAlpacaFlattening(userId)) {
+    return res.status(409).json({ ok: false, error: 'Emergency flatten is already in progress.' });
+  }
+  alpacaEmergencyFlattenLocks.add(userId);
   try {
-    const result = await alpacaFetch(req.session.userId, '/v2/positions', { method: 'DELETE' });
-    res.json({ ok: true, result });
-  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+    const result = await runEmergencyFlatten({
+      waitForOrderRequests: () => waitForAlpacaOrderRequests(userId),
+      listOpenOrders: () => listAlpacaOpenOrders(userId),
+      cancelOpenOrders: orders => cancelAlpacaOpenOrders(userId, orders),
+      closeAllPositions: () => alpacaFetch(userId, '/v2/positions', { method: 'DELETE' }),
+      listPositions: async () => {
+        const positions = await alpacaFetch(userId, '/v2/positions');
+        return Array.isArray(positions) ? positions : [];
+      },
+    });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    const status = e instanceof EmergencyFlattenError ? 409 : 400;
+    res.status(status).json({ ok: false, error: e.message, details: e.details || null });
+  } finally {
+    alpacaEmergencyFlattenLocks.delete(userId);
+  }
 });
 
 // Public SPY gate levels — no auth needed (cached server-side)
@@ -2167,6 +2235,9 @@ app.get('/api/spy-levels', async (req, res) => {
 
 // Place order (market with optional TP/SL bracket)
 app.post('/api/alpaca/order', requireAuth, async (req, res) => {
+  if (isAlpacaFlattening(req.session.userId)) {
+    return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
+  }
   const { symbol, side, amount, tpPct, slPct, leverage, clientOrderId } = req.body || {};
 
   // ── Input validation ───────────────────────────────────────────────────────
@@ -2307,10 +2378,21 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
     }
     if (clientOrderId) orderBody.client_order_id = String(clientOrderId);
 
-    const data = await alpacaFetch(req.session.userId, '/v2/orders', {
-      method: 'POST',
-      body:   JSON.stringify(orderBody),
-    });
+    // Re-check immediately before the broker request, then mark it in-flight.
+    // The flatten route waits for this counter before cancelling orders.
+    if (isAlpacaFlattening(req.session.userId)) {
+      return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
+    }
+    beginAlpacaOrderRequest(req.session.userId);
+    let data;
+    try {
+      data = await alpacaFetch(req.session.userId, '/v2/orders', {
+        method: 'POST',
+        body:   JSON.stringify(orderBody),
+      });
+    } finally {
+      endAlpacaOrderRequest(req.session.userId);
+    }
     res.json({ ok: true, order: data, shares: orderBody.qty || null, price, leverage: lev });
   } catch (e) {
     // A timeout or broker-side failure after a POST is ambiguous: Alpaca may

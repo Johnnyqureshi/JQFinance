@@ -960,6 +960,9 @@
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
     _activeTrades: new Set(),      // symbols with pending/live bot orders (prevents double-entry)
     posMonitorId:  null,           // setInterval handle for position polling
+    _flattenInProgress: false,     // blocks new automated orders while the kill switch settles
+    _autoTradePromise: null,       // active auto-entry cycle, awaited before flattening
+    _rsiExitPromise: null,         // active RSI exit cycle, awaited before flattening
 
     init() {
       this.config = MomentumConfig.load();
@@ -1059,7 +1062,7 @@
         const meta = MomentumScanner._lastUniverseMeta;
         this._setScanStatus('done', results.length, '', 0, meta?.count || 0, meta);
         this._startCountdown();
-        if (this.botEnabled) this._autoTrade(results).catch(() => {});
+        if (this.botEnabled && !this._flattenInProgress) this._autoTrade(results).catch(() => {});
       } catch (err) {
         this._setScanStatus('error', 0, err.message);
       }
@@ -2208,20 +2211,24 @@
     async _autoTrade(results) {
       // BUG FIX: null guard — results could be undefined if scan throws
       if (!results?.length) return;
-      if (!this.botEnabled || !AlpacaClient.connected) return;
+      if (!this.botEnabled || this._flattenInProgress || !AlpacaClient.connected) return;
 
       // Concurrency mutex — prevent overlapping auto-trade cycles (manual refresh,
       // timer scan, or config change could each trigger a cycle in flight)
       if (this._autoTradeBusy) return;
       this._autoTradeBusy = true;
+      const cycle = this._autoTradeInner(results);
+      this._autoTradePromise = cycle;
       try {
-        await this._autoTradeInner(results);
+        await cycle;
       } finally {
         this._autoTradeBusy = false;
+        if (this._autoTradePromise === cycle) this._autoTradePromise = null;
       }
     },
 
     async _autoTradeInner(results) {
+      if (!this.botEnabled || this._flattenInProgress) return;
 
       // BUG FIX: market-hours guard — never attempt equity orders when market is closed
       if (!this._isMarketOpen()) {
@@ -2265,6 +2272,7 @@
       // candidate that is topping (dump flags) or printing a strong bearish pattern.
       const row = await this._pickSafeCandidate(candidates.slice(0, 3));
       if (!row) return; // every candidate failed the safety gate this cycle
+      if (!this.botEnabled || this._flattenInProgress) return;
       const cfg   = this.config;
       const entry = row.price;
 
@@ -2305,6 +2313,7 @@
       }
 
       // Lock this symbol to prevent duplicate orders while request is in flight
+      if (!this.botEnabled || this._flattenInProgress) return;
       this._activeTrades.add(row.sym);
       this.addLog(row.sym, '→ AUTO-BUY',
         `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · ${AlpacaClient.mode.toUpperCase()}`, 'info');
@@ -2344,6 +2353,20 @@
           entrySynced: false,
           ts: Date.now(),
         });
+
+        // A flatten request may have arrived while the durable journal entry was
+        // being written. Never submit a new broker order after the kill switch.
+        if (!this.botEnabled || this._flattenInProgress) {
+          await this._persistBotTrade({
+            action: 'void',
+            tradeId: journalTrade.id,
+            symbol: row.sym,
+            reason: 'Flatten all initiated before broker order submission',
+          });
+          this.botPositions.delete(row.sym);
+          this._activeTrades.delete(row.sym);
+          return;
+        }
 
         // OTO order: market buy + stop-loss leg. Take profit = RSI exit (poller).
         const resp = await fetch('/api/alpaca/order', {
@@ -2470,7 +2493,15 @@
         }
 
         // ── RSI take-profit exit: sell when intraday RSI(14) ≥ configured level ──
-        if (this.botEnabled && this._isMarketOpen()) await this._checkRsiExits(positions || []);
+        if (this.botEnabled && !this._flattenInProgress && this._isMarketOpen()) {
+          const exitCycle = this._checkRsiExits(positions || []);
+          this._rsiExitPromise = exitCycle;
+          try {
+            await exitCycle;
+          } finally {
+            if (this._rsiExitPromise === exitCycle) this._rsiExitPromise = null;
+          }
+        }
       } catch (_) {}
       finally { this._pollBusy = false; }
     },
@@ -2484,10 +2515,12 @@
     // Sell any bot position whose intraday RSI has reached its take-profit level
     async _checkRsiExits(positions) {
       for (const [sym, info] of this.botPositions) {
+        if (!this.botEnabled || this._flattenInProgress) return;
         if (info._exiting || info.pendingExit) continue;
         const pos = positions.find(p => p.symbol === sym);
         if (!pos) continue;
         const analysis = await MomentumAnalysis.fetch(sym);
+        if (!this.botEnabled || this._flattenInProgress) return;
         const rsi = analysis?.rsi14;
         if (rsi == null || rsi < (info.tpRsi ?? 75)) continue;
         info._exiting = true; // prevent duplicate sells while request is in flight
@@ -2552,8 +2585,12 @@
     _renderPositionsPanel(positions) {
       const el = $('atPositionsBody');
       if (!el) return;
+      const count = Array.isArray(positions) ? positions.length : 0;
+      const countEl = $('atPosCount');
+      if (countEl) countEl.textContent = String(count);
+      this._setFlattenButtonState(count);
       if (!positions.length) {
-        el.innerHTML = `<tr><td colspan="7" class="mt-empty-row">No open positions</td></tr>`;
+        el.innerHTML = '<div class="at-empty">No open positions</div>';
         return;
       }
       el.innerHTML = positions.map(p => {
@@ -2574,6 +2611,89 @@
           <td class="mt-r" style="font-size:.68rem;color:var(--t3)">${meta}</td>
         </tr>`;
       }).join('');
+    },
+
+    _setFlattenButtonState(positionCount) {
+      const btn = $('atCloseAllPos');
+      if (!btn) return;
+      btn.disabled = this._flattenInProgress || positionCount === 0;
+      if (this._flattenInProgress) {
+        btn.dataset.flattening = 'true';
+        btn.textContent = 'FLATTENING…';
+      } else {
+        delete btn.dataset.flattening;
+        btn.textContent = 'FLATTEN ALL';
+      }
+    },
+
+    async _flattenAllPositions() {
+      if (this._flattenInProgress) return;
+
+      let positions;
+      try {
+        const response = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Could not load positions (${response.status})`);
+        positions = Array.isArray(data) ? data : [];
+      } catch (error) {
+        this.addLog('BOT', 'FLATTEN ALL FAILED', error.message, 'err');
+        alert(`Could not load open positions: ${error.message}`);
+        return;
+      }
+
+      this._renderPositionsPanel(positions);
+      const count = positions.length;
+      if (!count) return;
+
+      const noun = count === 1 ? 'position' : 'positions';
+      if (!confirm(`Close all ${count} ${noun}? This stops the bot and submits market-close orders immediately.`)) return;
+
+      const botWasRunning = this.botEnabled;
+      this._flattenInProgress = true;
+      this.botEnabled = false;
+      this._renderBotStatus();
+      this._stopPositionMonitor();
+      this._setFlattenButtonState(count);
+
+      let flattenVerified = false;
+      try {
+        const response = await fetch('/api/alpaca/positions', {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) {
+          const details = data.details || {};
+          const unresolved = [
+            ...(details.openOrderIds || []).map(id => `order ${id}`),
+            ...(details.remainingOpenOrderIds || []).map(id => `order ${id}`),
+            ...(details.remainingPositionSymbols || []).map(symbol => `position ${symbol}`),
+          ];
+          const suffix = unresolved.length ? ` Remaining: ${unresolved.join(', ')}.` : '';
+          throw new Error(`${data.error || `Could not close positions (${response.status})`}${suffix}`);
+        }
+
+        flattenVerified = true;
+        this.addLog(
+          'BOT',
+          '⚠ FLATTEN ALL',
+          `${botWasRunning ? 'Bot stopped; ' : ''}${count} ${noun} closed and no open orders remain`,
+          'warn'
+        );
+      } catch (error) {
+        this.addLog(
+          'BOT',
+          'FLATTEN ALL FAILED',
+          `Bot stopped; positions were not closed: ${error.message}`,
+          'err'
+        );
+        alert(`Could not close all positions: ${error.message}`);
+      } finally {
+        this._flattenInProgress = false;
+        if (this.botPositions.size) this._startPositionMonitor();
+        else this._pollPositions();
+        this._setFlattenButtonState(flattenVerified ? 0 : count);
+      }
     },
 
     // ── Bot toggle — enable/disable auto-trading ──────────────────────────
@@ -2693,6 +2813,7 @@
 
       // Bot ON/OFF toggle
       $('mtBotToggle')?.addEventListener('click', () => this._toggleBot());
+      $('atCloseAllPos')?.addEventListener('click', () => this._flattenAllPositions());
 
       // Clear log
       $('mtClearLog')?.addEventListener('click', () => {

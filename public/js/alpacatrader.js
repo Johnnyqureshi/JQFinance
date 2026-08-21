@@ -197,8 +197,13 @@ const alpacaTrader = (() => {
   function renderPositions(positions) {
     const body    = $('atPositionsBody');
     const countEl = $('atPosCount');
+    const closeAllBtn = $('atCloseAllPos');
     if (!body) return;
     if (countEl) countEl.textContent = positions.length;
+    if (closeAllBtn && closeAllBtn.dataset.flattening !== 'true') {
+      closeAllBtn.disabled = positions.length === 0;
+      closeAllBtn.textContent = 'FLATTEN ALL';
+    }
 
     if (!positions.length) {
       body.innerHTML = '<div class="at-empty">No open positions</div>';
@@ -236,23 +241,6 @@ const alpacaTrader = (() => {
         } catch (e) { btn.disabled = false; btn.textContent = '✕'; alert('Error: ' + e.message); }
       });
     });
-  }
-
-  // ── Close ALL positions ─────────────────────────────────────────────────────
-  async function closeAllPositions() {
-    const btn = $('atCloseAllPos');
-    if (!confirm('Close ALL open positions at market price? This cannot be undone.')) return;
-    if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
-    try {
-      const r = await apiFetch('/api/alpaca/positions', { method: 'DELETE' });
-      if (r.ok !== false) {
-        setTimeout(() => { loadPositions(); loadAccount(); }, 1500);
-      }
-    } catch (e) {
-      alert('Could not close positions: ' + e.message);
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '✕ Close All'; }
-    }
   }
 
   // ── Pending orders ──────────────────────────────────────────────────────────
@@ -423,7 +411,6 @@ const alpacaTrader = (() => {
 
     $('atRefreshPos')?.addEventListener('click', () => { loadPositions(); loadAccount(); });
     $('atRefreshOrders')?.addEventListener('click', loadOrders);
-    $('atCloseAllPos')?.addEventListener('click', closeAllPositions);
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────

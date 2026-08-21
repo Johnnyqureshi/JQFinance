@@ -9034,6 +9034,44 @@ option { background: var(--card); }
   white-space: nowrap;
 }
 
+/* ── Scanner criterion filters ───────────────────────────────────────────── */
+.mt-scan-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.mt-scan-filters-label {
+  color: var(--t3);
+  font-size: .68rem;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.mt-scan-filter {
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--card);
+  color: var(--t2);
+  font: 600 .68rem/1.2 inherit;
+  white-space: nowrap;
+  transition: color var(--tr), background var(--tr), border-color var(--tr);
+}
+.mt-scan-filter:hover {
+  color: var(--t1);
+  border-color: var(--teal-bdr);
+  background: var(--teal-dim);
+}
+.mt-scan-filter.active {
+  color: var(--teal);
+  border-color: var(--teal);
+  background: var(--teal-dim);
+  box-shadow: 0 0 0 1px rgba(29,214,163,.08);
+}
+
 /* ── Left col ────────────────────────────────────────────────────────────── */
 .mt-left-col { display: flex; flex-direction: column; gap: 0; }
 .mt-scan-wrap { overflow-x: auto; }

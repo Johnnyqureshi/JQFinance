@@ -433,6 +433,66 @@
     },
   };
 
+  // The scanner exposes these as quick, client-side views of the earned
+  // criteria.  Match both the current descriptive reason text and the shorter
+  // reason labels used by older scan payloads.
+  const SCAN_CRITERIA = [
+    {
+      key: 'strong-momentum',
+      label: 'Strong momentum',
+      matches: row => (row.scoreReasons || []).some(reason =>
+        reason.includes('Strong momentum') || reason.includes('+10%')
+      ),
+    },
+    {
+      key: 'very-strong-momentum',
+      label: 'Very strong momentum',
+      matches: row => (row.scoreReasons || []).some(reason =>
+        reason.includes('Very strong momentum') ||
+        reason.includes('Full profile') ||
+        reason.includes('+20%') ||
+        reason.includes('30%')
+      ),
+    },
+    {
+      key: 'rel-vol-2',
+      label: 'Rel Vol >2×',
+      matches: row => {
+        const reasons = row.scoreReasons || [];
+        return (row.relVol ?? 0) > 2 || reasons.some(reason =>
+          reason.includes('> 2×') || reason.includes('≥ 2×')
+        );
+      },
+    },
+    {
+      key: 'rel-vol-5',
+      label: 'Rel Vol >5×',
+      matches: row => {
+        const reasons = row.scoreReasons || [];
+        return (row.relVol ?? 0) >= 5 || reasons.some(reason =>
+          reason.includes('> 5×') ||
+          reason.includes('≥ 5×') ||
+          reason.includes('10×')
+        );
+      },
+    },
+    {
+      key: 'price-range',
+      label: 'Price range',
+      matches: (row, config) => {
+        const minPrice = config?.minPrice ?? MomentumConfig.defaults.minPrice;
+        const maxPrice = config?.maxPrice ?? MomentumConfig.defaults.maxPrice;
+        const reasons = row.scoreReasons || [];
+        return (
+          (row.price ?? 0) >= minPrice &&
+          (row.price ?? 0) <= maxPrice
+        ) || reasons.some(reason =>
+          reason.includes('price range') || reason.includes('Price range')
+        );
+      },
+    },
+  ];
+
   // Internal EMA helper (matches server-side calcEMA)
   function _calcEMA(closes, period) {
     if (closes.length < period) return null;
@@ -886,6 +946,8 @@
     dailyDate:    '',
     // Active trade-methods tab
     _tmTab:       'dip',
+    // Criterion quick-filter for the scanner table; null means all rows.
+    _activeScanFilter: null,
     // ── Automation state ─────────────────────────────────────────────────────
     botEnabled:    false,          // true when auto-trading is running
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
@@ -981,12 +1043,29 @@
       const tbody = $('mtScanBody');
       if (!tbody) return;
 
-      if (!results.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="mt-empty-row">No momentum stocks found — try relaxing filters</td></tr>`;
+      const allResults = Array.isArray(results) ? results : [];
+      const criterion = SCAN_CRITERIA.find(c => c.key === this._activeScanFilter);
+      const visibleResults = criterion
+        ? allResults.filter(row => criterion.matches(row, this.config))
+        : allResults;
+
+      // Keep the filter state visually in sync on initial render and refreshes.
+      $('mtScanFilters')?.querySelectorAll('.mt-scan-filter').forEach(btn => {
+        const active = btn.dataset.scanFilter === this._activeScanFilter;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+
+      if (!visibleResults.length) {
+        const emptyText = criterion
+          ? `No stocks earned the “${criterion.label}” criterion`
+          : 'No momentum stocks found — try relaxing filters';
+        tbody.innerHTML = `<tr><td colspan="7" class="mt-empty-row">${emptyText}</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = results.slice(0, 40).map((r, i) => {
+      const rowsToRender = visibleResults.slice(0, 40);
+      tbody.innerHTML = rowsToRender.map((r, i) => {
         const sig        = MomentumStrategy.getSignal(r);
         const chgUp      = r.change > 0;
         const hasBonus   = (r.change ?? 0) >= 20 || (r.relVol ?? 0) >= 5;
@@ -1032,8 +1111,9 @@
         tr.addEventListener('click', () => {
           tbody.querySelectorAll('.mt-scan-row').forEach(r => r.classList.remove('mt-row-active'));
           tr.classList.add('mt-row-active');
-          const idx = +tr.dataset.idx;
-          this._openDetail(this.scanResults[idx]);
+          const row = this.scanResults.find(result => result.sym === tr.dataset.sym);
+          if (!row) return;
+          this._openDetail(row);
           // On stacked mobile layout (body is single column), scroll detail panel into view
           if (window.innerWidth <= 1100) {
             const panel = $('mtDetailPanel');
@@ -1043,7 +1123,7 @@
       });
 
       // Auto-open top result
-      if (results.length && !this.selectedRow) {
+      if (rowsToRender.length && !this.selectedRow) {
         tbody.querySelector('.mt-scan-row')?.click();
       }
     },
@@ -1979,6 +2059,15 @@
         MomentumConfig.save(this.config);
         this.selectedRow = null;
         this.run();
+      });
+
+      // Scanner criteria filters are local views over the latest scan results.
+      $('mtScanFilters')?.addEventListener('click', event => {
+        const button = event.target.closest('.mt-scan-filter');
+        if (!button) return;
+        const nextFilter = button.dataset.scanFilter;
+        this._activeScanFilter = this._activeScanFilter === nextFilter ? null : nextFilter;
+        this._renderScanTable(this.scanResults);
       });
 
       // Apply config

@@ -9267,7 +9267,7 @@ option { background: var(--card); }
   align-items: flex-end;
 }
 
-/* Criteria tooltip — shown on hover of score cell */
+/* Criteria tooltip — shown on hover of score cell on pointer devices */
 .mt-criteria-tooltip {
   position: absolute;
   bottom: calc(100% + 7px);
@@ -9294,7 +9294,49 @@ option { background: var(--card); }
   border-top-color: var(--border2);
 }
 
-.mt-score-cell-wrap:hover .mt-criteria-tooltip { display: flex; }
+@media (hover: hover) and (pointer: fine) {
+  .mt-score-cell-wrap:hover .mt-criteria-tooltip { display: flex; }
+}
+
+/* Touch-friendly criteria disclosure. The extra table row is toggled by the
+   score-cell tap handler so it remains usable when hover is unavailable. */
+.mt-criteria-row { display: none; }
+.mt-criteria-row--open { display: table-row; }
+.mt-criteria-row > td {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.mt-criteria-expanded {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--card2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+}
+.mt-criteria-expanded-label {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-size: .64rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.mt-criteria-expanded-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+.mt-criteria-expanded-pills .mt-crit-pill { white-space: normal; }
+
+@media (hover: none), (pointer: coarse) {
+  .mt-score-cell-wrap { cursor: pointer; }
+  .mt-score-cell-wrap:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 3px;
+  }
+}
 
 /* Individual criterion pill inside tooltip */
 .mt-crit-pill {

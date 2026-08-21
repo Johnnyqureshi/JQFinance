@@ -1171,11 +1171,35 @@
             </div>
           </td>
           <td><span class="mt-signal-badge ${sig.badge}">${sig.signal}</span></td>
+        </tr>
+        <tr class="mt-criteria-row" data-sym="${r.sym}" data-idx="${i}">
+          <td colspan="7">
+            <div class="mt-criteria-expanded">
+              <span class="mt-criteria-expanded-label">Earned criteria</span>
+              <div class="mt-criteria-expanded-pills">${tooltipContent}</div>
+            </div>
+          </td>
         </tr>`;
       }).join('');
 
+      const isTouchDevice = () =>
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0 ||
+        window.matchMedia?.('(hover: none), (pointer: coarse)').matches;
+
       // Row click → open detail panel
       tbody.querySelectorAll('.mt-scan-row').forEach(tr => {
+        const scoreCell = tr.querySelector('.mt-score-td');
+        const criteriaRow = tr.nextElementSibling;
+
+        scoreCell?.addEventListener('click', event => {
+          if (!isTouchDevice()) return;
+          event.stopPropagation();
+          const isExpanded = tr.classList.toggle('mt-score-expanded');
+          criteriaRow?.classList.toggle('mt-criteria-row--open', isExpanded);
+          scoreCell.setAttribute('aria-expanded', String(isExpanded));
+        });
+
         tr.addEventListener('click', () => {
           tbody.querySelectorAll('.mt-scan-row').forEach(r => r.classList.remove('mt-row-active'));
           tr.classList.add('mt-row-active');

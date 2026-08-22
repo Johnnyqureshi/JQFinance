@@ -4,7 +4,9 @@ const alpacaTrader = (() => {
 
   let connected     = false;
   let reconnecting  = false;   // true while we're waiting for checkCredentials after logout
-  let alpacaMode    = 'live';
+  // Paper is the safe default for a new/disconnected session. The server
+  // remains authoritative once credentials have been loaded.
+  let alpacaMode    = 'paper';
   let _pollFailures = 0;
   let _keepAlive    = null;
   const POLL_FAIL_LIMIT  = 3;
@@ -352,7 +354,7 @@ const alpacaTrader = (() => {
       if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
       connected    = true;
       reconnecting = false;
-      alpacaMode   = r.mode || 'live';
+       alpacaMode   = r.mode || 'paper';
       _pollFailures = 0;
       localStorage.setItem(LS_WAS_CONNECTED, '1');
       hideModal();
@@ -445,7 +447,7 @@ const alpacaTrader = (() => {
     });
   }
 
-  return { init, open, checkCredentials, reset };
+  return { init, open, checkCredentials, reset, openConnectModal: showModal };
 
 })();
 

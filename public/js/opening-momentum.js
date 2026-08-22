@@ -16,6 +16,7 @@
     requireMarketStrength:true, requireRelativeStrength:true, requireSectorStrength:false,
   };
   let config = { ...defaults }, enabled = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
+  let connectionBound = false;
 
   function readConfig() {
     return {
@@ -41,6 +42,21 @@
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
     return data;
+  }
+  async function refreshBrokerStatus() {
+    const dot = $('pmhConnDot'), text = $('pmhConnText'), button = $('pmhConnBtn');
+    if (!dot || !text || !button) return;
+    try {
+      const status = await request('/api/alpaca/credentials');
+      const connected = status.connected === true;
+      dot.className = `at-conn-dot ${connected ? 'dot-green' : 'dot-red'}`;
+      text.textContent = connected ? `Connected · ${String(status.mode || 'paper').toUpperCase()}` : 'Not connected';
+      button.textContent = connected ? 'Account Settings' : 'Connect Alpaca';
+    } catch (e) {
+      dot.className = 'at-conn-dot dot-red';
+      text.textContent = e.message === 'session_expired' ? 'Sign in required' : 'Not connected';
+      button.textContent = 'Connect Alpaca';
+    }
   }
   async function saveSettings(nextEnabled = enabled) {
     config = readConfig();
@@ -174,6 +190,19 @@
       try { await saveSettings(!enabled); if (enabled) await scan(); } catch (e) { $('pmhBotStatus').textContent = `Could not change automation: ${e.message}`; }
     });
     $('pmhTradesRefresh')?.addEventListener('click', refreshTrades);
+    $('pmhConnBtn')?.addEventListener('click', () => {
+      if (window.alpacaTrader?.openConnectModal) window.alpacaTrader.openConnectModal();
+      else $('pmhBotStatus').textContent = 'Open Momentum Trader to connect Alpaca.';
+    });
+    if (!connectionBound) {
+      connectionBound = true;
+      window.addEventListener('alpaca-connection-changed', async () => {
+        await refreshBrokerStatus();
+        await refreshTrades();
+        await scan(false);
+      });
+    }
+    await refreshBrokerStatus();
     try {
       const saved = await request('/api/opening-momentum/settings');
       enabled = saved.enabled; putConfig(saved.config); renderBot();

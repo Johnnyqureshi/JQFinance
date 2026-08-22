@@ -1,0 +1,789 @@
+OPENING MOMENTUM TRADING ENGINE
+
+SMB-Style Pre-Market High Break Strategy
+
+Implement this as a REAL-TIME trading strategy inside my existing trading bot.
+
+The bot must be capable of operating in either PAPER or LIVE mode depending on the user’s broker/API configuration. Do NOT hard-code paper trading.
+
+The strategy is designed for LONG opening-momentum trades.
+
+==================================================
+
+1. CORE STRATEGY
+    ==================================================
+
+Do NOT enter merely because:
+
+* The stock is gapping up.
+* The stock is green.
+* The stock has news.
+* The stock is breaking yesterday’s high.
+* The stock touches the pre-market high.
+
+The actual trigger is:
+
+PRICE MUST CLOSE ABOVE THE PRE-MARKET HIGH ON A 2-MINUTE CANDLE WITH STRONG VOLUME EXPANSION.
+
+The breakout must be confirmed by the candle CLOSE.
+
+A wick above the pre-market high is NOT an entry.
+
+==================================================
+2. PRE-MARKET DATA
+
+Before the market opens, calculate and store:
+
+* Previous day’s close
+* Previous day’s high
+* Previous day’s low
+* Pre-market high
+* Pre-market low
+* Pre-market volume
+* Opening price
+* Gap percentage
+* ATR
+* Relative volume
+* Average historical volume by time of day
+* 10 SMA
+* 20 SMA
+* 9 EMA on the 2-minute chart
+* Current price
+* Current volume
+* Market/sector relative strength
+
+The pre-market high must remain fixed as the primary breakout level after the regular session begins.
+
+==================================================
+3. INITIAL ELIGIBILITY GATE
+
+A stock is eligible ONLY if:
+
+1. OPENING PRICE > PREVIOUS DAY CLOSE
+
+AND
+
+2. OPENING PRICE > PREVIOUS DAY HIGH
+
+If the stock opens below yesterday’s high:
+
+DO NOT TRADE THIS SETUP.
+
+Even if the stock subsequently breaks the pre-market high, reject the setup unless the strategy is explicitly configured to allow a secondary setup.
+
+This is an important strategy filter.
+
+==================================================
+4. CATALYST REQUIREMENT
+
+Prefer stocks with a genuine catalyst.
+
+Examples:
+
+* Earnings
+* FDA/news
+* Major company announcement
+* Analyst upgrade/downgrade
+* Contract
+* Government announcement
+* Industry/sector news
+* Major technical event
+* All-time-high breakout
+* Significant daily-chart breakout
+
+The catalyst should explain why abnormal buying interest exists.
+
+If there is no obvious catalyst, the setup may still qualify if there is an exceptionally strong technical breakout and volume confirmation.
+
+==================================================
+5. BREAKOUT TRIGGER
+
+Monitor 2-minute candles after the regular market opens.
+
+ENTRY CONDITION:
+
+A 2-minute candle must:
+
+* Close ABOVE the pre-market high
+* Have increased volume
+* Demonstrate meaningful buying pressure
+* Not be a weak/rejection candle
+
+DO NOT ENTER when price merely touches or briefly trades above the pre-market high.
+
+WAIT FOR THE 2-MINUTE CANDLE TO CLOSE.
+
+If the candle closes above the pre-market high, generate an entry signal.
+
+==================================================
+6. VOLUME CONFIRMATION
+
+Volume is a critical part of the strategy.
+
+The bot must determine whether current volume is unusually strong relative to normal volume for that exact time of day.
+
+Preferably calculate:
+
+Relative Volume =
+Current cumulative volume /
+Average cumulative volume at the same time over the previous 5-10 trading sessions
+
+Also calculate a standardized volume score where possible.
+
+Strong confirmation should generally correspond to approximately:
+
+3+ standard deviations above normal volume
+
+OR
+
+a clearly elevated relative-volume reading.
+
+The bot must NOT use raw volume alone.
+
+Example:
+
+10:32 AM volume should be compared against typical 10:32 AM volume, NOT against full-day average volume.
+
+==================================================
+7. BREAKOUT CANDLE QUALITY FILTER
+
+Reject the breakout if:
+
+* Candle closes red
+* Candle closes back below the pre-market high
+* Upper wick is larger than approximately 50% of the candle body
+* Breakout is only a wick
+* Volume is weak
+* Price immediately rejects the breakout level
+* Spread becomes abnormally wide
+* Liquidity is insufficient
+
+The ideal breakout candle should show:
+
+* Strong body
+* Close near the high
+* Strong volume
+* Price acceptance above pre-market high
+
+==================================================
+8. OVERHEAD RESISTANCE FILTER
+
+Before entering, calculate nearby resistance.
+
+Look for:
+
+* Previous daily highs
+* Major intraday highs
+* All-time highs
+* Round numbers
+* Premarket resistance
+* Significant supply zones
+* Prior consolidation levels
+
+Avoid entering if obvious resistance is approximately 3-5% above the proposed entry unless the breakout is exceptionally strong.
+
+Calculate:
+
+Distance to nearest major resistance %
+
+If insufficient room exists, reject the trade.
+
+==================================================
+9. MARKET FILTER
+
+Check SPY and the relevant sector ETF/index.
+
+Prefer long trades when:
+
+* SPY is above its 10 SMA
+* SPY is above its 20 SMA
+* SPY has positive intraday momentum
+* Relevant sector is strong
+* Stock is outperforming the market
+
+If SPY is strongly red or market conditions are hostile:
+
+Reduce confidence or reject the setup depending on configuration.
+
+The stock should ideally belong to a sector that is at least as strong as the broader market.
+
+==================================================
+10. RELATIVE STRENGTH
+
+Calculate stock performance versus:
+
+* SPY
+* Relevant sector ETF
+
+Example:
+
+If SPY is +0.3% but the stock is +4%, the stock has strong relative strength.
+
+Prefer stocks with significant relative strength.
+
+==================================================
+11. ENTRY
+
+ENTRY PRICE:
+
+The bot enters at or immediately after confirmation of the CLOSE of the qualifying 2-minute breakout candle.
+
+Do NOT anticipate the breakout.
+
+Do NOT buy at the pre-market high before confirmation.
+
+Do NOT buy simply because the candle is trading above the pre-market high.
+
+Confirmation first.
+
+Then entry.
+
+==================================================
+12. STOP LOSS
+
+Initial stop:
+
+PLACE STOP BELOW THE LOW OF THE BREAKOUT 2-MINUTE CANDLE.
+
+If price returns below the breakout candle low:
+
+EXIT IMMEDIATELY.
+
+Do not average down.
+
+Do not widen the stop.
+
+Do not move the stop farther away to avoid taking a loss.
+
+The breakout must prove itself.
+
+==================================================
+13. RISK CALCULATION
+
+Position size must be based on the distance between:
+
+ENTRY PRICE
+
+and
+
+STOP PRICE.
+
+Use:
+
+Risk Per Share =
+Entry - Stop
+
+Position Size =
+Maximum Dollar Risk / Risk Per Share
+
+Allow the user to manually enter maximum dollar risk OR position size.
+
+Do NOT automatically use a fixed number of shares regardless of stop distance.
+
+If the stop distance is unusually large, automatically reduce share quantity.
+
+If the calculated position size is below 1 share:
+
+REJECT TRADE.
+
+==================================================
+14. RISK FILTER
+
+Reject trades when:
+
+* Stop is excessively wide
+* Spread is too large
+* Liquidity is inadequate
+* Position size becomes impractical
+* Risk/reward is poor
+* Nearby resistance leaves insufficient upside
+* Volume confirmation disappears
+
+Never increase position size simply because the setup “looks good.”
+
+==================================================
+15. INITIAL PROFIT MANAGEMENT
+
+After entry:
+
+Monitor:
+
+* ATR
+* Previous resistance
+* Round numbers
+* Intraday highs
+* Volume
+* Momentum
+* Distance from VWAP
+* 9 EMA
+
+Take partial profits into significant strength.
+
+Allow the user to configure:
+
+FIRST PROFIT TARGET
+SECOND PROFIT TARGET
+FINAL RUNNER MANAGEMENT
+
+Default behavior:
+
+Trim a portion of the position into a strong extension toward the next resistance/ATR target.
+
+==================================================
+16. RUNNER MANAGEMENT
+
+For the remaining position:
+
+Use the 2-minute 9 EMA as a trailing trend indicator.
+
+If a 2-minute candle closes below the 9 EMA after the stock has extended:
+
+Exit the runner.
+
+Also exit if:
+
+* 2-minute candle closes back below the pre-market high
+* Momentum collapses
+* Major reversal occurs
+* Volume dries up while price fails to advance
+* Stop is hit
+* Market conditions deteriorate dramatically
+
+==================================================
+17. BREAKOUT FAILURE
+
+A breakout is considered failed if:
+
+Price closes back below the pre-market high after entering.
+
+Treat this as an immediate warning.
+
+Depending on configuration:
+
+DEFAULT = EXIT rather than wait for the hard stop.
+
+The bot must never turn a failed breakout into a long-term hold.
+
+==================================================
+18. TRADE TIME WINDOW
+
+This is an OPENING MOMENTUM strategy.
+
+Prioritize the first several minutes of regular trading.
+
+Default:
+
+Begin scanning immediately after market open.
+
+Highest priority:
+
+First 10-30 minutes.
+
+Allow the user to configure the maximum entry time.
+
+Example:
+
+MAX_ENTRY_TIME = 10:30 AM ET
+
+After the maximum entry time:
+
+DO NOT initiate new trades using this opening-momentum setup.
+
+Existing positions may continue to be managed.
+
+==================================================
+19. TRADE SCORE
+
+Before placing an order, calculate a 0-100 setup score.
+
+Suggested scoring:
+
+Catalyst = 15 points
+Opening gap / price positioning = 10
+Above yesterday’s high = 10
+Pre-market high breakout = 15
+Volume expansion = 20
+Breakout candle quality = 10
+Relative strength = 5
+Market strength = 5
+Sector strength = 5
+Room to resistance = 5
+
+Maximum = 100.
+
+DEFAULT:
+
+Only execute trades with SCORE >= 80.
+
+Allow user to change this threshold.
+
+==================================================
+20. ABSOLUTE NO-TRADE CONDITIONS
+
+DO NOT TRADE if:
+
+* Opening price is below yesterday’s high
+* Breakout candle does not close above pre-market high
+* Volume confirmation is missing
+* Breakout candle is a major rejection
+* Price immediately loses pre-market high
+* Major resistance is too close
+* Spread is excessive
+* Liquidity is insufficient
+* Risk cannot be calculated
+* Stop distance is unreasonable
+* Market conditions are extremely weak
+* Data is stale or missing
+* Broker/API confirmation is unavailable
+
+When data is missing:
+
+DO NOT GUESS.
+
+Return:
+
+“TRADE BLOCKED — REQUIRED DATA UNAVAILABLE.”
+
+==================================================
+21. REAL-TIME SCANNER
+
+The scanner should continuously rank stocks using this strategy.
+
+For each candidate display:
+
+Ticker
+Current Price
+Gap %
+Previous Close
+Yesterday High
+Opening Price
+Pre-Market High
+Distance Above PM High %
+2-Minute Volume
+Relative Volume
+Volume Z-Score
+ATR
+9 EMA
+10 SMA
+20 SMA
+Sector Strength
+SPY Strength
+Nearest Resistance
+Risk Per Share
+Setup Score
+Trade Status
+
+Example statuses:
+
+WAITING FOR BREAKOUT
+BREAKOUT APPROACHING
+BREAKOUT CONFIRMED
+TRADE ELIGIBLE
+TRADE BLOCKED
+POSITION ACTIVE
+BREAKOUT FAILED
+EXITED
+
+==================================================
+22. ALERT SYSTEM
+
+When a stock approaches the pre-market high:
+
+Generate:
+
+“SETUP DEVELOPING”
+
+When it breaks but the candle has not closed:
+
+“BREAKOUT TEST — WAIT FOR 2-MINUTE CLOSE”
+
+When the candle closes above the pre-market high with volume:
+
+“OPENING MOMENTUM BREAKOUT CONFIRMED”
+
+Then calculate:
+
+Entry
+Stop
+Risk/share
+Position size
+Target 1
+Target 2
+Setup score
+
+==================================================
+23. ORDER EXECUTION
+
+When all conditions are satisfied:
+
+1. Confirm current market price.
+2. Confirm breakout candle closed.
+3. Confirm volume.
+4. Recalculate stop.
+5. Calculate position size.
+6. Confirm risk limit.
+7. Submit order through the configured broker.
+8. Confirm fill.
+9. Immediately create protective stop.
+10. Begin active trade management.
+
+Never submit an order using stale market data.
+
+If the expected entry price moves materially before execution:
+
+RECALCULATE.
+
+If the setup no longer qualifies:
+
+CANCEL THE TRADE.
+
+==================================================
+24. DUPLICATE TRADE PROTECTION
+
+Never open multiple positions in the same ticker from the same breakout.
+
+After a breakout fails:
+
+Do not immediately re-enter repeatedly.
+
+Require a new valid setup.
+
+Add configurable:
+
+MAX_TRADES_PER_SYMBOL_PER_DAY = 1
+
+==================================================
+25. DAILY RISK PROTECTION
+
+Implement configurable:
+
+MAX_DAILY_LOSS
+MAX_NUMBER_OF_TRADES
+MAX_CONSECUTIVE_LOSSES
+
+If any limit is reached:
+
+STOP OPENING NEW POSITIONS.
+
+Continue managing existing positions normally.
+
+==================================================
+26. LOGGING
+
+Every trade must be logged with:
+
+Timestamp
+Ticker
+Catalyst
+Previous close
+Yesterday high
+Opening price
+Premarket high
+Entry
+Stop
+Position size
+Risk/share
+Volume
+Relative volume
+Volume score
+ATR
+SPY condition
+Sector condition
+Resistance
+Setup score
+Exit
+Profit/Loss
+Exit reason
+Trade duration
+
+==================================================
+27. POST-TRADE ANALYSIS
+
+After each trade calculate:
+
+Win/Loss
+R multiple
+Maximum favorable excursion
+Maximum adverse excursion
+Entry efficiency
+Exit efficiency
+Volume at breakout
+Breakout candle size
+Time of entry
+Time of exit
+
+Track performance specifically for this setup.
+
+After sufficient trades, calculate:
+
+Win rate
+Average winner
+Average loser
+Profit factor
+Average R
+Maximum drawdown
+Expectancy
+Best time of day
+Best volume threshold
+Best setup score range
+
+DO NOT automatically change strategy parameters based on a small sample.
+
+==================================================
+28. IMPORTANT STRATEGY PRINCIPLE
+
+The bot must understand:
+
+A GAP IS NOT THE ENTRY.
+
+A GREEN CANDLE IS NOT THE ENTRY.
+
+A PRE-MARKET HIGH TOUCH IS NOT THE ENTRY.
+
+THE ENTRY IS THE CONFIRMED 2-MINUTE CLOSE ABOVE THE PRE-MARKET HIGH WITH ABNORMAL VOLUME.
+
+Price makes the claim.
+
+Volume provides the evidence.
+
+==================================================
+29. EXISTING BOT INTEGRATION
+
+Integrate this strategy into my existing scanner rather than creating a separate disconnected trading system.
+
+Preserve my existing:
+
+* Alpaca integration
+* Paper/Live mode selection
+* API credentials
+* Manual position sizing option
+* Existing scanner
+* Existing portfolio management
+* Existing risk controls
+* Existing UI
+
+Add this strategy as:
+
+“Opening Momentum — PMH Break”
+
+Make all important thresholds configurable from the UI.
+
+==================================================
+30. DEFAULT CONFIGURATION
+
+Strategy:
+Opening Momentum PMH Break
+
+Timeframe:
+2-minute
+
+Market:
+US equities
+
+Direction:
+Long
+
+Minimum Setup Score:
+80
+
+Volume confirmation:
+Strong abnormal volume
+
+Preferred volume threshold:
+3 standard deviations above normal when sufficient historical data exists
+
+Opening price:
+Above previous close AND previous day’s high
+
+Breakout:
+2-minute candle CLOSE above pre-market high
+
+Stop:
+Breakout candle low
+
+Runner:
+2-minute 9 EMA
+
+Market filter:
+SPY + sector strength
+
+Resistance:
+Prefer 3-5%+ room
+
+Maximum entry time:
+10:30 AM ET
+
+Maximum trades per symbol:
+1
+
+==================================================
+31. EXECUTION PRIORITY
+
+When multiple stocks qualify, rank them by:
+
+1. Setup score
+2. Volume expansion
+3. Relative strength
+4. Catalyst quality
+5. Distance above pre-market high
+6. Room to resistance
+7. Market/sector strength
+
+Only execute the highest-quality opportunities that satisfy the user’s risk limits.
+
+==================================================
+32. FINAL BOT BEHAVIOR
+
+The bot should behave like a disciplined momentum trader, NOT like a prediction engine.
+
+It should NOT attempt to predict that a stock “will probably break.”
+
+It should WAIT for confirmation.
+
+Correct sequence:
+
+PRE-MARKET DATA
+↓
+OPENING GATE
+↓
+CATALYST
+↓
+PRE-MARKET HIGH IDENTIFIED
+↓
+PRICE APPROACHES PM HIGH
+↓
+BREAKOUT
+↓
+WAIT
+↓
+2-MINUTE CANDLE CLOSES ABOVE PM HIGH
+↓
+CONFIRM VOLUME
+↓
+CONFIRM CANDLE QUALITY
+↓
+CONFIRM MARKET/SECTOR
+↓
+CONFIRM ROOM TO RESISTANCE
+↓
+CALCULATE STOP
+↓
+CALCULATE POSITION SIZE
+↓
+EXECUTE
+↓
+PROTECT POSITION
+↓
+TRIM INTO STRENGTH
+↓
+TRAIL RUNNER WITH 9 EMA
+↓
+EXIT ON FAILURE
+
+Do not bypass these steps.
+
+If any required condition fails:
+
+NO TRADE.
+
+Build this as production-quality trading logic with robust error handling, stale-data protection, broker-order confirmation, duplicate-order protection, and detailed logging.

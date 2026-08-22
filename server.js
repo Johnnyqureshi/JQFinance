@@ -8,7 +8,7 @@ const YahooFinance = require('yahoo-finance2').default;
 const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
-const SQLiteStore  = require('connect-sqlite3')(session);
+const createSqliteSessionStore = require('./lib/sqlite-session-store');
 const helmet       = require('helmet');
 const crypto       = require('crypto');
 const {
@@ -46,6 +46,8 @@ const NEWS_KEY = process.env.NEWSAPI_KEY;
 // ── SQLite Database ────────────────────────────────────────────────────────────
 const db = new Database('jqf.db');
 db.pragma('journal_mode = WAL');
+const sessionDb = new Database('sessions.db');
+sessionDb.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,8 +399,9 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
+const SqliteSessionStore = createSqliteSessionStore(session, sessionDb, 90 * 24 * 60 * 60 * 1000);
 app.use(session({
-  store:             new SQLiteStore({ db: 'sessions.db', dir: '.' }),
+  store:             new SqliteSessionStore(),
   secret:            SESSION_SECRET,
   resave:            false,
   saveUninitialized: false,

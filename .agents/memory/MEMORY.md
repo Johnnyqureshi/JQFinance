@@ -3,3 +3,4 @@
 - [Bot trade journal integrity](bot-trade-journal-integrity.md) — journal performance must reconcile broker fills, not estimates or order acknowledgements.
 - [Probability confluence safety gate](probability-confluence-safety-gate.md) — shared fresh, complete technical evidence governs UI signals and automated entries.
 - [PMH order safety](pmh-order-safety.md) — freeze at the open; bound and reserve entries; reconcile only broker-confirmed protected lots.
+- [SQLite session store](sqlite-session-store.md) — persistent sessions use better-sqlite3 to avoid the vulnerable connect-sqlite3 dependency chain.

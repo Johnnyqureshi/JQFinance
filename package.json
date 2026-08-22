@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/strategy-validator.test.js && node tests/strategy-validation-runner.test.js && node tests/paper-shadow.test.js && node tests/catalyst-intel.test.js && node tests/momentum-news.test.js && node tests/emergency-flatten.test.js && node tests/technical-probability-engine.test.js && node tests/opening-momentum-pmh.test.js",
+    "test": "node tests/strategy-validator.test.js && node tests/strategy-validation-runner.test.js && node tests/paper-shadow.test.js && node tests/catalyst-intel.test.js && node tests/momentum-news.test.js && node tests/emergency-flatten.test.js && node tests/technical-probability-engine.test.js && node tests/opening-momentum-pmh.test.js && node tests/sqlite-session-store.test.js",
     "validate:strategy": "node scripts/validate-strategy.js"
   },
   "keywords": [],
@@ -13,13 +13,14 @@
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
-    "connect-sqlite3": "^0.9.16",
+    "body-parser": "^2.3.0",
     "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "helmet": "^8.1.0",
+    "helmet": "^8.3.0",
     "node-fetch": "^2.7.0",
-    "yahoo-finance2": "^3.14.0"
+    "qs": "^6.15.3",
+    "yahoo-finance2": "^3.15.4"
   }
 }

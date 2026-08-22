@@ -1,11 +1,11 @@
 # Strategy Validation Report
 
-Generated: 2026-08-21T04:30:44.364Z
-Study: 7488c74ceda8
+Generated: 2026-08-22T16:05:23.086Z
+Study: 15a559f7d1a3
 Mode: **PAPER_ONLY**
-Input SHA-256: `d64d4027d40c646e45b4e0caed2c327a8114b58b19e94534f0955749dd60f9b2`
-Experiment SHA-256: `7488c74ceda87fb85747ae3c12b098ecead741b1399c4e1d34795f31c2c372de`
-Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-7488c74ceda8.json`
+Input SHA-256: `c7398cab4f6dc4268d8c21df803e4d5b35026c1e7a2b06b027148336c97a18cb`
+Experiment SHA-256: `15a559f7d1a3ad21949944d90e5ea019f6d17665d875b219621fb96fff4d23dc`
+Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-15a559f7d1a3.json`
 
 ## Decision
 
@@ -19,17 +19,17 @@ No live-order settings or execution code were changed.
 
 | Period | Sessions | Trades | Win rate | Net expectancy | Profit factor | Max drawdown |
 |---|---:|---:|---:|---:|---:|---:|
-| Development | 45 | 2 | 0.0% | $-132.89 | 0 | $265.77 |
+| Development | 45 | 5 | 0.0% | $-147.45 | 0 | $737.24 |
 | Validation | 15 | 0 | 0.0% | $0.00 | 0 | $0.00 |
-| Untouched test | 15 | 6 | 50.0% | $-35.36 | 0.7132269776927245 | $739.83 |
+| Untouched test | 15 | 5 | 20.0% | $38.88 | 1.3324307699038227 | $444.54 |
 
 ## Promotion checks that failed
 
 - minValidationTrades: required 30; observed 0
-- minTestTrades: required 30; observed 6
-- positiveAfterCostExpectancy: required > 0; observed -35.360715389520706
-- profitFactorGe1: required >= 1; observed val:0.00 test:0.71
-- ciLoNonNegative: required >= 0 in validation and test; observed val:0 test:-244.6006631248749
+- minTestTrades: required 30; observed 5
+- positiveAfterCostExpectancy: required > 0; observed 38.88370733250005
+- profitFactorGe1: required >= 1; observed val:0.00 test:1.33
+- ciLoNonNegative: required >= 0 in validation and test; observed val:0 test:-158.12163066749994
 
 ## Data limitations
 

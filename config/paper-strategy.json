@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "studyId": "7488c74ceda8",
-  "experimentSha256": "7488c74ceda87fb85747ae3c12b098ecead741b1399c4e1d34795f31c2c372de",
-  "experimentPath": "reports/data/strategy-experiment-7488c74ceda8.json",
-  "generatedAt": "2026-08-21T04:30:44.364Z",
+  "studyId": "15a559f7d1a3",
+  "experimentSha256": "15a559f7d1a3ad21949944d90e5ea019f6d17665d875b219621fb96fff4d23dc",
+  "experimentPath": "reports/data/strategy-experiment-15a559f7d1a3.json",
+  "generatedAt": "2026-08-22T16:05:23.086Z",
   "mode": "PAPER_ONLY",
   "liveExecutionAllowed": false,
   "status": "NO_PROMOTION",
@@ -79,27 +79,27 @@
     },
     "minTestTrades": {
       "required": 30,
-      "actual": 6,
+      "actual": 5,
       "pass": false
     },
     "positiveAfterCostExpectancy": {
       "required": "> 0",
-      "actual": -35.360715389520706,
+      "actual": 38.88370733250005,
       "pass": false
     },
     "profitFactorGe1": {
       "required": ">= 1",
-      "actual": "val:0.00 test:0.71",
+      "actual": "val:0.00 test:1.33",
       "pass": false
     },
     "maxDrawdownNotWorse": {
-      "required": "<= baseline 739.83",
-      "actual": 739.8335123371216,
+      "required": "<= baseline 444.54",
+      "actual": 444.5386833375014,
       "pass": true
     },
     "ciLoNonNegative": {
       "required": ">= 0 in validation and test",
-      "actual": "val:0 test:-244.6006631248749",
+      "actual": "val:0 test:-158.12163066749994",
       "pass": false
     }
   },

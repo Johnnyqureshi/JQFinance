@@ -164,8 +164,16 @@
       const data = await request(`/api/opening-momentum/scan?symbols=${encodeURIComponent(watchlist)}`);
       results = data.results || []; config = { ...config, ...(data.config || {}) };
       if (!selected || !results.some(x => x.symbol === selected.symbol)) selected = results[0] || null;
-      $('pmhSession').textContent = data.sessionDate ? `Session ${data.sessionDate}` : 'Session unavailable';
-      $('pmhScanStatus').textContent = `${results.filter(x => x.eligible).length} eligible · ${results.filter(x => x.status === 'BLOCKED').length} blocked`;
+      const coverage = data.coverage || {};
+      const brokerCount = Number(coverage.availableAtBroker);
+      const rotation = coverage.rotation;
+      const coverageLabel = Number.isFinite(brokerCount)
+        ? `${coverage.scanned}/${brokerCount.toLocaleString()} catalog snapshot${rotation ? ` · batch ${rotation.batch}/${rotation.totalBatches}` : ''}`
+        : `${coverage.scanned ?? results.length} unverified candidates`;
+      $('pmhSession').textContent = data.sessionDate
+        ? `Session ${data.sessionDate} · ${coverageLabel}`
+        : `Session unavailable · ${coverageLabel}`;
+      $('pmhScanStatus').textContent = `${results.filter(x => x.eligible).length} eligible · ${results.filter(x => x.status === 'BLOCKED').length} blocked · ${coverage.candidateSource || 'PMH watchlist'}`;
       renderRows(); renderDetail();
       if (enabled && allowAuto) {
         const candidate = results.find(x => x.eligible);

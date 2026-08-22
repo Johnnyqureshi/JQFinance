@@ -78,7 +78,7 @@
       emaFast:        9,
       emaSlow:        21,
       // Scanner universe: 'curated' | 'alpaca'
-      universeMode:   'alpaca',   // default to live Alpaca top-100 most-actives
+      universeMode:   'alpaca',   // verified Alpaca catalog: market-mover priority + rotating full coverage
     },
 
     // Load saved config from localStorage, merging with defaults
@@ -224,7 +224,9 @@
     },
 
     /**
-     * Fetch the live full-market universe from the server.
+     * Fetch liquid market-mover candidates from the server. When an account is
+     * connected, the server intersects them with Alpaca's active/tradable
+     * stock-and-ETF catalog before this browser scans them.
      * Returns { symbols, gainers, highVolume, source, count } or null on failure.
      */
     async fetchAlpacaUniverse() {
@@ -246,7 +248,7 @@
     _lastUniverseMeta: null,
 
     async scan(cfg, onProgress) {
-      // Resolve universe: live full-market feed OR static curated list
+      // Resolve universe: broker-verified market movers OR static curated list
       let universe = MomentumConfig.UNIVERSE;
       this._lastUniverseMeta = null;
       if (cfg.universeMode === 'alpaca') {
@@ -1636,7 +1638,7 @@
       if (state === 'scanning') {
         const isFullMarket = this.config?.universeMode === 'alpaca';
         if (isFullMarket && total > 0) {
-          el.textContent = `⟳ Full market scan — ${done} / ${total} tickers…`;
+          el.textContent = `⟳ Scanning liquid candidates — ${done} / ${total} tickers…`;
         } else if (isFullMarket) {
           el.textContent = '⟳ Fetching live market data…';
         } else {
@@ -1646,9 +1648,16 @@
         if (cdEl) cdEl.textContent = '';
       } else if (state === 'done') {
         const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        if ((meta?.source === 'yf-full-market' || meta?.source === 'alpaca-full-market') && meta.count) {
+        if (meta?.count) {
           const gainersN = (meta.gainers?.length || 0) + (meta.smallCap?.length || 0);
-          el.textContent = `✓ ${count} hit${count !== 1 ? 's' : ''} from ${meta.count} live tickers · ${gainersN} gainers scanned · ${time}`;
+          const coverage = meta.coverage;
+          const brokerCount = Number(coverage?.availableAtBroker);
+          const rotation = coverage?.rotation;
+          const scope = Number.isFinite(brokerCount)
+            ? `${meta.count} scanned / ${brokerCount.toLocaleString()} Alpaca catalog snapshot${rotation ? ` · catalog batch ${rotation.batch}/${rotation.totalBatches}` : ''}`
+            : `${meta.count} scanned (broker verification unavailable)`;
+          const source = meta.candidateSource || 'market-mover candidates';
+          el.textContent = `✓ ${count} hit${count !== 1 ? 's' : ''} · ${scope} · ${gainersN} gainers · ${source} · ${time}`;
         } else if (meta?.source === 'curated-fallback') {
           el.textContent = `✓ ${count} stock${count !== 1 ? 's' : ''} · Curated list · ${time}`;
         } else {

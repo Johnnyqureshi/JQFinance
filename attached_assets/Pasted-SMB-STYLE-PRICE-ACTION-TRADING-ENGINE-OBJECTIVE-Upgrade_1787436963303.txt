@@ -1,0 +1,919 @@
+SMB-STYLE PRICE ACTION TRADING ENGINE
+
+OBJECTIVE
+
+Upgrade the existing trading bot into a professional-style intraday price-action engine inspired by the concepts presented by SMB Capital in:
+
+“Price Action Trading Like an Elite Prop Trader (4 Killer Setups)”
+
+Do NOT treat this as a simple indicator strategy.
+
+The bot must evaluate:
+
+1. Market context
+2. Stock context
+3. Price action
+4. Relative strength/weakness
+5. Key technical areas
+6. Volume and momentum
+7. Confirmation
+8. Risk/reward
+9. Trade management
+
+The bot should only execute a trade when enough independent evidence supports a defined setup.
+
+==================================================
+
+1. MARKET CONTEXT
+
+==================================================
+
+Before entering any trade, determine:
+
+* SPY trend
+* QQQ trend
+* IWM trend
+* Market breadth if available
+* Overall market momentum
+* Market volatility
+* Whether the market is trending, ranging, or transitioning
+
+Classify the environment as:
+
+RISK_ON
+RISK_OFF
+NEUTRAL
+TRENDING
+RANGING
+HIGH_VOLATILITY
+
+Use this classification to modify trade aggressiveness.
+
+Do NOT automatically trade a stock simply because its individual chart looks attractive if the broader market strongly contradicts the trade.
+
+==================================================
+
+2. STOCK SELECTION
+
+==================================================
+
+Prioritize stocks that are:
+
+* Highly liquid
+* Actively traded
+* Showing unusual volume
+* Showing strong relative volume
+* In play because of news, earnings, catalysts, sector movement, or unusual activity
+* Showing meaningful intraday price movement
+* Demonstrating clear relative strength or relative weakness
+
+Calculate:
+
+Relative Volume =
+Current volume / Average volume for comparable time period
+
+Give higher scores to stocks with significant relative volume.
+
+Avoid low-liquidity stocks with unreliable spreads unless explicitly enabled by the user.
+
+==================================================
+
+3. IDENTIFY THE STOCK’S CHARACTER
+
+==================================================
+
+Determine whether the stock is:
+
+STRONG
+WEAK
+NEUTRAL
+TRENDING_UP
+TRENDING_DOWN
+RANGE_BOUND
+EXTENDED
+REVERSING
+
+Compare the stock’s performance against:
+
+* SPY
+* QQQ
+* Sector ETF
+* Relevant industry peers when available
+
+Example:
+
+If SPY is weak but the stock is holding highs and repeatedly reclaiming VWAP, classify the stock as relatively strong.
+
+If SPY is strong but the stock repeatedly fails at resistance and makes lower lows, classify it as relatively weak.
+
+Relative strength/weakness is a major component of the setup score.
+
+==================================================
+
+4. KEY PRICE AREAS
+
+==================================================
+
+Identify important areas rather than relying on a single exact price.
+
+Track:
+
+* Premarket high
+* Premarket low
+* Previous day high
+* Previous day low
+* Previous close
+* Opening price
+* Intraday high
+* Intraday low
+* VWAP
+* Anchored VWAP when available
+* Major consolidation areas
+* High-volume areas
+* Recent swing highs
+* Recent swing lows
+* Support zones
+* Resistance zones
+* Psychological levels
+
+Treat support and resistance as ZONES.
+
+Do not assume a level is valid merely because price touched it once.
+
+==================================================
+
+5. PRICE ACTION ENGINE
+
+==================================================
+
+Analyze candle-by-candle behavior.
+
+Track:
+
+* Higher highs
+* Higher lows
+* Lower highs
+* Lower lows
+* Consolidation
+* Expansion
+* Compression
+* Failed breakouts
+* Failed breakdowns
+* Reclaims
+* Rejections
+* Pullbacks
+* Continuations
+* Reversals
+
+The bot must understand that the same price level can behave differently depending on:
+
+* Momentum
+* Volume
+* Market environment
+* Previous price action
+* Number of tests
+* Speed of approach
+* Reaction after the level is breached
+
+==================================================
+
+6. SETUP A — BREAKOUT / BREAKDOWN
+
+Identify a well-defined consolidation or resistance/support area.
+
+LONG CONDITIONS:
+
+1. Stock is showing relative strength.
+2. Price forms a recognizable resistance zone.
+3. Price consolidates near the upper portion of the range.
+4. Volume begins increasing.
+5. Price breaks above the resistance zone.
+6. Breakout candle demonstrates meaningful expansion.
+7. Breakout is confirmed rather than immediately rejected.
+8. Market context does not strongly contradict the trade.
+
+SHORT CONDITIONS:
+
+Reverse the logic.
+
+Look for:
+
+* Relative weakness
+* Consolidation near support
+* Increasing selling pressure
+* Breakdown through support
+* Volume expansion
+* Confirmation below the level
+
+Do NOT chase an extremely extended breakout.
+
+If price has already moved substantially beyond the breakout area, wait for a controlled pullback/retest.
+
+==================================================
+
+7. SETUP B — PULLBACK / CONTINUATION
+
+Identify a strong directional move.
+
+LONG:
+
+1. Stock establishes an uptrend.
+2. Strong impulse move occurs.
+3. Stock pulls back.
+4. Pullback volume decreases relative to the impulse.
+5. Price holds an important support area/VWAP/previous breakout area.
+6. Selling pressure begins to weaken.
+7. Price resumes upward momentum.
+8. Enter on confirmation.
+
+SHORT:
+
+Reverse the conditions.
+
+Look for:
+
+* Strong downtrend
+* Sharp downside impulse
+* Controlled bounce
+* Weak buying volume
+* Rejection at resistance/VWAP
+* Resumption of downside movement
+
+The bot should favor controlled pullbacks rather than buying extended candles.
+
+==================================================
+
+8. SETUP C — FAILED BREAKOUT / FAILED BREAKDOWN
+
+A breakout that cannot hold can create a high-quality reversal opportunity.
+
+LONG REVERSAL:
+
+1. Price breaks below an important support area.
+2. Breakdown fails.
+3. Price quickly reclaims the level.
+4. Selling pressure decreases.
+5. Buyers regain control.
+6. Volume confirms the reclaim.
+7. Enter after confirmation.
+
+SHORT REVERSAL:
+
+1. Price breaks above resistance.
+2. Breakout fails.
+3. Price falls back below the resistance area.
+4. Buyers become trapped.
+5. Selling pressure increases.
+6. Enter after confirmation.
+
+The bot should explicitly detect trapped traders.
+
+==================================================
+
+9. SETUP D — EXTREME MOVE / REVERSION
+
+Identify stocks that have become excessively extended from:
+
+* VWAP
+* Moving averages
+* Recent support/resistance
+* Intraday mean
+* Recent consolidation
+
+Do NOT automatically buy an oversold stock.
+
+Do NOT automatically short an overbought stock.
+
+Require evidence that the extreme move is actually reversing.
+
+LONG REVERSAL CONFIRMATION:
+
+* Extreme downside extension
+* Selling momentum slows
+* Price forms a higher low
+* Important support holds
+* Price reclaims a meaningful level
+* Volume confirms buying
+* Market/sector context supports the reversal
+
+SHORT REVERSAL:
+
+Reverse the conditions.
+
+==================================================
+
+10. VWAP
+
+==================================================
+
+Use VWAP as a contextual reference rather than a standalone buy/sell signal.
+
+Track:
+
+* Price above VWAP
+* Price below VWAP
+* VWAP slope
+* VWAP reclaim
+* VWAP rejection
+* Distance from VWAP
+
+Higher-quality LONG:
+
+Price above VWAP + rising VWAP + relative strength + bullish price action.
+
+Higher-quality SHORT:
+
+Price below VWAP + falling VWAP + relative weakness + bearish price action.
+
+A VWAP cross alone is NOT an entry signal.
+
+==================================================
+
+11. VOLUME ANALYSIS
+
+==================================================
+
+Volume must confirm price behavior.
+
+Track:
+
+* Relative volume
+* Volume acceleration
+* Volume expansion on breakout
+* Volume contraction during pullback
+* Volume expansion during reversal
+* Volume divergence
+
+Prefer:
+
+Breakout + increasing volume
+
+Pullback + decreasing volume
+
+Reversal + renewed volume
+
+Avoid:
+
+Breakout + declining volume + immediate rejection.
+
+==================================================
+
+12. MOMENTUM
+
+==================================================
+
+Use momentum indicators as confirmation, NOT as the primary strategy.
+
+The existing RSI functionality may remain available.
+
+Use RSI to identify:
+
+* Momentum
+* Extreme conditions
+* Divergence
+* Potential exhaustion
+
+Do NOT automatically buy RSI < 30.
+
+Do NOT automatically short RSI > 70.
+
+RSI should never override strong price-action evidence.
+
+==================================================
+
+13. TRADE SCORE
+
+==================================================
+
+Create a 0–100 setup score.
+
+Suggested weighting:
+
+Market Context             15 points
+Stock Relative Strength    15 points
+Price Action                20 points
+Key Level                  10 points
+Volume                     10 points
+Momentum                   10 points
+Setup Quality              10 points
+Risk/Reward                10 points
+
+Maximum = 100
+
+Trade classifications:
+
+90–100 = A+ setup
+80–89  = A setup
+70–79  = B setup
+60–69  = Watch only
+Below 60 = NO TRADE
+
+Default automatic execution threshold:
+
+80+
+
+Allow the user to change this threshold.
+
+==================================================
+
+14. ENTRY CONFIRMATION
+
+==================================================
+
+Never enter merely because a setup appears possible.
+
+Require confirmation.
+
+Confirmation can include:
+
+* Break of structure
+* Reclaim
+* Rejection
+* Higher low
+* Lower high
+* Volume expansion
+* VWAP reclaim/rejection
+* Breakout confirmation
+* Tape/Level 2 confirmation if available
+
+If Level 2 is available, incorporate:
+
+* Bid strength
+* Ask pressure
+* Spread
+* Repeated absorption
+* Aggressive buyers
+* Aggressive sellers
+* Failed pushes
+
+If Level 2 is unavailable, continue using price/volume data.
+
+==================================================
+
+15. STOP LOSS
+
+==================================================
+
+Stops must be based on the trade thesis.
+
+Do NOT use an arbitrary percentage stop for every trade.
+
+Examples:
+
+Breakout trade:
+Stop below breakout/retest structure.
+
+Pullback trade:
+Stop below the pullback’s structural low.
+
+Short continuation:
+Stop above structural lower high.
+
+Failed breakout short:
+Stop above failed breakout area.
+
+Reversal long:
+Stop below reversal structure/support.
+
+The bot must calculate:
+
+Risk per share =
+Entry price - Stop price
+
+For shorts:
+
+Risk per share =
+Stop price - Entry price
+
+==================================================
+
+16. RISK / REWARD
+
+==================================================
+
+Before executing:
+
+Calculate realistic target based on:
+
+* Previous high/low
+* Support/resistance
+* Measured move
+* VWAP
+* Consolidation range
+* Volatility
+* ATR when available
+
+Default minimum acceptable reward/risk:
+
+2.0 : 1
+
+Preferred:
+
+2.5 : 1 or better
+
+Do not enter if the nearest realistic target does not provide adequate reward relative to the stop.
+
+==================================================
+
+17. PROFIT MANAGEMENT
+
+==================================================
+
+Do not automatically exit solely because RSI reaches 70/75.
+
+Instead:
+
+Take partial profits near meaningful resistance/target zones.
+
+After price moves favorably:
+
+* Protect gains
+* Raise stop when justified
+* Trail behind higher lows for longs
+* Trail above lower highs for shorts
+
+Allow the user to configure:
+
+FIRST_TARGET_R
+SECOND_TARGET_R
+TRAILING_STOP
+PARTIAL_EXIT_PERCENT
+
+Example:
+
+At +1R:
+Optionally take 25%.
+
+At +2R:
+Optionally take another 25–50%.
+
+Allow remaining shares to run while structure remains favorable.
+
+==================================================
+
+18. TRADE INVALIDATION
+
+==================================================
+
+Immediately reassess the trade when:
+
+* Breakout fails
+* VWAP is lost after a VWAP-dependent setup
+* Support breaks
+* Resistance rejects unexpectedly
+* Volume disappears
+* Market conditions change
+* Relative strength/weakness reverses
+* Original trade thesis is no longer valid
+
+Do not hold a trade simply because the position is losing.
+
+The question is:
+
+“Is the original trade thesis still valid?”
+
+If NO:
+
+Exit.
+
+==================================================
+
+19. NO-TRADE CONDITIONS
+
+==================================================
+
+Do NOT trade when:
+
+* Market is extremely choppy
+* Spread is excessive
+* Liquidity is insufficient
+* Volume is abnormally low
+* Setup is unclear
+* Risk/reward is poor
+* Price is already excessively extended
+* Multiple signals contradict one another
+* The setup cannot be objectively defined
+* The stock is halted or trading abnormally
+* Data quality is unreliable
+
+“No trade” is a valid and preferred decision.
+
+==================================================
+
+20. PRE-TRADE DECISION ENGINE
+
+==================================================
+
+Before every order, generate:
+
+SYMBOL:
+DIRECTION:
+SETUP:
+MARKET ENVIRONMENT:
+RELATIVE STRENGTH:
+KEY LEVEL:
+ENTRY:
+STOP:
+TARGET 1:
+TARGET 2:
+RISK/SHARE:
+EXPECTED R:R:
+VOLUME STATUS:
+VWAP STATUS:
+MOMENTUM STATUS:
+SETUP SCORE:
+TRADE THESIS:
+INVALIDATION CONDITION:
+
+Then evaluate:
+
+IF setup_score >= minimum_score
+AND risk_reward >= minimum_rr
+AND liquidity_ok
+AND market_conditions_allowed
+AND entry_confirmation = TRUE
+AND trade_thesis_valid = TRUE
+
+THEN:
+
+EXECUTE TRADE
+
+ELSE:
+
+DO NOT TRADE
+
+==================================================
+
+21. POSITION MANAGEMENT
+
+==================================================
+
+Once in a position:
+
+Continuously monitor:
+
+* Price
+* Volume
+* VWAP
+* Structure
+* Relative strength
+* Market direction
+* Target proximity
+* Stop proximity
+
+Never increase position size simply because the trade is losing.
+
+Only add to a position if:
+
+1. The strategy explicitly permits scaling.
+2. The original thesis remains valid.
+3. The new entry provides favorable risk/reward.
+4. Total risk remains within the user’s maximum risk limit.
+
+==================================================
+
+22. MARKET REGIME ADAPTATION
+
+==================================================
+
+TRENDING MARKET:
+
+Favor:
+
+* Breakouts
+* Pullbacks
+* Continuations
+* Relative-strength trades
+
+RANGING MARKET:
+
+Favor:
+
+* Reversions
+* Failed breakouts
+* Failed breakdowns
+* Range-edge trades
+
+HIGH VOLATILITY:
+
+Reduce aggressiveness.
+
+Require stronger confirmation.
+
+Widen structural stops only when justified by volatility and reduce position size accordingly.
+
+==================================================
+
+23. POSITION SIZING
+
+==================================================
+
+Do not hard-code position size.
+
+Respect the user’s existing manual position-size setting.
+
+If risk-based sizing is enabled:
+
+Position Size =
+Maximum Dollar Risk / Risk Per Share
+
+Never exceed:
+
+* User-defined max position
+* User-defined max dollar risk
+* Broker buying power
+* Account risk limits
+
+==================================================
+
+24. ALPACA EXECUTION
+
+==================================================
+
+Use the existing Alpaca integration.
+
+The bot must support:
+
+PAPER mode
+LIVE mode
+
+The user selects the mode through the existing application settings.
+
+Do NOT hard-code paper trading.
+
+Before submitting an order verify:
+
+* Market is open
+* Symbol is tradable
+* Buying power is sufficient
+* Position does not already violate strategy limits
+* Order quantity is valid
+* Stop/target calculations are valid
+* Data timestamp is current
+
+Use appropriate order types based on the existing architecture.
+
+==================================================
+
+25. SCANNER
+
+==================================================
+
+Continuously scan the user’s stock universe.
+
+Prioritize stocks with:
+
+* High relative volume
+* Large percentage move
+* Strong price momentum
+* News/catalyst
+* Significant premarket movement
+* VWAP interaction
+* Breakout/breakdown structure
+* Relative strength/weakness
+
+Rank candidates by:
+
+SETUP SCORE
+
+Show the highest-quality setups first.
+
+==================================================
+
+26. HUMAN-READABLE TRADE EXPLANATION
+
+==================================================
+
+For every potential trade, produce a concise explanation:
+
+“LONG — A setup
+
+Stock is showing relative strength versus SPY, holding above VWAP, consolidating below resistance, and volume is increasing. A confirmed breakout above the resistance zone provides the entry. Structural stop is below the consolidation. First target is the next resistance area. Estimated R:R = X.”
+
+For a rejected trade:
+
+“NO TRADE — Setup score 67/100. Breakout lacks volume confirmation and expected reward does not justify the risk.”
+
+==================================================
+
+27. IMPORTANT PRINCIPLE
+
+The bot must NOT attempt to predict the future with certainty.
+
+It should react to what price is actually doing.
+
+Think:
+
+“If X happens, do Y.”
+
+NOT:
+
+“Price will definitely go up.”
+
+Every trade must have:
+
+SETUP
+TRIGGER
+ENTRY
+STOP
+TARGET
+INVALIDATION
+
+If the trigger never occurs:
+
+NO TRADE.
+
+==================================================
+
+28. BACKTESTING / LOGGING
+
+Log every candidate setup, including trades that were NOT taken.
+
+Store:
+
+* Symbol
+* Timestamp
+* Setup type
+* Market regime
+* Entry
+* Stop
+* Target
+* Setup score
+* Volume
+* VWAP
+* RSI
+* Relative strength
+* Result
+* Maximum favorable excursion
+* Maximum adverse excursion
+* Reason for entry
+* Reason for rejection
+* Exit reason
+
+Create statistics for each setup independently.
+
+Do NOT optimize the strategy solely for historical win rate.
+
+Track:
+
+* Win rate
+* Average winner
+* Average loser
+* Profit factor
+* Expectancy
+* Maximum drawdown
+* Average R
+* Number of trades
+* Performance by setup
+* Performance by market regime
+
+==================================================
+
+29. IMPLEMENTATION PRIORITY
+
+Do not remove existing working functionality.
+
+Integrate this as a strategy engine into the existing Replit application.
+
+First inspect the existing codebase and determine:
+
+* Current market-data provider
+* Current Alpaca integration
+* Current scanner
+* Current order manager
+* Current RSI implementation
+* Current volume scanner
+* Current position manager
+* Current paper/live toggle
+* Current UI
+
+Reuse existing infrastructure whenever possible.
+
+Do not create duplicate Alpaca connections.
+
+Do not create duplicate market-data streams.
+
+Do not break existing functionality.
+
+==================================================
+
+FINAL OPERATING RULE
+
+The bot’s job is NOT to trade constantly.
+
+The bot’s job is to identify:
+
+HIGH-QUALITY
+DEFINED
+CONFIRMED
+FAVORABLE-RISK/REWARD
+
+trade opportunities.
+
+When the market does not provide one:
+
+WAIT.
+
+A missed trade is preferable to an undefined trade.
+
+Build the system so every executed trade can be explained in plain English and every trade can later be reviewed against the exact setup rules that caused the execution.

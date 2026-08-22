@@ -3,4 +3,6 @@
 - [Bot trade journal integrity](bot-trade-journal-integrity.md) — journal performance must reconcile broker fills, not estimates or order acknowledgements.
 - [Probability confluence safety gate](probability-confluence-safety-gate.md) — shared fresh, complete technical evidence governs UI signals and automated entries.
 - [PMH order safety](pmh-order-safety.md) — freeze at the open; bound and reserve entries; reconcile only broker-confirmed protected lots.
+- [Broker entry capacity](broker-entry-capacity.md) — shared long-entry capacity counts every pending buy parent; multi-lot PMH reserves both units and ambiguous posts reconcile by client ID.
+- [Broker catalog coverage](broker-catalog-coverage.md) — bounded scans rotate a stable per-account Alpaca catalog snapshot; changing movers must never reshuffle catalog coverage.
 - [SQLite session store](sqlite-session-store.md) — persistent sessions use better-sqlite3 to avoid the vulnerable connect-sqlite3 dependency chain.

@@ -24,6 +24,15 @@ const {
 } = require('./lib/opening-momentum-pmh');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
+const {
+  buildTradableEquityCatalog,
+  selectTradableEquityCandidates,
+  selectCatalogRotation,
+  resolveInverseSymbol,
+  calculateEntryCapacity,
+  canReserveEntryUnits,
+  isLikelyCryptoSymbol,
+} = require('./lib/broker-universe');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -2187,6 +2196,68 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   return data;
 }
 
+// Asset listings change far less often than prices. Cache the broker's
+// authoritative active/tradable US-equity catalog per connected account so a
+// scanner refresh never has to enumerate every asset again.
+const ALPACA_ASSET_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
+const _alpacaAssetCatalogCache = new Map();
+const _alpacaCatalogRotationState = new Map();
+
+async function getAlpacaTradableEquityCatalog(userId, { force = false } = {}) {
+  const creds = getAlpacaCreds(userId);
+  if (!creds) throw new Error('Alpaca not connected. Connect an account before verifying tradable symbols.');
+  const key = `${userId}:${creds.mode}:${creds.api_key}`;
+  const cached = _alpacaAssetCatalogCache.get(key);
+  if (!force && cached && Date.now() - cached.at < ALPACA_ASSET_CATALOG_TTL_MS) return cached;
+
+  const assets = await alpacaFetch(userId, '/v2/assets?status=active&asset_class=us_equity');
+  const catalog = buildTradableEquityCatalog(assets);
+  if (!catalog.size) throw new Error('Alpaca returned no active tradable US stocks or ETFs.');
+  const entry = { at: Date.now(), key, catalog };
+  _alpacaAssetCatalogCache.set(key, entry);
+  if (_alpacaAssetCatalogCache.size > 200) _alpacaAssetCatalogCache.delete(_alpacaAssetCatalogCache.keys().next().value);
+  return entry;
+}
+
+function nextAlpacaCatalogRotation(catalogEntry, prioritySymbols, {
+  strategy = 'momentum',
+  limit = 300,
+  priorityLimit = 180,
+  rotationLimit = 120,
+} = {}) {
+  const snapshotId = `${catalogEntry.key}:${catalogEntry.at}`;
+  const stateKey = `${catalogEntry.key}:${strategy}`;
+  let state = _alpacaCatalogRotationState.get(stateKey);
+  if (!state || state.snapshotId !== snapshotId) {
+    state = { snapshotId, offset: 0 };
+    _alpacaCatalogRotationState.set(stateKey, state);
+  }
+  const rotation = selectCatalogRotation(catalogEntry.catalog, {
+    prioritySymbols,
+    limit,
+    priorityLimit,
+    rotationLimit,
+    rotationOffset: state.offset,
+  });
+  state.offset = rotation.nextOffset;
+  if (_alpacaCatalogRotationState.size > 200) _alpacaCatalogRotationState.delete(_alpacaCatalogRotationState.keys().next().value);
+  return rotation;
+}
+
+async function assertAlpacaTradableEquity(userId, symbol, { fresh = false } = {}) {
+  const normalized = String(symbol || '').toUpperCase();
+  if (fresh) {
+    const asset = await alpacaFetch(userId, `/v2/assets/${encodeURIComponent(normalized)}`);
+    const eligible = buildTradableEquityCatalog([asset]).get(normalized);
+    if (!eligible) throw new Error(`${normalized} is not an active, tradable Alpaca stock or ETF.`);
+    return eligible;
+  }
+  const { catalog } = await getAlpacaTradableEquityCatalog(userId);
+  const asset = catalog.get(normalized);
+  if (!asset) throw new Error(`${normalized} is not an active, tradable Alpaca stock or ETF.`);
+  return asset;
+}
+
 // Emergency liquidation is coordinated server-side so an order accepted just
 // before a browser kill switch cannot fill after the account has been closed.
 const alpacaEmergencyFlattenLocks = new Set();
@@ -2436,12 +2507,28 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
 
   // ── Market-hours guard (equity only — crypto trades 24/7) ─────────────────
-  const isCryptoSym = /[-]|USD$|USDT$/.test(symbol.toUpperCase());
+  const isCryptoSym = isLikelyCryptoSymbol(symbol);
   if (!isCryptoSym && !isMarketOpen()) {
     return res.status(400).json({ error: 'Market is closed. Equity orders are only accepted during regular market hours (9:35 AM – 3:50 PM ET, Mon–Fri). Use Alpaca directly for extended-hours orders.' });
   }
 
+  let entryLockHeld = false;
   try {
+    // The order endpoint is shared by manual orders and the Momentum bot.
+    // Reserve the cross-bot lock before looking at capacity, so simultaneous
+    // buys cannot each consume the last available slot.
+    if (sideL === 'buy') {
+      if (!acquireBotLock(req.session.userId)) {
+        return res.status(409).json({ error: 'Another entry is being prepared. Please wait for it to settle.' });
+      }
+      entryLockHeld = true;
+      if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true });
+      const slots = await getOpenSlots(req.session.userId, 'Order');
+      if (!canReserveEntryUnits(slots)) {
+        return res.status(409).json({ error: 'Position limit reached or account data unavailable.' });
+      }
+    }
+
     // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
     const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId);
     // BUG FIX: use live `price` field — regularClose is prior-session close and causes stale bracket levels
@@ -2538,6 +2625,8 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
     const status = e.alpacaTransient ? 503
       : e.alpacaStatus || (e.message.includes('authentication') ? 401 : 400);
     res.status(status).json({ error: e.message });
+  } finally {
+    if (entryLockHeld) releaseBotLock(req.session.userId);
   }
 });
 
@@ -3311,14 +3400,46 @@ app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
 
 app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
   const raw = String(req.query.symbols || 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY');
-  const symbols = [...new Set(raw.split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)))].slice(0, 25);
+  const requestedSymbols = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, 25);
+  let catalog = null;
+  let catalogEntry = null;
+  let catalogError = null;
+  try {
+    catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId);
+    catalog = catalogEntry.catalog;
+  }
+  catch (error) { catalogError = error; }
+  const selection = selectTradableEquityCandidates(requestedSymbols, catalog);
+  const rotation = catalog
+    ? nextAlpacaCatalogRotation(catalogEntry, requestedSymbols, {
+      strategy: 'pmh', limit: 25, priorityLimit: 13, rotationLimit: 12,
+    })
+    : null;
+  const symbols = rotation ? rotation.symbols : selection.symbols;
   const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
   let config = DEFAULT_PMH_CONFIG;
   try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
   const results = await Promise.all(symbols.map(sym => buildPmhCandidate(req.session.userId, sym, config).catch(error => ({
     symbol: sym, status: 'BLOCKED', eligible: false, score: 0, reasons: [`Market data unavailable: ${error.message}`],
   }))));
-  res.set('Cache-Control', 'no-store').json({ strategy: 'opening-momentum-pmh-v1', sessionDate: pmhEtParts(new Date())?.date, results, config });
+  res.set('Cache-Control', 'no-store').json({
+    strategy: 'opening-momentum-pmh-v1', sessionDate: pmhEtParts(new Date())?.date, results, config,
+    coverage: {
+      candidateSource: catalog
+        ? 'Alpaca catalog rotation with PMH watchlist priority'
+        : 'Opening Momentum PMH watchlist',
+      verification: catalog ? 'alpaca-active-tradable-catalog-snapshot' : 'unverified-no-broker-connection',
+      availableAtBroker: catalog ? catalog.size : null,
+      catalogSnapshotAt: catalogEntry ? new Date(catalogEntry.at).toISOString() : null,
+      requested: requestedSymbols.length, scanned: symbols.length, rejected: selection.rejected,
+      priorityWatchlistSymbols: rotation?.prioritySymbols.length || selection.symbols.length,
+      rotatingCatalogSymbols: rotation?.rotatingSymbols.length || 0,
+      rotation: rotation ? { batch: rotation.batch + 1, totalBatches: rotation.totalBatches } : null,
+      note: catalog
+        ? 'PMH keeps its focused watchlist priority while rotating a bounded lane across the same verified Alpaca catalog snapshot.'
+        : catalogError?.message || null,
+    },
+  });
 });
 
 app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
@@ -3327,10 +3448,14 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
   if (!isBotEnabled(userId, 'pmh')) return res.status(409).json({ error: 'Opening Momentum automation is disabled.' });
   if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
   let clientOrderId = null;
+  let submittedOrders = [];
   try {
     if (!isMarketOpen()) return res.status(400).json({ error: 'Market is closed for regular-session PMH entries.' });
+    await assertAlpacaTradableEquity(userId, symbol, { fresh: true });
     const slots = await getOpenSlots(userId, 'PMH');
-    if (!slots || slots.available < 1) return res.status(409).json({ error: 'Position limit reached or account data unavailable.' });
+    // A PMH setup submits two independently protected BUY parents (partial +
+    // runner), so reserve both shared entry units before either reaches Alpaca.
+    if (!canReserveEntryUnits(slots, 2)) return res.status(409).json({ error: 'PMH needs two available entry slots for its protected partial and runner lots.' });
     if (slots.positions.some(p => p.symbol === symbol) ||
         slots.openOrders.some(o => o.symbol === symbol)) return res.status(409).json({ error: `${symbol} already has a position or pending order.` });
     const allSymbolOrders = await alpacaFetch(userId, `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
@@ -3385,7 +3510,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     // behind and accidentally create a short position.
     const partialQty = shares >= 2 ? Math.max(1, Math.min(shares - 1, Math.floor(shares * config.partialPercent / 100))) : 0;
     const runnerQty = shares - partialQty;
-    const orders = [];
+    const orders = submittedOrders;
     const submitLot = async (qty, kind) => {
       const clientId = `pmh_${sessionDate.replaceAll('-','')}_${userId}_${symbol}_${kind}`.slice(0, 48);
       clientOrderId = clientId;
@@ -3395,6 +3520,11 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
       const trade = db.prepare(`INSERT INTO bot_trade_log
         (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_rsi,entry_order_id,entry_client_order_id,strategy)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, entry, qty, mode, 'pending_entry', stop, config.partialTargetR, clientId, clientId, strategy);
+      // Record the broker submission attempt before issuing POST. A network
+      // timeout is ambiguous: Alpaca may accept it, so reconciliation must use
+      // this durable client ID even when no broker order ID comes back.
+      const submitted = { kind, order: null, tradeId: trade.lastInsertRowid, qty, clientOrderId: clientId };
+      orders.push(submitted);
       const orderBody = {
         symbol, qty: String(qty), side: 'buy', type: 'limit', limit_price: entry.toFixed(2), time_in_force: 'day', client_order_id: clientId,
         ...(kind === 'partial'
@@ -3406,7 +3536,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
       try { order = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) }); }
       finally { endAlpacaOrderRequest(userId); }
       db.prepare('UPDATE bot_trade_log SET entry_order_id=? WHERE id=?').run(order?.id || clientId, trade.lastInsertRowid);
-      orders.push({ kind, order, tradeId: trade.lastInsertRowid, qty });
+      submitted.order = order;
     };
     if (partialQty) await submitLot(partialQty, 'partial');
     await submitLot(runnerQty, 'runner');
@@ -3415,9 +3545,17 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     res.json({ ok: true, strategy: 'opening-momentum-pmh-v1', mode, orders, target, stop, candidate });
   } catch (error) {
     const sessionDate = pmhEtParts(new Date())?.date;
-    if (sessionDate) db.prepare(`UPDATE pmh_entry_intents SET status='error',detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
-      .run(String(error.message || 'Broker submission failed').slice(0, 240), userId, symbol, sessionDate);
-    res.status(error.alpacaTransient ? 503 : 400).json({ error: error.message, clientOrderId });
+    if (sessionDate) db.prepare(`UPDATE pmh_entry_intents SET status=?,detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
+      .run(
+        submittedOrders.length ? 'partial_submission_pending_reconciliation' : 'error',
+        String(error.message || 'Broker submission failed').slice(0, 240),
+        userId, symbol, sessionDate,
+      );
+    res.status(error.alpacaTransient ? 503 : 400).json({
+      error: error.message, clientOrderId,
+      reconciliationRequired: submittedOrders.length > 0,
+      submittedLots: submittedOrders.map(order => ({ kind: order.kind, orderId: order.order?.id || null, qty: order.qty })),
+    });
   } finally { releaseBotLock(userId); }
 });
 
@@ -3443,7 +3581,9 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
     let runnerStopCancelled = false;
     try {
       if (trade.status === 'pending_entry') {
-        const order = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+        const order = trade.entry_order_id === trade.entry_client_order_id
+          ? await alpacaFetch(userId, `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`)
+          : await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
         if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
           db.prepare(`UPDATE bot_trade_log SET status='open', entry_price=?, shares=?, entry_order_id=? WHERE id=?`)
             .run(Number(order.filled_avg_price), Number(order.filled_qty), order.id, trade.id);
@@ -3750,15 +3890,21 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
 // ── GET /api/patterns/:sym — standalone daily candle pattern endpoint ─────────
 // ── Inverse-ETF resolver ──────────────────────────────────────────────────────
 // No shorting on this platform: to trade the downside of a stock or the market,
-// buy the mapped inverse ETF instead. Falls back to SH (inverse S&P 500).
+// buy the specifically mapped inverse ETF instead. Unknown mappings are
+// intentionally blocked: silently choosing SH creates unrelated exposure.
 app.get('/api/inverse/:sym', (req, res) => {
   const sym = req.params.sym?.toUpperCase().replace(/[^A-Z.\-]/g, '');
   if (!sym) return res.status(400).json({ ok: false, error: 'symbol required' });
-  const inverse = INVERSE_MAP[sym] || 'SH';
-  res.json({ ok: true, sym, inverse, mapped: !!INVERSE_MAP[sym],
-    note: INVERSE_MAP[sym]
-      ? `${sym} falls → ${inverse} rises (mapped inverse ETF)`
-      : `No specific mapping for ${sym} — SH (inverse S&P 500) is the general market hedge` });
+  const inverse = resolveInverseSymbol(sym, INVERSE_MAP);
+  if (!inverse) {
+    return res.status(404).json({
+      ok: false, sym, code: 'NO_INVERSE_MAPPING',
+      error: `No approved inverse ETF mapping exists for ${sym}. Downside routing is blocked.`,
+    });
+  }
+  res.json({ ok: true, sym, inverse, mapped: true,
+    product: ETF_PRODUCT_METADATA[inverse] || null,
+    note: `${sym} falls → ${inverse} rises (approved mapped inverse ETF)` });
 });
 
 app.get('/api/patterns/:sym', async (req, res) => {
@@ -4151,8 +4297,68 @@ const UNIVERSE_TTL_MS = 4 * 60 * 1000;
 app.get('/api/momentum/universe', requireAuth, async (req, res) => {
   try {
     const now = Date.now();
+    let catalog = null;
+    let catalogEntry = null;
+    let catalogError = null;
+    try {
+      catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId);
+      catalog = catalogEntry.catalog;
+    }
+    catch (error) { catalogError = error; }
+
+    const respond = (rawPayload, cached) => {
+      if (catalog) {
+        // Never enumerate all broker assets in a single browser refresh. Reserve
+        // room for liquid market movers, then rotate the remaining budget
+        // through every active/tradable Alpaca stock and ETF.
+        const rotation = nextAlpacaCatalogRotation(catalogEntry, rawPayload.symbols);
+        const includedGainers = (rawPayload.gainers || []).filter(symbol => rotation.symbols.includes(symbol));
+        const includedSmallCap = (rawPayload.smallCap || []).filter(symbol => rotation.symbols.includes(symbol));
+        const includedActives = (rawPayload.highVolume || []).filter(symbol => rotation.symbols.includes(symbol));
+        return res.json({
+          ...rawPayload,
+          symbols: rotation.symbols,
+          source: 'alpaca-active-tradable-rotating-catalog',
+          candidateSource: 'Alpaca active/tradable catalog: market-mover priority plus rotating catalog coverage',
+          count: rotation.symbols.length,
+          gainers: includedGainers,
+          smallCap: includedSmallCap,
+          highVolume: includedActives,
+          cached,
+          coverage: {
+            verification: 'alpaca-active-tradable-catalog-snapshot',
+            availableAtBroker: catalog.size,
+            catalogSnapshotAt: new Date(catalogEntry.at).toISOString(),
+            candidatesRanked: catalog.size,
+            priorityMarketMovers: rotation.prioritySymbols.length,
+            rotatingCatalogSymbols: rotation.rotatingSymbols.length,
+            scanned: rotation.symbols.length,
+            rotation: { batch: rotation.batch + 1, totalBatches: rotation.totalBatches },
+            rejected: selectTradableEquityCandidates(rawPayload.symbols, catalog).rejected,
+            note: 'The bot scans a bounded batch from one cached Alpaca catalog snapshot each refresh; mover priority does not alter rotation coverage.',
+          },
+        });
+      }
+      const selection = selectTradableEquityCandidates(rawPayload.symbols, catalog);
+      return res.json({
+        ...rawPayload,
+        symbols: selection.symbols,
+        source: rawPayload.source,
+        candidateSource: rawPayload.candidateSource,
+        count: selection.symbols.length,
+        cached,
+        coverage: {
+          verification: 'unverified-no-broker-connection',
+          availableAtBroker: null,
+          candidatesFromSource: rawPayload.symbols.length,
+          scanned: selection.symbols.length,
+          rejected: selection.rejected,
+          note: catalogError?.message || null,
+        },
+      });
+    };
     if (_universeCache && (now - _universeCacheAt) < UNIVERSE_TTL_MS) {
-      return res.json({ ..._universeCache, cached: true });
+      return respond(_universeCache, true);
     }
 
     const YF_SCREENER = 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved';
@@ -4203,27 +4409,32 @@ app.get('/api/momentum/universe', requireAuth, async (req, res) => {
       ...actives,
     ];
 
-    if (!allSymbols.length) {
-      return res.json({ symbols: MASTER_UNIVERSE, source: 'curated-fallback', count: MASTER_UNIVERSE.length, gainers: [], cached: false });
-    }
-
-    const payload = {
+    const payload = allSymbols.length ? {
       symbols:    allSymbols,
-      source:     'yf-full-market',
-      count:      allSymbols.length,
+      source:     'yahoo-market-movers',
+      candidateSource: 'Yahoo day gainers, small-cap gainers, and most active lists',
       gainers:    gainers.map(g => g.symbol),
       smallCap:   smallCap.map(g => g.symbol),
       highVolume: actives,
-      cached:     false,
+    } : {
+      symbols: MASTER_UNIVERSE,
+      source: 'curated-fallback',
+      candidateSource: 'Curated stock and ETF fallback list',
+      gainers: [], smallCap: [], highVolume: [],
     };
 
     _universeCache   = payload;
     _universeCacheAt = now;
     console.log(`[Universe] YF full market: ${gainers.length} day-gainers + ${smallCap.length} small-cap + ${actives.length} actives = ${allSymbols.length} total`);
-    res.json(payload);
+    respond(payload, false);
   } catch (e) {
     console.error('[Universe] Error:', e.message);
-    res.json({ symbols: MASTER_UNIVERSE, source: 'curated-fallback', count: MASTER_UNIVERSE.length, cached: false });
+    const selection = selectTradableEquityCandidates(MASTER_UNIVERSE);
+    res.json({
+      symbols: selection.symbols, source: 'curated-fallback',
+      candidateSource: 'Curated stock and ETF fallback list', count: selection.symbols.length, cached: false,
+      coverage: { verification: 'unverified-server-error', availableAtBroker: null, candidatesFromSource: MASTER_UNIVERSE.length, scanned: selection.symbols.length, rejected: selection.rejected, note: e.message },
+    });
   }
 });
 
@@ -4995,13 +5206,24 @@ const LEVERAGED_MAP = {
   'ZTS':   'SPXL',  'NKE':  'SPXL',  'PM':   'SPXL',
 };
 
+// Explicit product metadata is the one trusted source for route direction and
+// daily leverage. Never infer 2× vs 3× from a ticker name.
+const ETF_PRODUCT_METADATA = Object.freeze({
+  SH:{direction:'inverse',leverage:1}, DOG:{direction:'inverse',leverage:1}, TBF:{direction:'inverse',leverage:1}, SJB:{direction:'inverse',leverage:1}, RXD:{direction:'inverse',leverage:1}, PLTD:{direction:'inverse',leverage:1},
+  QID:{direction:'inverse',leverage:2}, DXD:{direction:'inverse',leverage:2}, GLL:{direction:'inverse',leverage:2}, ZSL:{direction:'inverse',leverage:2}, SCO:{direction:'inverse',leverage:2}, DUST:{direction:'inverse',leverage:2}, JDST:{direction:'inverse',leverage:2}, ERY:{direction:'inverse',leverage:2}, SBIT:{direction:'inverse',leverage:2}, TSLZ:{direction:'inverse',leverage:2}, NVD:{direction:'inverse',leverage:2}, AMDD:{direction:'inverse',leverage:2}, MSTZ:{direction:'inverse',leverage:2}, AAPD:{direction:'inverse',leverage:2}, AMZD:{direction:'inverse',leverage:2}, GGLS:{direction:'inverse',leverage:2}, BIS:{direction:'inverse',leverage:2},
+  SQQQ:{direction:'inverse',leverage:3}, TZA:{direction:'inverse',leverage:3}, SPXS:{direction:'inverse',leverage:3}, SOXS:{direction:'inverse',leverage:3}, TECS:{direction:'inverse',leverage:3}, LABD:{direction:'inverse',leverage:3}, FAZ:{direction:'inverse',leverage:3}, SRTY:{direction:'inverse',leverage:3}, PSQ:{direction:'inverse',leverage:1}, SARK:{direction:'inverse',leverage:1},
+  NVDL:{direction:'long',leverage:2}, TSLL:{direction:'long',leverage:2}, AAPU:{direction:'long',leverage:2}, MSFU:{direction:'long',leverage:2}, AMZU:{direction:'long',leverage:2}, GGLL:{direction:'long',leverage:2}, METU:{direction:'long',leverage:2}, AMDL:{direction:'long',leverage:2}, PLTG:{direction:'long',leverage:2},
+  SPXL:{direction:'long',leverage:3}, TQQQ:{direction:'long',leverage:3}, TNA:{direction:'long',leverage:3}, UDOW:{direction:'long',leverage:3}, SOXL:{direction:'long',leverage:3}, FAS:{direction:'long',leverage:3}, CURE:{direction:'long',leverage:3}, ERX:{direction:'long',leverage:3},
+});
+
 // Returns the affordable 2×/3× leveraged proxy for an expensive stock,
 // or null if the proxy itself is also > $25 or if no mapping exists.
-async function getLeveragedProxy(symbol, price) {
+async function getLeveragedProxy(symbol, price, userId = null) {
   if (price <= MAX_TRADE_PRICE) return null;
   const proxyTicker = LEVERAGED_MAP[symbol];
-  if (!proxyTicker) return null;
+  if (!proxyTicker || ETF_PRODUCT_METADATA[proxyTicker]?.direction !== 'long') return null;
   try {
+    if (userId) await assertAlpacaTradableEquity(userId, proxyTicker);
     const bars = await fetchOHLCV(proxyTicker, 2);
     const proxyPrice = bars?.at(-1)?.c;
     if (!proxyPrice || proxyPrice > MAX_TRADE_PRICE) return null;
@@ -5485,24 +5707,22 @@ function acquireBotLock(userId) {
 }
 function releaseBotLock(userId) { _botLock.delete(String(userId)); }
 
-// ── Slot counter: positions + pending bracket orders ─────────────────────────
-// Each open position = 1 slot. Each pending parent bracket order (not yet filled)
-// = 1 slot. Bracket child legs (TP limit / SL stop) have legs=[] and don't count.
+// ── Slot counter: positions + all pending long entries ────────────────────────
+// Every open BUY consumes capacity, including simple manual, OTO, bracket and
+// PMH orders. Protective legs are SELLs and therefore do not consume a slot.
 async function getOpenSlots(userId, botName) {
-  let positions = [], openOrders = [];
+  let positions = [], allOpen = [], openOrders = [];
   try { positions = await alpacaFetch(userId, '/v2/positions'); } catch { return null; }
   try {
-    const allOpen = await alpacaFetch(userId, '/v2/orders?status=open&limit=50');
-    // Only parent bracket orders have a non-empty legs array
+    allOpen = await alpacaFetch(userId, '/v2/orders?status=open&limit=500');
     openOrders = Array.isArray(allOpen)
-      ? allOpen.filter(o => Array.isArray(o.legs) && o.legs.length > 0)
+      ? allOpen.filter(o => String(o?.side || '').toLowerCase() === 'buy')
       : [];
-  } catch { /* positions-only fallback */ }
-  const used      = (Array.isArray(positions) ? positions.length : 0) + openOrders.length;
-  const available = Math.max(0, MAX_CONCURRENT_POSITIONS - used);
-  if (available <= 0)
-    console.log(`[${botName}] Slot cap: ${positions.length} pos + ${openOrders.length} pending orders = ${used}/${MAX_CONCURRENT_POSITIONS}`);
-  return { available, positions: Array.isArray(positions) ? positions : [], openOrders };
+  } catch { return null; } // shared capacity must fail closed if pending buys are unknown
+  const capacity = calculateEntryCapacity(positions, allOpen, MAX_CONCURRENT_POSITIONS);
+  if (capacity.available <= 0)
+    console.log(`[${botName}] Slot cap: ${capacity.held} pos + ${capacity.pendingEntries} pending buy entries = ${capacity.used}/${MAX_CONCURRENT_POSITIONS}`);
+  return { ...capacity, positions: Array.isArray(positions) ? positions : [], openOrders };
 }
 
 

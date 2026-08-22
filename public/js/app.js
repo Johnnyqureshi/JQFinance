@@ -136,6 +136,8 @@ function goPage(page) {
   if (page==='trading')   { alpacaTrader.open(); }
   if (page==='momentum')  { if (window.momentumTrader) momentumTrader.open(); }
   else if (window.momentumTrader) momentumTrader.pause();
+  if (page==='opening-momentum') { if (window.openingMomentumBot) openingMomentumBot.open(); }
+  else if (window.openingMomentumBot) openingMomentumBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

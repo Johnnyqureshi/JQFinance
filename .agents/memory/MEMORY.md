@@ -2,3 +2,4 @@
 - [Auto-trade safety gates](autotrade-safety-gates.md) — order API leverages server-side (send base amount!); gates fail closed; cycle mutex required; accept BUY and STRONG BUY
 - [Bot trade journal integrity](bot-trade-journal-integrity.md) — journal performance must reconcile broker fills, not estimates or order acknowledgements.
 - [Probability confluence safety gate](probability-confluence-safety-gate.md) — shared fresh, complete technical evidence governs UI signals and automated entries.
+- [PMH order safety](pmh-order-safety.md) — freeze at the open; bound and reserve entries; reconcile only broker-confirmed protected lots.

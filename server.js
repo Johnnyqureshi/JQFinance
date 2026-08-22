@@ -17,6 +17,11 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
+const {
+  DEFAULT_PMH_CONFIG,
+  evaluatePmhBreak,
+  evaluatePmhRunnerExit,
+} = require('./lib/opening-momentum-pmh');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 
@@ -118,6 +123,39 @@ db.exec(`
     WHERE entry_order_id IS NOT NULL;
 `);
 
+// PMH snapshots are frozen per user/symbol/session. Settings are separate from
+// Momentum Trader so changing one strategy cannot silently change the other.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pmh_session_snapshots (
+    user_id      INTEGER NOT NULL,
+    symbol       TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    pmh_high     REAL NOT NULL,
+    pmh_low      REAL NOT NULL,
+    pmh_volume   REAL NOT NULL,
+    opening_price REAL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol, session_date),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS pmh_settings (
+    user_id    INTEGER PRIMARY KEY,
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS pmh_entry_intents (
+    user_id      INTEGER NOT NULL,
+    symbol       TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    detail       TEXT,
+    PRIMARY KEY (user_id, symbol, session_date),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
 [
   `ALTER TABLE auto_trade_settings ADD COLUMN investment_amount REAL DEFAULT 1000.0`,
@@ -138,6 +176,9 @@ db.exec(`
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_reason TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN exit_reason TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN strategy TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN entry_client_order_id TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN rescue_stop_order_id TEXT`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 
 // Paper/shadow evidence is global to the frozen study, never tied to a broker
@@ -3087,6 +3128,485 @@ app.get('/api/momentum/paper-comparison', requireAuth, (req, res) => {
   }
 });
 
+// ── Opening Momentum — PMH Break data contract ────────────────────────────────
+function pmhEtParts(value) {
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  }).formatToParts(d);
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, minutes: Number(p.hour) * 60 + Number(p.minute) };
+}
+
+function pmhTwoMinuteBars(bars) {
+  const groups = new Map();
+  for (const b of (Array.isArray(bars) ? bars : [])) {
+    const et = pmhEtParts(b.t);
+    if (!et || et.minutes < 570 || et.minutes >= 960) continue;
+    const bucket = Math.floor((et.minutes - 570) / 2);
+    const key = `${et.date}:${bucket}`;
+    const g = groups.get(key) || { date: et.date, bucket, bars: [] };
+    g.bars.push(b); groups.set(key, g);
+  }
+  return [...groups.values()].map(g => {
+    const values = g.bars.slice().sort((a, b) => new Date(a.t) - new Date(b.t));
+    return {
+      date: g.date, bucket: g.bucket, t: values[0].t,
+      open: values[0].o, high: Math.max(...values.map(b => b.h)),
+      low: Math.min(...values.map(b => b.l)), close: values.at(-1).c,
+      volume: values.reduce((sum, b) => sum + (Number(b.v) || 0), 0),
+      complete: values.length >= 2,
+    };
+  }).filter(b => b.complete);
+}
+
+function pmhMeanStd(values) {
+  const nums = values.filter(Number.isFinite);
+  if (nums.length < 5) return null;
+  const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+  const variance = nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
+  return { mean, stdDev: Math.sqrt(variance), samples: nums.length };
+}
+
+function pmhFresh(timestamp, maxAgeMs) {
+  const time = new Date(timestamp || 0).getTime();
+  return Number.isFinite(time) && Date.now() - time >= 0 && Date.now() - time <= maxAgeMs;
+}
+
+async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
+  const sym = String(symbol || '').toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+  if (!sym) return { symbol: '', status: 'BLOCKED', eligible: false, reasons: ['Invalid symbol.'] };
+  const now = new Date();
+  const end = now.toISOString();
+  const start = new Date(now.getTime() - 21 * 86400000).toISOString();
+  const [snapshots, barsData, dailyData, spySnapshots] = await Promise.all([
+    alpacaSnapshotFetch(userId, `${sym},SPY`).catch(() => null),
+    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=10000&adjustment=all&feed=iex`).catch(() => null),
+    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Day&limit=30&adjustment=all&feed=iex`).catch(() => null),
+    alpacaSnapshotFetch(userId, 'SPY').catch(() => null),
+  ]);
+  const snap = snapshots?.[sym];
+  const spy = spySnapshots?.SPY || snapshots?.SPY;
+  const oneMinute = Array.isArray(barsData?.bars) ? barsData.bars : [];
+  const twoMinute = pmhTwoMinuteBars(oneMinute);
+  const etNow = pmhEtParts(now);
+  const sessionDate = etNow?.date || now.toISOString().slice(0, 10);
+  const sessionBars = oneMinute.filter(b => pmhEtParts(b.t)?.date === sessionDate);
+  const premarketBars = sessionBars.filter(b => {
+    const mins = pmhEtParts(b.t)?.minutes;
+    return mins >= 240 && mins < 570;
+  });
+  const regularBars = sessionBars.filter(b => (pmhEtParts(b.t)?.minutes || 0) >= 570);
+  const previous = snap?.prevDailyBar || {};
+  const firstRegular = regularBars.slice().sort((a, b) => new Date(a.t) - new Date(b.t))[0];
+  const openingPrice = snap?.dailyBar?.o ?? firstRegular?.o ?? null;
+
+  let frozen = db.prepare('SELECT * FROM pmh_session_snapshots WHERE user_id=? AND symbol=? AND session_date=?')
+    .get(userId, sym, sessionDate);
+  // A PMH is immutable only once the entire pre-market session has ended. Do
+  // not write an early 04:00–09:29 reading, or a later pre-market high would
+  // be silently ignored and create a false breakout level.
+  if (!frozen && premarketBars.length && (etNow?.minutes || 0) >= 570) {
+    frozen = {
+      user_id: userId, symbol: sym, session_date: sessionDate,
+      pmh_high: Math.max(...premarketBars.map(b => b.h)),
+      pmh_low: Math.min(...premarketBars.map(b => b.l)),
+      pmh_volume: premarketBars.reduce((s, b) => s + (Number(b.v) || 0), 0),
+    };
+    db.prepare(`INSERT OR IGNORE INTO pmh_session_snapshots
+      (user_id,symbol,session_date,pmh_high,pmh_low,pmh_volume,opening_price)
+      VALUES (?,?,?,?,?,?,?)`).run(userId, sym, sessionDate, frozen.pmh_high, frozen.pmh_low, frozen.pmh_volume, openingPrice);
+    frozen = db.prepare('SELECT * FROM pmh_session_snapshots WHERE user_id=? AND symbol=? AND session_date=?')
+      .get(userId, sym, sessionDate);
+  } else if (frozen && openingPrice && !frozen.opening_price) {
+    db.prepare('UPDATE pmh_session_snapshots SET opening_price=? WHERE user_id=? AND symbol=? AND session_date=?')
+      .run(openingPrice, userId, sym, sessionDate);
+    frozen.opening_price = openingPrice;
+  }
+
+  const completed = twoMinute.filter(b => b.date === sessionDate);
+  const latestCandle = completed.at(-1) || null;
+  const baseline = latestCandle ? pmhMeanStd(twoMinute
+    .filter(b => b.bucket === latestCandle.bucket && b.date !== sessionDate)
+    .map(b => b.volume)) : null;
+  const closes = completed.map(b => b.close);
+  const ema9 = calcEMA(closes, 9);
+  const dailyBars = Array.isArray(dailyData?.bars) ? dailyData.bars : [];
+  const atrBars = dailyBars.slice(-15);
+  const atr = atrBars.length >= 5
+    ? atrBars.reduce((s, b) => s + (b.h - b.l), 0) / atrBars.length : null;
+  const entry = latestCandle?.close ?? snap?.latestTrade?.p ?? null;
+  const resistanceCandidates = [
+    ...dailyBars.map(b => b.h),
+    ...completed.slice(0, -1).map(b => b.high),
+  ].filter(v => Number.isFinite(v) && Number.isFinite(entry) && v > entry);
+  const resistance = resistanceCandidates.length ? Math.min(...resistanceCandidates) : null;
+  const bid = snap?.latestQuote?.bp ?? null;
+  const ask = snap?.latestQuote?.ap ?? null;
+  const price = snap?.latestTrade?.p ?? latestCandle?.close ?? null;
+  const latestBarTime = latestCandle?.t || oneMinute.at(-1)?.t;
+  const quoteTime = snap?.latestQuote?.t || snap?.latestTrade?.t;
+  const marketPrice = spy?.latestTrade?.p ?? spy?.minuteBar?.c;
+  const marketOpen = spy?.dailyBar?.o;
+  const candidateMove = openingPrice && price ? price / openingPrice - 1 : null;
+  const marketMove = marketOpen && marketPrice ? marketPrice / marketOpen - 1 : null;
+
+  return evaluatePmhBreak({
+    symbol: sym,
+    premarket: frozen ? {
+      high: frozen.pmh_high, low: frozen.pmh_low, volume: frozen.pmh_volume, frozen: true,
+    } : { frozen: false },
+    previousDay: { close: previous.c, high: previous.h, low: previous.l },
+    openingPrice: frozen?.opening_price ?? openingPrice,
+    candle: latestCandle ? {
+      open: latestCandle.open, high: latestCandle.high, low: latestCandle.low,
+      close: latestCandle.close, volume: latestCandle.volume,
+    } : null,
+    volumeBaseline: baseline,
+    quote: { price, bid, ask },
+    resistance,
+    atr,
+    ema9,
+    market: { available: Number.isFinite(marketMove), bullish: Number.isFinite(marketMove) ? marketMove >= 0 : false, movePct: marketMove == null ? null : marketMove * 100 },
+    sector: { available: false, bullish: false },
+    relativeStrength: Number.isFinite(candidateMove) && Number.isFinite(marketMove) ? candidateMove >= marketMove : null,
+    freshness: {
+      bars: pmhFresh(latestBarTime, 4 * 60 * 1000),
+      quote: pmhFresh(quoteTime, 30 * 1000),
+      barsAt: latestBarTime || null, quoteAt: quoteTime || null,
+    },
+    evaluatedAt: now.toISOString(),
+  }, config);
+}
+
+app.get('/api/opening-momentum/settings', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT enabled, config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
+  let config = DEFAULT_PMH_CONFIG;
+  try { config = { ...DEFAULT_PMH_CONFIG, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+  res.json({ enabled: !!row?.enabled, config });
+});
+
+app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const config = { ...DEFAULT_PMH_CONFIG };
+  for (const key of Object.keys(DEFAULT_PMH_CONFIG)) {
+    if (typeof body.config?.[key] === 'boolean') config[key] = body.config[key];
+    else if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
+  }
+  // The shared bot safety cap remains authoritative even if a stale browser
+  // setting attempts to widen it.
+  config.maxTradePrice = Math.min(MAX_TRADE_PRICE, Math.max(1, Number(config.maxTradePrice) || MAX_TRADE_PRICE));
+  db.prepare(`INSERT INTO pmh_settings (user_id,enabled,config_json) VALUES (?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,config_json=excluded.config_json`)
+    .run(req.session.userId, body.enabled ? 1 : 0, JSON.stringify(config));
+  res.json({ ok: true, enabled: !!body.enabled, config });
+});
+
+app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
+  const raw = String(req.query.symbols || 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY');
+  const symbols = [...new Set(raw.split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)))].slice(0, 25);
+  const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
+  let config = DEFAULT_PMH_CONFIG;
+  try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+  const results = await Promise.all(symbols.map(sym => buildPmhCandidate(req.session.userId, sym, config).catch(error => ({
+    symbol: sym, status: 'BLOCKED', eligible: false, score: 0, reasons: [`Market data unavailable: ${error.message}`],
+  }))));
+  res.set('Cache-Control', 'no-store').json({ strategy: 'opening-momentum-pmh-v1', sessionDate: pmhEtParts(new Date())?.date, results, config });
+});
+
+app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  const symbol = String(req.body?.symbol || '').toUpperCase();
+  if (!isBotEnabled(userId, 'pmh')) return res.status(409).json({ error: 'Opening Momentum automation is disabled.' });
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  let clientOrderId = null;
+  try {
+    if (!isMarketOpen()) return res.status(400).json({ error: 'Market is closed for regular-session PMH entries.' });
+    const slots = await getOpenSlots(userId, 'PMH');
+    if (!slots || slots.available < 1) return res.status(409).json({ error: 'Position limit reached or account data unavailable.' });
+    if (slots.positions.some(p => p.symbol === symbol) ||
+        slots.openOrders.some(o => o.symbol === symbol)) return res.status(409).json({ error: `${symbol} already has a position or pending order.` });
+    const allSymbolOrders = await alpacaFetch(userId, `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
+    if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) return res.status(409).json({ error: `${symbol} already has a broker-open order.` });
+    const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
+    let config = DEFAULT_PMH_CONFIG;
+    try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+    const candidate = await buildPmhCandidate(userId, symbol, config);
+    if (!candidate.eligible) return res.status(400).json({ error: 'Trade is not eligible.', candidate });
+    // Calculate risk from a fresh executable quote, not a 2-minute candle
+    // close. A marketable limit bounds upward slippage; without a usable ask,
+    // the trade is blocked rather than sized optimistically.
+    const freshSnapshot = await alpacaSnapshotFetch(userId, symbol);
+    const executableAsk = Number(freshSnapshot?.[symbol]?.latestQuote?.ap);
+    const executableQuoteAt = freshSnapshot?.[symbol]?.latestQuote?.t;
+    if (!(executableAsk > 0) || !pmhFresh(executableQuoteAt, 15 * 1000)) {
+      return res.status(400).json({ error: 'Fresh executable Alpaca ask is unavailable; PMH order blocked.' });
+    }
+    const slippageCap = 0.0025; // 25 bps maximum accepted entry drift
+    const boundedEntry = +(executableAsk * (1 + slippageCap)).toFixed(2);
+    const stop = Number(candidate.levels.stop);
+    const boundedRisk = boundedEntry - stop;
+    const boundedRiskPct = boundedRisk / boundedEntry * 100;
+    if (!(boundedRisk > 0) || boundedRiskPct > config.maxRiskPerSharePct ||
+        !Number.isFinite(candidate.levels.resistance) ||
+        candidate.levels.resistance - boundedEntry < boundedRisk * config.minRoomRiskMultiple) {
+      return res.status(400).json({ error: 'Fresh quote invalidates the configured stop or resistance-risk gate.' });
+    }
+    if (boundedEntry > MAX_TRADE_PRICE) return res.status(400).json({ error: `PMH preserves the account-wide $${MAX_TRADE_PRICE} maximum trade price.` });
+    const daily = db.prepare(`SELECT COUNT(*) AS trades,
+      COALESCE(SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END), 0) AS losses
+      FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
+      AND date(timestamp, 'localtime')=date('now','localtime') AND status <> 'void'`).get(userId);
+    if (Number(daily.trades) >= config.maxTradesPerDay) return res.status(409).json({ error: 'PMH daily trade limit reached.' });
+    if (Number(daily.losses) >= config.maxDailyLoss) return res.status(409).json({ error: 'PMH daily loss limit reached.' });
+    const mode = getAlpacaCreds(userId)?.mode || 'paper';
+    const shares = Math.floor(config.maxRiskDollars / boundedRisk);
+    if (!Number.isInteger(shares) || shares < 1) return res.status(400).json({ error: 'Risk sizing produced less than one whole share.' });
+    const entry = boundedEntry;
+    const target = Number((entry + boundedRisk * config.partialTargetR).toFixed(2));
+    const sessionDate = pmhEtParts(new Date())?.date;
+    if (!sessionDate) return res.status(400).json({ error: 'Trading session date is unavailable.' });
+    try {
+      db.prepare(`INSERT INTO pmh_entry_intents (user_id,symbol,session_date,status,detail) VALUES (?,?,?,?,?)`)
+        .run(userId, symbol, sessionDate, 'pending', 'PMH broker submission reserved');
+    } catch (e) {
+      return res.status(409).json({ error: `${symbol} already has a PMH entry intent for this session.` });
+    }
+    // Use two broker-protected lots: a bracket lot realizes the configured
+    // partial target, while an OTO lot is the independent EMA-managed runner.
+    // This avoids a browser-side partial sell that could leave an oversized stop
+    // behind and accidentally create a short position.
+    const partialQty = shares >= 2 ? Math.max(1, Math.min(shares - 1, Math.floor(shares * config.partialPercent / 100))) : 0;
+    const runnerQty = shares - partialQty;
+    const orders = [];
+    const submitLot = async (qty, kind) => {
+      const clientId = `pmh_${sessionDate.replaceAll('-','')}_${userId}_${symbol}_${kind}`.slice(0, 48);
+      clientOrderId = clientId;
+      const existing = db.prepare('SELECT id FROM bot_trade_log WHERE user_id=? AND entry_client_order_id=?').get(userId, clientId);
+      if (existing) throw new Error('This PMH entry lot is already recorded.');
+      const strategy = kind === 'partial' ? 'opening-momentum-pmh-partial' : 'opening-momentum-pmh-runner';
+      const trade = db.prepare(`INSERT INTO bot_trade_log
+        (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_rsi,entry_order_id,entry_client_order_id,strategy)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, entry, qty, mode, 'pending_entry', stop, config.partialTargetR, clientId, clientId, strategy);
+      const orderBody = {
+        symbol, qty: String(qty), side: 'buy', type: 'limit', limit_price: entry.toFixed(2), time_in_force: 'day', client_order_id: clientId,
+        ...(kind === 'partial'
+          ? { order_class: 'bracket', take_profit: { limit_price: target.toFixed(2) }, stop_loss: { stop_price: stop.toFixed(2) } }
+          : { order_class: 'oto', stop_loss: { stop_price: stop.toFixed(2) } }),
+      };
+      beginAlpacaOrderRequest(userId);
+      let order;
+      try { order = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) }); }
+      finally { endAlpacaOrderRequest(userId); }
+      db.prepare('UPDATE bot_trade_log SET entry_order_id=? WHERE id=?').run(order?.id || clientId, trade.lastInsertRowid);
+      orders.push({ kind, order, tradeId: trade.lastInsertRowid, qty });
+    };
+    if (partialQty) await submitLot(partialQty, 'partial');
+    await submitLot(runnerQty, 'runner');
+    db.prepare(`UPDATE pmh_entry_intents SET status='submitted',detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
+      .run(`Submitted ${orders.length} protected PMH lot(s)`, userId, symbol, sessionDate);
+    res.json({ ok: true, strategy: 'opening-momentum-pmh-v1', mode, orders, target, stop, candidate });
+  } catch (error) {
+    const sessionDate = pmhEtParts(new Date())?.date;
+    if (sessionDate) db.prepare(`UPDATE pmh_entry_intents SET status='error',detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
+      .run(String(error.message || 'Broker submission failed').slice(0, 240), userId, symbol, sessionDate);
+    res.status(error.alpacaTransient ? 503 : 400).json({ error: error.message, clientOrderId });
+  } finally { releaseBotLock(userId); }
+});
+
+app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
+  const trades = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
+    ORDER BY timestamp DESC LIMIT 30`).all(req.session.userId);
+  res.json({ trades });
+});
+
+// Reconcile only broker-confirmed PMH fills. The browser can request this while
+// open; it never manufactures a fill price, exit, or P&L from a quote.
+app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot reconciliation cycle is in progress.' });
+  try {
+  const settingRow = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
+  let pmhConfig = DEFAULT_PMH_CONFIG;
+  try { pmhConfig = { ...pmhConfig, ...(settingRow?.config_json ? JSON.parse(settingRow.config_json) : {}) }; } catch (_) {}
+  const open = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
+    AND status IN ('pending_entry','open','pending_exit','exit_reserving') ORDER BY id`).all(userId);
+  const reconciled = [];
+  for (const trade of open) {
+    let runnerStopCancelled = false;
+    try {
+      if (trade.status === 'pending_entry') {
+        const order = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+        if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
+          db.prepare(`UPDATE bot_trade_log SET status='open', entry_price=?, shares=?, entry_order_id=? WHERE id=?`)
+            .run(Number(order.filled_avg_price), Number(order.filled_qty), order.id, trade.id);
+          reconciled.push({ id: trade.id, status: 'open', event: 'entry fill confirmed' });
+        } else if (['canceled', 'rejected', 'expired'].includes(order.status)) {
+          db.prepare(`UPDATE bot_trade_log SET status='void', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
+            .run(`Entry ${order.status} by broker`, trade.id);
+          reconciled.push({ id: trade.id, status: 'void', event: `entry ${order.status}` });
+        }
+        continue;
+      }
+      if (trade.status === 'pending_exit' && trade.pending_exit_order_id) {
+        const order = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.pending_exit_order_id)}`);
+        if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
+          const filledQty = Number(order.filled_qty);
+          const exitPrice = Number(order.filled_avg_price);
+          const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
+          db.prepare(`UPDATE bot_trade_log SET status='closed', exit_price=?, shares=?, pnl=?, exit_reason=?,
+            pending_exit_order_id=NULL, pending_exit_reason=NULL, closed_at=datetime('now') WHERE id=?`)
+            .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
+          reconciled.push({ id: trade.id, status: 'closed', event: 'exit fill confirmed' });
+        }
+        continue;
+      }
+      // Parent orders expose their protective child legs. A broker-filled
+      // bracket target/stop is the only source of a realized partial result.
+      const parent = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      const filledLeg = (parent?.legs || []).find(leg =>
+        leg.status === 'filled' && Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0
+      );
+      if (filledLeg) {
+        const filledQty = Number(filledLeg.filled_qty);
+        const exitPrice = Number(filledLeg.filled_avg_price);
+        const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
+        db.prepare(`UPDATE bot_trade_log SET status='closed', exit_price=?, shares=?, pnl=?, exit_reason=?, closed_at=datetime('now') WHERE id=?`)
+          .run(exitPrice, filledQty, pnl, filledLeg.type === 'limit' ? 'Partial target broker fill' : 'Protective stop broker fill', trade.id);
+        reconciled.push({ id: trade.id, status: 'closed', event: 'protective leg fill confirmed' });
+        continue;
+      }
+      // The partial lot has a native Alpaca bracket. It never uses the runner
+      // manager or a browser-estimated partial sell.
+      if (trade.strategy === 'opening-momentum-pmh-partial') continue;
+      // An earlier cycle acquired the exit reservation but could not finish.
+      // It may still reconcile a broker leg above, but it must never submit a
+      // second discretionary sell without operator review.
+      if (trade.status === 'exit_reserving' || trade.rescue_stop_order_id) {
+        reconciled.push({ id: trade.id, status: trade.status, event: 'runner exit remains reserved; broker state must reconcile before another sell' });
+        continue;
+      }
+      // For an active runner, the exit decision uses a completed 2-minute
+      // candle only. Before sending a sell, cancel any stop child so it cannot
+      // later flip the account short; the generic no-short guard is preserved.
+      if (!isMarketOpen()) continue;
+      const candidate = await buildPmhCandidate(userId, trade.symbol, pmhConfig);
+      if (!candidate.freshness?.bars) continue;
+      const runner = evaluatePmhRunnerExit({
+        candle: candidate.candle,
+        pmh: candidate.premarket?.high,
+        ema9: candidate.context?.ema9,
+        momentumCollapsed: candidate.candle?.upperWickRatio > .55 && candidate.candle?.close < candidate.candle?.open,
+        majorReversal: candidate.status === 'BREAKOUT FAILED',
+      });
+      if (!runner.exit) continue;
+      // A durable compare-and-swap is the second line of defense after the
+      // in-process bot lock. Only the winning request may cancel a stop or
+      // submit a runner exit.
+      const claimed = db.prepare(`UPDATE bot_trade_log SET status='exit_reserving', pending_exit_reason=?
+        WHERE id=? AND user_id=? AND status='open'`).run(runner.reason, trade.id, userId);
+      if (claimed.changes !== 1) continue;
+      const position = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+      const qty = Math.min(Number(position?.qty), Number(trade.shares));
+      if (!(qty > 0)) continue; // Preserve journal until broker evidence explains the disappearance.
+      // Cancel only this runner's own OTO stop child. The partial bracket stays
+      // in force and continues to protect/target its separate lot.
+      let stopCancelAmbiguous = false;
+      for (const leg of (parent.legs || [])) {
+        if (leg.status === 'new' || leg.status === 'accepted' || leg.status === 'pending_new') {
+          await alpacaFetch(userId, `/v2/orders/${leg.id}`, { method: 'DELETE' });
+          const settledLeg = await alpacaFetch(userId, `/v2/orders/${leg.id}`);
+          if (!['canceled', 'cancelled'].includes(String(settledLeg?.status || '').toLowerCase())) {
+            stopCancelAmbiguous = true;
+          } else {
+            runnerStopCancelled = true;
+          }
+        }
+      }
+      // A stop may fill while the cancel request is in flight. In that
+      // ambiguous state, do not submit a discretionary sell; reconcile the
+      // terminal broker state on the next cycle instead.
+      const afterCancel = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      const stopFilledDuringCancel = (afterCancel?.legs || []).some(leg => leg.status === 'filled');
+      if (stopCancelAmbiguous || stopFilledDuringCancel) {
+        reconciled.push({ id: trade.id, status: 'open', event: 'runner stop cancellation unsettled; no discretionary sell submitted' });
+        continue;
+      }
+      const currentPosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+      const remainingRunnerQty = Math.min(Number(currentPosition?.qty), Number(trade.shares));
+      if (!(remainingRunnerQty > 0)) continue;
+      const exitClientId = `pmhx_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48);
+      beginAlpacaOrderRequest(userId);
+      let exitOrder;
+      try {
+        exitOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+          symbol: trade.symbol, qty: String(remainingRunnerQty), side: 'sell', type: 'market', time_in_force: 'day', client_order_id: exitClientId,
+        }) });
+      } catch (exitError) {
+        // We deliberately canceled the old OTO stop before this market exit.
+        // If the broker did not accept the exit, immediately try to restore a
+        // protective stop for the broker-confirmed remaining runner quantity.
+        try {
+          const rescuePosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+          const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
+          if (rescueQty > 0 && Number(trade.stop_price) > 0) {
+            const rescueOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+              symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
+              stop_price: Number(trade.stop_price).toFixed(2),
+              client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
+            }) });
+            db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
+              pending_exit_order_id=NULL, pending_exit_reason=? WHERE id=?`)
+              .run(rescueOrder.id, 'Runner exit failed; replacement stop submitted', trade.id);
+          }
+        } catch (_) {}
+        throw exitError;
+      } finally { endAlpacaOrderRequest(userId); }
+      db.prepare(`UPDATE bot_trade_log SET status='pending_exit', pending_exit_order_id=?, pending_exit_reason=? WHERE id=?`)
+        .run(exitOrder.id, runner.reason, trade.id);
+      reconciled.push({ id: trade.id, status: 'pending_exit', event: runner.reason });
+    } catch (error) {
+      // Any failure after the original runner stop was terminally canceled must
+      // leave the runner protected or reserved for manual broker resolution.
+      // Never return it to `open`, which could submit a second discretionary
+      // sell on a later polling cycle.
+      if (runnerStopCancelled) {
+        try {
+          const latest = db.prepare('SELECT rescue_stop_order_id FROM bot_trade_log WHERE id=?').get(trade.id);
+          if (!latest?.rescue_stop_order_id) {
+            const rescuePosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+            const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
+            if (rescueQty > 0 && Number(trade.stop_price) > 0) {
+              beginAlpacaOrderRequest(userId);
+              let rescueOrder;
+              try {
+                rescueOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+                  symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
+                  stop_price: Number(trade.stop_price).toFixed(2),
+                  client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
+                }) });
+              } finally { endAlpacaOrderRequest(userId); }
+              db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
+                pending_exit_order_id=NULL, pending_exit_reason=? WHERE id=?`)
+                .run(rescueOrder.id, 'Runner reconciliation failed; replacement stop submitted', trade.id);
+            }
+          }
+        } catch (_) {}
+      }
+      reconciled.push({ id: trade.id, status: trade.status, error: error.message });
+    }
+  }
+  const trades = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
+    ORDER BY timestamp DESC LIMIT 30`).all(userId);
+  res.json({ ok: true, reconciled, trades });
+  } finally {
+    releaseBotLock(userId);
+  }
+});
+
 // ── GET /api/bots/status — SPY gate + PDT state for the logged-in user ────────
 // ── Momentum: intraday analysis (MACD, candle patterns, move %) ──────────────
 app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
@@ -3737,17 +4257,19 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
 });
 
 // ── Bot toggle helpers ─────────────────────────────────────────────────────────
-const BOT_NAMES = ['countertrend'];
+const BOT_NAMES = ['countertrend', 'pmh'];
 
 function isBotEnabled(userId, botName) {
   const row = db.prepare('SELECT enabled FROM bot_toggles WHERE user_id=? AND bot_name=?').get(userId, botName);
-  return row ? !!row.enabled : true; // default ON if no row exists yet
+  // PMH is deliberately opt-in; an account connection must never silently
+  // activate a new opening-range strategy.
+  return row ? !!row.enabled : botName === 'pmh' ? false : true;
 }
 
 // GET /api/bots/toggles — returns { bounce: true, volatility_expansion: false, … }
 app.get('/api/bots/toggles', requireAuth, (req, res) => {
   const rows = db.prepare('SELECT bot_name, enabled FROM bot_toggles WHERE user_id=?').all(req.session.userId);
-  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, true])); // default all ON
+  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, b === 'pmh' ? false : true]));
   rows.forEach(r => { map[r.bot_name] = !!r.enabled; });
   res.json(map);
 });

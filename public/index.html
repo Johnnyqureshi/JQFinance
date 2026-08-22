@@ -81,6 +81,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
       Momentum
     </button>
+    <button class="nav-link" data-page="opening-momentum">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
+      Opening
+    </button>
   </div>
 
   <div class="nav-right">
@@ -1284,6 +1288,110 @@
   </div><!-- /.mt-page -->
 </div><!-- /#page-momentum -->
 
+<!-- ══════════════════════════════════════════════════════════════════════════
+     OPENING MOMENTUM — PMH BREAK
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-opening-momentum">
+  <div class="mt-page pmh-page">
+    <div class="mt-topbar">
+      <div class="mt-topbar-left">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
+        <span class="mt-topbar-title">Opening Momentum</span>
+        <span class="mt-mode-badge mt-badge-warn" id="pmhModeBadge">PMH BREAK</span>
+        <span class="pmh-session" id="pmhSession">Waiting for Alpaca data</span>
+      </div>
+      <div class="mt-topbar-right">
+        <span id="pmhScanStatus" class="mt-scan-status">Ready to scan</span>
+        <button class="mt-refresh-btn" id="pmhRefreshBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh PMH scan
+        </button>
+      </div>
+    </div>
+
+    <section class="pmh-intro" aria-label="Strategy rules">
+      <strong>Closed-candle strategy.</strong> The bot freezes the pre-market high at the regular open and waits for a completed 2-minute close above it. A gap, touch, wick, or unavailable same-time volume history is never a trade.
+    </section>
+
+    <div class="mt-config-section">
+      <div class="mt-config-header">
+        <div class="mt-config-title">PMH rules &amp; risk <span class="mt-config-sub">saved separately from Momentum Trader</span></div>
+        <button class="mt-config-toggle" id="pmhConfigToggle">▼ Configure</button>
+      </div>
+      <div class="mt-config-body" id="pmhConfigBody" style="display:none">
+        <div class="mt-cpt-block">
+          <span class="mt-cpt-block-label">Confirmation</span>
+          <div class="mt-cpt-grid">
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMinScore">Min setup score /100</label><input id="pmhMinScore" class="mt-cpt-input" type="number" min="0" max="100" value="80"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRelVol">Same-time rel. volume ×</label><input id="pmhRelVol" class="mt-cpt-input" type="number" min="1" step=".1" value="2"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhVolZ">Volume z-score</label><input id="pmhVolZ" class="mt-cpt-input" type="number" min="0" step=".1" value="1.5"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhBody">Min body / range</label><input id="pmhBody" class="mt-cpt-input" type="number" min=".1" max="1" step=".05" value=".55"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhWick">Max upper wick / range</label><input id="pmhWick" class="mt-cpt-input" type="number" min=".05" max=".9" step=".05" value=".28"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhResistance">Minimum room / risk</label><input id="pmhResistance" class="mt-cpt-input" type="number" min=".5" step=".25" value="2"></div>
+          </div>
+        </div>
+        <div class="mt-cpt-block">
+          <span class="mt-cpt-block-label">Risk &amp; runner</span>
+          <div class="mt-cpt-grid">
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRisk">Max dollar risk</label><input id="pmhRisk" class="mt-cpt-input" type="number" min="1" step="5" value="100"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPrice">Max trade price</label><input id="pmhMaxPrice" class="mt-cpt-input" type="number" min="1" max="15" step=".5" value="15"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxStop">Max stop distance %</label><input id="pmhMaxStop" class="mt-cpt-input" type="number" min=".5" step=".5" value="8"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialR">Partial target (R)</label><input id="pmhPartialR" class="mt-cpt-input" type="number" min="1" step=".25" value="2"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialPct">Partial exit %</label><input id="pmhPartialPct" class="mt-cpt-input" type="number" min="1" max="99" value="50"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxTrades">Max trades / day</label><input id="pmhMaxTrades" class="mt-cpt-input" type="number" min="1" max="10" value="3"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxLoss">Max daily loss $</label><input id="pmhMaxLoss" class="mt-cpt-input" type="number" min="1" step="25" value="500"></div>
+            <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input type="checkbox" id="pmhRequireMarket" checked><span>Require SPY to be positive from its regular-session open</span></label></div>
+            <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input type="checkbox" id="pmhRequireRS" checked><span>Require the symbol to outperform SPY from the open</span></label></div>
+          </div>
+        </div>
+        <div class="mt-config-actions">
+          <button class="mt-btn-apply" id="pmhApplyConfig">Save &amp; rescan</button>
+          <button class="mt-btn-reset" id="pmhResetConfig">Reset defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-bot-bar" id="pmhBotBar">
+      <div class="mt-bot-left">
+        <button class="mt-bot-toggle mt-bot-toggle--off" id="pmhBotToggle">▶ ENABLE AUTOMATION</button>
+        <div class="mt-bot-indicators"><span class="mt-bot-dot" id="pmhBotDot"></span><span class="mt-bot-status" id="pmhBotStatus">Automation is off. Scans remain read-only.</span></div>
+      </div>
+      <div class="mt-bot-right">Risk sizing · broker-confirmed fills · stop at breakout-candle low · 2-min 9 EMA runner</div>
+    </div>
+
+    <div class="pmh-stats" id="pmhStats">
+      <div><span>Pre-market high</span><strong>Frozen at the open</strong></div>
+      <div><span>Entry proof</span><strong>2-min close, never a wick</strong></div>
+      <div><span>Volume proof</span><strong>Same time of day</strong></div>
+      <div><span>Exit rule</span><strong>9 EMA / PMH failure</strong></div>
+    </div>
+
+    <div class="mt-body">
+      <div class="mt-left-col">
+        <div class="mt-panel">
+          <div class="mt-panel-head"><span class="mt-panel-title">PMH candidate scanner</span><span class="mt-panel-sub">Alpaca bars · explicit no-trade reasons</span></div>
+          <div class="mt-scan-wrap">
+            <table class="mt-table pmh-table">
+              <thead><tr><th>Symbol</th><th class="mt-r">Open / PMH</th><th class="mt-r">2m close</th><th class="mt-r">Vol × / z</th><th class="mt-r">Risk / sh</th><th class="mt-r">Score</th><th class="mt-r">Status</th></tr></thead>
+              <tbody id="pmhScanBody"><tr><td colspan="7" class="mt-empty-row">Open this page to scan the PMH watchlist.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="mt-right-col">
+        <div class="mt-panel pmh-detail" id="pmhDetailPanel">
+          <div class="mt-panel-head"><span class="mt-panel-title">PMH setup detail</span><span class="mt-panel-sub" id="pmhDetailTime">—</span></div>
+          <div id="pmhDetailBody" class="pmh-detail-body"><span class="mt-na">Select a candidate to see its fixed level, risk preview, and every passed or blocked condition.</span></div>
+        </div>
+        <div class="mt-panel pmh-active">
+          <div class="mt-panel-head"><span class="mt-panel-title">PMH activity</span><button class="at-icon-btn" id="pmhTradesRefresh" title="Refresh broker journal">↻</button></div>
+          <div id="pmhTradesBody" class="pmh-trades-body">No PMH order intents have been recorded.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ALPACA CONNECT MODAL -->
 <div class="trd-modal-bg" id="trdModal" style="display:none" role="dialog" aria-modal="true">
   <div class="trd-modal-card">
@@ -1332,6 +1440,7 @@
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
 <script src="/js/momentum.js"></script>
+<script src="/js/opening-momentum.js"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -1354,6 +1463,10 @@
   <button class="mobile-nav-btn nav-link" data-page="momentum" aria-label="Momentum">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
     <span>Momentum</span>
+  </button>
+  <button class="mobile-nav-btn nav-link" data-page="opening-momentum" aria-label="Opening Momentum">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
+    <span>Opening</span>
   </button>
 </nav>
 

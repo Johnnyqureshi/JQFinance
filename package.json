@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/strategy-validator.test.js && node tests/strategy-validation-runner.test.js && node tests/paper-shadow.test.js && node tests/catalyst-intel.test.js && node tests/momentum-news.test.js && node tests/emergency-flatten.test.js && node tests/technical-probability-engine.test.js",
+    "test": "node tests/strategy-validator.test.js && node tests/strategy-validation-runner.test.js && node tests/paper-shadow.test.js && node tests/catalyst-intel.test.js && node tests/momentum-news.test.js && node tests/emergency-flatten.test.js && node tests/technical-probability-engine.test.js && node tests/opening-momentum-pmh.test.js",
     "validate:strategy": "node scripts/validate-strategy.js"
   },
   "keywords": [],

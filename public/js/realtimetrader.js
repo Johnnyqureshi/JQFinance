@@ -82,7 +82,71 @@ const rtTrader = (() => {
   }
 
   // ── Signal engine ───────────────────────────────────────────────────────────
-  function computeSignal(rsi, price, vwap, volData, momentum, sr) {
+  function computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, isFresh) {
+    // The server-side technical engine is the authoritative path whenever it is
+    // available. It evaluates higher timeframes and critical support/resistance,
+    // avoiding a one-bar SELL call into a confirmed support response.
+    if (confluence?.available && !isFresh) {
+      return {
+        signal: 'HOLD', confidence: 30,
+        reasons: ['DATA STALE — SIGNAL CONFIDENCE REDUCED', 'No directional call is issued from stale technical evidence'],
+      };
+    }
+    if (confluence?.available) {
+      const scores = confluence.scores || {};
+      const signal = confluence.signal || {};
+      if (confluence.dataQuality?.fresh !== true) {
+        return {
+          signal: 'HOLD', confidence: 30,
+          reasons: ['STALE OR UNVERIFIED MARKET DATA', 'No directional call is issued until each required source is current'],
+        };
+      }
+      const support = confluence.levels?.criticalSupport;
+      const resistance = confluence.levels?.criticalResistance;
+      const supportNote = support?.price != null ? `Critical support $${fmt(support.price)}` : 'No verified support level';
+      const resistanceNote = resistance?.price != null ? `Critical resistance $${fmt(resistance.price)}` : 'No verified resistance level';
+      if (signal.stage === 'CONFIRMED' && scores.bullish >= 68 && scores.drawdown < scores.bullish) {
+        return {
+          signal: 'BUY', confidence: scores.setupQuality || scores.bullish,
+          reasons: [signal.label, supportNote, `Bounce estimate ${scores.bounce}%`, 'Multiple independent technical confirmations'],
+        };
+      }
+      if (signal.stage === 'ENTRY CONFIRMATION' && scores.bullish >= 58 && scores.drawdown < scores.bullish) {
+        return {
+          signal: 'HOLD', confidence: scores.setupQuality || scores.bullish,
+          reasons: [signal.label, `Wait for confirmation level`, supportNote, `Bullish ${scores.bullish}% vs drawdown ${scores.drawdown}%`],
+        };
+      }
+      if (signal.label?.includes('BEARISH') || signal.label?.includes('DRAWDOWN')) {
+        // Never call a short-style SELL into nearby, unbroken support. The signal
+        // becomes actionable only after the deterministic engine confirms that
+        // support has failed.
+        if (support?.distancePct != null && support.distancePct <= 1 && signal.stage !== 'INVALIDATED') {
+          return {
+            signal: 'HOLD', confidence: scores.setupQuality || scores.bearish,
+            reasons: ['Elevated drawdown risk, but price remains at critical support', supportNote, 'Wait for a support break before treating it as bearish confirmation'],
+          };
+        }
+        return {
+          signal: 'SELL', confidence: scores.setupQuality || scores.bearish,
+          reasons: [signal.label, resistanceNote, `Drawdown estimate ${scores.drawdown}%`, 'Multiple bearish confirmations'],
+        };
+      }
+      return {
+        signal: 'HOLD', confidence: scores.setupQuality || 50,
+        reasons: [signal.label || 'NO CLEAR EDGE', supportNote, resistanceNote, 'Signals conflict — wait for confirmation'],
+      };
+    }
+
+    // The shared confluence path is unavailable, so do not fall back to a
+    // simplified one-bar BUY/SELL rule. It would be inconsistent with the bot.
+    if (!confluence?.available) {
+      return {
+        signal: 'HOLD', confidence: 30,
+        reasons: ['Technical confluence unavailable', 'No directional call without support/resistance and multi-timeframe confirmation'],
+      };
+    }
+
     const aboveVwap  = vwap != null && price > vwap;
     const belowVwap  = vwap != null && price < vwap;
 
@@ -97,6 +161,10 @@ const rtTrader = (() => {
     } else if (sr.support && price <= sr.support * 1.005 && aboveVwap && momentum >= 1) {
       signal = 'BUY'; confidence = 63;
       reasons = ['Price bouncing off intraday support', 'Price above VWAP', 'Bullish momentum at demand zone'];
+    } else if (sr.support && price <= sr.support * 1.006) {
+      // A nearby support test needs confirmation, not a forced directional call.
+      signal = 'HOLD'; confidence = 54;
+      reasons = ['Price is testing intraday support', 'Wait for a break or a confirmed bounce', 'Fallback signal has limited context'];
     } else if (rsi !== null && rsi > 70 && belowVwap) {
       signal = 'SELL'; confidence = 76;
       reasons = ['RSI overbought (> 70)', 'Price below VWAP — bearish bias', 'Overbought + below equilibrium'];
@@ -496,14 +564,17 @@ const rtTrader = (() => {
   }
 
   // ── Render results ──────────────────────────────────────────────────────────
-  function render(sym, bars, price, dailyBars, marketState) {
+  function render(sym, bars, price, dailyBars, marketState, gamePlan) {
     const closes  = bars.map(b => b.c);
     const vwap    = calcVWAP(bars);
     const rsi     = calcRSI(closes);
     const sr      = calcSR(bars, price);
     const volData = calcVolData(bars);
     const momentum = calcMomentum(bars);
-    const { signal, confidence, reasons } = computeSignal(rsi, price, vwap, volData, momentum, sr);
+    const confluence = gamePlan?.confluence || null;
+    const generated = Date.parse(gamePlan?.generatedAt || '');
+    const fresh = Number.isFinite(generated) && Date.now() - generated <= 90_000;
+    const { signal, confidence, reasons } = computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, fresh);
 
     // Verdict
     const vb = $('rtVerdict');
@@ -629,10 +700,11 @@ const rtTrader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, intradayRes, histRes] = await Promise.all([
+      const [quoteRes, intradayRes, histRes, gamePlanRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/gameplan/${sym}?force=1`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       const price       = quoteRes?.price ?? intradayRes?.price ?? null;
@@ -644,7 +716,7 @@ const rtTrader = (() => {
       if (bars.length < 2) throw new Error('No price data available for ' + sym + ' — try again shortly.');
 
       $('rtInput').value = sym;
-      render(sym, bars, price, dailyBars, marketState);
+      render(sym, bars, price, dailyBars, marketState, gamePlanRes);
 
     } catch (e) {
       $('rtLoading').style.display = 'none';

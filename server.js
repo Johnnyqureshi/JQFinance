@@ -16,6 +16,7 @@ const {
   buildCatalystEvent,
   dedupeEvents,
 } = require('./lib/catalyst-intel');
+const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 
@@ -610,6 +611,7 @@ function _normaliseQuote(q) {
     yearLow:           q.fiftyTwoWeekLow  ?? null,
     pe:                q.trailingPE       ?? null,
     eps:               q.epsTrailingTwelveMonths ?? null,
+    asOf:              q.preMarketTime ?? q.postMarketTime ?? q.regularMarketTime ?? null,
   };
 }
 
@@ -739,6 +741,7 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
     pe:                extras.pe        ?? null,
     eps:               extras.eps       ?? null,
     source:            'alpaca',
+    asOf:              snap.latestTrade?.t ?? snap.minuteBar?.t ?? snap.dailyBar?.t ?? null,
   };
 }
 
@@ -1537,9 +1540,9 @@ async function gpFetchDaily(symbol, range = '2y') {
   } catch { return null; }
 }
 
-async function gpFetchIntraday5m(symbol) {
+async function gpFetchIntraday(symbol, interval = '5m', range = '1d') {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=1d&includePrePost=true`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=true`;
     const r = await fetch(url, { headers: YH });
     if (!r.ok) return null;
     const rs = (await r.json())?.chart?.result?.[0];
@@ -1557,6 +1560,37 @@ async function gpFetchIntraday5m(symbol) {
       })(),
     })).filter(b => b.c != null);
   } catch { return null; }
+}
+
+function gpFetchIntraday5m(symbol) {
+  return gpFetchIntraday(symbol, '5m', '1d');
+}
+
+function gpTimestampMs(value) {
+  if (typeof value === 'number') return value < 10_000_000_000 ? value * 1000 : value;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function gpSourceFreshness({ quote, daily, oneMinute, fiveMinute, fifteenMinute, hourly }) {
+  const ageOf = value => {
+    const timestamp = gpTimestampMs(value);
+    return timestamp == null ? null : Math.max(0, Date.now() - timestamp);
+  };
+  const latestBar = bars => Array.isArray(bars) && bars.length ? bars.at(-1)?.t : null;
+  const sources = {
+    quote:          { sourceTimestamp: quote?.asOf ?? null, maxAgeMs: 90_000 },
+    oneMinute:      { sourceTimestamp: latestBar(oneMinute), maxAgeMs: 6 * 60_000 },
+    fiveMinute:     { sourceTimestamp: latestBar(fiveMinute), maxAgeMs: 16 * 60_000 },
+    fifteenMinute:  { sourceTimestamp: latestBar(fifteenMinute), maxAgeMs: 35 * 60_000 },
+    hourly:         { sourceTimestamp: latestBar(hourly), maxAgeMs: 100 * 60_000 },
+    daily:          { sourceTimestamp: latestBar(daily), maxAgeMs: 54 * 60 * 60_000 },
+  };
+  for (const source of Object.values(sources)) {
+    source.ageMs = ageOf(source.sourceTimestamp);
+    source.fresh = source.ageMs != null && source.ageMs <= source.maxAgeMs;
+  }
+  return sources;
 }
 
 function gpATR(bars, period = 14) {
@@ -1677,10 +1711,13 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   }
 
   const job = (async () => {
-    const [quote, daily, intra, profile, mktRaw] = await Promise.all([
+    const [quote, daily, intra, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
       fetchLiveQuote(sym, req.session.userId).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
+      gpFetchIntraday(sym, '1m', '1d'),
+      gpFetchIntraday(sym, '15m', '5d'),
+      gpFetchIntraday(sym, '1h', '1mo'),
       yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
     ]);
@@ -1846,7 +1883,12 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       const out = [];
       arr.forEach(c => {
         const near = out.find(o => Math.abs(o.price - c.price) / price < 0.004);
-        if (near) near.label += ' + ' + c.label; else out.push({ ...c });
+        if (near) {
+          near.label += ' + ' + c.label;
+          near.confirmations = (near.confirmations || 1) + 1;
+        } else {
+          out.push({ ...c, confirmations: 1 });
+        }
       });
       return out;
     };
@@ -1854,6 +1896,36 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const resistance = dedupe(inRange.filter(c => c.price > price).sort((a, b) => a.price - b.price)).slice(0, 3);
     const breakdown = support.length ? +(support.at(-1).price - (atr ?? price * 0.02) * 0.5).toFixed(2) : null;
     const levels = { support, resistance, breakdown, currentPrice: +price.toFixed(2) };
+    const sourceFreshness = gpSourceFreshness({
+      quote, daily, oneMinute: intra1m, fiveMinute: intra,
+      fifteenMinute: intra15m, hourly: intra1h,
+    });
+
+    // Technical probability / confluence engine. This is deterministic and uses
+    // only the supplied price, volume, and market-context observations. It never
+    // places an order and never turns missing data into a directional signal.
+    const confluence = buildTechnicalConfluence({
+      price,
+      dailyBars: daily,
+      intradayBars: intra,
+      indicators,
+      levels,
+      relVol,
+      dayChangePct: chg1d,
+      market,
+      newsCount: news.length,
+      freshness: sourceFreshness,
+      timeframes: {
+        oneMinute: intra1m,
+        fiveMinute: intra,
+        fifteenMinute: intra15m,
+        hourly: intra1h,
+        daily,
+      },
+    });
+    if (!intra1m?.length) dataGaps.push('1-minute timeframe unavailable');
+    if (!intra15m?.length) dataGaps.push('15-minute timeframe unavailable');
+    if (!intra1h?.length) dataGaps.push('1-hour timeframe unavailable');
 
     // Probabilities — analog base rates adjusted by live context, rounded to 5s
     const clamp5 = v => Math.max(5, Math.min(95, Math.round(v / 5) * 5));
@@ -1875,6 +1947,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       rebound3:     clamp5(p3 + adj * 0.5),
       rebound5:     clamp5(p5 + adj * 0.5),
       downsideLeg:  clamp5(100 - (pBounce + adj)),
+      bullish:      confluence.scores.bullish,
+      bearish:      confluence.scores.bearish,
+      bounce:       confluence.scores.bounce,
+      drawdown:     confluence.scores.drawdown,
       basis: analogs
         ? `Base rates from ${analogs.sampleSize} past session(s) that closed down ${threshold}%+ (end-of-day statistics — intraday timing not modeled)${analogs.lowConfidence ? '. LIMITED SAMPLE, LOW CONFIDENCE' : ''}. Adjusted for VWAP position, market and sector trend.`
         : 'No comparable historical selloff for the current move — probabilities are neutral heuristics adjusted for live context. LOW CONFIDENCE.',
@@ -1902,8 +1978,8 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     let ai = { available: false, reason: 'AI narrative unavailable' };
     const apiKey = process.env.AIML_API_KEY;
     if (apiKey) {
-      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities };
-      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. Oversold alone is NOT a buy signal. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
+      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence };
+      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic confluence signal is authoritative; do not upgrade a WATCH or NO CLEAR EDGE into a trade. Oversold alone is NOT a buy signal. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
       try {
         const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
           method: 'POST',
@@ -1923,7 +1999,19 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
           const raw = data.choices?.[0]?.message?.content?.trim() || '';
           try {
             const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, ''));
-            ai = { available: true, ...parsed };
+            const deterministicTradeAllowed = confluence.dataQuality?.entryEligible
+              && confluence.signal?.stage === 'CONFIRMED'
+              && confluence.signal?.confluence === 'HIGH CONFLUENCE';
+            // Narrative text is never permitted to manufacture a trade. A trade
+            // setup is shown only when the deterministic engine has complete
+            // data and independently confirmed high confluence.
+            ai = {
+              available: true,
+              ...parsed,
+              noTrade: deterministicTradeAllowed ? !!parsed.noTrade : true,
+              tradeSetup: deterministicTradeAllowed ? (parsed.tradeSetup || null) : null,
+              setup: confluence.signal?.label || parsed.setup,
+            };
           } catch { ai = { available: false, reason: 'AI returned unparseable output' }; }
         } else {
           ai = { available: false, reason: `AI service error (${r.status})` };
@@ -1933,12 +2021,13 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       ai = { available: false, reason: 'AI key not configured' };
     }
 
+    const generatedAt = new Date().toISOString();
     const out = {
-      ok: true, symbol: sym, generatedAt: new Date().toISOString(), dataGaps,
+      ok: true, symbol: sym, generatedAt, freshness: { generatedAt, maxAgeMs: GP_CACHE_MS }, dataGaps,
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, probabilities,
+      market, news, levels, probabilities, confluence,
       confidence: { overall, parts },
       ai,
     };

@@ -52,6 +52,68 @@ const gamePlan = (() => {
     return `<ul class="gp-list ${cls || ''}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`;
   }
 
+  function confluenceHtml(confluence) {
+    if (!confluence?.available) return '';
+    const scores = confluence.scores || {};
+    const states = confluence.states || {};
+    const audit = confluence.audit || {};
+    const quality = confluence.dataQuality || {};
+    const cLevels = confluence.levels || {};
+    const plan = confluence.tradePlan || {};
+    const tf = confluence.timeframes || {};
+    const fmtLevel = level => level?.price != null
+      ? `$${fmt(level.price)} · ${esc(level.label || 'technical level')} (${fmt(level.distancePct, 1)}% away)`
+      : 'Unavailable';
+    const score = (label, value, inverse = false) => probBar(label, value, inverse);
+    const statesHtml = [
+      ['Trend', states.trend], ['Momentum', states.momentum], ['Volume', states.volume],
+      ['Risk', states.risk], ['Relative strength', states.relativeStrength],
+    ].map(([label, value]) => `<span class="gp-state"><i>${esc(label)}</i>${esc(value || 'UNAVAILABLE')}</span>`).join('');
+    const timeframeHtml = Object.entries(tf).map(([key, value]) =>
+      `<span class="gp-timeframe"><i>${esc(key.replace(/([A-Z])/g, ' $1'))}</i>${esc(value?.state || 'UNAVAILABLE')}</span>`
+    ).join('');
+    const factors = (audit.bullishFactors || []).map(f => `<li><b>+${esc(f.points)}</b> ${esc(f.reason)}</li>`).join('')
+      || '<li>No independently bullish confirmations were available.</li>';
+    const risks = (audit.bearishFactors || []).map(f => `<li><b>+${esc(f.points)}</b> ${esc(f.reason)}</li>`).join('')
+      || '<li>No independently bearish confirmations were available.</li>';
+    return `<section class="gp-confluence">
+      <div class="gp-confluence-head">
+        <div><span class="gp-sec-title">Technical confluence</span><span class="gp-sec-note">probability estimates, not guarantees</span></div>
+        <div class="gp-confluence-signal">${esc(confluence.signal?.label || 'NO CLEAR EDGE')}<small>${esc(confluence.signal?.stage || 'WATCH')} · ${esc(confluence.signal?.confluence || 'MIXED')}</small></div>
+      </div>
+      <div class="gp-confluence-scores">
+        ${score('Bullish setup', scores.bullish)}
+        ${score('Bearish setup', scores.bearish, true)}
+        ${score('Bounce probability', scores.bounce)}
+        ${score('Drawdown probability', scores.drawdown, true)}
+        ${score('Setup quality', scores.setupQuality)}
+      </div>
+      <div class="gp-states">${statesHtml}</div>
+      <div class="gp-critical-levels">
+        <div><span>Critical support</span><b>${fmtLevel(cLevels.criticalSupport)}</b></div>
+        <div><span>Critical resistance</span><b>${fmtLevel(cLevels.criticalResistance)}</b></div>
+      </div>
+      <div class="gp-timeframes"><span>Timeframe alignment</span>${timeframeHtml}</div>
+      <div class="gp-setup-grid gp-deterministic-plan">
+        <div><span>Entry zone</span><b>${plan.entryZone != null ? '$' + fmt(plan.entryZone) : 'Wait for a defined level'}</b></div>
+        <div><span>Confirmation</span><b>${plan.confirmation != null ? '$' + fmt(plan.confirmation) : 'Volume + VWAP confirmation'}</b></div>
+        <div><span>Invalidation</span><b>${plan.invalidation != null ? '$' + fmt(plan.invalidation) : 'Unavailable'}</b></div>
+        <div><span>Target 1</span><b>${plan.target1 != null ? '$' + fmt(plan.target1) : 'Unavailable'}</b></div>
+        <div><span>Target 2</span><b>${plan.target2 != null ? '$' + fmt(plan.target2) : 'Unavailable'}</b></div>
+        <div><span>Risk / reward</span><b>${plan.riskReward != null ? plan.riskReward + 'R' : 'Unavailable'}</b></div>
+      </div>
+      <div class="gp-audit">
+        <div><span class="gp-audit-title bull">Bullish factors</span><ul>${factors}</ul></div>
+        <div><span class="gp-audit-title bear">Bearish factors</span><ul>${risks}</ul></div>
+      </div>
+      ${quality.entryEligible
+        ? '<div class="gp-engine-ready">Complete multi-timeframe evidence available — this remains decision support, not a guarantee.</div>'
+        : `<div class="gp-engine-notrade">NO TRADE — incomplete evidence: ${esc((quality.missingCriticalInputs || []).join(' · ') || 'required confirmation unavailable')}</div>`}
+      ${(audit.notes || []).length ? `<div class="gp-engine-notes">${audit.notes.map(esc).join(' · ')}</div>` : ''}
+      ${(audit.missingInputs || []).length ? `<div class="gp-engine-notes gp-warn-txt">Confidence reduced: missing ${audit.missingInputs.map(esc).join(' · ')}</div>` : ''}
+    </section>`;
+  }
+
   function render(d) {
     const c = $('gpContent');
     if (!c) return;
@@ -67,7 +129,7 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, levels, confidence, ai, dataGaps, news } = d;
+    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, levels, confidence, ai, dataGaps, news, confluence } = d;
 
     // Header badge
     const setup = ai?.available ? ai.setup : oversold?.label;
@@ -76,7 +138,11 @@ const gamePlan = (() => {
       el.textContent = setup || '--';
       el.className = 'gp-setup-badge ' + setupClass(setup);
     });
-    setSafe('gpUpdated', el => el.textContent = d.generatedAt ? new Date(d.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+    const ageMs = d.generatedAt ? Date.now() - Date.parse(d.generatedAt) : null;
+    setSafe('gpUpdated', el => {
+      const at = d.generatedAt ? new Date(d.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      el.textContent = ageMs != null && ageMs > 90_000 ? `${at} · DATA STALE — CONFIDENCE REDUCED` : at;
+    });
 
     const chgCls = (s.changePct ?? 0) >= 0 ? 'up' : 'down';
     const analogHtml = analogs
@@ -161,6 +227,7 @@ const gamePlan = (() => {
         </div>
       </div>
 
+      ${confluenceHtml(confluence)}
       ${ai?.available && ai.why?.length ? `<div class="gp-sec-title">Why</div>${list(ai.why)}` : ''}
       ${scen}
       ${knife ? `<div class="gp-knife">⚠ ${esc(knife)}</div>` : ''}

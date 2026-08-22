@@ -2168,16 +2168,42 @@
     // bearish reversal pattern. Returns the first safe candidate or null.
     async _pickSafeCandidate(candidates) {
       for (const row of candidates) {
-        const [analysis, patResp] = await Promise.all([
+        const [analysis, patResp, gamePlan] = await Promise.all([
           MomentumAnalysis.fetch(row.sym),
           fetch(`/api/patterns/${row.sym}`, { credentials: 'include' })
             .then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/gameplan/${encodeURIComponent(row.sym)}?force=1`, { credentials: 'include' })
+            .then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
 
-        // FAIL CLOSED: if safety data is unavailable, we cannot verify the setup —
-        // skip this candidate rather than trading blind.
-        if (!analysis && !patResp?.ok) {
+        // FAIL CLOSED: if safety/confluence data is unavailable, we cannot verify
+        // the setup — skip this candidate rather than trading blind.
+        if ((!analysis && !patResp?.ok) || !gamePlan?.confluence?.available) {
           this.addLog(row.sym, 'SKIP', 'Safety analysis unavailable — cannot verify dump/pattern status', 'warn');
+          continue;
+        }
+        const confluence = gamePlan.confluence;
+        const tcScores = confluence.scores || {};
+        const tcSignal = confluence.signal || {};
+        const dataQuality = confluence.dataQuality || {};
+        const generatedAt = Date.parse(gamePlan.generatedAt || '');
+        const freshEnough = Number.isFinite(generatedAt) && Date.now() - generatedAt <= 90_000;
+        const atResistance = confluence.levels?.criticalResistance?.distancePct != null
+          && confluence.levels.criticalResistance.distancePct <= 0.6;
+        const hasBreakoutVolume = confluence.states?.volume === 'BUYING VOLUME SPIKE';
+        const entryConfirmed = tcSignal.stage === 'CONFIRMED' && tcSignal.confluence === 'HIGH CONFLUENCE';
+        if (!entryConfirmed
+          || !dataQuality.entryEligible
+          || !dataQuality.fresh
+          || !freshEnough
+          || (tcScores.bullish ?? 0) < 68
+          || (tcScores.drawdown ?? 100) >= (tcScores.bullish ?? 0)
+          || confluence.states?.risk === 'ELEVATED'
+          || confluence.tradePlan?.invalidation == null
+          || (atResistance && !hasBreakoutVolume)) {
+          this.addLog(row.sym, 'SKIP',
+            `Technical confluence: ${tcSignal.label || 'NO CLEAR EDGE'} · Bull ${tcScores.bullish ?? '--'} / Drawdown ${tcScores.drawdown ?? '--'} · ${confluence.states?.risk || 'risk unavailable'}`,
+            'warn');
           continue;
         }
 
@@ -2202,7 +2228,7 @@
           continue;
         }
 
-        return row; // passed all safety checks
+        return { ...row, technicalConfluence: confluence }; // passed all safety checks
       }
       return null;
     },
@@ -2315,8 +2341,8 @@
       // Lock this symbol to prevent duplicate orders while request is in flight
       if (!this.botEnabled || this._flattenInProgress) return;
       this._activeTrades.add(row.sym);
-      this.addLog(row.sym, '→ AUTO-BUY',
-        `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · ${AlpacaClient.mode.toUpperCase()}`, 'info');
+        this.addLog(row.sym, '→ AUTO-BUY',
+          `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · Confluence ${row.technicalConfluence?.scores?.bullish ?? '--'}/100 · ${AlpacaClient.mode.toUpperCase()}`, 'info');
 
       let journalTrade = null;
       let journalOrderId = null;

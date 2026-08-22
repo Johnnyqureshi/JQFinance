@@ -440,6 +440,28 @@
             </div>
           </div>
 
+          <!-- Candle patterns are shown separately for daily context and 5-min entries -->
+          <div class="rt-patterns-panel" id="rtPatternsPanel">
+            <div class="rt-patterns-strip">
+              <div class="cp-header">
+                <span>Daily Patterns</span>
+                <span class="rt-patterns-timeframe">30 sessions</span>
+              </div>
+              <div id="rtDailyPatternsList" class="rt-patterns-body">
+                <span class="rt-patterns-empty">Loading…</span>
+              </div>
+            </div>
+            <div class="rt-patterns-strip">
+              <div class="cp-header">
+                <span>5-min Patterns</span>
+                <span class="rt-patterns-timeframe">last 10 bars</span>
+              </div>
+              <div id="rtIntradayPatternsList" class="rt-patterns-body">
+                <span class="rt-patterns-empty">Loading…</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Auto-refresh footer -->
           <div class="rt-cd-col">
             <div class="rt-cd-label">Next refresh</div>

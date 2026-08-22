@@ -549,6 +549,39 @@ const rtTrader = (() => {
     return trs.reduce((s, v) => s + v, 0) / trs.length;
   }
 
+  // ── Render candle patterns for a specific timeframe ─────────────────────────
+  function renderCandlePatterns(patterns, listId, emptyLabel) {
+    const listEl = $(listId);
+    if (!listEl) return;
+
+    const items = Array.isArray(patterns) ? patterns : [];
+    if (!items.length) {
+      listEl.innerHTML = `<span class="rt-patterns-empty">${emptyLabel}</span>`;
+      return;
+    }
+
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+
+    listEl.innerHTML = items.map(pattern => {
+      const type = pattern?.type;
+      const cls = type === 'BULLISH' ? 'cp-bull' : type === 'BEARISH' ? 'cp-bear' : 'cp-neutral';
+      const arrow = type === 'BULLISH' ? '▲' : type === 'BEARISH' ? '▼' : '●';
+      const strength = Math.max(1, Math.min(3, Number(pattern?.strength) || 1));
+      const dots = '●'.repeat(strength) + '○'.repeat(3 - strength);
+      const desc = String(pattern?.desc || '').split(' — ').pop();
+      return `<div class="cp-row ${cls}">
+        <div class="cp-row-top">
+          <span class="cp-badge ${cls}">${arrow}</span>
+          <span class="cp-name">${escapeHtml(pattern?.name || 'Pattern')}</span>
+          <span class="cp-strength">${dots}</span>
+        </div>
+        <div class="cp-desc">${escapeHtml(desc)}</div>
+      </div>`;
+    }).join('');
+  }
+
   // ── Countdown timer ─────────────────────────────────────────────────────────
   function startCountdown(onDone) {
     clearInterval(cdTimer);
@@ -564,7 +597,7 @@ const rtTrader = (() => {
   }
 
   // ── Render results ──────────────────────────────────────────────────────────
-  function render(sym, bars, price, dailyBars, marketState, gamePlan) {
+  function render(sym, bars, price, dailyBars, marketState, gamePlan, dailyPatterns, intradayPatterns) {
     const closes  = bars.map(b => b.c);
     const vwap    = calcVWAP(bars);
     const rsi     = calcRSI(closes);
@@ -684,6 +717,10 @@ const rtTrader = (() => {
     const pivots = calcDailyPivots(dailyBars || [], price);
     renderDailyPivots(pivots, price);
 
+    // Keep the slower daily context separate from the actionable 5-minute read.
+    renderCandlePatterns(dailyPatterns, 'rtDailyPatternsList', 'No significant patterns detected on daily bars');
+    renderCandlePatterns(intradayPatterns, 'rtIntradayPatternsList', 'No significant patterns detected on 5-min bars');
+
     startCountdown(() => analyze(sym));
   }
 
@@ -700,23 +737,26 @@ const rtTrader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, intradayRes, histRes, gamePlanRes] = await Promise.all([
+      const [quoteRes, intradayRes, histRes, gamePlanRes, dailyPatternRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/gameplan/${sym}?force=1`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/patterns/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       const price       = quoteRes?.price ?? intradayRes?.price ?? null;
       const bars        = intradayRes?.bars || [];
       const dailyBars   = histRes?.historical || [];
+      const dailyPatterns = dailyPatternRes?.patterns || [];
+      const intradayPatterns = intradayRes?.intradayPatterns || [];
       const marketState = intradayRes?.marketState ?? quoteRes?.marketState ?? 'REGULAR';
 
       if (!price) throw new Error('Unable to fetch quote for ' + sym);
       if (bars.length < 2) throw new Error('No price data available for ' + sym + ' — try again shortly.');
 
       $('rtInput').value = sym;
-      render(sym, bars, price, dailyBars, marketState, gamePlanRes);
+      render(sym, bars, price, dailyBars, marketState, gamePlanRes, dailyPatterns, intradayPatterns);
 
     } catch (e) {
       $('rtLoading').style.display = 'none';

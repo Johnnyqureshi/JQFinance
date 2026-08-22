@@ -1236,8 +1236,10 @@ app.get('/api/intraday/:symbol', async (req, res) => {
         const snap  = snapData?.[sym];
         const normQ = snap ? _normaliseAlpacaSnapshot(sym, snap) : null;
         const marketState = currentMarketState();
+        const intradayPatterns = detectCandlePatterns(bars.slice(-10)).all;
         return res.json({
           bars,
+          intradayPatterns,
           price:         normQ?.price ?? bars.at(-1)?.c ?? null,
           regularClose:  normQ?.regularClose ?? bars.at(-1)?.c ?? null,
           extendedPrice: normQ?.extendedPrice ?? null,
@@ -1255,10 +1257,10 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       yf.quote(sym, {}, { validateResult: false }).catch(() => null),
     ]);
 
-    if (!chartRes.ok) return res.json({ bars: [], price: null });
+    if (!chartRes.ok) return res.json({ bars: [], intradayPatterns: [], price: null });
     const d  = await chartRes.json();
     const rs = d?.chart?.result?.[0];
-    if (!rs) return res.json({ bars: [], price: null });
+    if (!rs) return res.json({ bars: [], intradayPatterns: [], price: null });
 
     const times = rs.timestamp || [];
     const q     = rs.indicators?.quote?.[0] || {};
@@ -1268,6 +1270,7 @@ app.get('/api/intraday/:symbol', async (req, res) => {
       l: q.low?.[i]    ?? null, c: q.close?.[i]  ?? null,
       v: q.volume?.[i] ?? null,
     })).filter(b => b.c != null);
+    const intradayPatterns = detectCandlePatterns(bars.slice(-10)).all;
 
     const marketState = yfQuote?.marketState || 'CLOSED';
     const isPost = ['POST', 'POSTPOST'].includes(marketState);
@@ -1279,6 +1282,7 @@ app.get('/api/intraday/:symbol', async (req, res) => {
 
     res.json({
       bars,
+      intradayPatterns,
       price:         extendedPrice ?? regPrice,
       regularClose:  regPrice,
       extendedPrice,
@@ -1289,7 +1293,7 @@ app.get('/api/intraday/:symbol', async (req, res) => {
     });
   } catch (e) {
     console.error('Intraday error:', e.message);
-    res.json({ bars: [], price: null });
+    res.json({ bars: [], intradayPatterns: [], price: null });
   }
 });
 
@@ -2866,7 +2870,6 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 
-
 // ── Bounce 2.0 — Indicator Math ───────────────────────────────────────────────
 function calcEMA(closes, period) {
   if (closes.length < period) return null;
@@ -2972,7 +2975,6 @@ async function resolvePaperMarketRegime() {
 }
 
 
-
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
 // ── Master scan universe — all 4 bots use this list ───────────────────────────
 const MASTER_UNIVERSE = [
@@ -3063,7 +3065,6 @@ const MASTER_UNIVERSE = [
   // ── User-added ─────────────────────────────────────────────────────────────
   'ADBG','GLND','USAR','ZSX','DOGD','AVS','BABO','KMLI','NBIG','NBIZ','LLYX','BRKU',
 ];
-
 
 
 // ── Latest paper-only walk-forward validation report ─────────────────────────
@@ -5505,9 +5506,6 @@ async function getOpenSlots(userId, botName) {
 }
 
 
-
-
-
 // ── FMP helpers ───────────────────────────────────────────────────────────────
 const FMP_BASE = 'https://financialmodelingprep.com/api';
 const FMP_H    = { headers: { 'User-Agent': 'Mozilla/5.0' } };
@@ -5571,8 +5569,6 @@ function detectEarningsBarIdx(bars, fiscalQuarterEndDate) {
 }
 
 // ── Explosive Earnings Signal Computation ─────────────────────────────────────
-
-
 
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -1448,6 +1448,37 @@ input  { font-family:inherit; }
 .rt-m-sub.down { color: var(--red); }
 .rt-m-sub.neut { color: var(--gold); }
 
+/* Candle pattern strips — daily context followed by actionable 5-min bars */
+.rt-patterns-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+.rt-patterns-strip {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 8px;
+}
+.rt-patterns-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+.rt-patterns-timeframe {
+  color: var(--t3);
+  font-size: 0.56rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin-left: 2px;
+}
+.rt-patterns-empty {
+  color: var(--t3);
+  font-size: 0.68rem;
+  padding: 4px 1px 1px;
+}
+
 /* Countdown column */
 .rt-cd-col {
   display: flex; flex-direction: column; align-items: center; justify-content: center;

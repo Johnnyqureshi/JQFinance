@@ -1,0 +1,615 @@
+Advanced Technical Probability Engine
+
+Upgrade the stock analysis engine so it does NOT attempt to predict market movements with certainty.
+
+The system must instead calculate the probability and strength of potential bullish continuation, bullish reversal/bounce, bearish continuation, and bearish reversal/drawdown setups using technical confluence.
+
+PRIMARY OBJECTIVE
+
+For every stock being analyzed, calculate:
+
+* Bullish Probability Score: 0–100
+* Bearish Probability Score: 0–100
+* Bounce Probability: 0–100
+* Drawdown Probability: 0–100
+* Setup Quality: 0–100
+* Trend State
+* Momentum State
+* Volume State
+* Risk State
+
+Never describe a prediction as guaranteed.
+
+Use language such as:
+
+* “High-probability bullish setup”
+* “Moderate bullish setup”
+* “Neutral / no clear edge”
+* “Elevated drawdown risk”
+* “High-probability bearish setup”
+
+1. PRICE ACTION / MARKET STRUCTURE
+
+Analyze:
+
+* Higher highs
+* Higher lows
+* Lower highs
+* Lower lows
+* Breakouts
+* Breakdown attempts
+* Failed breakouts
+* Failed breakdowns
+* Consolidation
+* Range expansion
+* Range contraction
+* Gap-ups
+* Gap-downs
+
+Determine:
+
+TREND = BULLISH / BEARISH / SIDEWAYS
+
+Identify the most important recent support and resistance levels.
+
+Give greater weight to levels that have been tested multiple times.
+
+2. VOLUME ANALYSIS
+
+Calculate:
+
+* Current volume
+* Relative volume
+* Average volume
+* Volume spike percentage
+* Volume trend
+* Up-volume versus down-volume
+* Volume confirmation of price movement
+
+Detect:
+
+* Breakout + volume confirmation
+* Breakdown + volume confirmation
+* Price increase without volume confirmation
+* Price decrease without volume confirmation
+* Selling exhaustion
+* Buying exhaustion
+* Volume climax
+* Volume contraction before potential expansion
+
+IMPORTANT:
+
+A price breakout without meaningful volume confirmation should receive a lower confidence score.
+
+A price breakout accompanied by significantly elevated relative volume should receive a higher confidence score.
+
+3. RSI ANALYSIS
+
+Calculate RSI using the configured timeframe.
+
+Interpret RSI in context.
+
+Do NOT automatically treat RSI <30 as a BUY signal.
+
+Use:
+
+RSI <30:
+Potentially oversold.
+
+RSI 30–40:
+Potential recovery zone.
+
+RSI 40–50:
+Neutral/recovery momentum.
+
+RSI 50–60:
+Bullish momentum developing.
+
+RSI 60–70:
+Strong bullish momentum.
+
+RSI 70–75:
+Extended but potentially still trending.
+
+RSI >=75:
+Potential exhaustion / take-profit zone.
+
+Detect RSI divergence:
+
+* Bullish divergence
+* Bearish divergence
+
+Bullish divergence should increase bounce probability when price is near meaningful support.
+
+Bearish divergence should increase drawdown probability when price is near meaningful resistance.
+
+4. VWAP ANALYSIS
+
+Calculate intraday VWAP.
+
+Determine:
+
+* Price above VWAP
+* Price below VWAP
+* VWAP slope
+* VWAP reclaim
+* VWAP rejection
+* VWAP breakout
+* VWAP breakdown
+
+Bullish signals:
+
+Price above VWAP + rising VWAP + increasing volume.
+
+Potential reversal signal:
+
+Price below VWAP → reclaims VWAP → holds VWAP → volume increases.
+
+Bearish signals:
+
+Price below VWAP + declining VWAP + increasing selling volume.
+
+Potential bearish reversal:
+
+Price above VWAP → loses VWAP → fails to reclaim it.
+
+5. MOVING AVERAGES
+
+Calculate at minimum:
+
+* 9 EMA
+* 20 EMA
+* 50 SMA
+* 200 SMA
+
+Analyze:
+
+* Price versus each moving average
+* EMA crossovers
+* Moving-average slope
+* Distance from moving averages
+* Reclaims
+* Rejections
+
+Short-term bullish confirmation:
+
+9 EMA > 20 EMA with both rising.
+
+Short-term bearish confirmation:
+
+9 EMA < 20 EMA with both declining.
+
+A large distance from the 9/20 EMA should be treated as an extension risk.
+
+6. MACD
+
+Calculate:
+
+* MACD line
+* Signal line
+* Histogram
+
+Detect:
+
+* Bullish crossover
+* Bearish crossover
+* Increasing bullish histogram
+* Decreasing bullish histogram
+* Increasing bearish histogram
+* Decreasing bearish histogram
+* Bullish divergence
+* Bearish divergence
+
+Use MACD as confirmation rather than a standalone trading signal.
+
+7. SUPPORT AND RESISTANCE ENGINE
+
+Automatically identify:
+
+* Recent swing highs
+* Recent swing lows
+* Previous day’s high
+* Previous day’s low
+* Premarket high
+* Premarket low
+* VWAP
+* Major moving averages
+* Recent consolidation ranges
+* Breakout levels
+* Breakdown levels
+* Gap levels
+
+Calculate distance from current price to each important level.
+
+Detect:
+
+SUPPORT TEST
+
+RESISTANCE TEST
+
+BREAKOUT
+
+BREAKDOWN
+
+FAILED BREAKOUT
+
+FAILED BREAKDOWN
+
+When price approaches resistance while RSI is elevated and bearish divergence exists, increase drawdown probability.
+
+When price approaches support while RSI is oversold, selling volume is declining, and bullish divergence exists, increase bounce probability.
+
+8. RELATIVE STRENGTH
+
+Compare the stock against:
+
+* SPY
+* QQQ
+* Relevant sector ETF
+
+Calculate relative strength.
+
+Examples:
+
+Stock +5%, SPY +1% = strong relative strength.
+
+Stock -3%, SPY -1% = weak relative strength.
+
+A stock outperforming its sector and the broader market should receive additional bullish points.
+
+A stock underperforming both should receive additional bearish points.
+
+9. MARKET REGIME
+
+Analyze the broader market before making a directional assessment.
+
+Determine:
+
+* SPY trend
+* QQQ trend
+* Market momentum
+* Market volatility
+* Sector trend
+* Risk-on / risk-off environment
+
+Do not evaluate a stock completely independently from the market.
+
+10. CATALYST ANALYSIS
+
+When reliable real-time data is available, analyze:
+
+* Earnings
+* Earnings surprises
+* Guidance
+* News
+* FDA events
+* Analyst upgrades
+* Analyst downgrades
+* SEC filings
+* Offerings
+* Dilution
+* Insider activity
+* Short interest
+* Short squeeze potential
+* Premarket gap
+* Breaking news
+
+Catalysts should modify the technical score rather than replace technical analysis.
+
+11. BOUNCE DETECTION ENGINE
+
+Create a dedicated BOUNCE SETUP score.
+
+Increase bounce probability when multiple conditions occur simultaneously:
+
+* RSI oversold
+* Bullish RSI divergence
+* Price at significant support
+* Selling volume declining
+* Volume exhaustion
+* Price stops making new lows
+* Bullish candle reversal
+* MACD momentum improving
+* Price reclaims 9 EMA
+* Price reclaims VWAP
+* Relative strength improves
+* Market/sector stabilizes
+
+Do NOT call a bounce simply because RSI is oversold.
+
+Require multiple confirming signals.
+
+12. DRAWDOWN DETECTION ENGINE
+
+Create a dedicated DRAWDOWN RISK score.
+
+Increase drawdown probability when multiple conditions occur simultaneously:
+
+* Price loses major support
+* High-volume selling
+* Price below VWAP
+* VWAP declining
+* RSI weakening
+* Bearish RSI divergence
+* MACD bearish crossover
+* 9 EMA crosses below 20 EMA
+* Relative weakness versus SPY
+* Relative weakness versus sector
+* Failed breakout
+* Bearish catalyst
+* Breakdown confirmed by volume
+
+13. BULLISH BREAKOUT DETECTION
+
+A breakout should receive high confidence only when:
+
+1. Price breaks meaningful resistance.
+2. Volume increases significantly above average.
+3. Price holds above the breakout level.
+4. VWAP/short-term moving averages confirm direction.
+5. RSI is strong but not excessively extended.
+6. The broader market is not strongly bearish.
+
+Detect and flag:
+
+“BREAKOUT CONFIRMED”
+
+or
+
+“BREAKOUT NOT CONFIRMED”
+
+14. FALSE BREAKOUT DETECTION
+
+Detect:
+
+* Price briefly moves above resistance
+* Volume fails to confirm
+* Price falls back below resistance
+* RSI divergence
+* Rejection candle
+* VWAP loss
+
+If detected:
+
+“FALSE BREAKOUT / DRAWDOWN RISK”
+
+15. SCORING SYSTEM
+
+Create a weighted scoring model.
+
+Example:
+
+PRICE ACTION = 20%
+
+VOLUME = 20%
+
+VWAP = 15%
+
+RSI = 10%
+
+MACD = 10%
+
+MOVING AVERAGES = 10%
+
+SUPPORT/RESISTANCE = 10%
+
+RELATIVE STRENGTH = 5%
+
+MARKET REGIME = 5%
+
+CATALYST = adjustment layer
+
+Do not simply count indicators.
+
+Signals should be weighted according to their importance and timeframe.
+
+16. CONFLUENCE REQUIREMENT
+
+The engine must distinguish between:
+
+SINGLE SIGNAL
+
+MULTIPLE CONFIRMATIONS
+
+HIGH CONFLUENCE
+
+Example:
+
+RSI <30 alone:
+
+“Bounce possible, but insufficient confirmation.”
+
+RSI <30 + support + bullish divergence:
+
+“Moderate bounce probability.”
+
+RSI <30 + support + bullish divergence + declining selling volume + VWAP reclaim + MACD improvement:
+
+“High-confluence bullish reversal setup.”
+
+17. MULTI-TIMEFRAME ANALYSIS
+
+Analyze at minimum:
+
+* 1-minute
+* 5-minute
+* 15-minute
+* 1-hour
+* Daily
+
+Use shorter timeframes for entry timing.
+
+Use higher timeframes for trend direction.
+
+Do not allow a 1-minute bullish signal to override a major daily bearish structure without explicitly explaining the conflict.
+
+18. ENTRY SIGNAL
+
+When the user is scanning for a potential trade, provide:
+
+ENTRY ZONE
+
+CONFIRMATION LEVEL
+
+INVALIDATION LEVEL
+
+TARGET 1
+
+TARGET 2
+
+TARGET 3
+
+STOP/INVALIDATION
+
+RISK/REWARD
+
+BOUNCE PROBABILITY
+
+DRAWDOWN PROBABILITY
+
+SETUP QUALITY
+
+The system should distinguish between:
+
+“Watch”
+
+“Approaching setup”
+
+“Entry confirmation”
+
+“Confirmed”
+
+“Invalidated”
+
+19. TAKE-PROFIT LOGIC
+
+If the configured strategy uses RSI 75 as the take-profit condition:
+
+When RSI reaches or exceeds 75, flag:
+
+“RSI TAKE-PROFIT ZONE”
+
+However, do not blindly exit solely because RSI reaches 75 if the user has configured a different strategy.
+
+Allow RSI 75 to be configurable.
+
+20. OUTPUT FORMAT
+
+For every stock, return:
+
+TICKER:
+
+CURRENT PRICE:
+
+TREND:
+
+MARKET REGIME:
+
+RELATIVE STRENGTH:
+
+RSI:
+
+VWAP:
+
+RELATIVE VOLUME:
+
+MACD:
+
+9 EMA:
+
+20 EMA:
+
+50 SMA:
+
+200 SMA:
+
+SUPPORT:
+
+RESISTANCE:
+
+BULLISH SCORE: XX/100
+
+BEARISH SCORE: XX/100
+
+BOUNCE PROBABILITY: XX%
+
+DRAWDOWN PROBABILITY: XX%
+
+SETUP QUALITY: XX/100
+
+SIGNAL:
+
+ENTRY ZONE:
+
+CONFIRMATION:
+
+INVALIDATION:
+
+TARGET:
+
+RISK/REWARD:
+
+KEY REASON:
+
+21. MOST IMPORTANT RULE
+
+Never claim that the system knows a pump or drop “is coming.”
+
+The system must identify probability and confluence.
+
+The goal is:
+
+“Find situations where the evidence is becoming increasingly asymmetric in one direction.”
+
+Only generate a strong BUY/SELL signal when multiple independent technical factors agree.
+
+If signals conflict, return:
+
+“NO CLEAR EDGE”
+
+instead of forcing a trade.
+
+22. REAL-TIME DATA REQUIREMENT
+
+Use the freshest available market data.
+
+Clearly display the timestamp of the market data used.
+
+If a required data source is delayed, unavailable, or stale, do not pretend it is real-time.
+
+Flag:
+
+“DATA STALE — SIGNAL CONFIDENCE REDUCED”
+
+23. AUDIT TRAIL
+
+For every generated signal, store the individual reasons behind the score.
+
+Example:
+
+Bullish factors:
++18 breakout volume
++12 VWAP reclaim
++10 bullish RSI divergence
++8 support confirmation
++6 relative strength
+
+Bearish factors:
+-7 elevated RSI
+-5 resistance nearby
+
+This allows the user to understand WHY the algorithm generated the signal instead of receiving an unexplained prediction.
+
+FINAL PRINCIPLE
+
+Build this as a probability/confluence engine, not a crystal ball.
+
+The strongest setup is not “one indicator says BUY.”
+
+The strongest setup is when:
+
+PRICE ACTION + VOLUME + VWAP + MOMENTUM + SUPPORT/RESISTANCE + RELATIVE STRENGTH + MARKET REGIME
+
+all point in the same direction.
+
+When those signals disagree, reduce confidence or return NO CLEAR EDGE.

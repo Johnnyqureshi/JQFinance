@@ -6,3 +6,4 @@
 - [Broker entry capacity](broker-entry-capacity.md) — shared long-entry capacity counts every pending buy parent; multi-lot PMH reserves both units and ambiguous posts reconcile by client ID.
 - [Broker catalog coverage](broker-catalog-coverage.md) — bounded scans rotate a stable per-account Alpaca catalog snapshot; changing movers must never reshuffle catalog coverage.
 - [SQLite session store](sqlite-session-store.md) — persistent sessions use better-sqlite3 to avoid the vulnerable connect-sqlite3 dependency chain.
+- [Momentum price-action execution](momentum-price-action-execution.md) — automated Momentum entries use a dedicated server-owned route with completed-bar freshness and structural-stop enforcement.

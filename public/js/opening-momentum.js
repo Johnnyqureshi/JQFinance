@@ -121,9 +121,12 @@
       ${metric('Stop at candle low', `${money(r.levels?.stop)} · ${money(r.levels?.riskPerShare)}/share`)}
       ${metric('Partial / runner', `${r.targets?.partialPercent ?? '—'}% at ${money(r.targets?.partialPrice)} · 9 EMA runner`)}
       ${metric('Market / relative strength', `${r.context?.market?.bullish ? 'SPY positive' : 'Unavailable / failed'} · ${r.context?.relativeStrength === true ? 'outperforming' : 'not confirmed'}`)}
+      ${metric('Price-action context', r.priceAction?.setup?.label || r.priceAction?.status || 'Unavailable')}
+      ${metric('Structural invalidation', `${money(r.priceAction?.invalidation)}${r.priceAction?.riskReward != null ? ` · ${fmt(r.priceAction.riskReward,2)}R` : ''}`)}
     </div>
     <div class="pmh-reason-title">${reasons.length ? 'Blocked or pending conditions' : 'All configured conditions passed'}</div>
     ${reasons.length ? `<ul class="pmh-reasons">${reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="pmh-pass">Complete fresh evidence. Entry still re-checks all conditions server-side.</div>'}
+    ${r.priceAction?.reasons?.length ? `<div class="pmh-reason-title">Price-action context (informational only)</div><ul class="pmh-reasons">${r.priceAction.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${enabled && r.eligible ? '<button class="mt-trade-buy pmh-execute" id="pmhExecuteBtn">Submit risk-sized PMH entry</button>' : ''}
     `;
     $('pmhDetailTime').textContent = r.freshness?.barsAt ? `bars ${new Date(r.freshness.barsAt).toLocaleTimeString()}` : 'no fresh bars';

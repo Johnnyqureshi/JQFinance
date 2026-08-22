@@ -1251,9 +1251,11 @@
       const emaEl = $('mtEmaSignal');
       if (emaEl) emaEl.innerHTML = `<span class="mt-loading-sm">Fetching EMA…</span>`;
 
-      const [ema, analysis] = await Promise.all([
+      const [ema, analysis, gamePlan] = await Promise.all([
         MomentumStrategy.getEMASignal(row.sym, this.config.emaFast, this.config.emaSlow),
         MomentumAnalysis.fetch(row.sym),
+        fetch(`/api/gameplan/${encodeURIComponent(row.sym)}`, { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       this.emaSignal    = ema;
@@ -1261,6 +1263,7 @@
 
       this._renderEMASignal(ema);
       this._renderIntradayIndicators(analysis);
+      this._renderPriceAction(gamePlan?.confluence?.priceAction || analysis?.priceAction || null);
       this._renderCandlePatterns(row.sym);
       // Re-render trade methods now that we have full data
       this._renderTradeMethodPanel(row, ema, analysis);
@@ -1494,6 +1497,44 @@
       // Update sub-label with bar count
       const subEl = $('mtIntradaySub');
       if (subEl) subEl.textContent = `data.py · 1-min bars · ${a.bars} bars loaded`;
+    },
+
+    _renderPriceAction(setup) {
+      const el = $('mtPriceAction');
+      if (!el) return;
+      if (!setup) {
+        el.innerHTML = '<span class="mt-na">Price-action evidence unavailable — no trade signal is inferred.</span>';
+        return;
+      }
+      const eligible = setup.eligible === true;
+      const evidence = setup.evidence || {};
+      const reasons = Array.isArray(setup.reasons) ? setup.reasons : [];
+      const statusClass = eligible ? 'mt-up' : 'mt-dn';
+      const status = escapeHtml(setup.status || 'NO TRADE');
+      const type = escapeHtml(setup.setup?.label || 'No confirmed long setup');
+      const detail = setup.thesis
+        ? escapeHtml(setup.thesis)
+        : reasons.length
+          ? escapeHtml(reasons.slice(0, 2).join(' · '))
+          : 'Waiting for structural confirmation.';
+      el.innerHTML = `
+        <div class="mt-ema-row">
+          <span class="mt-ema-label">Verdict</span>
+          <span class="mt-ema-val ${statusClass}">${status}</span>
+        </div>
+        <div class="mt-ema-row">
+          <span class="mt-ema-label">Pattern</span>
+          <span class="mt-ema-val">${type}</span>
+        </div>
+        <div class="mt-ema-row">
+          <span class="mt-ema-label">VWAP / volume</span>
+          <span class="mt-ema-val">${evidence.vwap != null ? `$${fmt(evidence.vwap, 3)}` : '—'} · ${evidence.volumeRatio != null ? `${fmt(evidence.volumeRatio, 2)}×` : '—'}</span>
+        </div>
+        <div class="mt-ema-row">
+          <span class="mt-ema-label">Invalidation / target</span>
+          <span class="mt-ema-val">${setup.invalidation != null ? `$${fmt(setup.invalidation)}` : '—'} / ${setup.target != null ? `$${fmt(setup.target)}` : '—'}${setup.riskReward != null ? ` · ${fmt(setup.riskReward, 2)}R` : ''}</span>
+        </div>
+        <div class="mt-intra-note">${detail}</div>`;
     },
 
     _renderSignalPanel(row) {
@@ -2192,6 +2233,7 @@
           continue;
         }
         const confluence = gamePlan.confluence;
+        const priceAction = confluence.priceAction;
         const tcScores = confluence.scores || {};
         const tcSignal = confluence.signal || {};
         const dataQuality = confluence.dataQuality || {};
@@ -2212,6 +2254,12 @@
           || (atResistance && !hasBreakoutVolume)) {
           this.addLog(row.sym, 'SKIP',
             `Technical confluence: ${tcSignal.label || 'NO CLEAR EDGE'} · Bull ${tcScores.bullish ?? '--'} / Drawdown ${tcScores.drawdown ?? '--'} · ${confluence.states?.risk || 'risk unavailable'}`,
+            'warn');
+          continue;
+        }
+        if (!priceAction?.eligible || priceAction.direction !== 'LONG_ONLY') {
+          this.addLog(row.sym, 'SKIP',
+            `Price action: ${priceAction?.status || 'NO TRADE'} · ${(priceAction?.reasons || ['required setup evidence unavailable']).slice(0, 2).join(' · ')}`,
             'warn');
           continue;
         }
@@ -2237,7 +2285,7 @@
           continue;
         }
 
-        return { ...row, technicalConfluence: confluence }; // passed all safety checks
+        return { ...row, technicalConfluence: confluence, priceAction }; // passed all safety checks
       }
       return null;
     },
@@ -2313,6 +2361,14 @@
 
       // ── Calculate stop loss % ────────────────────────────────────────────
       let slPct = (cfg.stopPercent != null && cfg.stopPercent > 0) ? cfg.stopPercent : null;
+      const structuralInvalidation = Number(row.priceAction?.invalidation);
+      const structuralSlPct = Number.isFinite(structuralInvalidation) && structuralInvalidation > 0 && structuralInvalidation < entry
+        ? +((entry - structuralInvalidation) / entry * 100).toFixed(2)
+        : null;
+      // A compatible setup supplies a structural invalidation. Preserve a
+      // tighter user-configured stop, but never loosen protection below that
+      // setup failure point or replace it with an arbitrary wider stop.
+      if (structuralSlPct != null) slPct = slPct ? Math.min(slPct, structuralSlPct) : structuralSlPct;
       if (!slPct && row.atr14 != null) {
         const stopPrice = RiskManager.calcStopLoss(entry, row.atr14, 1.5);
         if (stopPrice) slPct = +((entry - stopPrice) / entry * 100).toFixed(2);
@@ -2351,7 +2407,7 @@
       if (!this.botEnabled || this._flattenInProgress) return;
       this._activeTrades.add(row.sym);
         this.addLog(row.sym, '→ AUTO-BUY',
-          `$${notional.toFixed(0)} · SL ${slPct}% · TP RSI ≥${tpRsi} · Confluence ${row.technicalConfluence?.scores?.bullish ?? '--'}/100 · ${AlpacaClient.mode.toUpperCase()}`, 'info');
+          `$${notional.toFixed(0)} · ${row.priceAction?.setup?.label || 'long setup'} · SL ${slPct}% · TP RSI ≥${tpRsi} · Confluence ${row.technicalConfluence?.scores?.bullish ?? '--'}/100 · ${AlpacaClient.mode.toUpperCase()}`, 'info');
 
       let journalTrade = null;
       let journalOrderId = null;
@@ -2404,7 +2460,7 @@
         }
 
         // OTO order: market buy + stop-loss leg. Take profit = RSI exit (poller).
-        const resp = await fetch('/api/alpaca/order', {
+        const resp = await fetch('/api/momentum/order', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',

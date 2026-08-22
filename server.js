@@ -17,6 +17,7 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
+const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const {
   DEFAULT_PMH_CONFIG,
   evaluatePmhBreak,
@@ -1629,6 +1630,23 @@ function gpTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function completedFiveMinuteBars(bars, nowMs = Date.now()) {
+  return (Array.isArray(bars) ? bars : []).filter(bar => {
+    const startedAt = gpTimestampMs(bar?.t);
+    return Number.isFinite(startedAt) && startedAt + 5 * 60_000 <= nowMs;
+  });
+}
+
+function completedFiveMinuteFreshness(bars, maxAgeMs = 16 * 60_000) {
+  const last = bars.at(-1);
+  const startedAt = gpTimestampMs(last?.t);
+  const completedAt = Number.isFinite(startedAt) ? startedAt + 5 * 60_000 : NaN;
+  return {
+    fresh: Number.isFinite(completedAt) && Date.now() - completedAt >= 0 && Date.now() - completedAt <= maxAgeMs,
+    sourceTimestamp: last?.t || null,
+  };
+}
+
 function gpSourceFreshness({ quote, daily, oneMinute, fiveMinute, fifteenMinute, hourly }) {
   const ageOf = value => {
     const timestamp = gpTimestampMs(value);
@@ -1979,6 +1997,22 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
         hourly: intra1h,
         daily,
       },
+    });
+    const stockVsSpy = chg1d != null && mkt.SPY != null ? chg1d - mkt.SPY : null;
+    // Compatible SMB-style context is an additional deterministic gate. The
+    // existing confluence engine remains authoritative for its own score and
+    // data-quality contract; this does not replace it or use score alone.
+    const completedIntra5m = completedFiveMinuteBars(intra);
+    confluence.priceAction = evaluatePriceActionSetup({
+      symbol: sym,
+      bars: completedIntra5m,
+      price,
+      vwap,
+      support: confluence.levels?.criticalSupport,
+      resistance: confluence.levels?.criticalResistance,
+      market,
+      relativeStrength: stockVsSpy == null ? null : stockVsSpy >= 1,
+      freshness: completedFiveMinuteFreshness(completedIntra5m),
     });
     if (!intra1m?.length) dataGaps.push('1-minute timeframe unavailable');
     if (!intra15m?.length) dataGaps.push('15-minute timeframe unavailable');
@@ -2441,8 +2475,56 @@ app.get('/api/spy-levels', async (req, res) => {
   } catch (e) { res.json({ floor: null, maxPain: null, roof: null, expiry: null }); }
 });
 
+async function evaluateMomentumEntryPriceAction(userId, symbol) {
+  const now = new Date();
+  const start = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
+  const [barsData, snapshots] = await Promise.all([
+    alpacaDataFetch(userId,
+      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=5Min&start=${encodeURIComponent(start)}&limit=100&adjustment=all&feed=iex`
+    ).catch(() => null),
+    alpacaSnapshotFetch(userId, `${symbol},SPY`).catch(() => null),
+  ]);
+  const rawBars = Array.isArray(barsData?.bars) ? barsData.bars : [];
+  const barStartMs = bar => {
+    const timestamp = bar?.t;
+    return typeof timestamp === 'number'
+      ? (timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp)
+      : Date.parse(timestamp || '');
+  };
+  // Alpaca can include the active five-minute bucket. A setup is never allowed
+  // to treat an unfinished bar as a close/volume confirmation.
+  const bars = rawBars.filter(bar => {
+    const startedAt = barStartMs(bar);
+    return Number.isFinite(startedAt) && startedAt + 5 * 60_000 <= now.getTime();
+  });
+  const snapshot = snapshots?.[symbol] || null;
+  const spy = snapshots?.SPY || null;
+  const price = snapshot?.latestTrade?.p ?? snapshot?.minuteBar?.c ?? bars.at(-1)?.c ?? null;
+  const latestBarAt = bars.at(-1)?.t;
+  const latestBarMs = barStartMs(bars.at(-1));
+  const completedAtMs = Number.isFinite(latestBarMs) ? latestBarMs + 5 * 60_000 : NaN;
+  const symbolOpen = snapshot?.dailyBar?.o;
+  const spyOpen = spy?.dailyBar?.o;
+  const spyPrice = spy?.latestTrade?.p ?? spy?.minuteBar?.c;
+  const symbolMove = Number.isFinite(symbolOpen) && Number.isFinite(price) ? price / symbolOpen - 1 : null;
+  const marketMove = Number.isFinite(spyOpen) && Number.isFinite(spyPrice) ? spyPrice / spyOpen - 1 : null;
+  return evaluatePriceActionSetup({
+    symbol,
+    bars,
+    price,
+    market: { trend: Number.isFinite(marketMove) ? (marketMove >= 0 ? 'BULLISH' : 'BEARISH') : 'UNKNOWN' },
+    relativeStrength: Number.isFinite(symbolMove) && Number.isFinite(marketMove) ? symbolMove >= marketMove : null,
+    freshness: {
+      // Require a newly completed five-minute confirmation; after two minutes
+      // it is too old for an automated momentum entry.
+      fresh: Number.isFinite(completedAtMs) && Date.now() - completedAtMs >= 0 && Date.now() - completedAtMs <= 2 * 60 * 1000,
+      sourceTimestamp: latestBarAt || null,
+    },
+  });
+}
+
 // Place order (market with optional TP/SL bracket)
-app.post('/api/alpaca/order', requireAuth, async (req, res) => {
+async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
   if (isAlpacaFlattening(req.session.userId)) {
     return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
   }
@@ -2513,6 +2595,7 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   }
 
   let entryLockHeld = false;
+  let momentumPriceAction = null;
   try {
     // The order endpoint is shared by manual orders and the Momentum bot.
     // Reserve the cross-bot lock before looking at capacity, so simultaneous
@@ -2523,6 +2606,18 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
       }
       entryLockHeld = true;
       if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true });
+      // Browser-side scanner scores are not trusted for automation. A Momentum
+      // entry must independently reproduce a fresh compatible long setup at
+      // the server boundary before it can consume broker capacity.
+      if (automatedMomentum) {
+        momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
+        if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
+          return res.status(409).json({
+            error: `Momentum price-action gate blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
+            priceAction: momentumPriceAction,
+          });
+        }
+      }
       const slots = await getOpenSlots(req.session.userId, 'Order');
       if (!canReserveEntryUnits(slots)) {
         return res.status(409).json({ error: 'Position limit reached or account data unavailable.' });
@@ -2534,7 +2629,6 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
     // BUG FIX: use live `price` field — regularClose is prior-session close and causes stale bracket levels
     const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.regularClose;
     if (!price || !isFinite(price) || price <= 0) throw new Error('Could not fetch a valid current price for ' + symbol.toUpperCase());
-
     const leveragedAmount = amtNum * lev;
     let orderBody;
 
@@ -2607,6 +2701,19 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
     if (isAlpacaFlattening(req.session.userId)) {
       return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
     }
+    if (automatedMomentum) {
+      momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
+      if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
+        return res.status(409).json({
+          error: `Momentum price-action recheck blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
+          priceAction: momentumPriceAction,
+        });
+      }
+      const roundedStop = Number((price * (1 - slNum / 100)).toFixed(2));
+      if (!(slNum > 0) || !Number.isFinite(roundedStop) || roundedStop < Number(momentumPriceAction.invalidation)) {
+        throw new Error('Momentum protective stop must be at or above the fresh rounded structural invalidation level.');
+      }
+    }
     beginAlpacaOrderRequest(req.session.userId);
     let data;
     try {
@@ -2628,7 +2735,15 @@ app.post('/api/alpaca/order', requireAuth, async (req, res) => {
   } finally {
     if (entryLockHeld) releaseBotLock(req.session.userId);
   }
-});
+}
+
+// Manual orders retain their existing endpoint and safeguards. The Momentum
+// browser uses the dedicated route below, whose setup gate cannot be disabled
+// by changing a client-supplied request field.
+app.post('/api/alpaca/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
+app.post('/api/momentum/order', requireAuth, (req, res) =>
+  placeAlpacaOrder(req, res, { automatedMomentum: true })
+);
 
 // Cancel order
 app.get('/api/alpaca/order/by-client/:clientOrderId', requireAuth, async (req, res) => {
@@ -3234,6 +3349,26 @@ function pmhEtParts(value) {
   return { date: `${p.year}-${p.month}-${p.day}`, minutes: Number(p.hour) * 60 + Number(p.minute) };
 }
 
+function pmhFinite(value) {
+  return value !== null
+    && value !== undefined
+    && !(typeof value === 'string' && value.trim() === '')
+    && Number.isFinite(Number(value));
+}
+
+function pmhValidMinute(bar) {
+  if (!bar || ![bar.o, bar.h, bar.l, bar.c, bar.v].every(pmhFinite)) return false;
+  const [o, h, l, c, v] = [bar.o, bar.h, bar.l, bar.c, bar.v].map(Number);
+  return o > 0 && h > 0 && l > 0 && c > 0 && v > 0
+    && h >= l && h >= o && h >= c && l <= o && l <= c;
+}
+
+function pmhCompleteMinuteGroup(values, expectedBars) {
+  if (values.length !== expectedBars || !values.every(pmhValidMinute)) return false;
+  const times = values.map(bar => new Date(bar.t).getTime());
+  return times.every((time, index) => Number.isFinite(time) && (index === 0 || time - times[index - 1] === 60_000));
+}
+
 function pmhTwoMinuteBars(bars) {
   const groups = new Map();
   for (const b of (Array.isArray(bars) ? bars : [])) {
@@ -3246,14 +3381,41 @@ function pmhTwoMinuteBars(bars) {
   }
   return [...groups.values()].map(g => {
     const values = g.bars.slice().sort((a, b) => new Date(a.t) - new Date(b.t));
+    if (!pmhCompleteMinuteGroup(values, 2)) return null;
     return {
       date: g.date, bucket: g.bucket, t: values[0].t,
-      open: values[0].o, high: Math.max(...values.map(b => b.h)),
-      low: Math.min(...values.map(b => b.l)), close: values.at(-1).c,
-      volume: values.reduce((sum, b) => sum + (Number(b.v) || 0), 0),
-      complete: values.length >= 2,
+      open: Number(values[0].o), high: Math.max(...values.map(b => Number(b.h))),
+      low: Math.min(...values.map(b => Number(b.l))), close: Number(values.at(-1).c),
+      volume: values.reduce((sum, b) => sum + Number(b.v), 0),
+      complete: true,
     };
-  }).filter(b => b.complete);
+  }).filter(Boolean);
+}
+
+function pmhFiveMinuteBars(bars) {
+  const groups = new Map();
+  for (const b of (Array.isArray(bars) ? bars : [])) {
+    const et = pmhEtParts(b.t);
+    if (!et || et.minutes < 570 || et.minutes >= 960) continue;
+    const bucket = Math.floor((et.minutes - 570) / 5);
+    const key = `${et.date}:${bucket}`;
+    const group = groups.get(key) || { date: et.date, bucket, bars: [] };
+    group.bars.push(b);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(group => {
+    const values = group.bars.slice().sort((a, b) => new Date(a.t) - new Date(b.t));
+    if (!pmhCompleteMinuteGroup(values, 5)) return null;
+    return {
+      t: values[0].t,
+      o: Number(values[0].o),
+      h: Math.max(...values.map(b => Number(b.h))),
+      l: Math.min(...values.map(b => Number(b.l))),
+      c: Number(values.at(-1).c),
+      v: values.reduce((sum, b) => sum + Number(b.v), 0),
+      session: 'reg',
+    };
+  }).filter(Boolean);
 }
 
 function pmhMeanStd(values) {
@@ -3284,7 +3446,9 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
   const snap = snapshots?.[sym];
   const spy = spySnapshots?.SPY || snapshots?.SPY;
   const oneMinute = Array.isArray(barsData?.bars) ? barsData.bars : [];
-  const twoMinute = pmhTwoMinuteBars(oneMinute);
+  const twoMinute = pmhTwoMinuteBars(oneMinute)
+    .filter(bar => new Date(bar.t).getTime() + 2 * 60_000 <= now.getTime());
+  const fiveMinute = pmhFiveMinuteBars(oneMinute);
   const etNow = pmhEtParts(now);
   const sessionDate = etNow?.date || now.toISOString().slice(0, 10);
   const sessionBars = oneMinute.filter(b => pmhEtParts(b.t)?.date === sessionDate);
@@ -3347,7 +3511,7 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
   const candidateMove = openingPrice && price ? price / openingPrice - 1 : null;
   const marketMove = marketOpen && marketPrice ? marketPrice / marketOpen - 1 : null;
 
-  return evaluatePmhBreak({
+  const result = evaluatePmhBreak({
     symbol: sym,
     premarket: frozen ? {
       high: frozen.pmh_high, low: frozen.pmh_low, volume: frozen.pmh_volume, frozen: true,
@@ -3373,6 +3537,20 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
     },
     evaluatedAt: now.toISOString(),
   }, config);
+  const completedFiveMinute = completedFiveMinuteBars(fiveMinute);
+  result.priceAction = evaluatePriceActionSetup({
+    symbol: sym,
+    bars: completedFiveMinute,
+    price,
+    // PMH remains anchored to its own frozen level and opening gate. This
+    // context is explanatory only and cannot make an ineligible PMH trade
+    // eligible.
+    vwap: null,
+    market: { trend: Number.isFinite(marketMove) ? (marketMove >= 0 ? 'BULLISH' : 'BEARISH') : 'UNKNOWN' },
+    relativeStrength: Number.isFinite(candidateMove) && Number.isFinite(marketMove) ? candidateMove >= marketMove : null,
+    freshness: completedFiveMinuteFreshness(completedFiveMinute),
+  });
+  return result;
 }
 
 app.get('/api/opening-momentum/settings', requireAuth, (req, res) => {
@@ -3763,9 +3941,14 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
     const now   = new Date();
     const start = new Date(now.getTime() - 240 * 60 * 1000);
 
-    const barsData = await alpacaDataFetch(uid,
-      `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start.toISOString())}&limit=300&adjustment=all&feed=iex`
-    ).catch(() => null);
+    const [barsData, fiveMinuteData] = await Promise.all([
+      alpacaDataFetch(uid,
+        `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start.toISOString())}&limit=300&adjustment=all&feed=iex`
+      ).catch(() => null),
+      alpacaDataFetch(uid,
+        `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=100&adjustment=all&feed=iex`
+      ).catch(() => null),
+    ]);
 
     const bars = barsData?.bars || [];
     if (!bars.length) return res.json({ sym, bars: 0, error: 'No intraday bars — market may be closed' });
@@ -3810,6 +3993,19 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
       return cumVol > 0 ? cumPV / cumVol : null;
     });
     const currentVwap = vwapArr[vwapArr.length - 1];
+    const fiveMinuteBars = completedFiveMinuteBars(fiveMinuteData?.bars);
+    const priceAction = evaluatePriceActionSetup({
+      symbol: sym,
+      bars: fiveMinuteBars,
+      price: lastClose,
+      vwap: null,
+      freshness: completedFiveMinuteFreshness(fiveMinuteBars),
+      // The standalone analysis endpoint has no market/sector comparison
+      // payload, so it remains conservative and marks relative strength
+      // unavailable rather than inventing it.
+      market: { trend: 'UNKNOWN' },
+      relativeStrength: null,
+    });
 
     // ── EMA9 + EMA20 on close — mirrors calculate_indicators() in data.py ───
     const ema9arr  = ema(closes, 9);
@@ -3870,6 +4066,7 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
       priceAboveEma9:  currentEma9  != null ? lastClose > currentEma9  : null,
       priceAboveEma20: currentEma20 != null ? lastClose > currentEma20 : null,
       breakingHigh20,
+      priceAction,
       // ── candle + MACD ──────────────────────────────────────────────────────
       lastCandle: {
         open: lastBar.o, high: lastBar.h, low: lastBar.l, close: lastBar.c,

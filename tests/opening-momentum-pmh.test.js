@@ -32,9 +32,21 @@ test('blocks without same-time volume history', () => {
   const r = evaluatePmhBreak(valid({ volumeBaseline: { mean: 4000, stdDev: 1000, samples: 2 } }));
   assert.strictEqual(r.eligible, false); assert(r.reasons.some(x => /baseline/.test(x)));
 });
+test('blocks a candle with missing volume instead of treating it as zero', () => {
+  const r = evaluatePmhBreak(valid({ candle: { open: 10.52, high: 10.85, low: 10.5, close: 10.82, volume: null } }));
+  assert.strictEqual(r.eligible, false); assert(r.reasons.some(x => /volume baseline/.test(x)));
+});
 test('enforces strict opening above previous close and high', () => {
   const r = evaluatePmhBreak(valid({ openingPrice: 10.0 }));
   assert.strictEqual(r.opening.eligible, false); assert.strictEqual(r.eligible, false);
+});
+test('keeps the frozen PMH opening gate authoritative over supplemental setup context', () => {
+  const r = evaluatePmhBreak(valid({
+    openingPrice: 10.0,
+    priceAction: { eligible: true, setup: { type: 'BREAKOUT_CONTINUATION' } },
+  }));
+  assert.strictEqual(r.eligible, false);
+  assert(r.reasons.some(x => /Opening price must be above/.test(x)));
 });
 test('uses dollar risk divided by breakout-low distance', () => {
   const r = evaluatePmhBreak(valid());

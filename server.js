@@ -443,6 +443,13 @@ app.use(session({
   },
 }));
 app.use(express.static(path.join(__dirname, 'public')));
+// The application shell lives at the project root while its CSS/JS assets
+// live under public/. Serve both paths so the published app and custom domain
+// have a real homepage instead of Express's default "Cannot GET /" response.
+app.use('/public', express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 async function requireAuthStore(req, res, next) {
   await authStoreReady;

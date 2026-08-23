@@ -10,6 +10,7 @@ const alpacaTrader = (() => {
   let _pollFailures = 0;
   let _keepAlive    = null;
   let modalConnection = 'manual';
+  let modalMode = 'paper';
   const POLL_FAIL_LIMIT  = 3;
   const LS_WAS_CONNECTED = 'jqf_alpaca_was_connected';
 
@@ -145,10 +146,7 @@ const alpacaTrader = (() => {
         if (target === alpacaMode) return;
         if (!_alpacaCredsAvailable(target)) {
           // Open modal pre-set to that mode
-          alpacaMode = target;
-          document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === target));
-          const w = $('trdLiveWarn'); if (w) w.style.display = target === 'live' ? '' : 'none';
-          showModal(); return;
+          showModal('manual', target); return;
         }
         btn.disabled = true;
         try {
@@ -181,6 +179,12 @@ const alpacaTrader = (() => {
       if ($('atEquity')) $('atEquity').textContent = '$' + fmt(a.equity);
       if ($('atCash'))   $('atCash').textContent   = '$' + fmt(a.cash);
       if ($('atBP'))     $('atBP').textContent     = '$' + fmt(a.buying_power);
+      const accountId = a.id || a.account_number;
+      const accountIdEl = $('atAccountId');
+      if (accountIdEl) {
+        accountIdEl.textContent = `Verified broker account: ${accountId}`;
+        accountIdEl.style.display = accountId ? '' : 'none';
+      }
       renderPDTBanner(a);
     } catch (e) {
       if (e.message !== 'session_expired') console.warn('[AT] Account load:', e.message);
@@ -338,8 +342,9 @@ const alpacaTrader = (() => {
       : `${path}${path.includes('?') ? '&' : '?'}connection=${encodeURIComponent(connection)}`;
   }
 
-  function showModal(connection = 'manual') {
+  function showModal(connection = 'manual', requestedMode = alpacaMode) {
     modalConnection = ['momentum', 'pmh'].includes(connection) ? connection : 'manual';
+    modalMode = requestedMode === 'live' ? 'live' : 'paper';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';
     if ($('trdModalTitle')) $('trdModalTitle').textContent = `Connect Alpaca — ${connectionLabel(modalConnection)}`;
@@ -347,8 +352,8 @@ const alpacaTrader = (() => {
       ? 'API keys stored securely per user'
       : `Dedicated account for ${connectionLabel(modalConnection)}. It cannot be shared with the other bot.`;
     if ($('trdModalDisc')) $('trdModalDisc').style.display = 'none';
-    document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === alpacaMode));
-    const w = $('trdLiveWarn'); if (w) w.style.display = alpacaMode === 'live' ? '' : 'none';
+    document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === modalMode));
+    const w = $('trdLiveWarn'); if (w) w.style.display = modalMode === 'live' ? '' : 'none';
   }
   function hideModal() { const m = $('trdModal'); if (m) m.style.display = 'none'; }
 
@@ -364,7 +369,7 @@ const alpacaTrader = (() => {
       const r = await apiFetch(connectionUrl('/api/alpaca/credentials'), {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ apiKey: key, apiSecret: secret, mode: alpacaMode, connection: modalConnection }),
+        body:    JSON.stringify({ apiKey: key, apiSecret: secret, mode: modalMode, connection: modalConnection }),
       });
       if (r.error) throw new Error(r.error);
       if (modalConnection === 'manual') {
@@ -432,8 +437,8 @@ const alpacaTrader = (() => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        alpacaMode = tab.dataset.mode;
-        const w = $('trdLiveWarn'); if (w) w.style.display = alpacaMode === 'live' ? '' : 'none';
+        modalMode = tab.dataset.mode;
+        const w = $('trdLiveWarn'); if (w) w.style.display = modalMode === 'live' ? '' : 'none';
       });
     });
 

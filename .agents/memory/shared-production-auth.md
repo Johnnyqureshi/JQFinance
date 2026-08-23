@@ -1,10 +1,10 @@
 ---
-name: Shared production authentication
-description: Authentication and sessions for autoscaled deployment instances.
+name: Shared production authentication and state
+description: Production persistence boundaries for identities, sessions, and trading state.
 ---
 
-Use the shared PostgreSQL database as the authoritative store for application identities and Express sessions. Keep legacy SQLite rows synchronized by user ID only as a compatibility bridge for the existing strategy data.
+Use the shared PostgreSQL database as the authoritative store for application identities and Express sessions. Deploy the application as one always-running VM while user-owned broker connections, bot settings, watchlists, and trade journals remain in SQLite.
 
-**Why:** Autoscaled instances do not share their local filesystem. SQLite-backed users or sessions can therefore make an account appear to register or log in on one instance but disappear on the next request.
+**Why:** Autoscaled instances do not share their local filesystem. Any remaining SQLite trading state can therefore disagree across instances, including the broker credentials and journals that drive automated orders. A single VM keeps that state coherent until a full shared-database migration is complete.
 
-**How to apply:** Any deployment-safe auth change must use the managed PostgreSQL schema flow and be verified with a create-account, fresh-session, and fresh-login round trip. Do not add startup database DDL; publish the development schema so the platform applies it to production.
+**How to apply:** Keep `SESSION_SECRET` deployment-managed and stable. Verify auth changes with a create-account, fresh-session, and fresh-login round trip. Do not switch the deployment target back to autoscale until all user-owned trading state has migrated off local SQLite.

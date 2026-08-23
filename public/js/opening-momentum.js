@@ -50,7 +50,9 @@
       const status = await request('/api/alpaca/credentials?connection=pmh');
       const connected = status.connected === true;
       dot.className = `at-conn-dot ${connected ? 'dot-green' : 'dot-red'}`;
-      text.textContent = connected ? `Connected · ${String(status.mode || 'paper').toUpperCase()}` : 'Not connected';
+      text.textContent = connected
+        ? `Connected · ${String(status.mode || 'paper').toUpperCase()} · Account ${status.accountId || 'verifying…'}`
+        : 'Not connected';
       button.textContent = connected ? 'Account Settings' : 'Connect Alpaca';
     } catch (e) {
       dot.className = 'at-conn-dot dot-red';

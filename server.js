@@ -84,6 +84,7 @@ db.exec(`
     api_key    TEXT    NOT NULL,
     api_secret TEXT    NOT NULL,
     mode       TEXT    DEFAULT 'paper',
+    account_id TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS auto_trade_settings (
@@ -236,6 +237,9 @@ const paperShadow = createPaperShadow({
     } catch(e) { console.error('[Migration] alpaca_creds failed:', e.message); }
   }
 }
+// Account IDs are non-secret broker identities used to prevent accidental
+// account sharing across manual and automated trading scopes.
+try { db.prepare('ALTER TABLE alpaca_creds ADD COLUMN account_id TEXT').run(); } catch (_) {}
 
 // ── Active-mode tracker — which account (paper/live) each user is using ───────
 db.prepare(`
@@ -271,6 +275,15 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_bot_alpaca_creds_account
+    ON bot_alpaca_creds (user_id, account_id)
+    WHERE account_id IS NOT NULL AND api_key <> '__disconnected__'`);
+} catch (error) {
+  // Do not silently overwrite a historical duplicate. New connections are
+  // still checked below and the owner can reconnect the affected bot safely.
+  console.error('[Alpaca] Existing bot account duplication needs reconnection:', error.message);
+}
 
 // ── App settings table (persists generated secrets etc.) ──────────────────────
 db.prepare(`
@@ -280,17 +293,14 @@ db.prepare(`
   )
 `).run();
 
-// Generate or retrieve a persistent session secret so sessions survive restarts
-// and cannot be forged even if SESSION_SECRET env var is absent.
+// Every deployed instance must use the same signing secret. A local fallback
+// breaks sessions whenever traffic lands on another instance or the app restarts.
 function getSessionSecret() {
   const envSecret = process.env.SESSION_SECRET;
-  if (envSecret && envSecret.length >= 32) return envSecret;
-  const row = db.prepare("SELECT value FROM app_settings WHERE key='session_secret'").get();
-  if (row) return row.value;
-  const generated = crypto.randomBytes(64).toString('hex');
-  db.prepare("INSERT INTO app_settings (key, value) VALUES ('session_secret', ?)").run(generated);
-  console.log('[Security] No SESSION_SECRET env var found — generated and stored a random secret in DB.');
-  return generated;
+  if (!envSecret || envSecret.length < 32) {
+    throw new Error('SESSION_SECRET must be configured with at least 32 characters before the app can start.');
+  }
+  return envSecret;
 }
 const SESSION_SECRET = getSessionSecret();
 
@@ -353,9 +363,9 @@ if (retireLegacyAccount({
   console.warn('[Security] Retired the legacy bootstrap account and removed its broker access. Create a new account and reconnect broker credentials.');
 }
 
-// Published instances are autoscaled, so local SQLite files cannot be used for
-// identities or sessions. Keep strategy data in SQLite for now, but put account
-// access in the shared PostgreSQL database used by every deployed instance.
+// Account identities and sessions are shared through PostgreSQL. The deployment
+// runs as a single VM so the established SQLite trading journal and broker state
+// remain consistent while their full shared-data migration is completed.
 const authStore = createPostgresAuthStore({
   databaseUrl: process.env.DATABASE_URL,
   sessionTtlMs: 90 * 24 * 60 * 60 * 1000,
@@ -766,18 +776,6 @@ async function alpacaDataFetch(userId, path, scope = 'manual', _attempt = 0) {
   } catch { return null; }
 }
 
-// Returns any userId that has Alpaca credentials — used by non-auth endpoints
-// so they can still benefit from Alpaca data without being session-bound.
-function getAnyAlpacaUserId() {
-  // Must skip sentinel rows — disconnected users have api_key = '__disconnected__'
-  // and must not be used to make live API calls.
-  const rows = db.prepare('SELECT user_id FROM alpaca_creds').all();
-  for (const r of rows) {
-    if (getAlpacaCreds(r.user_id)) return r.user_id;
-  }
-  return null;
-}
-
 // Fetch Alpaca snapshot(s) for one or more symbols.
 // Returns { AAPL: { latestTrade, latestQuote, minuteBar, dailyBar, prevDailyBar }, ... }
 async function alpacaSnapshotFetch(userId, symbols, scope = 'manual') {
@@ -848,10 +846,9 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
 // Single source of truth for real-time price throughout the app.
 // data.alpaca.markets is the primary feed (24/7); Yahoo Finance is the safety net.
 async function fetchLiveQuote(symbol, userId = null, scope = 'manual') {
-  const uid = userId ?? getAnyAlpacaUserId();
-  if (uid) {
+  if (userId) {
     try {
-      const snap = await alpacaSnapshotFetch(uid, symbol, scope);
+      const snap = await alpacaSnapshotFetch(userId, symbol, scope);
       if (snap?.[symbol]) {
         const q = _normaliseAlpacaSnapshot(symbol, snap[symbol]);
         if (q?.price != null) return q;
@@ -893,9 +890,9 @@ app.get('/api/futures', requireAuth, async (req, res) => {
 
 // ── GET /api/quote/:symbol ─────────────────────────────────────────────────────
 // Alpaca data.alpaca.markets is tried first (24/7); Yahoo Finance is the fallback.
-app.get('/api/quote/:symbol', async (req, res) => {
+app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
-    const q = await fetchLiveQuote(req.params.symbol.toUpperCase());
+    const q = await fetchLiveQuote(req.params.symbol.toUpperCase(), req.session.userId);
     if (!q) return res.status(404).json({ error: 'Not found' });
     res.json(q);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -903,11 +900,11 @@ app.get('/api/quote/:symbol', async (req, res) => {
 
 // ── GET /api/snapshots?symbols=A,B ────────────────────────────────────────────
 // Alpaca batch snapshot tried first (one call, 24/7); Yahoo Finance fallback.
-app.get('/api/snapshots', async (req, res) => {
+app.get('/api/snapshots', requireAuth, async (req, res) => {
   const syms = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
   if (!syms.length) return res.json({});
   try {
-    const uid = getAnyAlpacaUserId();
+    const uid = req.session.userId;
     if (uid) {
       const snap = await alpacaSnapshotFetch(uid, syms).catch(() => null);
       if (snap && Object.keys(snap).length) {
@@ -931,7 +928,7 @@ app.get('/api/snapshots', async (req, res) => {
 // ── GET /api/search?q= ────────────────────────────────────────────────────────
 // Yahoo Finance attempted first; Alpaca asset catalogue used as 24/7 fallback.
 // Results cached 5 min to survive Yahoo rate-limits and speed up repeat queries.
-app.get('/api/search', async (req, res) => {
+app.get('/api/search', requireAuth, async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
 
@@ -955,7 +952,7 @@ app.get('/api/search', async (req, res) => {
 
   // ── 2. Alpaca asset catalogue fallback (works 24/7, no rate limits) ─────────
   try {
-    const uid = getAnyAlpacaUserId();
+    const uid = req.session.userId;
     if (uid) {
       const upper = q.toUpperCase();
       // Try exact symbol match first
@@ -989,13 +986,13 @@ app.get('/api/search', async (req, res) => {
 });
 
 // ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────────
-app.get('/api/bars/:symbol', async (req, res) => {
+app.get('/api/bars/:symbol', requireAuth, async (req, res) => {
   const sym   = req.params.symbol.toUpperCase();
   const tf    = req.query.timeframe || '1Day';
   const limit = parseInt(req.query.limit) || 60;
 
   // ── Try Alpaca bars first (24/7, includes extended-hours OHLCV) ────────────
-  const uid = getAnyAlpacaUserId();
+  const uid = req.session.userId;
   if (uid) {
     try {
       // Alpaca timeframe strings match our convention directly
@@ -1375,10 +1372,10 @@ app.get('/api/signal/:symbol', async (req, res) => {
 
 // ── GET /api/intraday/:symbol (5-min bars — includes pre/post market) ──────────
 // Alpaca 5-Min bars + snapshot tried first (24/7); Yahoo Finance is the fallback.
-app.get('/api/intraday/:symbol', async (req, res) => {
+app.get('/api/intraday/:symbol', requireAuth, async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   try {
-    const uid = getAnyAlpacaUserId();
+    const uid = req.session.userId;
 
     // ── Alpaca path ───────────────────────────────────────────────────────────
     if (uid) {
@@ -2306,7 +2303,9 @@ function getAlpacaCreds(userId, scope = 'manual') {
       SELECT api_key, api_secret, mode, account_id
       FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?
     `).get(userId, scope, active);
-    if (!row || row.api_key === DISCONNECTED_SENTINEL) return null;
+    // Credentials saved before broker identity verification must be reconnected
+    // before an automated bot can use them.
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
     return row;
   }
   // Determine which mode this user has active
@@ -2315,8 +2314,10 @@ function getAlpacaCreds(userId, scope = 'manual') {
 
   // Strict: only return credentials for the ACTIVE mode — never silently fall back
   // to the other mode, as that could send "live mode" orders to a paper account.
-  const row = db.prepare('SELECT api_key, api_secret, mode FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
-  if (!row || row.api_key === DISCONNECTED_SENTINEL) return null;
+  const row = db.prepare('SELECT api_key, api_secret, mode, account_id FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
+  // Do not permit a legacy manual key pair to trade until it has been
+  // revalidated and associated with a specific broker account ID.
+  if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
   return row;
 }
 
@@ -2523,6 +2524,7 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   if (!key || !sec) return res.status(400).json({ error: 'API key and secret required.' });
   if (key.length < 8 || sec.length < 8) return res.status(400).json({ error: 'Credentials look too short — paste the full key and secret.' });
   const m = mode === 'live' ? 'live' : 'paper';
+  let verifiedAccountId = '';
 
   // ── Validate credentials against Alpaca before saving ─────────────────────
   // Never store credentials that Alpaca rejects.
@@ -2547,9 +2549,9 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       return res.status(400).json({ error: body.message || `Alpaca returned ${test.status} — please try again.` });
     }
     const account = await test.json().catch(() => ({}));
-    const accountId = String(account?.id || account?.account_number || '').trim();
-    if (scope !== 'manual' && !accountId) {
-      return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this bot connection cannot be safely verified.' });
+    verifiedAccountId = String(account?.id || account?.account_number || '').trim();
+    if (!verifiedAccountId) {
+      return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this connection cannot be safely verified.' });
     }
     const uid = req.session.userId;
     if (scope !== 'manual') {
@@ -2557,19 +2559,27 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         SELECT bot FROM bot_alpaca_creds
         WHERE user_id=? AND bot<>? AND account_id=? AND api_key<>?
         LIMIT 1
-      `).get(uid, scope, accountId, DISCONNECTED_SENTINEL);
+      `).get(uid, scope, verifiedAccountId, DISCONNECTED_SENTINEL);
       if (conflict) {
         return res.status(409).json({
           error: `This Alpaca account is already connected to ${conflict.bot === 'pmh' ? 'Opening Momentum' : 'Momentum Trader'}. Each bot must use a different Alpaca account.`,
         });
       }
+      const manualConflict = db.prepare(`
+        SELECT 1 FROM alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+      `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+      if (manualConflict) {
+        return res.status(409).json({ error: 'This Alpaca account is already connected for manual trading. Use a separate account for each automated bot.' });
+      }
       db.prepare(`
-        INSERT OR REPLACE INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
+        INSERT INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
         VALUES (?,?,?,?,?,?)
-      `).run(uid, scope, m, key, sec, accountId);
+        ON CONFLICT(user_id,bot,mode) DO UPDATE SET
+          api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
+      `).run(uid, scope, m, key, sec, verifiedAccountId);
       db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
         .run(uid, scope, m);
-      return res.json({ ok: true, mode: m, connection: scope });
+      return res.json({ ok: true, mode: m, connection: scope, accountId: verifiedAccountId });
     }
   } catch (e) {
     if (e.name === 'AbortError') return res.status(400).json({ error: 'Alpaca did not respond in time — check your connection.' });
@@ -2577,9 +2587,21 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   }
 
   const uid = req.session.userId;
-  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(uid, key, sec, m);
+  const botConflict = db.prepare(`
+    SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+  `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  if (botConflict) {
+    return res.status(409).json({
+      error: `This Alpaca account is already connected to ${botConflict.bot === 'pmh' ? 'Opening Momentum' : 'Momentum Trader'}. Manual trading requires its own broker account.`,
+    });
+  }
+  db.prepare(`
+    INSERT INTO alpaca_creds (user_id,api_key,api_secret,mode,account_id) VALUES (?,?,?,?,?)
+    ON CONFLICT(user_id,mode) DO UPDATE SET
+      api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
+  `).run(uid, key, sec, m, verifiedAccountId);
   db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
-  res.json({ ok: true, mode: m });
+  res.json({ ok: true, mode: m, accountId: verifiedAccountId });
 });
 
 // Disconnect — writes sentinel for the currently-active mode only.
@@ -2598,7 +2620,11 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   }
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
   const m = activeModeRow?.mode || 'paper';
-  db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(
+  db.prepare(`
+    INSERT INTO alpaca_creds (user_id,api_key,api_secret,mode,account_id) VALUES (?,?,?,?,NULL)
+    ON CONFLICT(user_id,mode) DO UPDATE SET
+      api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=NULL
+  `).run(
     uid, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, m
   );
   res.json({ ok: true });
@@ -2621,6 +2647,7 @@ app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
     paperConnected,
     liveConnected,
     connection: scope,
+    accountId: creds?.account_id || null,
   });
 });
 
@@ -2966,7 +2993,10 @@ async function placeAlpacaOrder(req, res) {
 // Manual orders retain their existing endpoint and safeguards. The Momentum
 // browser uses the dedicated route below, whose setup gate cannot be disabled
 // by changing a client-supplied request field.
-app.post('/api/alpaca/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
+app.post('/api/alpaca/order', requireAuth, (req, res) => {
+  req._alpacaScope = 'manual';
+  return placeAlpacaOrder(req, res);
+});
 app.post('/api/momentum/order', requireAuth, (req, res) => {
   req._alpacaScope = 'momentum';
   return placeAlpacaOrder(req, res);
@@ -3915,7 +3945,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Fresh quote invalidates the configured stop or resistance-risk gate.' });
     }
     if (boundedEntry > MAX_TRADE_PRICE) return res.status(400).json({ error: `PMH preserves the account-wide $${MAX_TRADE_PRICE} maximum trade price.` });
-    const daily = db.prepare(`SELECT COUNT(*) AS trades,
+    const daily = db.prepare(`SELECT COUNT(DISTINCT COALESCE(entry_client_order_id, CAST(id AS TEXT))) AS trades,
       COALESCE(SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END), 0) AS losses
       FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
       AND date(timestamp, 'localtime')=date('now','localtime') AND status <> 'void'`).get(userId);
@@ -3940,7 +3970,11 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     // partial target, while an OTO lot is the independent EMA-managed runner.
     // This avoids a browser-side partial sell that could leave an oversized stop
     // behind and accidentally create a short position.
-    const partialQty = shares >= 2 ? Math.max(1, Math.min(shares - 1, Math.floor(shares * config.partialPercent / 100))) : 0;
+    // One-share setups still need a broker-held target. Treat the sole share as
+    // the protected partial lot instead of silently turning it into a targetless
+    // runner.
+    const partialQty = shares === 1 ? 1
+      : Math.max(1, Math.min(shares - 1, Math.floor(shares * config.partialPercent / 100)));
     const runnerQty = shares - partialQty;
     const orders = submittedOrders;
     const submitLot = async (qty, kind) => {

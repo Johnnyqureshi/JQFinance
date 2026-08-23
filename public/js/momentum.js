@@ -1775,6 +1775,7 @@
         set('mtEquity', fmtDollar(AlpacaClient.getEquity()));
         set('mtCash',   fmtDollar(AlpacaClient.getCash()));
         set('mtBP',     fmtDollar(AlpacaClient.getBP()));
+        set('mtAccountId', `Verified broker account: ${AlpacaClient.account?.id || AlpacaClient.account?.account_number || '--'}`);
       }
 
       // ── Account error notice ────────────────────────────────────────────────

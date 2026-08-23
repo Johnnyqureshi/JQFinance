@@ -1603,7 +1603,9 @@ function setupAuthUI() {
       showApp(res.data);
       goPage('home');
     } else {
-      $('authError').textContent  = res.data?.error || 'Something went wrong.';
+      $('authError').textContent = res.data?.code === 'LEGACY_ACCOUNT_RETIRED'
+        ? 'This older account was retired for security. Select “Create Account” above to make a new account with this username, then reconnect your broker account.'
+        : res.data?.error || 'Something went wrong.';
       $('authSubmit').disabled    = false;
       $('authSubmit').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
     }

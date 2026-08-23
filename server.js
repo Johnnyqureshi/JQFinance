@@ -534,7 +534,19 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required.' });
 
   const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY id ASC LIMIT 1').get(username.trim());
-  if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
+  if (!user) {
+    // This source-disclosed bootstrap identity was retired one-way. Keep the
+    // normal generic response for other usernames, but give its owner an
+    // actionable recovery message instead of making a safe migration look like
+    // a broken password or session.
+    if (username.trim().toLowerCase() === 'johnnyqureshi') {
+      return res.status(401).json({
+        code: 'LEGACY_ACCOUNT_RETIRED',
+        error: 'This older account was retired for security. Create a new account with this username, then reconnect your broker account.',
+      });
+    }
+    return res.status(401).json({ error: 'Invalid username or password.' });
+  }
 
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });

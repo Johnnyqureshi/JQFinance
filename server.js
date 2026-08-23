@@ -19,6 +19,11 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
+const {
+  LOOKBACKS: FORECAST_LOOKBACKS,
+  HORIZONS: FORECAST_HORIZONS,
+  buildHistoricalForecast,
+} = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const {
   DEFAULT_PMH_CONFIG,
@@ -994,6 +999,106 @@ app.get('/api/historical/:symbol', async (req, res) => {
     })).filter(b => b.close != null).reverse().slice(0, n);
     res.json({ historical });
   } catch { res.json({ historical: [] }); }
+});
+
+// ── GET /api/forecast/:symbol ───────────────────────────────────────────────────
+// Read-only, historical conditional forecast. This deliberately uses Yahoo's
+// split-adjusted chart data and never participates in order decisions.
+const _forecastCache = new Map();
+const _forecastHistoryCache = new Map();
+const _forecastHistoryInflight = new Map();
+const FORECAST_CACHE_MS = 10 * 60 * 1000;
+const FORECAST_YEARS = [1, 3, 5, 10, 15, 20, 25];
+
+async function fetchForecastDaily(symbol, years) {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const period1 = now - years * 366 * 24 * 60 * 60;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${now}&events=div%2Csplits&includeAdjustedClose=true`;
+    const r = await fetch(url, { headers: YH, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return null;
+    const rs = (await r.json())?.chart?.result?.[0];
+    if (!rs) return null;
+    const times = rs.timestamp || [];
+    const quote = rs.indicators?.quote?.[0] || {};
+    const adjusted = rs.indicators?.adjclose?.[0]?.adjclose || [];
+    const mapped = times.map((t, i) => {
+      const rawClose = Number(quote.close?.[i]);
+      const adjustedClose = Number(adjusted[i]);
+      const factor = Number.isFinite(rawClose) && rawClose > 0 && Number.isFinite(adjustedClose)
+        ? adjustedClose / rawClose : 1;
+      return {
+        t: new Date(t * 1000).toISOString().slice(0, 10),
+        o: Number(quote.open?.[i]) * factor,
+        h: Number(quote.high?.[i]) * factor,
+        l: Number(quote.low?.[i]) * factor,
+        c: Number.isFinite(adjustedClose) ? adjustedClose : rawClose,
+        v: quote.volume?.[i],
+      };
+    });
+    // A live daily candle is not a completed historical observation. Excluding it
+    // during premarket/regular hours prevents the current partial session from
+    // changing a multi-session pattern merely because the page refreshed.
+    const marketState = currentMarketState();
+    const dateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const part = type => dateParts.find(entry => entry.type === type)?.value;
+    const etToday = `${part('year')}-${part('month')}-${part('day')}`;
+    if (['PRE', 'REGULAR'].includes(marketState) && mapped.at(-1)?.t === etToday) mapped.pop();
+    return mapped;
+  } catch (error) {
+    console.warn('[Forecast] historical fetch failed:', error.message);
+    return null;
+  }
+}
+
+async function getForecastDaily(symbol, years) {
+  const key = `${symbol}:${years}`;
+  const cached = _forecastHistoryCache.get(key);
+  if (cached && Date.now() - cached.at < FORECAST_CACHE_MS) return cached.bars;
+  if (_forecastHistoryInflight.has(key)) return _forecastHistoryInflight.get(key);
+  const request = fetchForecastDaily(symbol, years)
+    .then(bars => {
+      if (bars?.length) {
+        _forecastHistoryCache.set(key, { at: Date.now(), bars });
+        if (_forecastHistoryCache.size > 100) _forecastHistoryCache.delete(_forecastHistoryCache.keys().next().value);
+      }
+      return bars;
+    })
+    .finally(() => _forecastHistoryInflight.delete(key));
+  _forecastHistoryInflight.set(key, request);
+  return request;
+}
+
+app.get('/api/forecast/:symbol', requireAuth, async (req, res) => {
+  const symbol = String(req.params.symbol || '').toUpperCase().replace(/[^A-Z0-9.^-]/g, '');
+  if (!symbol || symbol.length > 12) return res.status(400).json({ error: 'Invalid symbol.' });
+  const lookback = Number(req.query.lookback) || 90;
+  const horizon = Number(req.query.horizon) || 30;
+  const requestedYears = Number(req.query.years) || 10;
+  const years = FORECAST_YEARS.reduce((closest, value) =>
+    Math.abs(value - requestedYears) < Math.abs(closest - requestedYears) ? value : closest, 10);
+  if (!FORECAST_LOOKBACKS.includes(lookback) || !FORECAST_HORIZONS.includes(horizon)) {
+    return res.status(400).json({
+      error: `lookback must be one of ${FORECAST_LOOKBACKS.join(', ')} and horizon must be one of ${FORECAST_HORIZONS.join(', ')}.`,
+    });
+  }
+
+  const cacheKey = `${symbol}:${years}:${lookback}:${horizon}`;
+  const cached = _forecastCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < FORECAST_CACHE_MS) return res.json({ ...cached.data, cached: true });
+  try {
+    const bars = await getForecastDaily(symbol, years);
+    const data = buildHistoricalForecast({ ticker: symbol, bars, lookback, horizon });
+    const payload = { ...data, provider: 'Yahoo Finance chart API', adjustedCloseUsed: true, years };
+    _forecastCache.set(cacheKey, { at: Date.now(), data: payload });
+    if (_forecastCache.size > 200) _forecastCache.delete(_forecastCache.keys().next().value);
+    res.json(payload);
+  } catch (error) {
+    console.error('[Forecast] build failed:', error.message);
+    res.status(500).json({ error: 'Historical forecast unavailable.' });
+  }
 });
 
 // ── GET /api/news/:symbol ──────────────────────────────────────────────────────

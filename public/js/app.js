@@ -11,6 +11,8 @@ const state = {
   stockData:   null,
   watchlist:   [],
   currentUser: null,
+  loadId:      0,
+  forecastLoadId: 0,
 };
 
 // ── utils ──────────────────────────────────────────────────────────────────────
@@ -54,6 +56,13 @@ const api = {
   },
   async valuation(sym) {
     try { const r = await fetch(`/api/valuation/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
+  },
+  async forecast(sym, lookback=90, horizon=30, years=10) {
+    try {
+      const params = new URLSearchParams({ lookback, horizon, years });
+      const r = await fetch(`/api/forecast/${encodeURIComponent(sym)}?${params}`);
+      return r.ok ? r.json() : null;
+    } catch { return null; }
   },
   async wsb() {
     try { const r = await fetch('/api/wsb'); return r.ok ? r.json() : null; } catch { return null; }
@@ -143,6 +152,7 @@ function goPage(page) {
 
 // ── Stock page ─────────────────────────────────────────────────────────────────
 async function openStock(sym, snap) {
+  const loadId = ++state.loadId;
   state.prevPage  = state.page;
   state.page      = 'home';
   state.symbol    = sym;
@@ -217,8 +227,15 @@ async function openStock(sym, snap) {
     api.news(sym),
     api.valuation(sym),
   ]);
-  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData, val: valData };
+  if (loadId !== state.loadId || state.symbol !== sym) return;
+  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData, val: valData, forecast: null };
   renderOverview(snap, barsData, up);
+  const forecastLoadId = ++state.forecastLoadId;
+  void api.forecast(sym).then(forecast => {
+    if (loadId !== state.loadId || forecastLoadId !== state.forecastLoadId || state.symbol !== sym || !state.stockData) return;
+    state.stockData.forecast = forecast;
+    renderForecastPanel(forecast, sym);
+  });
 }
 
 function updateWatchBtn(sym) {
@@ -253,7 +270,7 @@ function renderOverview(snap, bars, up) {
     '<div class="stat-cell"><label>Avg Volume</label><span id="ov-avgvol"></span></div>' +
     '</div><div class="chart-card"><h3>Intraday \u2014 Last 48 hours</h3>' +
     '<canvas id="ovCanvas" style="height:220px"></canvas></div></div>' +
-    '<div id="scorePanel"></div></div>';
+    '<div id="scorePanel"></div></div><section id="forecastPanel" class="forecast-panel"></section>';
   $('ov-open').textContent   = '$' + fmt(p.open);
   $('ov-prev').textContent   = '$' + fmt(p.previousClose);
   $('ov-high').textContent   = '$' + fmt(p.dayHigh);
@@ -264,6 +281,180 @@ function renderOverview(snap, bars, up) {
   if (canvas && bars?.bars?.length >= 2) requestAnimationFrame(() => drawChart(canvas, bars.bars, color, 220));
   // async score panel
   loadScorePanel(state.stockData?.fmp, p.price||0);
+  renderForecastPanel(state.stockData?.forecast, state.stockData?.sym);
+}
+
+function pct(value, digits=1) {
+  return value == null || !Number.isFinite(Number(value)) ? '—' : `${Number(value) >= 0 ? '+' : ''}${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function forecastStatus(data) {
+  if (!data?.available || data.status === 'INSUFFICIENT_HISTORICAL_DATA') {
+    return { cls: 'insufficient', icon: '⊘', label: 'Insufficient historical data', detail: 'No forecast is shown until the required clean history and forward outcome windows are available.' };
+  }
+  if (!data.displayable || data.status === 'LIMITED_HISTORICAL_SAMPLE') {
+    return { cls: 'limited', icon: '◌', label: 'Limited historical sample', detail: `Only ${data.matchCount || 0} separated comparable window${data.matchCount === 1 ? '' : 's'} were found. Probabilities are withheld to avoid false precision.` };
+  }
+  if (data.direction === 'BULLISH') return { cls: 'bullish', icon: '↗', label: 'Historical evidence leans bullish', detail: 'Comparable patterns more often produced the defined positive outcome.' };
+  if (data.direction === 'BEARISH') return { cls: 'bearish', icon: '↘', label: 'Historical evidence leans bearish', detail: 'Comparable patterns more often produced the defined negative outcome.' };
+  return { cls: 'neutral', icon: '→', label: 'Historical evidence is mixed', detail: 'Comparable outcomes do not show a dominant directional edge.' };
+}
+
+function probabilitySegment(label, value, cls) {
+  const safe = Math.max(0, Math.min(100, Number(value || 0) * 100));
+  return `<div class="hf-prob-item ${cls}">
+    <div class="hf-prob-top"><span class="hf-prob-label"><i></i>${label}</span><strong>${safe.toFixed(0)}%</strong></div>
+    <div class="hf-prob-track"><span style="width:${safe.toFixed(1)}%"></span></div>
+  </div>`;
+}
+
+function drawForecastPath(canvas, data) {
+  if (!canvas || !data?.paths?.current?.length) return;
+  const current = data.paths.current;
+  const horizon = Number(data.horizon) || 30;
+  const lines = [
+    { values: data.paths.closest, color: '#63b3ed', width: 2, label: 'Closest analog' },
+    { values: data.paths.bullish?.average, color: '#1dd6a3', width: 2.5, label: 'Bullish average' },
+    { values: data.paths.bearish?.average, color: '#e84545', width: 2.5, label: 'Bearish average' },
+  ].filter(line => Array.isArray(line.values) && line.values.length);
+  const allValues = [...current, ...lines.flatMap(line => line.values),
+    ...(data.paths.bullish?.lower || []), ...(data.paths.bullish?.upper || []),
+    ...(data.paths.bearish?.lower || []), ...(data.paths.bearish?.upper || [])].filter(Number.isFinite);
+  if (!allValues.length) return;
+  const ctx = canvas.getContext('2d');
+  const width = Math.max(280, canvas.parentElement?.clientWidth || canvas.offsetWidth || 600);
+  const height = 230;
+  canvas.width = width * devicePixelRatio;
+  canvas.height = height * devicePixelRatio;
+  canvas.style.height = `${height}px`;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, width, height);
+  const pad = { left: 42, right: 14, top: 14, bottom: 30 };
+  const chartW = width - pad.left - pad.right;
+  const chartH = height - pad.top - pad.bottom;
+  const min = Math.min(...allValues, 100) - 1;
+  const max = Math.max(...allValues, 100) + 1;
+  const y = value => pad.top + (max - value) / (max - min || 1) * chartH;
+  const dividerX = pad.left + chartW * 0.6;
+  const currentX = index => pad.left + index / Math.max(1, current.length - 1) * (dividerX - pad.left);
+  const forwardX = index => dividerX + index / Math.max(1, horizon) * (width - pad.right - dividerX);
+
+  ctx.strokeStyle = 'rgba(111,132,166,.18)';
+  ctx.lineWidth = 1;
+  [0, 0.5, 1].forEach(fraction => {
+    const guideY = pad.top + chartH * fraction;
+    ctx.beginPath(); ctx.moveTo(pad.left, guideY); ctx.lineTo(width - pad.right, guideY); ctx.stroke();
+  });
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = 'rgba(245,200,66,.65)';
+  ctx.beginPath(); ctx.moveTo(pad.left, y(100)); ctx.lineTo(width - pad.right, y(100)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(111,132,166,.45)';
+  ctx.beginPath(); ctx.moveTo(dividerX, pad.top); ctx.lineTo(dividerX, height - pad.bottom); ctx.stroke();
+
+  const band = (path, fill) => {
+    if (!path?.lower?.length || !path?.upper?.length) return;
+    ctx.beginPath();
+    path.upper.forEach((value, index) => index ? ctx.lineTo(forwardX(index), y(value)) : ctx.moveTo(forwardX(index), y(value)));
+    [...path.lower].reverse().forEach((value, index) => ctx.lineTo(forwardX(path.lower.length - 1 - index), y(value)));
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  };
+  band(data.paths.bullish, 'rgba(29,214,163,.10)');
+  band(data.paths.bearish, 'rgba(232,69,69,.10)');
+
+  ctx.strokeStyle = '#d7e3f4'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  current.forEach((value, index) => index ? ctx.lineTo(currentX(index), y(value)) : ctx.moveTo(currentX(index), y(value)));
+  ctx.stroke();
+  lines.forEach(line => {
+    ctx.strokeStyle = line.color; ctx.lineWidth = line.width;
+    ctx.beginPath();
+    line.values.forEach((value, index) => index ? ctx.lineTo(forwardX(index), y(value)) : ctx.moveTo(forwardX(index), y(value)));
+    ctx.stroke();
+  });
+  ctx.fillStyle = '#93a6c6'; ctx.font = '10px Inter, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Current pattern', pad.left, height - 9);
+  ctx.fillText(`${horizon} sessions forward`, dividerX + 8, height - 9);
+  ctx.textAlign = 'right';
+  ctx.fillText(`${max.toFixed(0)}`, pad.left - 7, y(max) + 3);
+  ctx.fillText(`${min.toFixed(0)}`, pad.left - 7, y(min) + 3);
+}
+
+function renderForecastPanel(data, symbol) {
+  const panel = $('forecastPanel');
+  if (!panel) return;
+  const status = forecastStatus(data);
+  const selectableLookbacks = [30, 60, 90, 120, 180];
+  const selectableHorizons = [5, 10, 20, 30, 60, 63];
+  const lookback = data?.lookback || 90;
+  const horizon = data?.horizon || 30;
+  const stars = '★'.repeat(data?.robustness || 1) + '☆'.repeat(Math.max(0, 5 - (data?.robustness || 1)));
+  const controls = `<div class="hf-controls">
+      <label>Pattern <select id="forecastLookback">${selectableLookbacks.map(value => `<option value="${value}"${value === lookback ? ' selected' : ''}>${value} sessions</option>`).join('')}</select></label>
+      <label>Outcome <select id="forecastHorizon">${selectableHorizons.map(value => `<option value="${value}"${value === horizon ? ' selected' : ''}>${value} sessions</option>`).join('')}</select></label>
+    </div>`;
+
+  if (!data?.available || !data.displayable) {
+    panel.innerHTML = `<div class="hf-card hf-${status.cls}">
+      <div class="hf-head"><div><span class="hf-kicker">Historical Forecast</span><h3>Historical conditional probability</h3></div>${controls}</div>
+      <div class="hf-empty"><span class="hf-status-icon">${status.icon}</span><div><strong>${status.label}</strong><p>${status.detail}</p><small>Historical outcomes are withheld rather than estimated from an unreliable sample.</small></div></div>
+      <details class="hf-method"><summary>How calculated?</summary><p>Uses clean, split-adjusted daily OHLCV history to compare normalized price paths, returns, volatility, momentum, and drawdown. Candidate windows are separated and their future outcomes are measured only after the comparison date.</p></details>
+    </div>`;
+    bindForecastControls(symbol);
+    return;
+  }
+
+  const probs = data.probabilities;
+  const closest = data.closest || {};
+  panel.innerHTML = `<div class="hf-card hf-${status.cls}">
+    <div class="hf-head">
+      <div><span class="hf-kicker">Historical Forecast</span><h3>Historical conditional probability</h3></div>
+      ${controls}
+    </div>
+    <div class="hf-status-row">
+      <span class="hf-status-icon">${status.icon}</span>
+      <div><strong>${status.label}</strong><span>${status.detail}</span></div>
+      <div class="hf-robustness"><span>Evidence quality</span><b aria-label="${data.robustness} of 5 stars">${stars}</b></div>
+    </div>
+    <div class="hf-probabilities">
+      ${probabilitySegment('Bullish', probs.bull, 'bull')}
+      ${probabilitySegment('Neutral', probs.neutral, 'neutral')}
+      ${probabilitySegment('Bearish', probs.bear, 'bear')}
+    </div>
+    <div class="hf-chart-card">
+      <div class="hf-chart-head"><strong>Historical analog projection</strong><span>Normalized to 100 at the forecast point</span></div>
+      <canvas id="forecastPathCanvas" aria-label="Current pattern and comparable historical outcome paths"></canvas>
+      <div class="hf-legend"><span class="current">● Current pattern</span><span class="analog">● Closest analog</span><span class="bull">● Bullish average</span><span class="bear">● Bearish average</span></div>
+    </div>
+    <div class="hf-facts">
+      <div><span>Comparable windows</span><strong>${data.matchCount}</strong><small>${Number(data.effectiveSampleSize || 0).toFixed(1)} effective weighted sample</small></div>
+      <div><span>Expected return</span><strong class="${data.expectedReturn >= 0 ? 'up' : 'down'}">${pct(data.expectedReturn)}</strong><small>10–90%: ${pct(data.returnRange?.p10)} to ${pct(data.returnRange?.p90)}</small></div>
+      <div><span>Closest analog</span><strong>${(Number(closest.similarity || 0) * 100).toFixed(0)}% similar</strong><small>${escapeHtml(closest.date || '—')} · ${pct(closest.forwardReturn)} forward</small></div>
+      <div><span>Historical range</span><strong class="up">${pct(closest.maxRise)}</strong><small class="down">Worst path: ${pct(closest.maxDrawdown)}</small></div>
+    </div>
+    <p class="hf-explain">${escapeHtml(data.explanation || '')}</p>
+    <details class="hf-method"><summary>How calculated?</summary><p>Each comparison uses the selected normalized price path plus return correlation, volatility, momentum, and drawdown. A match’s influence is its similarity cubed. Bullish and bearish require a move beyond ±${Number(data.thresholdPct || 2).toFixed(1)}% over ${horizon} sessions. Future candles are used only to measure historical outcomes, never to select a match.</p><p>Historical outcomes among comparable patterns are not guarantees of future performance. This panel is read-only and does not change trading signals or place orders.</p></details>
+  </div>`;
+  const canvas = $('forecastPathCanvas');
+  requestAnimationFrame(() => drawForecastPath(canvas, data));
+  bindForecastControls(symbol);
+}
+
+function bindForecastControls(symbol) {
+  const lookback = $('forecastLookback');
+  const horizon = $('forecastHorizon');
+  const update = async () => {
+    if (!symbol || symbol !== state.symbol || !lookback || !horizon) return;
+    const panel = $('forecastPanel');
+    if (panel) panel.classList.add('hf-loading');
+    const forecastLoadId = ++state.forecastLoadId;
+    const forecast = await api.forecast(symbol, Number(lookback.value), Number(horizon.value));
+    if (symbol !== state.symbol || forecastLoadId !== state.forecastLoadId || !state.stockData) return;
+    state.stockData.forecast = forecast;
+    renderForecastPanel(forecast, symbol);
+  };
+  lookback?.addEventListener('change', update);
+  horizon?.addEventListener('change', update);
 }
 
 async function loadScorePanel(fmp, price) {

@@ -20,6 +20,7 @@
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
     "node-fetch": "^2.7.0",
+    "pg": "^8.23.0",
     "qs": "^6.15.3",
     "yahoo-finance2": "^3.15.4"
   }

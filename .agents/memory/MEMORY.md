@@ -5,7 +5,7 @@
 - [PMH order safety](pmh-order-safety.md) — freeze at the open; bound and reserve entries; reconcile only broker-confirmed protected lots.
 - [Broker entry capacity](broker-entry-capacity.md) — shared long-entry capacity counts every pending buy parent; multi-lot PMH reserves both units and ambiguous posts reconcile by client ID.
 - [Broker catalog coverage](broker-catalog-coverage.md) — bounded scans rotate a stable per-account Alpaca catalog snapshot; changing movers must never reshuffle catalog coverage.
-- [SQLite session store](sqlite-session-store.md) — persistent sessions use better-sqlite3 to avoid the vulnerable connect-sqlite3 dependency chain.
+- [Shared production authentication](shared-production-auth.md) — autoscaled deployments must keep users and sessions in PostgreSQL, not local SQLite files.
 - [Momentum price-action execution](momentum-price-action-execution.md) — automated Momentum entries use a dedicated server-owned route with completed-bar freshness and structural-stop enforcement.
 - [Bot Alpaca account isolation](bot-alpaca-account-isolation.md) — Momentum and PMH use separate broker credentials and must never share an Alpaca account ID.
 - [Historical forecast evidence](historical-forecast-evidence.md) — historical pattern guidance must purge overlapping outcome windows and withhold probabilities for weak samples.

@@ -8,7 +8,7 @@ const YahooFinance = require('yahoo-finance2').default;
 const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
-const createSqliteSessionStore = require('./lib/sqlite-session-store');
+const { createPostgresAuthStore } = require('./lib/postgres-auth-store');
 const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
 const { requiresPriceActionForEntry } = require('./lib/order-entry-policy');
 const helmet       = require('helmet');
@@ -353,6 +353,23 @@ if (retireLegacyAccount({
   console.warn('[Security] Retired the legacy bootstrap account and removed its broker access. Create a new account and reconnect broker credentials.');
 }
 
+// Published instances are autoscaled, so local SQLite files cannot be used for
+// identities or sessions. Keep strategy data in SQLite for now, but put account
+// access in the shared PostgreSQL database used by every deployed instance.
+const authStore = createPostgresAuthStore({
+  databaseUrl: process.env.DATABASE_URL,
+  sessionTtlMs: 90 * 24 * 60 * 60 * 1000,
+});
+let authStoreInitError = null;
+const authStoreReady = authStore.init(db)
+  .then(() => authStore.retireLegacyUsername(
+    bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
+  ))
+  .catch(error => {
+    authStoreInitError = error;
+    console.error('[Auth] Shared authentication store failed to initialize:', error.message);
+  });
+
 // Broker credentials are attached only through the authenticated per-user
 // settings flow. Never assign environment credentials to a fixed user ID.
 
@@ -401,9 +418,9 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
-const SqliteSessionStore = createSqliteSessionStore(session, sessionDb, 90 * 24 * 60 * 60 * 1000);
+const PostgresSessionStore = authStore.createSessionStore(session);
 app.use(session({
-  store:             new SqliteSessionStore(),
+  store:             new PostgresSessionStore(),
   secret:            SESSION_SECRET,
   resave:            false,
   saveUninitialized: false,
@@ -416,6 +433,15 @@ app.use(session({
   },
 }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+async function requireAuthStore(req, res, next) {
+  await authStoreReady;
+  if (authStoreInitError) {
+    return res.status(503).json({ error: 'Authentication service is temporarily unavailable. Please try again shortly.' });
+  }
+  next();
+}
+app.use('/api/auth', requireAuthStore);
 
 // Auth guard helper
 function requireAuth(req, res, next) {
@@ -518,13 +544,18 @@ app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 10);
-    const stmt = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)');
-    const info = stmt.run(u, hash);
-    req.session.userId   = info.lastInsertRowid;
+    const user = await authStore.createUser(u, hash);
+    if (!user) return res.status(409).json({ error: 'Username already taken.' });
+    authStore.syncSqliteUser(db, user);
+    req.session.userId   = Number(user.id);
     req.session.username = u;
-    req.session.save(() => res.json({ id: info.lastInsertRowid, username: u }));
+    req.session.save(error => {
+      if (error) return res.status(500).json({ error: 'Account was created, but the sign-in session could not be saved. Please sign in again.' });
+      res.json({ id: Number(user.id), username: u });
+    });
   } catch (e) {
-    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken.' });
+    if (e.code === '23505') return res.status(409).json({ error: 'Username already taken.' });
+    console.error('[Auth] Registration failed:', e.message);
     res.status(500).json({ error: 'Registration failed.' });
   }
 });
@@ -535,8 +566,9 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY id ASC LIMIT 1').get(username.trim());
-  if (!user) {
+  try {
+    const user = await authStore.findUserByUsername(username.trim());
+    if (!user) {
     // This source-disclosed bootstrap identity was retired one-way. Keep the
     // normal generic response for other usernames, but give its owner an
     // actionable recovery message instead of making a safe migration look like
@@ -547,15 +579,23 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
         error: 'This older account was retired for security. Create a new account with this username, then reconnect your broker account.',
       });
     }
-    return res.status(401).json({ error: 'Invalid username or password.' });
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });
+
+    authStore.syncSqliteUser(db, user);
+    req.session.userId   = Number(user.id);
+    req.session.username = user.username;
+    req.session.save(error => {
+      if (error) return res.status(500).json({ error: 'Sign-in session could not be saved. Please try again.' });
+      res.json({ id: Number(user.id), username: user.username });
+    });
+  } catch (error) {
+    console.error('[Auth] Login failed:', error.message);
+    res.status(503).json({ error: 'Authentication service is temporarily unavailable. Please try again shortly.' });
   }
-
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });
-
-  req.session.userId   = user.id;
-  req.session.username = user.username;
-  req.session.save(() => res.json({ id: user.id, username: user.username }));
 });
 
 // Logout
@@ -572,12 +612,13 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Both current and new password are required.' });
   if (newPassword.length < 6)
     return res.status(400).json({ error: 'New password must be at least 6 characters.' });
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.userId);
+  const user = await authStore.findUserById(req.session.userId);
   if (!user) return res.status(401).json({ error: 'User not found.' });
   const ok = await bcrypt.compare(currentPassword, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
   const hash = await bcrypt.hash(newPassword, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.session.userId);
+  await authStore.updatePassword(req.session.userId, hash);
+  authStore.syncSqliteUser(db, { ...user, password_hash: hash });
   res.json({ ok: true });
 });
 

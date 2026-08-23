@@ -592,7 +592,7 @@
 
     async checkConnection() {
       try {
-        const r = await fetch('/api/alpaca/credentials', { credentials: 'include' });
+        const r = await fetch('/api/alpaca/credentials?connection=momentum', { credentials: 'include' });
         if (!r.ok) { this.connected = false; return false; }
         const d = await r.json();
         this.mode           = d.mode || 'paper';
@@ -606,7 +606,7 @@
 
     async loadAccount() {
       try {
-        const r = await fetch('/api/alpaca/account', { credentials: 'include' });
+        const r = await fetch('/api/alpaca/account?connection=momentum', { credentials: 'include' });
         if (r.ok) {
           this.account      = await r.json();
           this.accountError = null;
@@ -629,7 +629,7 @@
         const r = await fetch('/api/alpaca/switch-mode', {
           method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode }),
+          body: JSON.stringify({ mode, connection: 'momentum' }),
         });
         if (!r.ok) {
           const e    = await r.json().catch(() => ({}));
@@ -665,7 +665,7 @@
         stop_loss:     { stop_price: String(stopPrice.toFixed(2)) },
         take_profit:   { limit_price: String(takeProfitPrice.toFixed(2)) },
       };
-      const r = await fetch('/api/alpaca/order', {
+      const r = await fetch('/api/momentum/order', {
         method:      'POST',
         headers:     { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -685,11 +685,11 @@
      * Simple notional order without bracket (for quick entries).
      */
     async placeSimpleOrder(symbol, side, notional) {
-      const r = await fetch('/api/alpaca/order', {
+      const r = await fetch('/api/momentum/order', {
         method:      'POST',
         headers:     { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body:        JSON.stringify({ symbol, side, amount: notional }),
+        body:        JSON.stringify({ symbol, side, amount: notional, connection: 'momentum' }),
       });
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
@@ -1941,7 +1941,7 @@
 
     async _loadBotTrades() {
       try {
-        const response = await fetch('/api/bot-trades?limit=100', { credentials: 'include' });
+        const response = await fetch('/api/bot-trades?limit=100&strategy=momentum', { credentials: 'include' });
         if (!response.ok) return;
         const data = await response.json();
         this.tradeJournal = Array.isArray(data.trades) ? data.trades : [];
@@ -1960,7 +1960,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, connection: 'momentum' }),
         });
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
@@ -2010,13 +2010,13 @@
 
     async _getFilledExitOrder(sym, info, orderId = null, clientOrderId = null) {
       const endpoint = orderId
-        ? `/api/alpaca/order/${encodeURIComponent(orderId)}`
+          ? `/api/alpaca/order/${encodeURIComponent(orderId)}?connection=momentum`
         : clientOrderId
-          ? `/api/alpaca/order/by-client/${encodeURIComponent(clientOrderId)}`
+          ? `/api/alpaca/order/by-client/${encodeURIComponent(clientOrderId)}?connection=momentum`
         : info.brokerOrderId
-          ? `/api/alpaca/order/${encodeURIComponent(info.brokerOrderId)}`
+          ? `/api/alpaca/order/${encodeURIComponent(info.brokerOrderId)}?connection=momentum`
           : info.entryOrderId
-            ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}`
+            ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}?connection=momentum`
             : null;
       if (!endpoint) return null;
       try {
@@ -2055,8 +2055,8 @@
       try {
         const usesClientOrderId = String(info.entryOrderId).startsWith('mt-');
         const endpoint = usesClientOrderId
-          ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}`
-          : `/api/alpaca/order/${encodeURIComponent(info.entryOrderId)}`;
+          ? `/api/alpaca/order/by-client/${encodeURIComponent(info.entryOrderId)}?connection=momentum`
+          : `/api/alpaca/order/${encodeURIComponent(info.entryOrderId)}?connection=momentum`;
         const response = await fetch(
           endpoint,
           { credentials: 'include' }
@@ -2142,8 +2142,8 @@
         }
         try {
           const endpoint = info.pendingExit.orderId
-            ? `/api/alpaca/order/${encodeURIComponent(info.pendingExit.orderId)}`
-            : `/api/alpaca/order/by-client/${encodeURIComponent(info.pendingExit.clientOrderId)}`;
+            ? `/api/alpaca/order/${encodeURIComponent(info.pendingExit.orderId)}?connection=momentum`
+            : `/api/alpaca/order/by-client/${encodeURIComponent(info.pendingExit.clientOrderId)}?connection=momentum`;
           const response = await fetch(endpoint, { credentials: 'include' });
           if (!response.ok) continue;
           const order = await response.json();
@@ -2329,7 +2329,7 @@
       // Fetch current open positions (avoid doubling into the same symbol)
       let heldSyms = new Set();
       try {
-        const r = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        const r = await fetch('/api/alpaca/positions?connection=momentum', { credentials: 'include' });
         if (r.ok) {
           const pos = await r.json();
           (Array.isArray(pos) ? pos : []).forEach(p => heldSyms.add(p.symbol));
@@ -2543,7 +2543,7 @@
       if (this._pollBusy) return;
       this._pollBusy = true;
       try {
-        const r = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        const r = await fetch('/api/alpaca/positions?connection=momentum', { credentials: 'include' });
         if (!r.ok) return;
         const positions = await r.json();
         this._renderPositionsPanel(Array.isArray(positions) ? positions : []);
@@ -2630,12 +2630,12 @@
           });
           if (!pending) throw new Error('Trade journal is unavailable; exit order was not submitted');
           info.pendingExit = { clientOrderId: exitClientOrderId, reason };
-          const r = await fetch('/api/alpaca/order', {
+          const r = await fetch('/api/momentum/order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-              symbol: sym, side: 'sell', amount: notional, clientOrderId: exitClientOrderId,
+              symbol: sym, side: 'sell', amount: notional, clientOrderId: exitClientOrderId, connection: 'momentum',
             }),
           });
           if (!r.ok) {
@@ -2722,7 +2722,7 @@
 
       let positions;
       try {
-        const response = await fetch('/api/alpaca/positions', { credentials: 'include' });
+        const response = await fetch('/api/alpaca/positions?connection=momentum', { credentials: 'include' });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `Could not load positions (${response.status})`);
         positions = Array.isArray(data) ? data : [];
@@ -2748,7 +2748,7 @@
 
       let flattenVerified = false;
       try {
-        const response = await fetch('/api/alpaca/positions', {
+        const response = await fetch('/api/alpaca/positions?connection=momentum', {
           method: 'DELETE',
           credentials: 'include',
         });
@@ -2933,9 +2933,14 @@
       });
 
       // Re-check connection whenever alpacatrader.js saves or disconnects credentials
-      window.addEventListener('alpaca-connection-changed', () => {
+      window.addEventListener('alpaca-connection-changed', event => {
+        if (event.detail?.connection && event.detail.connection !== 'momentum') return;
         AlpacaClient.checkConnection().then(() => this._renderStatus());
       });
+      $('atConnBtn')?.addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        window.alpacaTrader?.openConnectModal?.('momentum');
+      }, true);
     },
 
     _showTradeSuccess(msg) {

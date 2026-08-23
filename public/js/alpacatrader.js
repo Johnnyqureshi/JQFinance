@@ -9,6 +9,7 @@ const alpacaTrader = (() => {
   let alpacaMode    = 'paper';
   let _pollFailures = 0;
   let _keepAlive    = null;
+  let modalConnection = 'manual';
   const POLL_FAIL_LIMIT  = 3;
   const LS_WAS_CONNECTED = 'jqf_alpaca_was_connected';
 
@@ -326,10 +327,26 @@ const alpacaTrader = (() => {
   }
 
   // ── Modal ──────────────────────────────────────────────────────────────────
-  function showModal() {
+  function connectionLabel(connection) {
+    return connection === 'pmh' ? 'Opening Momentum'
+      : connection === 'momentum' ? 'Momentum Trader'
+      : 'Manual Trading';
+  }
+
+  function connectionUrl(path, connection = modalConnection) {
+    return connection === 'manual' ? path
+      : `${path}${path.includes('?') ? '&' : '?'}connection=${encodeURIComponent(connection)}`;
+  }
+
+  function showModal(connection = 'manual') {
+    modalConnection = ['momentum', 'pmh'].includes(connection) ? connection : 'manual';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';
-    if ($('trdModalDisc')) $('trdModalDisc').style.display = connected ? '' : 'none';
+    if ($('trdModalTitle')) $('trdModalTitle').textContent = `Connect Alpaca — ${connectionLabel(modalConnection)}`;
+    if ($('trdModalSub')) $('trdModalSub').textContent = modalConnection === 'manual'
+      ? 'API keys stored securely per user'
+      : `Dedicated account for ${connectionLabel(modalConnection)}. It cannot be shared with the other bot.`;
+    if ($('trdModalDisc')) $('trdModalDisc').style.display = 'none';
     document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === alpacaMode));
     const w = $('trdLiveWarn'); if (w) w.style.display = alpacaMode === 'live' ? '' : 'none';
   }
@@ -344,40 +361,49 @@ const alpacaTrader = (() => {
     btn.disabled = true; btn.textContent = 'Connecting…';
     if (errEl) errEl.textContent = '';
     try {
-      const r = await apiFetch('/api/alpaca/credentials', {
+      const r = await apiFetch(connectionUrl('/api/alpaca/credentials'), {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ apiKey: key, apiSecret: secret, mode: alpacaMode }),
+        body:    JSON.stringify({ apiKey: key, apiSecret: secret, mode: alpacaMode, connection: modalConnection }),
       });
       if (r.error) throw new Error(r.error);
-      const acct = await apiFetch('/api/alpaca/account');
-      if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
-      connected    = true;
-      reconnecting = false;
-       alpacaMode   = r.mode || 'paper';
+      if (modalConnection === 'manual') {
+        const acct = await apiFetch('/api/alpaca/account');
+        if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
+        connected = true;
+        reconnecting = false;
+        alpacaMode = r.mode || 'paper';
+      }
       _pollFailures = 0;
-      localStorage.setItem(LS_WAS_CONNECTED, '1');
+      if (modalConnection === 'manual') localStorage.setItem(LS_WAS_CONNECTED, '1');
       hideModal();
-      updateConnStatus();
-      loadAccount();
-      loadPositions();
-      loadOrders();
-      startKeepAlive();
+      if (modalConnection === 'manual') {
+        updateConnStatus();
+        loadAccount();
+        loadPositions();
+        loadOrders();
+        startKeepAlive();
+      }
       // Notify momentum scanner so AlpacaClient re-checks with fresh credentials
-      window.dispatchEvent(new CustomEvent('alpaca-connection-changed'));
+      window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
     } catch (e) { if (errEl) errEl.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = 'Connect'; }
   }
 
   async function disconnect() {
-    await apiFetch('/api/alpaca/credentials', { method: 'DELETE' });
+    await apiFetch(connectionUrl('/api/alpaca/credentials'), { method: 'DELETE' });
+    if (modalConnection !== 'manual') {
+      hideModal();
+      window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
+      return;
+    }
     connected    = false;
     reconnecting = false;
     localStorage.removeItem(LS_WAS_CONNECTED);
     stopKeepAlive();
     updateConnStatus();
     hideModal();
-    window.dispatchEvent(new CustomEvent('alpaca-connection-changed'));
+    window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: 'manual' } }));
     const posBody = $('atPositionsBody');
     if (posBody) posBody.innerHTML = '<div class="at-empty">Connect Alpaca to view live positions</div>';
     const ordBody = $('atOrdersBody');

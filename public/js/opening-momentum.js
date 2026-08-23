@@ -47,7 +47,7 @@
     const dot = $('pmhConnDot'), text = $('pmhConnText'), button = $('pmhConnBtn');
     if (!dot || !text || !button) return;
     try {
-      const status = await request('/api/alpaca/credentials');
+      const status = await request('/api/alpaca/credentials?connection=pmh');
       const connected = status.connected === true;
       dot.className = `at-conn-dot ${connected ? 'dot-green' : 'dot-red'}`;
       text.textContent = connected ? `Connected · ${String(status.mode || 'paper').toUpperCase()}` : 'Not connected';
@@ -202,12 +202,13 @@
     });
     $('pmhTradesRefresh')?.addEventListener('click', refreshTrades);
     $('pmhConnBtn')?.addEventListener('click', () => {
-      if (window.alpacaTrader?.openConnectModal) window.alpacaTrader.openConnectModal();
-      else $('pmhBotStatus').textContent = 'Open Momentum Trader to connect Alpaca.';
+      if (window.alpacaTrader?.openConnectModal) window.alpacaTrader.openConnectModal('pmh');
+      else $('pmhBotStatus').textContent = 'Alpaca connection panel is unavailable.';
     });
     if (!connectionBound) {
       connectionBound = true;
-      window.addEventListener('alpaca-connection-changed', async () => {
+      window.addEventListener('alpaca-connection-changed', async event => {
+        if (event.detail?.connection && event.detail.connection !== 'pmh') return;
         await refreshBrokerStatus();
         await refreshTrades();
         await scan(false);

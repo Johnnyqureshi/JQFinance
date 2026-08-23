@@ -239,6 +239,32 @@ db.prepare(`
   )
 `).run();
 
+// Bot connections intentionally live outside the legacy/manual Alpaca account
+// tables. A Momentum account and a PMH account must be independently connected
+// and may not point at the same broker account, even when different API keys
+// are used for that account.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bot_alpaca_creds (
+    user_id    INTEGER NOT NULL,
+    bot        TEXT    NOT NULL CHECK (bot IN ('momentum', 'pmh')),
+    mode       TEXT    NOT NULL CHECK (mode IN ('paper', 'live')),
+    api_key    TEXT    NOT NULL,
+    api_secret TEXT    NOT NULL,
+    account_id TEXT,
+    PRIMARY KEY (user_id, bot, mode),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_bot_alpaca_creds_account
+    ON bot_alpaca_creds (user_id, account_id);
+  CREATE TABLE IF NOT EXISTS bot_alpaca_active_mode (
+    user_id INTEGER NOT NULL,
+    bot     TEXT    NOT NULL CHECK (bot IN ('momentum', 'pmh')),
+    mode    TEXT    NOT NULL DEFAULT 'paper' CHECK (mode IN ('paper', 'live')),
+    PRIMARY KEY (user_id, bot),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 // ── App settings table (persists generated secrets etc.) ──────────────────────
 db.prepare(`
   CREATE TABLE IF NOT EXISTS app_settings (
@@ -642,9 +668,9 @@ async function yfChartQuote(symbol) {
 // Uses stored user Alpaca credentials for the data feed.
 // The data API key is identical to the trading API key.
 
-async function alpacaDataFetch(userId, path, _attempt = 0) {
+async function alpacaDataFetch(userId, path, scope = 'manual', _attempt = 0) {
   try {
-    const creds = getAlpacaCreds(userId);
+    const creds = getAlpacaCreds(userId, scope);
     if (!creds) return null;
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 12000);
@@ -662,18 +688,18 @@ async function alpacaDataFetch(userId, path, _attempt = 0) {
       if (_attempt < 2) {
         const delay = Math.min(1000 * 2 ** _attempt, 4000);
         await new Promise(res => setTimeout(res, delay));
-        return alpacaDataFetch(userId, path, _attempt + 1);
+        return alpacaDataFetch(userId, path, scope, _attempt + 1);
       }
       return null;
     }
     clearTimeout(timeoutId);
     if (r.status === 429 && _attempt < 2) {
       await new Promise(res => setTimeout(res, 2000 * (_attempt + 1)));
-      return alpacaDataFetch(userId, path, _attempt + 1);
+      return alpacaDataFetch(userId, path, scope, _attempt + 1);
     }
     if ([502, 503, 504].includes(r.status) && _attempt < 2) {
       await new Promise(res => setTimeout(res, 1500 * (_attempt + 1)));
-      return alpacaDataFetch(userId, path, _attempt + 1);
+      return alpacaDataFetch(userId, path, scope, _attempt + 1);
     }
     if (!r.ok) return null;
     return r.json();
@@ -694,9 +720,9 @@ function getAnyAlpacaUserId() {
 
 // Fetch Alpaca snapshot(s) for one or more symbols.
 // Returns { AAPL: { latestTrade, latestQuote, minuteBar, dailyBar, prevDailyBar }, ... }
-async function alpacaSnapshotFetch(userId, symbols) {
+async function alpacaSnapshotFetch(userId, symbols, scope = 'manual') {
   const syms = Array.isArray(symbols) ? symbols.join(',') : symbols;
-  return alpacaDataFetch(userId, `/v2/stocks/snapshots?symbols=${encodeURIComponent(syms)}&feed=iex`);
+  return alpacaDataFetch(userId, `/v2/stocks/snapshots?symbols=${encodeURIComponent(syms)}&feed=iex`, scope);
 }
 
 // Determine the current ET market session state (REGULAR, PRE, POST, CLOSED)
@@ -761,11 +787,11 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
 // ── fetchLiveQuote: Alpaca-first, Yahoo-fallback ───────────────────────────────
 // Single source of truth for real-time price throughout the app.
 // data.alpaca.markets is the primary feed (24/7); Yahoo Finance is the safety net.
-async function fetchLiveQuote(symbol, userId = null) {
+async function fetchLiveQuote(symbol, userId = null, scope = 'manual') {
   const uid = userId ?? getAnyAlpacaUserId();
   if (uid) {
     try {
-      const snap = await alpacaSnapshotFetch(uid, symbol);
+      const snap = await alpacaSnapshotFetch(uid, symbol, scope);
       if (snap?.[symbol]) {
         const q = _normaliseAlpacaSnapshot(symbol, snap[symbol]);
         if (q?.price != null) return q;
@@ -2102,8 +2128,27 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // Sentinel key written to DB when the user explicitly disconnects so that the
 // environment-variable fallback is suppressed for that user.
 const DISCONNECTED_SENTINEL = '__disconnected__';
+const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh']);
 
-function getAlpacaCreds(userId) {
+function normalizeAlpacaScope(value, fallback = 'manual') {
+  return BOT_ALPACA_SCOPES.has(value) ? value : fallback;
+}
+
+function requestAlpacaScope(req, fallback = 'manual') {
+  return normalizeAlpacaScope(req.body?.connection ?? req.query?.connection, fallback);
+}
+
+function getAlpacaCreds(userId, scope = 'manual') {
+  if (BOT_ALPACA_SCOPES.has(scope)) {
+    const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
+      .get(userId, scope)?.mode || 'paper';
+    const row = db.prepare(`
+      SELECT api_key, api_secret, mode, account_id
+      FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?
+    `).get(userId, scope, active);
+    if (!row || row.api_key === DISCONNECTED_SENTINEL) return null;
+    return row;
+  }
   // Determine which mode this user has active
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
   const activeMode    = activeModeRow?.mode || 'paper';
@@ -2116,13 +2161,18 @@ function getAlpacaCreds(userId) {
 }
 
 // Helper: check if a specific mode has valid (non-sentinel) credentials in DB
-function _alpacaCredsExist(userId, mode) {
+function _alpacaCredsExist(userId, mode, scope = 'manual') {
+  if (BOT_ALPACA_SCOPES.has(scope)) {
+    const row = db.prepare('SELECT api_key FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
+      .get(userId, scope, mode);
+    return !!row && row.api_key !== DISCONNECTED_SENTINEL;
+  }
   const row = db.prepare('SELECT api_key FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
   return !!row && row.api_key !== DISCONNECTED_SENTINEL;
 }
 
-async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
-  const creds = getAlpacaCreds(userId);
+async function alpacaFetchFor(userId, scope, path, opts = {}, _attempt = 0) {
+  const creds = getAlpacaCreds(userId, scope);
   if (!creds) throw new Error('Alpaca not connected. Please add your API credentials.');
   const base = creds.mode === 'live'
     ? 'https://api.alpaca.markets'
@@ -2151,7 +2201,7 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
       const delay = Math.min(1000 * 2 ** _attempt, 8000);
       console.warn(`[AT] Alpaca network error on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms: ${netErr.message}`);
       await new Promise(res => setTimeout(res, delay));
-      return alpacaFetch(userId, path, opts, _attempt + 1);
+      return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
     }
     const error = new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
     error.alpacaTransient = true;
@@ -2164,14 +2214,14 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
     const delay = Math.min(2000 * (_attempt + 1), 8000);
     console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
-    return alpacaFetch(userId, path, opts, _attempt + 1);
+    return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
   }
   // Transient server errors (502/503/504) — retry GET requests only
   if ([502, 503, 504].includes(r.status) && isGet && _attempt < MAX_ATTEMPTS - 1) {
     const delay = Math.min(1500 * 2 ** _attempt, 8000);
     console.warn(`[AT] Alpaca ${r.status} on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
-    return alpacaFetch(userId, path, opts, _attempt + 1);
+    return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
   }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
@@ -2189,6 +2239,12 @@ async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
   return data;
 }
 
+// Existing manual trading routes retain their connection behavior. Bot code must
+// use alpacaFetchFor with its fixed scope and can never fall back to this path.
+async function alpacaFetch(userId, path, opts = {}, _attempt = 0) {
+  return alpacaFetchFor(userId, 'manual', path, opts, _attempt);
+}
+
 // Asset listings change far less often than prices. Cache the broker's
 // authoritative active/tradable US-equity catalog per connected account so a
 // scanner refresh never has to enumerate every asset again.
@@ -2196,14 +2252,14 @@ const ALPACA_ASSET_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
 const _alpacaAssetCatalogCache = new Map();
 const _alpacaCatalogRotationState = new Map();
 
-async function getAlpacaTradableEquityCatalog(userId, { force = false } = {}) {
-  const creds = getAlpacaCreds(userId);
+async function getAlpacaTradableEquityCatalog(userId, { force = false, scope = 'manual' } = {}) {
+  const creds = getAlpacaCreds(userId, scope);
   if (!creds) throw new Error('Alpaca not connected. Connect an account before verifying tradable symbols.');
-  const key = `${userId}:${creds.mode}:${creds.api_key}`;
+  const key = `${userId}:${scope}:${creds.mode}:${creds.api_key}`;
   const cached = _alpacaAssetCatalogCache.get(key);
   if (!force && cached && Date.now() - cached.at < ALPACA_ASSET_CATALOG_TTL_MS) return cached;
 
-  const assets = await alpacaFetch(userId, '/v2/assets?status=active&asset_class=us_equity');
+  const assets = await alpacaFetchFor(userId, scope, '/v2/assets?status=active&asset_class=us_equity');
   const catalog = buildTradableEquityCatalog(assets);
   if (!catalog.size) throw new Error('Alpaca returned no active tradable US stocks or ETFs.');
   const entry = { at: Date.now(), key, catalog };
@@ -2237,15 +2293,15 @@ function nextAlpacaCatalogRotation(catalogEntry, prioritySymbols, {
   return rotation;
 }
 
-async function assertAlpacaTradableEquity(userId, symbol, { fresh = false } = {}) {
+async function assertAlpacaTradableEquity(userId, symbol, { fresh = false, scope = 'manual' } = {}) {
   const normalized = String(symbol || '').toUpperCase();
   if (fresh) {
-    const asset = await alpacaFetch(userId, `/v2/assets/${encodeURIComponent(normalized)}`);
+    const asset = await alpacaFetchFor(userId, scope, `/v2/assets/${encodeURIComponent(normalized)}`);
     const eligible = buildTradableEquityCatalog([asset]).get(normalized);
     if (!eligible) throw new Error(`${normalized} is not an active, tradable Alpaca stock or ETF.`);
     return eligible;
   }
-  const { catalog } = await getAlpacaTradableEquityCatalog(userId);
+  const { catalog } = await getAlpacaTradableEquityCatalog(userId, { scope });
   const asset = catalog.get(normalized);
   if (!asset) throw new Error(`${normalized} is not an active, tradable Alpaca stock or ETF.`);
   return asset;
@@ -2301,6 +2357,7 @@ async function cancelAlpacaOpenOrders(userId, orders) {
 // Save credentials — stores the key pair for the given mode, sets it as active
 app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const { apiKey, apiSecret, mode } = req.body || {};
+  const scope = requestAlpacaScope(req);
   const key = (apiKey  || '').trim();
   const sec = (apiSecret || '').trim();
   if (!key || !sec) return res.status(400).json({ error: 'API key and secret required.' });
@@ -2329,6 +2386,31 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       const body = await test.json().catch(() => ({}));
       return res.status(400).json({ error: body.message || `Alpaca returned ${test.status} — please try again.` });
     }
+    const account = await test.json().catch(() => ({}));
+    const accountId = String(account?.id || account?.account_number || '').trim();
+    if (scope !== 'manual' && !accountId) {
+      return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this bot connection cannot be safely verified.' });
+    }
+    const uid = req.session.userId;
+    if (scope !== 'manual') {
+      const conflict = db.prepare(`
+        SELECT bot FROM bot_alpaca_creds
+        WHERE user_id=? AND bot<>? AND account_id=? AND api_key<>?
+        LIMIT 1
+      `).get(uid, scope, accountId, DISCONNECTED_SENTINEL);
+      if (conflict) {
+        return res.status(409).json({
+          error: `This Alpaca account is already connected to ${conflict.bot === 'pmh' ? 'Opening Momentum' : 'Momentum Trader'}. Each bot must use a different Alpaca account.`,
+        });
+      }
+      db.prepare(`
+        INSERT OR REPLACE INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
+        VALUES (?,?,?,?,?,?)
+      `).run(uid, scope, m, key, sec, accountId);
+      db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
+        .run(uid, scope, m);
+      return res.json({ ok: true, mode: m, connection: scope });
+    }
   } catch (e) {
     if (e.name === 'AbortError') return res.status(400).json({ error: 'Alpaca did not respond in time — check your connection.' });
     return res.status(400).json({ error: 'Could not reach Alpaca to verify credentials: ' + e.message });
@@ -2344,6 +2426,16 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
 // The other mode's credentials remain stored and can be reactivated via switch-mode.
 app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   const uid = req.session.userId;
+  const scope = requestAlpacaScope(req);
+  if (scope !== 'manual') {
+    const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
+      .get(uid, scope)?.mode || 'paper';
+    db.prepare(`
+      INSERT OR REPLACE INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
+      VALUES (?,?,?,?,?,NULL)
+    `).run(uid, scope, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
+    return res.json({ ok: true, connection: scope });
+  }
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
   const m = activeModeRow?.mode || 'paper';
   db.prepare('INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (?,?,?,?)').run(
@@ -2355,16 +2447,20 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
 // Check connection status — returns active-mode creds plus availability of both modes
 app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
   const uid   = req.session.userId;
-  const creds = getAlpacaCreds(uid);
-  const paperConnected = _alpacaCredsExist(uid, 'paper');
-  const liveConnected  = _alpacaCredsExist(uid, 'live');
-  const activeModeRow  = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
+  const scope = requestAlpacaScope(req);
+  const creds = getAlpacaCreds(uid, scope);
+  const paperConnected = _alpacaCredsExist(uid, 'paper', scope);
+  const liveConnected  = _alpacaCredsExist(uid, 'live', scope);
+  const activeModeRow  = scope === 'manual'
+    ? db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid)
+    : db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?').get(uid, scope);
   const activeMode     = activeModeRow?.mode || (creds?.mode) || 'paper';
   res.json({
     connected:      !!creds,
     mode:           activeMode,
     paperConnected,
     liveConnected,
+    connection: scope,
   });
 });
 
@@ -2373,28 +2469,37 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
   const { mode } = req.body || {};
   const m   = mode === 'live' ? 'live' : 'paper';
   const uid = req.session.userId;
-  if (!_alpacaCredsExist(uid, m)) {
+  const scope = requestAlpacaScope(req);
+  if (!_alpacaCredsExist(uid, m, scope)) {
     return res.status(400).json({ error: `No ${m} account connected. Save your ${m} API keys first.` });
   }
-  db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
-  res.json({ ok: true, mode: m });
+  if (scope === 'manual') {
+    db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  } else {
+    db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
+      .run(uid, scope, m);
+  }
+  res.json({ ok: true, mode: m, connection: scope });
 });
 
 // Account info
 app.get('/api/alpaca/account', requireAuth, async (req, res) => {
-  try { res.json(await alpacaFetch(req.session.userId, '/v2/account')); }
+  const scope = requestAlpacaScope(req);
+  try { res.json(await alpacaFetchFor(req.session.userId, scope, '/v2/account')); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // Open positions
 app.get('/api/alpaca/positions', requireAuth, async (req, res) => {
-  try { res.json(await alpacaFetch(req.session.userId, '/v2/positions')); }
+  const scope = requestAlpacaScope(req);
+  try { res.json(await alpacaFetchFor(req.session.userId, scope, '/v2/positions')); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // Pending orders only (not order history — only shows new/partially_filled)
 app.get('/api/alpaca/orders', requireAuth, async (req, res) => {
-  try { res.json(await alpacaFetch(req.session.userId, '/v2/orders?limit=50&status=open')); }
+  const scope = requestAlpacaScope(req);
+  try { res.json(await alpacaFetchFor(req.session.userId, scope, '/v2/orders?limit=50&status=open')); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -2434,14 +2539,15 @@ app.get('/api/spy-levels', async (req, res) => {
   } catch (e) { res.json({ floor: null, maxPain: null, roof: null, expiry: null }); }
 });
 
-async function evaluateMomentumEntryPriceAction(userId, symbol) {
+async function evaluateMomentumEntryPriceAction(userId, symbol, scope = 'momentum') {
   const now = new Date();
   const start = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
   const [barsData, snapshots] = await Promise.all([
     alpacaDataFetch(userId,
-      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=5Min&start=${encodeURIComponent(start)}&limit=100&adjustment=all&feed=iex`
+      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=5Min&start=${encodeURIComponent(start)}&limit=100&adjustment=all&feed=iex`,
+      scope
     ).catch(() => null),
-    alpacaSnapshotFetch(userId, `${symbol},SPY`).catch(() => null),
+    alpacaSnapshotFetch(userId, `${symbol},SPY`, scope).catch(() => null),
   ]);
   const rawBars = Array.isArray(barsData?.bars) ? barsData.bars : [];
   const barStartMs = bar => {
@@ -2488,6 +2594,7 @@ async function placeAlpacaOrder(req, res) {
     return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
   }
   const { symbol, side, amount, tpPct, slPct, leverage, clientOrderId } = req.body || {};
+  const scope = req._alpacaScope || requestAlpacaScope(req);
 
   // ── Input validation ───────────────────────────────────────────────────────
   if (!symbol || !side) return res.status(400).json({ error: 'symbol and side required.' });
@@ -2511,7 +2618,7 @@ async function placeAlpacaOrder(req, res) {
   // stock/market, buy the mapped inverse ETF instead (GET /api/inverse/:sym).
   if (sideL === 'sell') {
     try {
-      const pos = await alpacaFetch(req.session.userId, `/v2/positions/${symbol.toUpperCase()}`, { method: 'GET' });
+      const pos = await alpacaFetchFor(req.session.userId, scope, `/v2/positions/${symbol.toUpperCase()}`, { method: 'GET' });
       const heldQty = parseFloat(pos?.qty ?? 0);
       if (!isFinite(heldQty) || heldQty <= 0) {
         return res.status(400).json({
@@ -2525,9 +2632,9 @@ async function placeAlpacaOrder(req, res) {
       // BEFORE selling — otherwise the leftover stop order could later trigger
       // against nothing (or a re-entered position) and flip the account short.
       try {
-        const open = await alpacaFetch(req.session.userId, `/v2/orders?status=open&symbols=${symbol.toUpperCase()}`, { method: 'GET' });
+        const open = await alpacaFetchFor(req.session.userId, scope, `/v2/orders?status=open&symbols=${symbol.toUpperCase()}`, { method: 'GET' });
         for (const o of (Array.isArray(open) ? open : [])) {
-          await alpacaFetch(req.session.userId, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {});
+          await alpacaFetchFor(req.session.userId, scope, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {});
         }
       } catch (_) {} // no open orders / cancel failure → proceed; Alpaca rejects unsafe sells
     } catch (e) {
@@ -2565,11 +2672,11 @@ async function placeAlpacaOrder(req, res) {
         return res.status(409).json({ error: 'Another entry is being prepared. Please wait for it to settle.' });
       }
       entryLockHeld = true;
-      if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true });
+      if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true, scope });
       // A non-PMH buy cannot bypass structural setup validation by using the
       // generic order URL. PMH has an independent frozen-opening contract.
       if (requiresPriceAction) {
-        momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
+        momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase(), scope);
         if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
           return res.status(409).json({
             error: `Momentum price-action gate blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
@@ -2577,14 +2684,14 @@ async function placeAlpacaOrder(req, res) {
           });
         }
       }
-      const slots = await getOpenSlots(req.session.userId, 'Order');
+      const slots = await getOpenSlots(req.session.userId, 'Order', scope);
       if (!canReserveEntryUnits(slots)) {
         return res.status(409).json({ error: 'Position limit reached or account data unavailable.' });
       }
     }
 
     // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
-    const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId);
+    const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId, scope);
     // BUG FIX: use live `price` field — regularClose is prior-session close and causes stale bracket levels
     const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.regularClose;
     if (!price || !isFinite(price) || price <= 0) throw new Error('Could not fetch a valid current price for ' + symbol.toUpperCase());
@@ -2661,7 +2768,7 @@ async function placeAlpacaOrder(req, res) {
       return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
     }
     if (requiresPriceAction) {
-      momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
+      momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase(), scope);
       if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
         return res.status(409).json({
           error: `Momentum price-action recheck blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
@@ -2676,7 +2783,7 @@ async function placeAlpacaOrder(req, res) {
     beginAlpacaOrderRequest(req.session.userId);
     let data;
     try {
-      data = await alpacaFetch(req.session.userId, '/v2/orders', {
+      data = await alpacaFetchFor(req.session.userId, scope, '/v2/orders', {
         method: 'POST',
         body:   JSON.stringify(orderBody),
       });
@@ -2700,7 +2807,10 @@ async function placeAlpacaOrder(req, res) {
 // browser uses the dedicated route below, whose setup gate cannot be disabled
 // by changing a client-supplied request field.
 app.post('/api/alpaca/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
-app.post('/api/momentum/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
+app.post('/api/momentum/order', requireAuth, (req, res) => {
+  req._alpacaScope = 'momentum';
+  return placeAlpacaOrder(req, res);
+});
 
 // Cancel order
 app.get('/api/alpaca/order/by-client/:clientOrderId', requireAuth, async (req, res) => {
@@ -2709,8 +2819,9 @@ app.get('/api/alpaca/order/by-client/:clientOrderId', requireAuth, async (req, r
   }
   try {
     const clientOrderId = encodeURIComponent(req.params.clientOrderId);
-    res.json(await alpacaFetch(
+    res.json(await alpacaFetchFor(
       req.session.userId,
+      requestAlpacaScope(req),
       `/v2/orders:by_client_order_id?client_order_id=${clientOrderId}&nested=true`,
       { method: 'GET' }
     ));
@@ -2724,8 +2835,9 @@ app.get('/api/alpaca/order/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Invalid order ID.' });
   }
   try {
-    res.json(await alpacaFetch(
+    res.json(await alpacaFetchFor(
       req.session.userId,
+      requestAlpacaScope(req),
       `/v2/orders/${req.params.id}?nested=true`,
       { method: 'GET' }
     ));
@@ -2736,7 +2848,7 @@ app.get('/api/alpaca/order/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
   if (!/^[a-f0-9\-]{10,40}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid order ID.' });
-  try { await alpacaFetch(req.session.userId, `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
+  try { await alpacaFetchFor(req.session.userId, requestAlpacaScope(req), `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -2744,7 +2856,7 @@ app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
 app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
   if (!/^[A-Z0-9.\-]{1,12}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol.' });
-  try { res.json(await alpacaFetch(req.session.userId, `/v2/positions/${sym}`, { method: 'DELETE' })); }
+  try { res.json(await alpacaFetchFor(req.session.userId, requestAlpacaScope(req), `/v2/positions/${sym}`, { method: 'DELETE' })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -2752,9 +2864,12 @@ app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
 // A journal row is opened when an AUTO-BUY is accepted and finalized when the bot
 // observes the position close. This makes performance survive page reloads while
 // keeping manual orders out of the bot-specific results.
-function botTradePerformance(userId, todayOnly = false) {
+function botTradePerformance(userId, todayOnly = false, strategy = 'all') {
   const dateFilter = todayOnly
     ? `AND date(closed_at, 'localtime') = date('now', 'localtime')`
+    : '';
+  const strategyFilter = strategy === 'momentum'
+    ? `AND (strategy IS NULL OR strategy='momentum')`
     : '';
   const row = db.prepare(`
     SELECT
@@ -2768,6 +2883,7 @@ function botTradePerformance(userId, todayOnly = false) {
       AND status = 'closed'
       AND exit_price IS NOT NULL
       ${dateFilter}
+      ${strategyFilter}
   `).get(userId);
   const totalTrades = Number(row?.total_trades || 0);
   const wins = Number(row?.wins || 0);
@@ -2786,12 +2902,16 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
     ? Math.max(1, Math.min(requestedLimit, 250))
     : 100;
   const userId = req.session.userId;
+  const momentumOnly = req.query.strategy === 'momentum';
+  const strategyClause = momentumOnly
+    ? ` AND (strategy IS NULL OR strategy='momentum')`
+    : '';
   const openTrades = db.prepare(`
     SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
            stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
            pending_exit_reason, exit_reason, timestamp, closed_at
     FROM bot_trade_log
-    WHERE user_id = ? AND status = 'open'
+    WHERE user_id = ? AND status = 'open'${strategyClause}
     ORDER BY timestamp DESC, id DESC
   `).all(userId);
   const history = db.prepare(`
@@ -2799,7 +2919,7 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
            stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
            pending_exit_reason, exit_reason, timestamp, closed_at
     FROM bot_trade_log
-    WHERE user_id = ? AND status <> 'open'
+    WHERE user_id = ? AND status <> 'open'${strategyClause}
     ORDER BY COALESCE(closed_at, timestamp) DESC, id DESC
     LIMIT ?
   `).all(userId, limit);
@@ -2810,8 +2930,8 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
   res.json({
     trades,
     performance: {
-      today: botTradePerformance(userId, true),
-      allTime: botTradePerformance(userId),
+      today: botTradePerformance(userId, true, momentumOnly ? 'momentum' : 'all'),
+      allTime: botTradePerformance(userId, false, momentumOnly ? 'momentum' : 'all'),
     },
   });
 });
@@ -2819,6 +2939,7 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
 app.post('/api/bot-trades', requireAuth, (req, res) => {
   const body = req.body || {};
   const userId = req.session.userId;
+  const momentumJournal = body.connection === 'momentum';
   const action = String(body.action || body.event || '').trim().toLowerCase();
   const isEntry = ['buy', 'entry', 'auto-buy', 'auto_buy'].includes(action);
   const isExit = ['exit', 'close', 'sell', 'auto-exit', 'auto_exit'].includes(action);
@@ -2842,6 +2963,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     }
     const openTrade = db.prepare(`
       SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+      ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
     `).get(requestedTradeId, userId, symbol);
     if (!openTrade) {
       return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -2853,8 +2975,8 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     return res.json({
       trade,
       performance: {
-        today: botTradePerformance(userId, true),
-        allTime: botTradePerformance(userId),
+        today: botTradePerformance(userId, true, momentumOnly ? 'momentum' : 'all'),
+        allTime: botTradePerformance(userId, false, momentumOnly ? 'momentum' : 'all'),
       },
     });
   }
@@ -2866,6 +2988,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     }
     const openTrade = db.prepare(`
       SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+      ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
     `).get(requestedTradeId, userId, symbol);
     if (!openTrade) {
       return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -2909,6 +3032,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
       }
       const openTrade = db.prepare(`
         SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
+        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
       `).get(requestedTradeId, userId, symbol);
       if (!openTrade) {
         return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -2957,15 +3081,17 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
         });
       }
     }
-    const modeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
+    const modeRow = momentumJournal
+      ? db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?').get(userId, 'momentum')
+      : db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
     const mode = modeRow?.mode === 'live' ? 'live' : 'paper';
     const result = db.prepare(`
       INSERT INTO bot_trade_log
-        (user_id, symbol, entry_price, shares, mode, stop_price, take_profit_rsi, entry_order_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, symbol, entry_price, shares, mode, stop_price, take_profit_rsi, entry_order_id, strategy)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId, symbol, entryPrice, shares, mode, stopPrice, takeProfitRsi,
-      entryOrderId
+      entryOrderId, momentumJournal ? 'momentum' : null
     );
     const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(result.lastInsertRowid);
     return res.status(201).json({
@@ -2994,10 +3120,12 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     ? db.prepare(`
         SELECT * FROM bot_trade_log
         WHERE id=? AND user_id=? AND symbol=? AND status='open'
+        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
       `).get(requestedTradeId, userId, symbol)
     : db.prepare(`
         SELECT * FROM bot_trade_log
         WHERE user_id=? AND symbol=? AND status='open'
+        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
         ORDER BY id DESC LIMIT 1
       `).get(userId, symbol);
   if (!trade) {
@@ -3395,10 +3523,10 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
   const end = now.toISOString();
   const start = new Date(now.getTime() - 21 * 86400000).toISOString();
   const [snapshots, barsData, dailyData, spySnapshots] = await Promise.all([
-    alpacaSnapshotFetch(userId, `${sym},SPY`).catch(() => null),
-    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=10000&adjustment=all&feed=iex`).catch(() => null),
-    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Day&limit=30&adjustment=all&feed=iex`).catch(() => null),
-    alpacaSnapshotFetch(userId, 'SPY').catch(() => null),
+    alpacaSnapshotFetch(userId, `${sym},SPY`, 'pmh').catch(() => null),
+    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=10000&adjustment=all&feed=iex`, 'pmh').catch(() => null),
+    alpacaDataFetch(userId, `/v2/stocks/${sym}/bars?timeframe=1Day&limit=30&adjustment=all&feed=iex`, 'pmh').catch(() => null),
+    alpacaSnapshotFetch(userId, 'SPY', 'pmh').catch(() => null),
   ]);
   const snap = snapshots?.[sym];
   const spy = spySnapshots?.SPY || snapshots?.SPY;
@@ -3540,7 +3668,7 @@ app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
   let catalogEntry = null;
   let catalogError = null;
   try {
-    catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId);
+    catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId, { scope: 'pmh' });
     catalog = catalogEntry.catalog;
   }
   catch (error) { catalogError = error; }
@@ -3588,14 +3716,14 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
   let submittedOrders = [];
   try {
     if (!isMarketOpen()) return res.status(400).json({ error: 'Market is closed for regular-session PMH entries.' });
-    await assertAlpacaTradableEquity(userId, symbol, { fresh: true });
-    const slots = await getOpenSlots(userId, 'PMH');
+    await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'pmh' });
+    const slots = await getOpenSlots(userId, 'PMH', 'pmh');
     // A PMH setup submits two independently protected BUY parents (partial +
     // runner), so reserve both shared entry units before either reaches Alpaca.
     if (!canReserveEntryUnits(slots, 2)) return res.status(409).json({ error: 'PMH needs two available entry slots for its protected partial and runner lots.' });
     if (slots.positions.some(p => p.symbol === symbol) ||
         slots.openOrders.some(o => o.symbol === symbol)) return res.status(409).json({ error: `${symbol} already has a position or pending order.` });
-    const allSymbolOrders = await alpacaFetch(userId, `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
+    const allSymbolOrders = await alpacaFetchFor(userId, 'pmh', `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
     if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) return res.status(409).json({ error: `${symbol} already has a broker-open order.` });
     const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
     let config = DEFAULT_PMH_CONFIG;
@@ -3605,7 +3733,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     // Calculate risk from a fresh executable quote, not a 2-minute candle
     // close. A marketable limit bounds upward slippage; without a usable ask,
     // the trade is blocked rather than sized optimistically.
-    const freshSnapshot = await alpacaSnapshotFetch(userId, symbol);
+    const freshSnapshot = await alpacaSnapshotFetch(userId, symbol, 'pmh');
     const executableAsk = Number(freshSnapshot?.[symbol]?.latestQuote?.ap);
     const executableQuoteAt = freshSnapshot?.[symbol]?.latestQuote?.t;
     if (!(executableAsk > 0) || !pmhFresh(executableQuoteAt, 15 * 1000)) {
@@ -3628,7 +3756,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
       AND date(timestamp, 'localtime')=date('now','localtime') AND status <> 'void'`).get(userId);
     if (Number(daily.trades) >= config.maxTradesPerDay) return res.status(409).json({ error: 'PMH daily trade limit reached.' });
     if (Number(daily.losses) >= config.maxDailyLoss) return res.status(409).json({ error: 'PMH daily loss limit reached.' });
-    const mode = getAlpacaCreds(userId)?.mode || 'paper';
+    const mode = getAlpacaCreds(userId, 'pmh')?.mode || 'paper';
     const shares = Math.floor(config.maxRiskDollars / boundedRisk);
     if (!Number.isInteger(shares) || shares < 1) return res.status(400).json({ error: 'Risk sizing produced less than one whole share.' });
     const entry = boundedEntry;
@@ -3670,7 +3798,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
       };
       beginAlpacaOrderRequest(userId);
       let order;
-      try { order = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) }); }
+      try { order = await alpacaFetchFor(userId, 'pmh', '/v2/orders', { method: 'POST', body: JSON.stringify(orderBody) }); }
       finally { endAlpacaOrderRequest(userId); }
       db.prepare('UPDATE bot_trade_log SET entry_order_id=? WHERE id=?').run(order?.id || clientId, trade.lastInsertRowid);
       submitted.order = order;
@@ -3706,6 +3834,7 @@ app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
 // open; it never manufactures a fill price, exit, or P&L from a quote.
 app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
   const userId = req.session.userId;
+  const pmhFetch = (path, opts = {}) => alpacaFetchFor(userId, 'pmh', path, opts);
   if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot reconciliation cycle is in progress.' });
   try {
   const settingRow = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
@@ -3719,8 +3848,8 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
     try {
       if (trade.status === 'pending_entry') {
         const order = trade.entry_order_id === trade.entry_client_order_id
-          ? await alpacaFetch(userId, `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`)
-          : await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+          ? await pmhFetch(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`)
+          : await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
         if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
           db.prepare(`UPDATE bot_trade_log SET status='open', entry_price=?, shares=?, entry_order_id=? WHERE id=?`)
             .run(Number(order.filled_avg_price), Number(order.filled_qty), order.id, trade.id);
@@ -3733,7 +3862,7 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
         continue;
       }
       if (trade.status === 'pending_exit' && trade.pending_exit_order_id) {
-        const order = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.pending_exit_order_id)}`);
+        const order = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.pending_exit_order_id)}`);
         if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
           const filledQty = Number(order.filled_qty);
           const exitPrice = Number(order.filled_avg_price);
@@ -3747,7 +3876,7 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
       }
       // Parent orders expose their protective child legs. A broker-filled
       // bracket target/stop is the only source of a realized partial result.
-      const parent = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      const parent = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
       const filledLeg = (parent?.legs || []).find(leg =>
         leg.status === 'filled' && Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0
       );
@@ -3790,7 +3919,7 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
       const claimed = db.prepare(`UPDATE bot_trade_log SET status='exit_reserving', pending_exit_reason=?
         WHERE id=? AND user_id=? AND status='open'`).run(runner.reason, trade.id, userId);
       if (claimed.changes !== 1) continue;
-      const position = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+      const position = await pmhFetch(`/v2/positions/${trade.symbol}`);
       const qty = Math.min(Number(position?.qty), Number(trade.shares));
       if (!(qty > 0)) continue; // Preserve journal until broker evidence explains the disappearance.
       // Cancel only this runner's own OTO stop child. The partial bracket stays
@@ -3798,8 +3927,8 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
       let stopCancelAmbiguous = false;
       for (const leg of (parent.legs || [])) {
         if (leg.status === 'new' || leg.status === 'accepted' || leg.status === 'pending_new') {
-          await alpacaFetch(userId, `/v2/orders/${leg.id}`, { method: 'DELETE' });
-          const settledLeg = await alpacaFetch(userId, `/v2/orders/${leg.id}`);
+          await pmhFetch(`/v2/orders/${leg.id}`, { method: 'DELETE' });
+          const settledLeg = await pmhFetch(`/v2/orders/${leg.id}`);
           if (!['canceled', 'cancelled'].includes(String(settledLeg?.status || '').toLowerCase())) {
             stopCancelAmbiguous = true;
           } else {
@@ -3810,20 +3939,20 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
       // A stop may fill while the cancel request is in flight. In that
       // ambiguous state, do not submit a discretionary sell; reconcile the
       // terminal broker state on the next cycle instead.
-      const afterCancel = await alpacaFetch(userId, `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      const afterCancel = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
       const stopFilledDuringCancel = (afterCancel?.legs || []).some(leg => leg.status === 'filled');
       if (stopCancelAmbiguous || stopFilledDuringCancel) {
         reconciled.push({ id: trade.id, status: 'open', event: 'runner stop cancellation unsettled; no discretionary sell submitted' });
         continue;
       }
-      const currentPosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+      const currentPosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
       const remainingRunnerQty = Math.min(Number(currentPosition?.qty), Number(trade.shares));
       if (!(remainingRunnerQty > 0)) continue;
       const exitClientId = `pmhx_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48);
       beginAlpacaOrderRequest(userId);
       let exitOrder;
       try {
-        exitOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+        exitOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
           symbol: trade.symbol, qty: String(remainingRunnerQty), side: 'sell', type: 'market', time_in_force: 'day', client_order_id: exitClientId,
         }) });
       } catch (exitError) {
@@ -3831,10 +3960,10 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
         // If the broker did not accept the exit, immediately try to restore a
         // protective stop for the broker-confirmed remaining runner quantity.
         try {
-          const rescuePosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+          const rescuePosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
           const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
           if (rescueQty > 0 && Number(trade.stop_price) > 0) {
-            const rescueOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+            const rescueOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
               symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
               stop_price: Number(trade.stop_price).toFixed(2),
               client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
@@ -3858,13 +3987,13 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
         try {
           const latest = db.prepare('SELECT rescue_stop_order_id FROM bot_trade_log WHERE id=?').get(trade.id);
           if (!latest?.rescue_stop_order_id) {
-            const rescuePosition = await alpacaFetch(userId, `/v2/positions/${trade.symbol}`);
+            const rescuePosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
             const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
             if (rescueQty > 0 && Number(trade.stop_price) > 0) {
               beginAlpacaOrderRequest(userId);
               let rescueOrder;
               try {
-                rescueOrder = await alpacaFetch(userId, '/v2/orders', { method: 'POST', body: JSON.stringify({
+                rescueOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
                   symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
                   stop_price: Number(trade.stop_price).toFixed(2),
                   client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
@@ -3902,10 +4031,12 @@ app.get('/api/momentum/analysis/:sym', requireAuth, async (req, res) => {
 
     const [barsData, fiveMinuteData] = await Promise.all([
       alpacaDataFetch(uid,
-        `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start.toISOString())}&limit=300&adjustment=all&feed=iex`
+        `/v2/stocks/${sym}/bars?timeframe=1Min&start=${encodeURIComponent(start.toISOString())}&limit=300&adjustment=all&feed=iex`,
+        'momentum'
       ).catch(() => null),
       alpacaDataFetch(uid,
-        `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=100&adjustment=all&feed=iex`
+        `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=100&adjustment=all&feed=iex`,
+        'momentum'
       ).catch(() => null),
     ]);
 
@@ -4457,7 +4588,7 @@ app.get('/api/momentum/universe', requireAuth, async (req, res) => {
     let catalogEntry = null;
     let catalogError = null;
     try {
-      catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId);
+      catalogEntry = await getAlpacaTradableEquityCatalog(req.session.userId, { scope: 'momentum' });
       catalog = catalogEntry.catalog;
     }
     catch (error) { catalogError = error; }
@@ -5866,11 +5997,11 @@ function releaseBotLock(userId) { _botLock.delete(String(userId)); }
 // ── Slot counter: positions + all pending long entries ────────────────────────
 // Every open BUY consumes capacity, including simple manual, OTO, bracket and
 // PMH orders. Protective legs are SELLs and therefore do not consume a slot.
-async function getOpenSlots(userId, botName) {
+async function getOpenSlots(userId, botName, scope = 'manual') {
   let positions = [], allOpen = [], openOrders = [];
-  try { positions = await alpacaFetch(userId, '/v2/positions'); } catch { return null; }
+  try { positions = await alpacaFetchFor(userId, scope, '/v2/positions'); } catch { return null; }
   try {
-    allOpen = await alpacaFetch(userId, '/v2/orders?status=open&limit=500');
+    allOpen = await alpacaFetchFor(userId, scope, '/v2/orders?status=open&limit=500');
     openOrders = Array.isArray(allOpen)
       ? allOpen.filter(o => String(o?.side || '').toLowerCase() === 'buy')
       : [];

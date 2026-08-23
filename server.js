@@ -9,6 +9,8 @@ const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
 const createSqliteSessionStore = require('./lib/sqlite-session-store');
+const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
+const { requiresPriceActionForEntry } = require('./lib/order-entry-policy');
 const helmet       = require('helmet');
 const crypto       = require('crypto');
 const {
@@ -245,24 +247,6 @@ db.prepare(`
   )
 `).run();
 
-// ── Seed: ensure the primary admin account always exists ─────────────────────
-// This runs at startup so the account is present even on a fresh deployment DB.
-// The hash below is bcrypt of 'JQFinance2024!' (rounds=10).
-// On every startup we upsert the admin account so a stale or missing hash
-// in any environment (dev or production) is automatically corrected.
-(function seedAdminUser() {
-  const ADMIN_USER = 'johnnyqureshi';
-  const ADMIN_HASH = '$2b$10$jqVXi70VTQegfWo3GiVvi.a4fl5QGzh34.tIzRwxIYjvu33SClh.a';
-  const existing = db.prepare('SELECT id, password_hash FROM users WHERE LOWER(username)=LOWER(?)').get(ADMIN_USER);
-  if (!existing) {
-    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(ADMIN_USER, ADMIN_HASH);
-    console.log(`[Seed] Created admin account: ${ADMIN_USER}`);
-  } else if (existing.password_hash !== ADMIN_HASH) {
-    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(ADMIN_HASH, existing.id);
-    console.log(`[Seed] Reset admin password hash for: ${ADMIN_USER}`);
-  }
-})();
-
 // Generate or retrieve a persistent session secret so sessions survive restarts
 // and cannot be forged even if SESSION_SECRET env var is absent.
 function getSessionSecret() {
@@ -323,46 +307,21 @@ db.prepare(`
   )
 `).run();
 
-// ── Startup migration: ensure all 3 active bots are enabled ───────────────────
-// Deletes any explicitly-disabled rows for the current bot names so they
-// revert to the default ON state. If a user disables a bot via the UI toggle
-// it persists until the next restart/redeploy, at which point it resets to ON.
-// This prevents bots from silently staying off after a container restart.
-db.prepare(`
-  DELETE FROM bot_toggles
-  WHERE bot_name IN ('countertrend','orb','swing') AND enabled = 0
-`).run();
-
-// ── Startup: sync alpaca_creds from env vars (paper + live independently) ─────
-// Supports two naming conventions so either works without renaming:
-//   Paper:  ALPACA_PAPER_KEY / ALPACA_PAPER_SECRET
-//           ALPACA_API_KEY   / ALPACA_API_SECRET  (alias)
-//           ALPACA_API_KEY   / ALPACA_SECRET_KEY  (alias — user preferred)
-//   Live:   ALPACA_LIVE_KEY  / ALPACA_LIVE_SECRET
-//   Mode:   ALPACA_MODE = "paper" (default) or "live" — sets the active mode
-{
-  const paperKey    = process.env.ALPACA_PAPER_KEY
-                   || process.env.ALPACA_API_KEY;
-  const paperSecret = process.env.ALPACA_PAPER_SECRET
-                   || process.env.ALPACA_API_SECRET
-                   || process.env.ALPACA_SECRET_KEY;
-  const liveKey     = process.env.ALPACA_LIVE_KEY;
-  const liveSecret  = process.env.ALPACA_LIVE_SECRET
-                   || process.env.ALPACA_LIVE_SECRET_KEY;
-  const activeMode  = (process.env.ALPACA_MODE || 'paper').toLowerCase() === 'live' ? 'live' : 'paper';
-
-  if (paperKey && paperSecret) {
-    db.prepare(`INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (1,?,?,'paper')`).run(paperKey, paperSecret);
-    console.log('[Startup] Synced paper alpaca_creds from env vars');
-  }
-  if (liveKey && liveSecret) {
-    db.prepare(`INSERT OR REPLACE INTO alpaca_creds (user_id, api_key, api_secret, mode) VALUES (1,?,?,'live')`).run(liveKey, liveSecret);
-    console.log('[Startup] Synced live alpaca_creds from env vars');
-  }
-  if (paperKey || liveKey) {
-    db.prepare(`INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (1, ?)`).run(activeMode);
-  }
+// ── Security migration: retire a source-disclosed bootstrap account ──────────
+// This is deliberately one-way. It runs after every automation table exists,
+// so the legacy account cannot retain an enabled execution control.
+if (retireLegacyAccount({
+  db,
+  sessionDb,
+  username: 'johnnyqureshi',
+  replacementPasswordHash: bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12),
+  botNames: ['countertrend', 'pmh'],
+})) {
+  console.warn('[Security] Retired the legacy bootstrap account and removed its broker access. Create a new account and reconnect broker credentials.');
 }
+
+// Broker credentials are attached only through the authenticated per-user
+// settings flow. Never assign environment credentials to a fixed user ID.
 
 // ── ORB session log — one row per user per trading day ────────────────────────
 db.prepare(`
@@ -2524,7 +2483,7 @@ async function evaluateMomentumEntryPriceAction(userId, symbol) {
 }
 
 // Place order (market with optional TP/SL bracket)
-async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
+async function placeAlpacaOrder(req, res) {
   if (isAlpacaFlattening(req.session.userId)) {
     return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
   }
@@ -2590,6 +2549,7 @@ async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
 
   // ── Market-hours guard (equity only — crypto trades 24/7) ─────────────────
   const isCryptoSym = isLikelyCryptoSymbol(symbol);
+  const requiresPriceAction = requiresPriceActionForEntry({ side: sideL, isCrypto: isCryptoSym });
   if (!isCryptoSym && !isMarketOpen()) {
     return res.status(400).json({ error: 'Market is closed. Equity orders are only accepted during regular market hours (9:35 AM – 3:50 PM ET, Mon–Fri). Use Alpaca directly for extended-hours orders.' });
   }
@@ -2606,10 +2566,9 @@ async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
       }
       entryLockHeld = true;
       if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true });
-      // Browser-side scanner scores are not trusted for automation. A Momentum
-      // entry must independently reproduce a fresh compatible long setup at
-      // the server boundary before it can consume broker capacity.
-      if (automatedMomentum) {
+      // A non-PMH buy cannot bypass structural setup validation by using the
+      // generic order URL. PMH has an independent frozen-opening contract.
+      if (requiresPriceAction) {
         momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
         if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
           return res.status(409).json({
@@ -2701,7 +2660,7 @@ async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
     if (isAlpacaFlattening(req.session.userId)) {
       return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
     }
-    if (automatedMomentum) {
+    if (requiresPriceAction) {
       momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase());
       if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
         return res.status(409).json({
@@ -2741,9 +2700,7 @@ async function placeAlpacaOrder(req, res, { automatedMomentum = false } = {}) {
 // browser uses the dedicated route below, whose setup gate cannot be disabled
 // by changing a client-supplied request field.
 app.post('/api/alpaca/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
-app.post('/api/momentum/order', requireAuth, (req, res) =>
-  placeAlpacaOrder(req, res, { automatedMomentum: true })
-);
+app.post('/api/momentum/order', requireAuth, (req, res) => placeAlpacaOrder(req, res));
 
 // Cancel order
 app.get('/api/alpaca/order/by-client/:clientOrderId', requireAuth, async (req, res) => {
@@ -3624,6 +3581,8 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
   const userId = req.session.userId;
   const symbol = String(req.body?.symbol || '').toUpperCase();
   if (!isBotEnabled(userId, 'pmh')) return res.status(409).json({ error: 'Opening Momentum automation is disabled.' });
+  const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
+  if (!pmhSetting?.enabled) return res.status(409).json({ error: 'Opening Momentum strategy is disabled in its persisted settings.' });
   if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
   let clientOrderId = null;
   let submittedOrders = [];

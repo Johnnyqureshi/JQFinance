@@ -125,6 +125,7 @@ db.exec(`
     status              TEXT    NOT NULL DEFAULT 'open',
     stop_price          REAL,
     take_profit_rsi     REAL,
+    take_profit_pct     REAL,
     entry_order_id      TEXT,
     pending_exit_order_id TEXT,
     pending_exit_reason TEXT,
@@ -191,6 +192,7 @@ db.exec(`
   `ALTER TABLE auto_trade_log ADD COLUMN strategy TEXT DEFAULT 'bounce'`,
   `ALTER TABLE bot_trade_log ADD COLUMN stop_price REAL`,
   `ALTER TABLE bot_trade_log ADD COLUMN take_profit_rsi REAL`,
+  `ALTER TABLE bot_trade_log ADD COLUMN take_profit_pct REAL`,
   `ALTER TABLE bot_trade_log ADD COLUMN entry_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_reason TEXT`,
@@ -3025,7 +3027,7 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
     : '';
   const openTrades = db.prepare(`
     SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
-           stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
+            stop_price, take_profit_rsi, take_profit_pct, entry_order_id, pending_exit_order_id,
            pending_exit_reason, exit_reason, timestamp, closed_at
     FROM bot_trade_log
     WHERE user_id = ? AND status = 'open'${strategyClause}
@@ -3033,7 +3035,7 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
   `).all(userId);
   const history = db.prepare(`
     SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
-           stop_price, take_profit_rsi, entry_order_id, pending_exit_order_id,
+            stop_price, take_profit_rsi, take_profit_pct, entry_order_id, pending_exit_order_id,
            pending_exit_reason, exit_reason, timestamp, closed_at
     FROM bot_trade_log
     WHERE user_id = ? AND status <> 'open'${strategyClause}
@@ -3168,6 +3170,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
 
     const stopPrice = body.stopPrice == null ? null : Number(body.stopPrice);
     const takeProfitRsi = body.takeProfitRsi == null ? null : Number(body.takeProfitRsi);
+    const takeProfitPct = body.takeProfitPct == null ? null : Number(body.takeProfitPct);
     if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
       return res.status(400).json({ error: 'entryPrice must be a positive number.' });
     }
@@ -3179,6 +3182,9 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     }
     if (takeProfitRsi != null && (!Number.isFinite(takeProfitRsi) || takeProfitRsi <= 0 || takeProfitRsi > 100)) {
       return res.status(400).json({ error: 'takeProfitRsi must be between 0 and 100 when provided.' });
+    }
+    if (takeProfitPct != null && (!Number.isFinite(takeProfitPct) || takeProfitPct <= 0 || takeProfitPct > 100)) {
+      return res.status(400).json({ error: 'takeProfitPct must be between 0 and 100 when provided.' });
     }
 
     const entryOrderId = typeof body.entryOrderId === 'string'
@@ -3204,10 +3210,10 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     const mode = modeRow?.mode === 'live' ? 'live' : 'paper';
     const result = db.prepare(`
       INSERT INTO bot_trade_log
-        (user_id, symbol, entry_price, shares, mode, stop_price, take_profit_rsi, entry_order_id, strategy)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, symbol, entry_price, shares, mode, stop_price, take_profit_rsi, take_profit_pct, entry_order_id, strategy)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      userId, symbol, entryPrice, shares, mode, stopPrice, takeProfitRsi,
+      userId, symbol, entryPrice, shares, mode, stopPrice, takeProfitRsi, takeProfitPct,
       entryOrderId, momentumJournal ? 'momentum' : null
     );
     const trade = db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(result.lastInsertRowid);
@@ -3772,6 +3778,7 @@ app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
   // The shared bot safety cap remains authoritative even if a stale browser
   // setting attempts to widen it.
   config.maxTradePrice = Math.min(MAX_TRADE_PRICE, Math.max(1, Number(config.maxTradePrice) || MAX_TRADE_PRICE));
+  config.maxPositionDollars = Math.min(1_000_000, Math.max(1, Number(config.maxPositionDollars) || DEFAULT_PMH_CONFIG.maxPositionDollars));
   db.prepare(`INSERT INTO pmh_settings (user_id,enabled,config_json) VALUES (?,?,?)
     ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,config_json=excluded.config_json`)
     .run(req.session.userId, body.enabled ? 1 : 0, JSON.stringify(config));
@@ -3874,7 +3881,9 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     if (Number(daily.trades) >= config.maxTradesPerDay) return res.status(409).json({ error: 'PMH daily trade limit reached.' });
     if (Number(daily.losses) >= config.maxDailyLoss) return res.status(409).json({ error: 'PMH daily loss limit reached.' });
     const mode = getAlpacaCreds(userId, 'pmh')?.mode || 'paper';
-    const shares = Math.floor(config.maxRiskDollars / boundedRisk);
+    const riskShares = Math.floor(config.maxRiskDollars / boundedRisk);
+    const positionShares = Math.floor(config.maxPositionDollars / boundedEntry);
+    const shares = Math.min(riskShares, positionShares);
     if (!Number.isInteger(shares) || shares < 1) return res.status(400).json({ error: 'Risk sizing produced less than one whole share.' });
     const entry = boundedEntry;
     const target = Number((entry + boundedRisk * config.partialTargetR).toFixed(2));

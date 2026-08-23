@@ -11,7 +11,7 @@
   const watchlist = 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY';
   const defaults = {
     minScore:80, minRelativeVolume:2, minVolumeZScore:1.5, minBodyRatio:.55,
-    maxUpperWickRatio:.28, minRoomRiskMultiple:2, maxRiskDollars:100,
+    maxUpperWickRatio:.28, minRoomRiskMultiple:2, maxRiskDollars:100, maxPositionDollars:5000,
     maxRiskPerSharePct:8, maxTradePrice:15, maxTradesPerDay:3, maxDailyLoss:500, partialTargetR:2, partialPercent:50,
     requireMarketStrength:true, requireRelativeStrength:true, requireSectorStrength:false,
   };
@@ -23,7 +23,7 @@
       ...config,
       minScore:input('pmhMinScore'), minRelativeVolume:input('pmhRelVol'), minVolumeZScore:input('pmhVolZ'),
       minBodyRatio:input('pmhBody'), maxUpperWickRatio:input('pmhWick'), minRoomRiskMultiple:input('pmhResistance'),
-      maxRiskDollars:input('pmhRisk'), maxTradePrice:input('pmhMaxPrice'), maxTradesPerDay:input('pmhMaxTrades'), maxDailyLoss:input('pmhMaxLoss'), maxRiskPerSharePct:input('pmhMaxStop'),
+      maxRiskDollars:input('pmhRisk'), maxPositionDollars:input('pmhMaxPosition'), maxTradePrice:input('pmhMaxPrice'), maxTradesPerDay:input('pmhMaxTrades'), maxDailyLoss:input('pmhMaxLoss'), maxRiskPerSharePct:input('pmhMaxStop'),
       partialTargetR:input('pmhPartialR'), partialPercent:input('pmhPartialPct'),
       requireMarketStrength:$('pmhRequireMarket')?.checked === true,
       requireRelativeStrength:$('pmhRequireRS')?.checked === true,
@@ -32,7 +32,7 @@
   }
   function putConfig(c) {
     config = { ...defaults, ...(c || {}) };
-    const pairs = { pmhMinScore:'minScore', pmhRelVol:'minRelativeVolume', pmhVolZ:'minVolumeZScore', pmhBody:'minBodyRatio', pmhWick:'maxUpperWickRatio', pmhResistance:'minRoomRiskMultiple', pmhRisk:'maxRiskDollars', pmhMaxPrice:'maxTradePrice', pmhMaxStop:'maxRiskPerSharePct', pmhPartialR:'partialTargetR', pmhPartialPct:'partialPercent', pmhMaxTrades:'maxTradesPerDay', pmhMaxLoss:'maxDailyLoss' };
+    const pairs = { pmhMinScore:'minScore', pmhRelVol:'minRelativeVolume', pmhVolZ:'minVolumeZScore', pmhBody:'minBodyRatio', pmhWick:'maxUpperWickRatio', pmhResistance:'minRoomRiskMultiple', pmhRisk:'maxRiskDollars', pmhMaxPosition:'maxPositionDollars', pmhMaxPrice:'maxTradePrice', pmhMaxStop:'maxRiskPerSharePct', pmhPartialR:'partialTargetR', pmhPartialPct:'partialPercent', pmhMaxTrades:'maxTradesPerDay', pmhMaxLoss:'maxDailyLoss' };
     Object.entries(pairs).forEach(([id,key]) => { if ($(id)) $(id).value = config[key]; });
     if ($('pmhRequireMarket')) $('pmhRequireMarket').checked = config.requireMarketStrength !== false;
     if ($('pmhRequireRS')) $('pmhRequireRS').checked = config.requireRelativeStrength !== false;
@@ -127,7 +127,7 @@
     <div class="pmh-reason-title">${reasons.length ? 'Blocked or pending conditions' : 'All configured conditions passed'}</div>
     ${reasons.length ? `<ul class="pmh-reasons">${reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="pmh-pass">Complete fresh evidence. Entry still re-checks all conditions server-side.</div>'}
     ${r.priceAction?.reasons?.length ? `<div class="pmh-reason-title">Price-action context (informational only)</div><ul class="pmh-reasons">${r.priceAction.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-    ${enabled && r.eligible ? '<button class="mt-trade-buy pmh-execute" id="pmhExecuteBtn">Submit risk-sized PMH entry</button>' : ''}
+    ${enabled && r.eligible ? '<button class="mt-trade-buy pmh-execute" id="pmhExecuteBtn">Submit protected PMH entry</button>' : ''}
     `;
     $('pmhDetailTime').textContent = r.freshness?.barsAt ? `bars ${new Date(r.freshness.barsAt).toLocaleTimeString()}` : 'no fresh bars';
     $('pmhExecuteBtn')?.addEventListener('click', () => execute(r.symbol));
@@ -140,7 +140,7 @@
       await refreshTrades(); await scan(false);
     } catch (e) {
       $('pmhBotStatus').textContent = `${symbol}: ${e.message}`;
-    } finally { if ($('pmhExecuteBtn')) { $('pmhExecuteBtn').disabled = false; $('pmhExecuteBtn').textContent = 'Submit risk-sized PMH entry'; } }
+    } finally { if ($('pmhExecuteBtn')) { $('pmhExecuteBtn').disabled = false; $('pmhExecuteBtn').textContent = 'Submit protected PMH entry'; } }
   }
   async function refreshTrades() {
     const box = $('pmhTradesBody'); if (!box) return;

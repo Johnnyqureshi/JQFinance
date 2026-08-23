@@ -831,9 +831,9 @@
           Scanner &amp; Trade Settings
           <span class="mt-config-sub">scanner · risk · execution — all in one place</span>
         </div>
-        <button class="mt-config-toggle" id="mtConfigToggle">▼ Configure</button>
+        <button class="mt-config-toggle" id="mtConfigToggle">▲ Hide settings</button>
       </div>
-      <div class="mt-config-body" id="mtConfigBody" style="display:none">
+      <div class="mt-config-body" id="mtConfigBody">
 
         <!-- ── Universe ── -->
         <div class="mt-cpt-block mt-cpt-block--uni">
@@ -897,20 +897,20 @@
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtStopPct">Stop Loss %</label>
               <input type="number" id="mtStopPct" class="mt-cpt-input" min="0.1" max="50" step="0.25" value="5"
-                placeholder="ATR" title="% below entry — blank uses ATR automatically">
-              <span class="mt-cpt-hint">Blank → ATR-based</span>
+                title="% below entry — the tighter structural invalidation remains authoritative">
+              <span class="mt-cpt-hint">Broker-protected; structural stops can only tighten it</span>
             </div>
             <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtTpRsi">Take Profit RSI</label>
-              <input type="number" id="mtTpRsi" class="mt-cpt-input" min="50" max="99" step="1" value="75" title="Bot sells when intraday RSI(14) reaches this level (default 75 = overbought exhaustion)">
-              <span class="mt-cpt-hint">Sell at RSI ≥ this</span>
+              <label class="mt-cpt-label" for="mtTpPct">Take Profit %</label>
+              <input type="number" id="mtTpPct" class="mt-cpt-input" min="0.25" max="100" step="0.25" value="10" title="% above entry — submitted as a broker-protected target">
+              <span class="mt-cpt-hint">Broker-protected target above entry</span>
             </div>
             <div class="mt-cpt-field">
               <label class="mt-cpt-label" for="mtMinRR">Min R : R</label>
               <input type="number" id="mtMinRR" class="mt-cpt-input" min="0.5" max="10" step="0.5" value="2.0" title="Minimum reward-to-risk ratio required to enter">
             </div>
             <div class="mt-cpt-field mt-cpt-field--pos">
-              <label class="mt-cpt-label">Position</label>
+              <label class="mt-cpt-label">Position Size</label>
               <div class="mt-cpt-pos-row">
                 <div class="ts-mode-group">
                   <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% equity</button>
@@ -1353,9 +1353,9 @@
     <div class="mt-config-section">
       <div class="mt-config-header">
         <div class="mt-config-title">PMH rules &amp; risk <span class="mt-config-sub">saved separately from Momentum Trader</span></div>
-        <button class="mt-config-toggle" id="pmhConfigToggle">▼ Configure</button>
+        <button class="mt-config-toggle" id="pmhConfigToggle">▲ Hide settings</button>
       </div>
-      <div class="mt-config-body" id="pmhConfigBody" style="display:none">
+      <div class="mt-config-body" id="pmhConfigBody">
         <div class="mt-cpt-block">
           <span class="mt-cpt-block-label">Confirmation</span>
           <div class="mt-cpt-grid">
@@ -1368,12 +1368,13 @@
           </div>
         </div>
         <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Risk &amp; runner</span>
+          <span class="mt-cpt-block-label">Position, stop &amp; target</span>
           <div class="mt-cpt-grid">
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRisk">Max dollar risk</label><input id="pmhRisk" class="mt-cpt-input" type="number" min="1" step="5" value="100"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPosition">Position size limit $</label><input id="pmhMaxPosition" class="mt-cpt-input" type="number" min="1" step="25" value="5000"><span class="mt-cpt-hint">Maximum notional per automated entry</span></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRisk">Max dollar risk</label><input id="pmhRisk" class="mt-cpt-input" type="number" min="1" step="5" value="100"><span class="mt-cpt-hint">Safety cap; cannot be exceeded</span></div>
             <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPrice">Max trade price</label><input id="pmhMaxPrice" class="mt-cpt-input" type="number" min="1" max="15" step=".5" value="15"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxStop">Max stop distance %</label><input id="pmhMaxStop" class="mt-cpt-input" type="number" min=".5" step=".5" value="8"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialR">Partial target (R)</label><input id="pmhPartialR" class="mt-cpt-input" type="number" min="1" step=".25" value="2"></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxStop">Stop loss limit %</label><input id="pmhMaxStop" class="mt-cpt-input" type="number" min=".5" step=".5" value="8"><span class="mt-cpt-hint">Breakout-candle low stays the actual stop</span></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialR">Take profit (R)</label><input id="pmhPartialR" class="mt-cpt-input" type="number" min="1" step=".25" value="2"><span class="mt-cpt-hint">Protected partial target; runner remains automated</span></div>
             <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialPct">Partial exit %</label><input id="pmhPartialPct" class="mt-cpt-input" type="number" min="1" max="99" value="50"></div>
             <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxTrades">Max trades / day</label><input id="pmhMaxTrades" class="mt-cpt-input" type="number" min="1" max="10" value="3"></div>
             <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxLoss">Max daily loss $</label><input id="pmhMaxLoss" class="mt-cpt-input" type="number" min="1" step="25" value="500"></div>

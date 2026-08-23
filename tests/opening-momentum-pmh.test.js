@@ -52,6 +52,11 @@ test('uses dollar risk divided by breakout-low distance', () => {
   const r = evaluatePmhBreak(valid());
   assert.strictEqual(r.sizing.method, 'risk'); assert.strictEqual(r.sizing.shares, Math.floor(100 / .32));
 });
+test('caps risk-sized shares at the configured position limit', () => {
+  const r = evaluatePmhBreak(valid(), { maxPositionDollars: 100 });
+  assert.strictEqual(r.sizing.shares, Math.floor(100 / 10.82));
+  assert(r.sizing.estimatedNotional <= 100);
+});
 test('score is bounded and resistance can block trade', () => {
   const r = evaluatePmhBreak(valid({ resistance: 10.95 }));
   assert(r.score >= 0 && r.score <= 100); assert.strictEqual(r.eligible, false);

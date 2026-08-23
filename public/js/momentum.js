@@ -49,7 +49,8 @@
 
     defaults: {
       // Position size
-      manualShares:   null,     // null = user enters; number = fixed shares
+      positionMode:    'pct',   // pct of equity or fixed dollar amount
+      positionValue:   15,
       // Daily limits
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
@@ -72,8 +73,8 @@
       minScore:       4,
       // Risk
       stopPercent:    5,        // 5% stop — backtest shows 2% is too tight for gap-up plays; avg intraday LOW is -6.6% from open
-      takeProfitRsi:  75,       // exit when intraday RSI(14) reaches this level (momentum exhaustion)
-      minRR:          2.0,      // used for manual risk-panel TP display only
+      takeProfitPercent: 10,    // broker-protected target above entry
+      minRR:          2.0,      // validation floor for the risk preview
       // EMA trend
       emaFast:        9,
       emaSlow:        21,
@@ -97,6 +98,14 @@
         if (saved._migratedFloat20) {
           if (saved.maxFloat === 20_000_000) saved.maxFloat = 10_000_000;
           delete saved._migratedFloat20;
+          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
+        }
+        // Older browser settings used an RSI exit rather than a broker-held
+        // target. Retain every other user choice but move those settings to the
+        // conservative default target used by the current protected bracket.
+        if (saved.takeProfitPercent == null) {
+          saved.takeProfitPercent = this.defaults.takeProfitPercent;
+          delete saved.takeProfitRsi;
           try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
         }
         return { ...this.defaults, ...saved };
@@ -1078,7 +1087,6 @@
         if (!el) return;
         el.value = (v == null || v === '') ? '' : v;
       };
-      setVal('mtManualShares',  cfg.manualShares);
       setVal('mtMaxTrades',     cfg.maxTradesPerDay);
       setVal('mtMaxDailyLoss',  cfg.maxDailyLoss);
       setVal('mtMinPrice',      cfg.minPrice);
@@ -1089,8 +1097,14 @@
       setVal('mtMinScore',      cfg.minScore);
       setVal('mtMaxFloat',      cfg.maxFloat != null ? cfg.maxFloat / 1_000_000 : '');
       setVal('mtStopPct',       cfg.stopPercent);
-      setVal('mtTpRsi',         cfg.takeProfitRsi);
+      setVal('mtTpPct',         cfg.takeProfitPercent);
       setVal('mtMinRR',         cfg.minRR);
+      setVal('tsPositionValue', cfg.positionValue);
+      const positionMode = cfg.positionMode === 'fixed' ? 'fixed' : 'pct';
+      $('tsBtnPct')?.classList.toggle('active', positionMode === 'pct');
+      $('tsBtnFixed')?.classList.toggle('active', positionMode === 'fixed');
+      const prefix = $('tsInputPrefix');
+      if (prefix) prefix.textContent = positionMode === 'pct' ? '%' : '$';
       // News required toggle
       const newsChk = $('mtRequireNews');
       if (newsChk) newsChk.checked = cfg.requireNewsCatalyst ?? true;
@@ -1105,7 +1119,8 @@
       const rawFloat = n('mtMaxFloat');  // stored in millions in UI; convert to raw count
       return {
         ...this.config,
-        manualShares:        n('mtManualShares'),
+        positionMode:         this._getPosMode(),
+        positionValue:        n('tsPositionValue') ?? this.config.positionValue,
         maxTradesPerDay:     n('mtMaxTrades')    ?? this.config.maxTradesPerDay,
         maxDailyLoss:        n('mtMaxDailyLoss') ?? this.config.maxDailyLoss,
         minPrice:            n('mtMinPrice')     ?? this.config.minPrice,
@@ -1117,7 +1132,7 @@
         maxFloat:            rawFloat != null ? rawFloat * 1_000_000 : this.config.maxFloat,
         requireNewsCatalyst: $('mtRequireNews')?.checked ?? this.config.requireNewsCatalyst,
         stopPercent:         n('mtStopPct'),
-        takeProfitRsi:       n('mtTpRsi')        ?? this.config.takeProfitRsi,
+        takeProfitPercent:   n('mtTpPct')        ?? this.config.takeProfitPercent,
         minRR:               n('mtMinRR')        ?? this.config.minRR,
         universeMode:        uni,
       };
@@ -1631,12 +1646,18 @@
         stopLoss = RiskManager.calcStopLoss(entry, row.atr14, 1.5);
       }
 
-      const takeProfit = RiskManager.calcTakeProfit(entry, stopLoss, cfg.minRR);
+      const takeProfitPct = Number(cfg.takeProfitPercent);
+      const takeProfit = Number.isFinite(takeProfitPct) && takeProfitPct > 0
+        ? +(entry * (1 + takeProfitPct / 100)).toFixed(2)
+        : null;
 
-      // Shares: manual entry overrides auto-sizing
-      const manualShares = cfg.manualShares;
-      const autoShares   = RiskManager.calcPositionSize(equity, 2.0, entry, stopLoss);
-      const shares       = (manualShares != null && manualShares > 0) ? manualShares : autoShares;
+      // Match the preview to the position-size control used by automated orders.
+      const positionValue = Number(cfg.positionValue);
+      const baseAmount = cfg.positionMode === 'fixed'
+        ? positionValue
+        : equity * (positionValue / 100);
+      const exposure = baseAmount * this._getLeverage();
+      const shares = Number.isFinite(exposure) && exposure > 0 ? Math.floor(exposure / entry) : 0;
 
       const rr         = RiskManager.calcRR(entry, stopLoss, takeProfit);
       const validation = shares ? RiskManager.validate(entry, stopLoss, takeProfit, equity, shares, cfg.minRR) : null;
@@ -1648,7 +1669,7 @@
       set('mtRiskEntry',   fmtDollar(entry));
       set('mtRiskStop',    stopLoss != null ? fmtDollar(stopLoss) + ` (${stopLbl})` : '--');
       set('mtRiskTP',      fmtDollar(takeProfit));
-      set('mtRiskShares',  shares != null ? shares + (manualShares ? ' (manual)' : ' (auto)') : '--');
+      set('mtRiskShares',  shares > 0 ? `${shares} (${cfg.positionMode === 'fixed' ? 'fixed $' : '% equity'})` : '--');
       set('mtRiskRR',      rr != null ? rr.toFixed(2) + ':1' : '--');
       set('mtRiskAmt',     validation ? fmtDollar(validation.totalRisk) : '--');
       set('mtRiskReward',  validation ? fmtDollar(validation.totalReward) : '--');
@@ -1930,7 +1951,13 @@
           slPct: trade.stop_price != null && Number.isFinite(stopPx) && stopPx > 0
             ? +((entry - stopPx) / entry * 100).toFixed(2)
             : null,
-          tpRsi: Number(trade.take_profit_rsi) || this.config?.takeProfitRsi || 75,
+          tpPct: Number(trade.take_profit_pct) || null,
+          // Only older entries lack a broker-held percentage target. Keep their
+          // existing RSI exit behavior during recovery without applying it to
+          // new bracket-protected positions.
+          tpRsi: Number(trade.take_profit_pct) > 0
+            ? null
+            : (Number(trade.take_profit_rsi) || 75),
           lastPrice: entry,
           entrySynced: false,
           ts: new Date(String(trade.timestamp).replace(' ', 'T') + 'Z').getTime() || Date.now(),
@@ -2377,8 +2404,11 @@
         this.addLog(row.sym, 'SKIP', 'No stop loss configured — set Stop Loss % in settings', 'warn');
         return;
       }
-      // Take profit: RSI-based exit (default 75) monitored by the position poller
-      const tpRsi = (cfg.takeProfitRsi != null && cfg.takeProfitRsi > 0) ? cfg.takeProfitRsi : 75;
+      const tpPct = Number(cfg.takeProfitPercent);
+      if (!Number.isFinite(tpPct) || tpPct <= 0) {
+        this.addLog(row.sym, 'SKIP', 'No take-profit target configured — set Take Profit % in settings', 'warn');
+        return;
+      }
 
       // ── Calculate position size from execution settings ──────────────────
       // BUG FIX: the server multiplies `amount` by `leverage` itself — sending a
@@ -2407,7 +2437,7 @@
       if (!this.botEnabled || this._flattenInProgress) return;
       this._activeTrades.add(row.sym);
         this.addLog(row.sym, '→ AUTO-BUY',
-          `$${notional.toFixed(0)} · ${row.priceAction?.setup?.label || 'long setup'} · SL ${slPct}% · TP RSI ≥${tpRsi} · Confluence ${row.technicalConfluence?.scores?.bullish ?? '--'}/100 · ${AlpacaClient.mode.toUpperCase()}`, 'info');
+          `$${notional.toFixed(0)} · ${row.priceAction?.setup?.label || 'long setup'} · SL ${slPct}% · TP ${tpPct}% · Confluence ${row.technicalConfluence?.scores?.bullish ?? '--'}/100 · ${AlpacaClient.mode.toUpperCase()}`, 'info');
 
       let journalTrade = null;
       let journalOrderId = null;
@@ -2423,7 +2453,7 @@
           entryPrice: entry,
           shares: estimatedShares,
           stopPrice: estimatedStopPx,
-          takeProfitRsi: tpRsi,
+          takeProfitPct: tpPct,
           entryOrderId: journalOrderId,
           mode: AlpacaClient.mode,
         });
@@ -2436,7 +2466,7 @@
           tradeId: journalTrade.id,
           entry: entry,
           slPct,
-          tpRsi,
+          tpPct,
           shares: estimatedShares,
           stopPx: estimatedStopPx,
           lastPrice: entry,
@@ -2459,13 +2489,14 @@
           return;
         }
 
-        // OTO order: market buy + stop-loss leg. Take profit = RSI exit (poller).
+        // Broker-held bracket: both take profit and stop loss remain active even
+        // if the browser disconnects or the user signs out.
         const resp = await fetch('/api/momentum/order', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            symbol: row.sym, side: 'buy', amount: baseAmount, slPct, leverage,
+            symbol: row.sym, side: 'buy', amount: baseAmount, tpPct, slPct, leverage,
             clientOrderId: journalOrderId,
           }),
         });
@@ -2490,12 +2521,13 @@
         this._renderDailyLimits();
 
         this.addLog(row.sym, '✓ AUTO-BUY',
-          `${shares} sh @ $${entryPrice.toFixed(2)} · stop $${stopPx} · exit RSI ≥${tpRsi}`, 'ok');
+          `${shares} sh @ $${entryPrice.toFixed(2)} · stop $${stopPx} · target $${(entryPrice * (1 + tpPct / 100)).toFixed(2)}`, 'ok');
         const info = this.botPositions.get(row.sym);
         if (info) {
           info.entry = entryPrice;
           info.shares = shares;
           info.stopPx = stopPx;
+          info.tpPct = tpPct;
           info.brokerOrderId = result.order?.id || null;
           // Alpaca can acknowledge a market entry before it fills. Reconcile
           // this parent order until it is filled or terminal before treating a
@@ -2613,13 +2645,13 @@
         const analysis = await MomentumAnalysis.fetch(sym);
         if (!this.botEnabled || this._flattenInProgress) return;
         const rsi = analysis?.rsi14;
-        if (rsi == null || rsi < (info.tpRsi ?? 75)) continue;
+        if (!(info.tpRsi > 0) || rsi == null || rsi < info.tpRsi) continue;
         info._exiting = true; // prevent duplicate sells while request is in flight
         try {
           const qty      = parseFloat(pos.qty || 0);
           const price    = parseFloat(pos.current_price || info.entry);
           const notional = qty * price * 1.05; // buffer — server caps sells at held qty
-          const reason = `RSI take-profit (${rsi} ≥ ${info.tpRsi ?? 75})`;
+          const reason = `RSI take-profit (${rsi} ≥ ${info.tpRsi})`;
           const exitClientOrderId = this._newJournalOrderId();
           const pending = await this._persistBotTrade({
             action: 'submit-exit',
@@ -2653,7 +2685,7 @@
             reason,
           };
           this.addLog(sym, 'AUTO-EXIT SUBMITTED',
-            `RSI ${rsi} ≥ ${info.tpRsi ?? 75} — waiting for broker fill confirmation`, 'info');
+            `RSI ${rsi} ≥ ${info.tpRsi} — waiting for broker fill confirmation`, 'info');
         } catch (err) {
           if (err.definitive && info.pendingExit?.clientOrderId) {
             const cleared = await this._persistBotTrade({
@@ -2691,7 +2723,9 @@
         const avg    = parseFloat(p.avg_entry_price  || 0);
         const isBot  = this.botPositions.has(p.symbol);
         const bInfo  = isBot ? this.botPositions.get(p.symbol) : null;
-        const meta   = bInfo ? `SL ${bInfo.slPct}% · TP RSI ${bInfo.tpRsi ?? 75}` : '—';
+          const meta = bInfo
+            ? `SL ${bInfo.slPct}% · ${bInfo.tpPct ? `TP ${bInfo.tpPct}%` : `TP RSI ${bInfo.tpRsi ?? 75}`}`
+            : '—';
         return `<tr>
           <td style="font-weight:700">${isBot ? '<span title="Bot-managed">🤖</span> ' : ''}${p.symbol}</td>
           <td class="mt-r">${p.qty}</td>
@@ -2793,6 +2827,12 @@
         this.addLog('BOT', 'Cannot start', 'Connect your Alpaca account first', 'err');
         return;
       }
+      if (!this.botEnabled) {
+        // Starting automation must honor the values the trader can currently
+        // see, even when they did not separately press Apply Settings.
+        this.config = this._readConfig();
+        MomentumConfig.save(this.config);
+      }
       this.botEnabled = !this.botEnabled;
       this._renderBotStatus();
       if (this.botEnabled) {
@@ -2878,6 +2918,17 @@
         body.style.display = hidden ? '' : 'none';
         $('mtConfigToggle').textContent = hidden ? '▲ Collapse' : '▼ Configure';
       });
+
+      // Position sizing is part of the saved bot configuration, not a
+      // temporary display preference. Update the prefix and active mode
+      // immediately; Apply Settings persists it before the next scan.
+      [$('tsBtnPct'), $('tsBtnFixed')].forEach(button => button?.addEventListener('click', () => {
+        const fixed = button.id === 'tsBtnFixed';
+        $('tsBtnPct')?.classList.toggle('active', !fixed);
+        $('tsBtnFixed')?.classList.toggle('active', fixed);
+        const prefix = $('tsInputPrefix');
+        if (prefix) prefix.textContent = fixed ? '$' : '%';
+      }));
 
       // Quick buy — checks daily limits, uses manual or auto shares
       $('mtBuyBtn')?.addEventListener('click', async () => {

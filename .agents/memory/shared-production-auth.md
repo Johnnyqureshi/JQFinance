@@ -9,4 +9,6 @@ Use the shared PostgreSQL database as the authoritative store for application id
 
 **Isolation rule:** If the shared PostgreSQL identity and local SQLite compatibility row disagree on either user ID or username, fail closed. Never overwrite or attach the local row, because it may own another user's broker settings and trading data.
 
-**How to apply:** Keep `SESSION_SECRET` deployment-managed and stable. Verify auth changes with a create-account, fresh-session, and fresh-login round trip. Do not switch the deployment target back to autoscale until all user-owned trading state has migrated off local SQLite.
+**Broker-write rule:** Reconcile the authenticated PostgreSQL user into the SQLite compatibility table before a broker-credential or other foreign-key-bound trading write. Valid sessions can predate the local identity row.
+
+**How to apply:** Keep `SESSION_SECRET` deployment-managed and stable. Verify auth changes with a create-account, fresh-session, and fresh-login round trip, including a first broker connection. Do not switch the deployment target back to autoscale until all user-owned trading state has migrated off local SQLite.

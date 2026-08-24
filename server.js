@@ -466,6 +466,23 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// SQLite still owns broker connections and trade journals while PostgreSQL owns
+// identities and sessions. A session created before the migration can be valid
+// while its matching SQLite compatibility row is absent; reconcile it before
+// writing any foreign-key-bound trading data.
+async function ensureSessionUserInTradingStore(req) {
+  const sessionUserId = Number(req.session?.userId);
+  if (!Number.isSafeInteger(sessionUserId) || sessionUserId <= 0) {
+    throw new Error('Authenticated session has no valid user identity.');
+  }
+  await authStoreReady;
+  if (authStoreInitError) throw authStoreInitError;
+  const user = await authStore.findUserById(sessionUserId);
+  if (!user) throw new Error('Authenticated user was not found.');
+  authStore.syncSqliteUser(db, user);
+  return Number(user.id);
+}
+
 const YH = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
 
 // ── Search result cache (5-min TTL) — prevents Yahoo rate-limits on fast typing ─
@@ -2532,6 +2549,16 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   if (key.length < 8 || sec.length < 8) return res.status(400).json({ error: 'Credentials look too short — paste the full key and secret.' });
   const m = mode === 'live' ? 'live' : 'paper';
   let verifiedAccountId = '';
+  let uid;
+
+  try {
+    uid = await ensureSessionUserInTradingStore(req);
+  } catch (error) {
+    console.error('[Auth] Could not reconcile authenticated user for broker connection:', error.message);
+    return res.status(503).json({
+      error: 'Your signed-in account could not be prepared for broker connections. Sign out, sign back in, and try again.',
+    });
+  }
 
   // ── Validate credentials against Alpaca before saving ─────────────────────
   // Never store credentials that Alpaca rejects.
@@ -2560,7 +2587,6 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     if (!verifiedAccountId) {
       return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this connection cannot be safely verified.' });
     }
-    const uid = req.session.userId;
     if (scope !== 'manual') {
       const conflict = db.prepare(`
         SELECT bot FROM bot_alpaca_creds
@@ -2590,10 +2616,15 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     }
   } catch (e) {
     if (e.name === 'AbortError') return res.status(400).json({ error: 'Alpaca did not respond in time — check your connection.' });
+    if (e.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      console.error('[Alpaca] Trading-store identity reconciliation failed:', e.message);
+      return res.status(503).json({
+        error: 'Your signed-in account could not be linked to the trading store. Sign out, sign back in, and try again.',
+      });
+    }
     return res.status(400).json({ error: 'Could not reach Alpaca to verify credentials: ' + e.message });
   }
 
-  const uid = req.session.userId;
   const botConflict = db.prepare(`
     SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
   `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);

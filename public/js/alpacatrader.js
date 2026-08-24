@@ -482,6 +482,11 @@ const alpacaTrader = (() => {
 
 })();
 
+// Bot pages call the shared connection modal through window so each bot can
+// select its own isolated broker scope (momentum or pmh). Top-level const
+// bindings are not window properties in browsers.
+window.alpacaTrader = alpacaTrader;
+
 document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 
 

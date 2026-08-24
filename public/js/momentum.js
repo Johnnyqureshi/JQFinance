@@ -1753,6 +1753,22 @@
       const chips   = $('mtAcctChips');
       const errEl   = $('mtAcctError');
       const sw      = $('mtModeSwitcher');
+      const dot     = $('atConnDot');
+      const text    = $('atConnText');
+      const button  = $('atConnBtn');
+
+      // The Momentum page reuses the shared header controls. Those controls
+      // must reflect Momentum's isolated broker account, not the optional
+      // manual-trading connection maintained by alpacatrader.js.
+      if (conn) {
+        if (dot) dot.className = 'at-conn-dot dot-green';
+        if (text) text.textContent = `Connected · ${mode.toUpperCase()}`;
+        if (button) button.textContent = 'Account Settings';
+      } else {
+        if (dot) dot.className = 'at-conn-dot dot-red';
+        if (text) text.textContent = 'Not connected';
+        if (button) button.textContent = 'Connect Alpaca';
+      }
 
       // ── Mode badge ──────────────────────────────────────────────────────────
       if (badge) {

@@ -51,6 +51,19 @@ assert.deepStrictEqual(secondCatalogBatch.symbols, ['SPY']);
 assert.deepStrictEqual(thirdCatalogBatch.symbols, ['AAPL', 'ZETA'],
   'an active/tradable symbol absent from market movers and the curated list still reaches a later bot scan batch');
 
+const capacityCatalog = new Map([
+  ['AAPL', { symbol: 'AAPL' }],
+  ['BRAVO', { symbol: 'BRAVO' }],
+  ['CHARLIE', { symbol: 'CHARLIE' }],
+  ['DELTA', { symbol: 'DELTA' }],
+  ['ZETA', { symbol: 'ZETA' }],
+]);
+const filledDefaultBatch = selectCatalogRotation(capacityCatalog, {
+  prioritySymbols: ['ZETA'], limit: 5, priorityLimit: 3, rotationOffset: 0,
+});
+assert.strictEqual(filledDefaultBatch.symbols.length, 5,
+  'unused mover-priority slots must be filled by the stable catalog rotation');
+
 const pmhFirstBatch = selectCatalogRotation(rotationCatalog, {
   prioritySymbols: ['AAPL'], limit: 25, priorityLimit: 13, rotationLimit: 1, rotationOffset: 0,
 });

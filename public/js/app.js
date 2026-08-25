@@ -147,6 +147,8 @@ function goPage(page) {
   else if (window.momentumTrader) momentumTrader.pause();
   if (page==='opening-momentum') { if (window.openingMomentumBot) openingMomentumBot.open(); }
   else if (window.openingMomentumBot) openingMomentumBot.pause();
+  if (page==='candlestick') { if (window.candlestickBot) candlestickBot.open(); }
+  else if (window.candlestickBot) candlestickBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

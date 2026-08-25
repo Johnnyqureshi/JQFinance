@@ -334,6 +334,7 @@ const alpacaTrader = (() => {
   function connectionLabel(connection) {
     return connection === 'pmh' ? 'Opening Momentum'
       : connection === 'momentum' ? 'Momentum Trader'
+      : connection === 'candlestick' ? 'UltraBot3'
       : 'Manual Trading';
   }
 
@@ -343,7 +344,7 @@ const alpacaTrader = (() => {
   }
 
   function showModal(connection = 'manual', requestedMode = alpacaMode) {
-    modalConnection = ['momentum', 'pmh'].includes(connection) ? connection : 'manual';
+    modalConnection = ['momentum', 'pmh', 'candlestick'].includes(connection) ? connection : 'manual';
     modalMode = requestedMode === 'live' ? 'live' : 'paper';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';

@@ -112,6 +112,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
       Opening
     </button>
+    <button class="nav-link" data-page="candlestick">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16m0-11h4m-4 6h4M18 4v16m-4-11h4m-4 6h4"/></svg>
+      UltraBot3
+    </button>
   </div>
 
   <div class="nav-right">
@@ -1350,6 +1354,62 @@
 </div><!-- /#page-momentum -->
 
 <!-- ══════════════════════════════════════════════════════════════════════════
+     STANDALONE ULTRABOT3
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-candlestick">
+  <div class="mt-page candle-page">
+    <div class="mt-topbar">
+      <div class="mt-topbar-left">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16m0-11h4m-4 6h4M18 4v16m-4-11h4m-4 6h4"/></svg>
+        <span class="mt-topbar-title">UltraBot3</span>
+        <span class="mt-mode-badge mt-badge-warn">LONG + SHORT</span>
+        <span class="pmh-session" id="candleSession">Server-side strategy · read-only until enabled</span>
+      </div>
+      <div class="mt-topbar-right">
+        <div class="at-conn-status"><span class="at-conn-dot dot-red" id="candleConnDot"></span><span id="candleConnText">Not connected</span></div>
+        <button class="at-conn-btn" id="candleConnBtn" type="button">Connect Alpaca</button>
+        <button class="mt-refresh-btn" id="candleRefreshBtn" type="button">Refresh scan</button>
+      </div>
+    </div>
+    <section class="pmh-intro">
+      <strong>Closed-candle, multi-timeframe price action.</strong> Engulfing, rejection, star, momentum and level patterns require trend, VWAP, relative-volume, structure, confirmation, and at least 2R. A pattern alone never opens a trade.
+    </section>
+    <div class="mt-config-section">
+      <div class="mt-config-header"><div class="mt-config-title">UltraBot3 rules &amp; risk <span class="mt-config-sub">separate account, settings, automation and journal</span></div><button class="mt-config-toggle" id="candleConfigToggle">▲ Hide settings</button></div>
+      <div class="mt-config-body" id="candleConfigBody">
+        <div class="mt-cpt-block"><span class="mt-cpt-block-label">Evidence gates</span><div class="mt-cpt-grid">
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleScore">Min setup score /100</label><input id="candleScore" class="mt-cpt-input" type="number" min="0" max="100" value="65"></div>
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRelVol">Relative volume ×</label><input id="candleRelVol" class="mt-cpt-input" type="number" min="1" step=".1" value="1.2"></div>
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRR">Minimum reward / risk</label><input id="candleRR" class="mt-cpt-input" type="number" min="2" step=".25" value="2"></div>
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleSymbols">Symbols per cycle</label><input id="candleSymbols" class="mt-cpt-input" type="number" min="1" max="30" value="16"></div>
+        </div></div>
+        <div class="mt-cpt-block"><span class="mt-cpt-block-label">Risk controls</span><div class="mt-cpt-grid">
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candlePosition">Position limit $</label><input id="candlePosition" class="mt-cpt-input" type="number" min="1" step="50" value="1000"></div>
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRisk">Max dollar risk</label><input id="candleRisk" class="mt-cpt-input" type="number" min="1" step="10" value="100"></div>
+          <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input id="candleLiveArm" type="checkbox"><span>I explicitly arm <strong>LIVE</strong> orders after connecting a live account</span></label></div>
+        </div></div>
+        <div class="mt-config-actions"><button class="mt-btn-apply" id="candleSaveBtn">Save settings</button><button class="mt-btn-reset" id="candleResetBtn">Reset defaults</button></div>
+      </div>
+    </div>
+    <div class="mt-bot-bar" id="candleBotBar">
+      <div class="mt-bot-left"><button class="mt-bot-toggle mt-bot-toggle--off" id="candleBotToggle">▶ ENABLE AUTOMATION</button><div class="mt-bot-indicators"><span class="mt-bot-dot" id="candleBotDot"></span><span class="mt-bot-status" id="candleBotStatus">Automation is off. Server scans stay read-only.</span></div></div>
+      <div class="mt-bot-right">Dedicated account · broker-confirmed fills · broker-held stop and target</div>
+    </div>
+    <div class="pmh-stats">
+      <div><span>Patterns</span><strong>Engulfing · rejection · stars</strong></div><div><span>Confirmation</span><strong>Next closed candle</strong></div><div><span>Context</span><strong>Trend · VWAP · structure</strong></div><div><span>Risk</span><strong>Technical stop · ≥ 2R</strong></div>
+    </div>
+    <div class="mt-body">
+      <div class="mt-left-col"><div class="mt-panel"><div class="mt-panel-head"><span class="mt-panel-title">Ranked candidates</span><span class="mt-panel-sub" id="candleScanStatus">Connect a dedicated account to scan</span></div><div class="mt-scan-wrap"><table class="mt-table pmh-table"><thead><tr><th>Symbol</th><th>Direction</th><th>Pattern / context</th><th class="mt-r">Rel vol</th><th class="mt-r">Score</th><th class="mt-r">Status</th></tr></thead><tbody id="candleScanBody"><tr><td colspan="6" class="mt-empty-row">No scan results yet.</td></tr></tbody></table></div></div></div>
+      <div class="mt-right-col">
+        <div class="mt-panel pmh-detail"><div class="mt-panel-head"><span class="mt-panel-title">Setup detail</span><span class="mt-panel-sub" id="candleDetailTime">—</span></div><div id="candleDetailBody" class="pmh-detail-body">Select a candidate to inspect every passed or rejected gate.</div></div>
+        <div class="mt-panel pmh-active"><div class="mt-panel-head"><span class="mt-panel-title">Broker journal</span><button class="at-icon-btn" id="candleTradesRefresh" type="button">↻</button></div><div id="candleTradesBody" class="pmh-trades-body">No candlestick order intents have been recorded.</div></div>
+        <div class="mt-panel pmh-active"><div class="mt-panel-head"><span class="mt-panel-title">Read-only backtest</span><button class="at-icon-btn" id="candleBacktestBtn" type="button">Run SPY</button></div><div id="candleBacktestBody" class="pmh-trades-body">Uses completed historical bars only. It will withhold conclusions for small samples.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
      OPENING MOMENTUM — PMH BREAK
      ══════════════════════════════════════════════════════════════════════════ -->
 <div class="page" id="page-opening-momentum">
@@ -1508,6 +1568,7 @@
 <script src="/js/agent.js"></script>
 <script src="/js/momentum.js"></script>
 <script src="/js/opening-momentum.js"></script>
+<script src="/js/candlestick.js"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -1534,6 +1595,10 @@
   <button class="mobile-nav-btn nav-link" data-page="opening-momentum" aria-label="Opening Momentum">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
     <span>Opening</span>
+  </button>
+  <button class="mobile-nav-btn nav-link" data-page="candlestick" aria-label="Candlestick automation">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16m0-11h4m-4 6h4M18 4v16m-4-11h4m-4 6h4"/></svg>
+    <span>UltraBot3</span>
   </button>
 </nav>
 

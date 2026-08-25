@@ -25,6 +25,13 @@ const {
   buildHistoricalForecast,
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
+const { sanitizeCandlestickExecutionConfig, calculateCandlestickEntryCapacity } = require('./lib/candlestick-execution-policy');
+const {
+  DEFAULT_CANDLE_CONFIG,
+  evaluateCandlestickSetup,
+  aggregateTimeframeBars,
+  simulateCandlestickBacktest,
+} = require('./lib/candlestick-strategy');
 const {
   DEFAULT_PMH_CONFIG,
   evaluatePmhBreak,
@@ -175,6 +182,47 @@ db.exec(`
     PRIMARY KEY (user_id, symbol, session_date),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS candlestick_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    live_armed INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_candidates (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_trade_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('LONG','SHORT')),
+    entry_price REAL NOT NULL,
+    exit_price REAL,
+    shares REAL NOT NULL,
+    stop_price REAL NOT NULL,
+    target_price REAL NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'paper',
+    status TEXT NOT NULL DEFAULT 'pending_entry',
+    entry_order_id TEXT,
+    entry_client_order_id TEXT NOT NULL,
+    exit_order_id TEXT,
+    exit_client_order_id TEXT,
+    pnl REAL,
+    exit_reason TEXT,
+    setup_json TEXT NOT NULL DEFAULT '{}',
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT,
+    UNIQUE(user_id, entry_client_order_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_candlestick_trade_open
+    ON candlestick_trade_log (user_id, status);
 `);
 
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
@@ -272,6 +320,20 @@ db.exec(`
     bot     TEXT    NOT NULL CHECK (bot IN ('momentum', 'pmh')),
     mode    TEXT    NOT NULL DEFAULT 'paper' CHECK (mode IN ('paper', 'live')),
     PRIMARY KEY (user_id, bot),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_alpaca_creds (
+    user_id INTEGER NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
+    api_key TEXT NOT NULL,
+    api_secret TEXT NOT NULL,
+    account_id TEXT,
+    PRIMARY KEY (user_id, mode),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_alpaca_active_mode (
+    user_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'paper' CHECK(mode IN ('paper','live')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
@@ -2309,7 +2371,11 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // Sentinel key written to DB when the user explicitly disconnects so that the
 // environment-variable fallback is suppressed for that user.
 const DISCONNECTED_SENTINEL = '__disconnected__';
-const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh']);
+const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick']);
+const isCandlestickScope = scope => scope === 'candlestick';
+const brokerScopeLabel = scope => scope === 'pmh' ? 'Opening Momentum'
+  : scope === 'momentum' ? 'Momentum Trader'
+    : scope === 'candlestick' ? 'Candlestick Automation' : 'manual trading';
 
 function normalizeAlpacaScope(value, fallback = 'manual') {
   return BOT_ALPACA_SCOPES.has(value) ? value : fallback;
@@ -2320,6 +2386,14 @@ function requestAlpacaScope(req, fallback = 'manual') {
 }
 
 function getAlpacaCreds(userId, scope = 'manual') {
+  if (isCandlestickScope(scope)) {
+    const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?')
+      .get(userId)?.mode || 'paper';
+    const row = db.prepare(`SELECT api_key, api_secret, mode, account_id
+      FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, active);
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
+    return row;
+  }
   if (BOT_ALPACA_SCOPES.has(scope)) {
     const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
       .get(userId, scope)?.mode || 'paper';
@@ -2347,6 +2421,11 @@ function getAlpacaCreds(userId, scope = 'manual') {
 
 // Helper: check if a specific mode has valid (non-sentinel) credentials in DB
 function _alpacaCredsExist(userId, mode, scope = 'manual') {
+  if (isCandlestickScope(scope)) {
+    const row = db.prepare('SELECT api_key FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?')
+      .get(userId, mode);
+    return !!row && row.api_key !== DISCONNECTED_SENTINEL;
+  }
   if (BOT_ALPACA_SCOPES.has(scope)) {
     const row = db.prepare('SELECT api_key FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
       .get(userId, scope, mode);
@@ -2588,6 +2667,15 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this connection cannot be safely verified.' });
     }
     if (scope !== 'manual') {
+      const candlestickConflict = isCandlestickScope(scope)
+        ? db.prepare(`SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`)
+          .get(uid, verifiedAccountId, DISCONNECTED_SENTINEL)
+        : db.prepare(`SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`)
+          .get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+      if (candlestickConflict) {
+        const owner = isCandlestickScope(scope) ? brokerScopeLabel(candlestickConflict.bot) : 'Candlestick Automation';
+        return res.status(409).json({ error: `This Alpaca account is already connected to ${owner}. Each bot must use a different Alpaca account.` });
+      }
       const conflict = db.prepare(`
         SELECT bot FROM bot_alpaca_creds
         WHERE user_id=? AND bot<>? AND account_id=? AND api_key<>?
@@ -2595,7 +2683,7 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       `).get(uid, scope, verifiedAccountId, DISCONNECTED_SENTINEL);
       if (conflict) {
         return res.status(409).json({
-          error: `This Alpaca account is already connected to ${conflict.bot === 'pmh' ? 'Opening Momentum' : 'Momentum Trader'}. Each bot must use a different Alpaca account.`,
+          error: `This Alpaca account is already connected to ${brokerScopeLabel(conflict.bot)}. Each bot must use a different Alpaca account.`,
         });
       }
       const manualConflict = db.prepare(`
@@ -2604,14 +2692,26 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       if (manualConflict) {
         return res.status(409).json({ error: 'This Alpaca account is already connected for manual trading. Use a separate account for each automated bot.' });
       }
-      db.prepare(`
-        INSERT INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
-        VALUES (?,?,?,?,?,?)
-        ON CONFLICT(user_id,bot,mode) DO UPDATE SET
-          api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
-      `).run(uid, scope, m, key, sec, verifiedAccountId);
-      db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
-        .run(uid, scope, m);
+      if (isCandlestickScope(scope)) {
+        db.prepare(`INSERT INTO candlestick_alpaca_creds (user_id,mode,api_key,api_secret,account_id)
+          VALUES (?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
+          api_key=excluded.api_key,api_secret=excluded.api_secret,account_id=excluded.account_id`)
+          .run(uid, m, key, sec, verifiedAccountId);
+        db.prepare('INSERT OR REPLACE INTO candlestick_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
+        // A verified credential or account change always revokes the prior
+        // explicit live-order acknowledgement. Merely connecting a live key
+        // must never inherit authority to trade real money from another account.
+        db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      } else {
+        db.prepare(`
+          INSERT INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
+          VALUES (?,?,?,?,?,?)
+          ON CONFLICT(user_id,bot,mode) DO UPDATE SET
+            api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
+        `).run(uid, scope, m, key, sec, verifiedAccountId);
+        db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
+          .run(uid, scope, m);
+      }
       return res.json({ ok: true, mode: m, connection: scope, accountId: verifiedAccountId });
     }
   } catch (e) {
@@ -2628,9 +2728,17 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const botConflict = db.prepare(`
     SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
   `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  const candleConflict = db.prepare(`
+    SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+  `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  if (candleConflict) {
+    return res.status(409).json({
+      error: 'This Alpaca account is already connected to Candlestick Automation. Manual trading requires its own broker account.',
+    });
+  }
   if (botConflict) {
     return res.status(409).json({
-      error: `This Alpaca account is already connected to ${botConflict.bot === 'pmh' ? 'Opening Momentum' : 'Momentum Trader'}. Manual trading requires its own broker account.`,
+      error: `This Alpaca account is already connected to ${brokerScopeLabel(botConflict.bot)}. Manual trading requires its own broker account.`,
     });
   }
   db.prepare(`
@@ -2648,6 +2756,13 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   const uid = req.session.userId;
   const scope = requestAlpacaScope(req);
   if (scope !== 'manual') {
+    if (isCandlestickScope(scope)) {
+      const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
+      db.prepare(`INSERT OR REPLACE INTO candlestick_alpaca_creds (user_id,mode,api_key,api_secret,account_id)
+        VALUES (?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
+      db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      return res.json({ ok: true, connection: scope });
+    }
     const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
       .get(uid, scope)?.mode || 'paper';
     db.prepare(`
@@ -2677,7 +2792,9 @@ app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
   const liveConnected  = _alpacaCredsExist(uid, 'live', scope);
   const activeModeRow  = scope === 'manual'
     ? db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid)
-    : db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?').get(uid, scope);
+    : isCandlestickScope(scope)
+      ? db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?').get(uid)
+      : db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?').get(uid, scope);
   const activeMode     = activeModeRow?.mode || (creds?.mode) || 'paper';
   res.json({
     connected:      !!creds,
@@ -2700,6 +2817,10 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
   }
   if (scope === 'manual') {
     db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  } else if (isCandlestickScope(scope)) {
+    db.prepare('INSERT OR REPLACE INTO candlestick_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
+    // Switching accounts/modes also requires an intentional new live arm.
+    db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
   } else {
     db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
       .run(uid, scope, m);
@@ -6251,6 +6372,164 @@ async function getOpenSlots(userId, botName, scope = 'manual') {
   return { ...capacity, positions: Array.isArray(positions) ? positions : [], openOrders };
 }
 
+// ── Standalone Candlestick Automation ──────────────────────────────────────────
+// This strategy has its own broker scope, settings, journal, and scheduler. It
+// does not reuse Momentum or PMH analysis or execution paths.
+const CANDLESTICK_DEFAULTS = Object.freeze({
+  ...DEFAULT_CANDLE_CONFIG,
+  maxPositionDollars: 1000,
+  maxRiskDollars: 100,
+  maxPositions: 1,
+  maxSymbols: 16,
+});
+const CANDLESTICK_WATCHLIST = ['AAPL','AMD','COIN','HOOD','IONQ','MARA','MSFT','NVDA','PLTR','QQQ','SMCI','SOFI','SPY','TSLA'];
+const candleBarTime = bar => {
+  const raw = bar?.t ?? bar?.timestamp;
+  const n = typeof raw === 'number' ? (raw < 10_000_000_000 ? raw * 1000 : raw) : Date.parse(raw || '');
+  return Number.isFinite(n) ? n : null;
+};
+function completedCandlestickBars(rawBars, durationMs = 5 * 60 * 1000) {
+  const now = Date.now();
+  return (Array.isArray(rawBars) ? rawBars : []).filter(bar => {
+    const t = candleBarTime(bar);
+    return t && t + durationMs <= now - 1_000;
+  }).map(bar => ({ o: +bar.o, h: +bar.h, l: +bar.l, c: +bar.c, v: +bar.v, t: bar.t }));
+}
+function candlestickFresh(bars, maxAgeMs = 8 * 60 * 1000) {
+  const last = bars?.at(-1);
+  const stamp = candleBarTime(last);
+  return !!stamp && Date.now() - stamp <= maxAgeMs;
+}
+function candlestickConfigFor(userId) {
+  const row = db.prepare('SELECT enabled,live_armed,config_json FROM candlestick_settings WHERE user_id=?').get(userId);
+  let config = { ...CANDLESTICK_DEFAULTS };
+  try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+  config = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
+  return { enabled: !!row?.enabled, liveArmed: !!row?.live_armed, config };
+}
+async function buildCandlestickCandidate(userId, symbol, config = CANDLESTICK_DEFAULTS) {
+  const sym = String(symbol || '').toUpperCase();
+  const now = new Date();
+  const start = new Date(now.getTime() - 10 * 60 * 60 * 1000).toISOString();
+  const data = await alpacaDataFetch(userId,
+    `/v2/stocks/${encodeURIComponent(sym)}/bars?timeframe=5Min&start=${encodeURIComponent(start)}&limit=110&adjustment=all&feed=iex`,
+    'candlestick');
+  const bars = completedCandlestickBars(data?.bars);
+  // Aggregation can produce a bucket whose final 5-minute constituent has
+  // closed while the enclosing 15-minute candle has not. It is not completed
+  // evidence and must be withheld from multi-timeframe confirmation.
+  const higherDurationMs = 15 * 60 * 1000;
+  const higher = aggregateTimeframeBars(bars, higherDurationMs).filter(bar => {
+    const startAt = candleBarTime(bar);
+    return startAt && startAt + higherDurationMs <= Date.now() - 1_000;
+  });
+  const setup = evaluateCandlestickSetup({
+    symbol: sym, bars,
+    timeframes: { primary: { bars, fresh: candlestickFresh(bars) }, higher: { bars: higher, fresh: candlestickFresh(higher, 20 * 60 * 1000) } },
+    freshness: { primary: candlestickFresh(bars), higher: candlestickFresh(higher, 20 * 60 * 1000) },
+  }, config);
+  return { ...setup, symbol: sym, evaluatedAt: new Date().toISOString(),
+    freshness: { bars: candlestickFresh(bars), higher: candlestickFresh(higher, 20 * 60 * 1000), barsAt: bars.at(-1)?.t || null } };
+}
+function saveCandlestickCandidates(userId, candidates) {
+  const statement = db.prepare(`INSERT INTO candlestick_candidates (user_id,symbol,payload_json,evaluated_at)
+    VALUES (?,?,?,datetime('now')) ON CONFLICT(user_id,symbol) DO UPDATE SET payload_json=excluded.payload_json,evaluated_at=excluded.evaluated_at`);
+  const save = db.transaction(rows => rows.forEach(row => statement.run(userId, row.symbol, JSON.stringify(row))));
+  save(candidates);
+}
+function candlestickSide(direction) { return direction === 'SHORT' ? 'sell_short' : 'buy'; }
+function candlestickPnl(trade, exitPrice, qty) {
+  const multiplier = trade.direction === 'SHORT' ? -1 : 1;
+  return +((Number(exitPrice) - Number(trade.entry_price)) * Number(qty) * multiplier).toFixed(6);
+}
+async function executeCandlestickEntry(userId, symbol, source = 'manual') {
+  const { enabled, liveArmed, config } = candlestickConfigFor(userId);
+  if (!enabled) throw new Error('Candlestick automation is disabled in persisted settings.');
+  const creds = getAlpacaCreds(userId, 'candlestick');
+  if (!creds) throw new Error('Connect the dedicated Candlestick Automation Alpaca account first.');
+  if (creds.mode === 'live' && !liveArmed) throw new Error('Live trading is connected but not explicitly armed.');
+  if (!isMarketOpen()) throw new Error('Market is closed for candlestick automation.');
+  await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'candlestick' });
+  const candidate = await buildCandlestickCandidate(userId, symbol, config);
+  saveCandlestickCandidates(userId, [candidate]);
+  if (!candidate.eligible) {
+    const error = new Error('Trade is not eligible after fresh server-side re-evaluation.');
+    error.candidate = candidate; throw error;
+  }
+  const positions = await alpacaFetchFor(userId, 'candlestick', '/v2/positions');
+  const openOrders = await alpacaFetchFor(userId, 'candlestick', '/v2/orders?status=open&limit=500');
+  const pendingJournal = db.prepare(`SELECT entry_order_id,entry_client_order_id FROM candlestick_trade_log
+    WHERE user_id=? AND status='pending_entry'`).all(userId);
+  const capacity = calculateCandlestickEntryCapacity(positions, openOrders, pendingJournal);
+  if (capacity.used >= config.maxPositions) throw new Error('Candlestick position limit reached by open or pending entries.');
+  if ((Array.isArray(positions) ? positions : []).some(p => p.symbol === symbol) ||
+      (Array.isArray(openOrders) ? openOrders : []).some(o => o.symbol === symbol)) throw new Error(`${symbol} already has a candlestick position or broker-open order.`);
+  const snapshot = await alpacaSnapshotFetch(userId, symbol, 'candlestick');
+  const quote = snapshot?.[symbol]?.latestQuote;
+  const executable = candidate.direction === 'SHORT' ? Number(quote?.bp) : Number(quote?.ap);
+  const quoteTime = candleBarTime({ t: quote?.t });
+  if (!(executable > 0) || !quoteTime || Date.now() - quoteTime > 20_000) throw new Error('Fresh executable Alpaca quote is unavailable.');
+  const stop = Number(candidate.stop);
+  const risk = candidate.direction === 'SHORT' ? stop - executable : executable - stop;
+  const target = Number(candidate.direction === 'SHORT'
+    ? executable - risk * config.minRewardRisk : executable + risk * config.minRewardRisk);
+  if (!(risk > 0) || !Number.isFinite(target)) throw new Error('Fresh quote invalidates the technical stop.');
+  const shares = Math.floor(Math.min(config.maxPositionDollars / executable, config.maxRiskDollars / risk));
+  if (!(shares >= 1)) throw new Error('Risk sizing produced less than one share.');
+  const clientId = `cndl_${userId}_${symbol}_${Date.now()}`.slice(0, 48);
+  const journal = db.prepare(`INSERT INTO candlestick_trade_log
+    (user_id,symbol,direction,entry_price,shares,stop_price,target_price,mode,status,entry_order_id,entry_client_order_id,setup_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, candidate.direction, executable, shares, stop, target,
+    creds.mode, 'pending_entry', clientId, clientId, JSON.stringify(candidate));
+  const order = {
+    symbol, qty: String(shares), side: candlestickSide(candidate.direction), type: 'market', time_in_force: 'gtc',
+    client_order_id: clientId, order_class: 'bracket',
+    take_profit: { limit_price: target.toFixed(2) }, stop_loss: { stop_price: stop.toFixed(2) },
+  };
+  beginAlpacaOrderRequest(userId);
+  try {
+    const submitted = await alpacaFetchFor(userId, 'candlestick', '/v2/orders', { method: 'POST', body: JSON.stringify(order) });
+    db.prepare('UPDATE candlestick_trade_log SET entry_order_id=? WHERE id=?').run(submitted?.id || clientId, journal.lastInsertRowid);
+    return { ok: true, source, order: submitted, candidate, tradeId: journal.lastInsertRowid };
+  } finally { endAlpacaOrderRequest(userId); }
+}
+async function reconcileCandlestickTrades(userId) {
+  const open = db.prepare(`SELECT * FROM candlestick_trade_log WHERE user_id=?
+    AND status IN ('pending_entry','open','pending_exit') ORDER BY id`).all(userId);
+  const events = [];
+  for (const trade of open) {
+    try {
+      const path = trade.entry_order_id === trade.entry_client_order_id
+        ? `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`
+        : `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`;
+      const parent = await alpacaFetchFor(userId, 'candlestick', path);
+      if (trade.status === 'pending_entry') {
+        // A canceled or partially-filled parent can still leave a real
+        // position. Broker fill quantity, never the parent status alone,
+        // decides whether the durable journal becomes an open lot.
+        if (Number(parent.filled_qty) > 0 && Number(parent.filled_avg_price) > 0) {
+          db.prepare(`UPDATE candlestick_trade_log SET status='open',entry_price=?,shares=?,entry_order_id=? WHERE id=?`)
+            .run(+parent.filled_avg_price, +parent.filled_qty, parent.id, trade.id);
+          events.push({ id: trade.id, event: parent.status === 'filled' ? 'entry fill confirmed' : `partial entry fill confirmed (${parent.status})` });
+        } else if (['canceled','rejected','expired'].includes(parent.status)) {
+          db.prepare(`UPDATE candlestick_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+            .run(`Entry ${parent.status} by broker`, trade.id);
+          events.push({ id: trade.id, event: `entry ${parent.status}` });
+        }
+        continue;
+      }
+      const leg = (parent.legs || []).find(item => item.status === 'filled' && Number(item.filled_qty) > 0 && Number(item.filled_avg_price) > 0);
+      if (leg) {
+        const exit = Number(leg.filled_avg_price), qty = Number(leg.filled_qty);
+        db.prepare(`UPDATE candlestick_trade_log SET status='closed',exit_price=?,pnl=?,exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+          .run(exit, candlestickPnl(trade, exit, qty), leg.type === 'limit' ? 'Broker target fill' : 'Broker protective stop fill', trade.id);
+        events.push({ id: trade.id, event: 'protective fill confirmed' });
+      }
+    } catch (error) { events.push({ id: trade.id, error: error.message }); }
+  }
+  return events;
+}
+
 
 // ── FMP helpers ───────────────────────────────────────────────────────────────
 const FMP_BASE = 'https://financialmodelingprep.com/api';
@@ -6421,6 +6700,135 @@ function groupDailyToWeekly(dailyBars) {
 //
 
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── Candlestick Automation API ─────────────────────────────────────────────────
+app.get('/api/candlestick/settings', requireAuth, (req, res) => {
+  const { enabled, liveArmed, config } = candlestickConfigFor(req.session.userId);
+  res.json({ enabled, liveArmed, config });
+});
+
+app.put('/api/candlestick/settings', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const prior = candlestickConfigFor(req.session.userId);
+  const config = { ...prior.config };
+  for (const key of Object.keys(CANDLESTICK_DEFAULTS)) {
+    if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
+  }
+  const safeConfig = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
+  // Live execution must be deliberately armed after the user has connected a
+  // live broker account; connecting keys alone never turns on real orders.
+  const liveArmed = body.liveArmed === true && getAlpacaCreds(req.session.userId, 'candlestick')?.mode === 'live';
+  db.prepare(`INSERT INTO candlestick_settings (user_id,enabled,live_armed,config_json) VALUES (?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,config_json=excluded.config_json`)
+    .run(req.session.userId, body.enabled === true ? 1 : 0, liveArmed ? 1 : 0, JSON.stringify(safeConfig));
+  res.json({ ok: true, enabled: body.enabled === true, liveArmed, config: safeConfig });
+});
+
+app.get('/api/candlestick/scan', requireAuth, async (req, res) => {
+  const { config } = candlestickConfigFor(req.session.userId);
+  const requested = String(req.query.symbols || CANDLESTICK_WATCHLIST.join(',')).split(',')
+    .map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, config.maxSymbols);
+  if (!getAlpacaCreds(req.session.userId, 'candlestick')) {
+    return res.status(400).json({ error: 'Connect the dedicated Candlestick Automation Alpaca account to scan.' });
+  }
+  const results = await Promise.all(requested.map(symbol => buildCandlestickCandidate(req.session.userId, symbol, config)
+    .catch(error => ({ symbol, status: 'NO TRADE', eligible: false, score: 0, reasons: [`Market data unavailable: ${error.message}`] }))));
+  saveCandlestickCandidates(req.session.userId, results);
+  const funnel = results.reduce((acc, row) => {
+    const key = row.eligible ? 'eligible' : row.direction ? 'rejected' : 'noPattern';
+    acc[key]++; return acc;
+  }, { eligible: 0, rejected: 0, noPattern: 0 });
+  res.set('Cache-Control', 'no-store').json({ strategy: 'candlestick-automation-v1', results, config, funnel, evaluatedAt: new Date().toISOString() });
+});
+
+app.post('/api/candlestick/execute', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  const symbol = String(req.body?.symbol || '').toUpperCase();
+  if (!/^[A-Z0-9.-]{1,12}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  try { res.json(await executeCandlestickEntry(userId, symbol)); }
+  catch (error) { res.status(error.alpacaTransient ? 503 : 400).json({ error: error.message, candidate: error.candidate || null, reconciliationRequired: true }); }
+  finally { releaseBotLock(userId); }
+});
+
+app.get('/api/candlestick/trades', requireAuth, (req, res) => {
+  const trades = db.prepare('SELECT * FROM candlestick_trade_log WHERE user_id=? ORDER BY timestamp DESC LIMIT 50').all(req.session.userId);
+  res.json({ trades });
+});
+
+app.post('/api/candlestick/reconcile', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  try {
+    const reconciled = await reconcileCandlestickTrades(userId);
+    const trades = db.prepare('SELECT * FROM candlestick_trade_log WHERE user_id=? ORDER BY timestamp DESC LIMIT 50').all(userId);
+    res.json({ ok: true, reconciled, trades });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+  finally { releaseBotLock(userId); }
+});
+
+app.get('/api/candlestick/backtest', requireAuth, async (req, res) => {
+  const symbol = String(req.query.symbol || 'SPY').toUpperCase();
+  if (!/^[A-Z0-9.-]{1,12}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
+  const { config } = candlestickConfigFor(req.session.userId);
+  if (!getAlpacaCreds(req.session.userId, 'candlestick')) return res.status(400).json({ error: 'Connect the dedicated Candlestick Automation Alpaca account to backtest.' });
+  const start = new Date(Date.now() - 18 * 24 * 60 * 60 * 1000).toISOString();
+  const data = await alpacaDataFetch(req.session.userId,
+    `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=5Min&start=${encodeURIComponent(start)}&limit=10000&adjustment=all&feed=iex`,
+    'candlestick');
+  const bars = completedCandlestickBars(data?.bars);
+  const replay = simulateCandlestickBacktest({ symbol, bars, higherTimeframeMs: 15 * 60 * 1000 }, config);
+  const closed = replay.records.filter(r => r.outcome !== 'OPEN');
+  const rs = closed.map(r => r.outcome === 'TARGET' ? Number(r.setup.riskReward || 0) : -1);
+  const wins = rs.filter(r => r > 0);
+  const grossWin = wins.reduce((a, b) => a + b, 0), grossLoss = Math.abs(rs.filter(r => r < 0).reduce((a, b) => a + b, 0));
+  let balance = 0, peak = 0, maxDrawdown = 0;
+  rs.forEach(r => { balance += r; peak = Math.max(peak, balance); maxDrawdown = Math.max(maxDrawdown, peak - balance); });
+  const countBy = mapper => Object.entries(closed.reduce((acc, r) => { const key = mapper(r); acc[key] = (acc[key] || 0) + 1; return acc; }, {}));
+  res.json({
+    strategy: replay.strategy, symbol, insufficientEvidence: closed.length < 20,
+    note: closed.length < 20 ? 'Insufficient completed samples to make a performance claim.' : 'Historical replay is descriptive, not a profitability claim.',
+    metrics: { trades: closed.length, winRate: closed.length ? wins.length / closed.length : null, averageR: rs.length ? rs.reduce((a,b) => a+b,0) / rs.length : null,
+      profitFactor: grossLoss ? grossWin / grossLoss : null, expectancyR: rs.length ? rs.reduce((a,b) => a+b,0) / rs.length : null, maxDrawdownR: maxDrawdown },
+    breakdowns: { setup: countBy(r => Object.entries(r.setup.evidence?.patterns || {}).filter(([,v]) => v).map(([k]) => k).join(', ') || 'other'),
+      scoreRange: countBy(r => `${Math.floor((r.setup.score || 0) / 10) * 10}-${Math.floor((r.setup.score || 0) / 10) * 10 + 9}`),
+      regime: countBy(r => r.setup.evidence?.regime?.regime || 'UNKNOWN'),
+      relativeVolume: countBy(r => Number(r.setup.evidence?.relativeVolume || 0) >= 2 ? '2x+' : 'under 2x') },
+    records: replay.records.slice(-100),
+  });
+});
+
+// The scheduler is intentionally server-owned. It runs only with a dedicated
+// connected scope, persisted enablement, an explicit live arm, fresh evidence,
+// and an available broker position. Closing the page never disables protection
+// or reconciliation, but no condition ever forces a demonstration trade.
+let candlestickSchedulerRunning = false;
+setInterval(async () => {
+  if (candlestickSchedulerRunning) return;
+  candlestickSchedulerRunning = true;
+  try {
+    const users = db.prepare('SELECT user_id FROM candlestick_settings WHERE enabled=1').all();
+    for (const { user_id: userId } of users) {
+      const creds = getAlpacaCreds(userId, 'candlestick');
+      const settings = candlestickConfigFor(userId);
+      if (!creds || (creds.mode === 'live' && !settings.liveArmed) || !acquireBotLock(userId)) continue;
+      try {
+        // Reconciliation is always-on: entries are bounded to the market
+        // window, but broker-confirmed fill recovery cannot wait for the page
+        // to be open or for tomorrow's entry session.
+        await reconcileCandlestickTrades(userId);
+        if (!isMarketOpen()) continue;
+        const candidates = (await Promise.all(CANDLESTICK_WATCHLIST.slice(0, settings.config.maxSymbols)
+          .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
+        saveCandlestickCandidates(userId, candidates);
+        const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+        if (candidate) await executeCandlestickEntry(userId, candidate.symbol, 'server-scheduler');
+      } catch (error) {
+        console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
+      } finally { releaseBotLock(userId); }
+    }
+  } finally { candlestickSchedulerRunning = false; }
+}, 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);

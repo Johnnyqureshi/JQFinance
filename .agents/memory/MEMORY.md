@@ -7,5 +7,5 @@
 - [Broker catalog coverage](broker-catalog-coverage.md) — bounded scans rotate a stable per-account Alpaca catalog snapshot; changing movers must never reshuffle catalog coverage.
 - [Shared production authentication](shared-production-auth.md) — PostgreSQL owns identities/sessions; retain a single VM until all trading state leaves SQLite.
 - [Momentum price-action execution](momentum-price-action-execution.md) — automated Momentum entries use a dedicated server-owned route with completed-bar freshness and structural-stop enforcement.
-- [Bot Alpaca account isolation](bot-alpaca-account-isolation.md) — Momentum and PMH use separate broker credentials and must never share an Alpaca account ID.
+- [Bot Alpaca account isolation](bot-alpaca-account-isolation.md) — automated strategies use separate broker credentials; live arming resets after every broker identity change.
 - [Historical forecast evidence](historical-forecast-evidence.md) — historical pattern guidance must purge overlapping outcome windows and withhold probabilities for weak samples.

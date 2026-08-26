@@ -3652,6 +3652,16 @@ async function resolvePaperMarketRegime() {
 
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
 // ── Master scan universe — all 4 bots use this list ───────────────────────────
+// Symbols transcribed from the user's portfolio screenshots. Keep this list
+// explicit so it is easy to audit when the shared bot library changes.
+const SCREENSHOT_STOCK_LIBRARY = [
+  'OKLL','SKHL','AVS','SPCH','SNDC','MSTZ','RGTZ','RAM','APRE','CDTG',
+  'INTW','HODU','TSLG','PATX','MUU','SNXX','SKHX','GLL','TSXD','TSLZ',
+  'NVDQ','TSDD','CORD','DAMD','PLTD','SMCZ','QQQD','ORCZ','NVD','ORCU',
+  'SOFX','KEEL','CIFG','AFRU','IRE','AMAU','NVDL','SMCX','PLTG','ADBG',
+  'NOWL','VYX','UECG','NUVB','NVDY','TSLL','SATL','USAS','EXK','MTA',
+  'BTG','DNN','CRML','TMQ','ASM','PLG','IAUX',
+];
 const MASTER_UNIVERSE = [
   // ── Mega-cap tech ──────────────────────────────────────────────────────────
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
@@ -3739,6 +3749,7 @@ const MASTER_UNIVERSE = [
   'WLFI','AVNT','XPL','SKR','ZORA','XCN','MEW','CC',
   // ── User-added ─────────────────────────────────────────────────────────────
   'ADBG','GLND','USAR','ZSX','DOGD','AVS','BABO','KMLI','NBIG','NBIZ','LLYX','BRKU',
+  ...SCREENSHOT_STOCK_LIBRARY,
 ];
 
 
@@ -4049,7 +4060,10 @@ app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
 });
 
 app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
-  const raw = String(req.query.symbols || 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY');
+  const raw = String(req.query.symbols || [
+    'AAPL','NVDA','AMD','TSLA','PLTR','SOFI','HOOD','MARA','IONQ','SMCI','COIN','QQQ','SPY',
+    ...SCREENSHOT_STOCK_LIBRARY,
+  ].join(','));
   const requestedSymbols = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, 25);
   let catalog = null;
   let catalogEntry = null;
@@ -6440,7 +6454,10 @@ const CANDLESTICK_DEFAULTS = Object.freeze({
   maxPositions: 1,
   maxSymbols: 16,
 });
-const CANDLESTICK_WATCHLIST = ['AAPL','AMD','COIN','HOOD','IONQ','MARA','MSFT','NVDA','PLTR','QQQ','SMCI','SOFI','SPY','TSLA'];
+const CANDLESTICK_WATCHLIST = [...new Set([
+  'AAPL','AMD','COIN','HOOD','IONQ','MARA','MSFT','NVDA','PLTR','QQQ','SMCI','SOFI','SPY','TSLA',
+  ...SCREENSHOT_STOCK_LIBRARY,
+])];
 const candleBarTime = bar => {
   const raw = bar?.t ?? bar?.timestamp;
   const n = typeof raw === 'number' ? (raw < 10_000_000_000 ? raw * 1000 : raw) : Date.parse(raw || '');

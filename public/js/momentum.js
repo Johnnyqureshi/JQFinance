@@ -44,7 +44,14 @@
       'COIN','PLTR','SOFI','MARA','RIOT','HOOD','RBLX','SHOP','SQ','PYPL',
       'ARM','SMCI','IONQ','LUNR','RDDT','APLS','CRWD','PANW','DDOG','SNOW',
       'NET','ZS','HIMS','TGTX','ACMR','SOUN','BBAI','KULR','CELH','GNRC',
-      'ENPH','FSLR','BE','PLUG','QQQ','SPY','IWM','ARKK','SOXS','LABU'
+      'ENPH','FSLR','BE','PLUG','QQQ','SPY','IWM','ARKK','SOXS','LABU',
+      // Additional stock/ETF symbols from the user's portfolio screenshots
+      'OKLL','SKHL','AVS','SPCH','SNDC','MSTZ','RGTZ','RAM','APRE','CDTG',
+      'INTW','HODU','TSLG','PATX','MUU','SNXX','SKHX','GLL','TSXD','TSLZ',
+      'NVDQ','TSDD','CORD','DAMD','PLTD','SMCZ','QQQD','ORCZ','NVD','ORCU',
+      'SOFX','KEEL','CIFG','AFRU','IRE','AMAU','NVDL','SMCX','PLTG','ADBG',
+      'NOWL','VYX','UECG','NUVB','NVDY','TSLL','SATL','USAS','EXK','MTA',
+      'BTG','DNN','CRML','TMQ','ASM','PLG','IAUX'
     ],
 
     defaults: {

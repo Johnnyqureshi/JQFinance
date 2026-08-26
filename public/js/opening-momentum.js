@@ -8,7 +8,7 @@
   const money = n => Number.isFinite(Number(n)) ? `$${fmt(n)}` : '—';
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[c]));
   const input = id => Number($(id)?.value);
-  const watchlist = 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY';
+  const watchlist = 'AAPL,NVDA,AMD,TSLA,PLTR,SOFI,HOOD,MARA,IONQ,SMCI,COIN,QQQ,SPY,OKLL,SKHL,AVS,SPCH,SNDC,MSTZ,RGTZ,RAM,APRE,CDTG,INTW,HODU,TSLG,PATX,MUU,SNXX,SKHX,GLL,TSXD,TSLZ,NVDQ,TSDD,CORD,DAMD,PLTD,SMCZ,QQQD,ORCZ,NVD,ORCU,SOFX,KEEL,CIFG,AFRU,IRE,AMAU,NVDL,SMCX,PLTG,ADBG,NOWL,VYX,UECG,NUVB,NVDY,TSLL,SATL,USAS,EXK,MTA,BTG,DNN,CRML,TMQ,ASM,PLG,IAUX';
   const defaults = {
     minScore:80, minRelativeVolume:2, minVolumeZScore:1.5, minBodyRatio:.55,
     maxUpperWickRatio:.28, minRoomRiskMultiple:2, maxRiskDollars:100, maxPositionDollars:5000,

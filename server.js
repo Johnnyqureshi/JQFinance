@@ -3662,6 +3662,12 @@ const SCREENSHOT_STOCK_LIBRARY = [
   'NOWL','VYX','UECG','NUVB','NVDY','TSLL','SATL','USAS','EXK','MTA',
   'BTG','DNN','CRML','TMQ','ASM','PLG','IAUX',
 ];
+// PMH's default scan universe — shared by the manual scan endpoint and the
+// always-on server-side scheduler so both consider the same symbols.
+const PMH_DEFAULT_SYMBOLS = [
+  'AAPL','NVDA','AMD','TSLA','PLTR','SOFI','HOOD','MARA','IONQ','SMCI','COIN','QQQ','SPY',
+  ...SCREENSHOT_STOCK_LIBRARY,
+];
 const MASTER_UNIVERSE = [
   // ── Mega-cap tech ──────────────────────────────────────────────────────────
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
@@ -4060,10 +4066,7 @@ app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
 });
 
 app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
-  const raw = String(req.query.symbols || [
-    'AAPL','NVDA','AMD','TSLA','PLTR','SOFI','HOOD','MARA','IONQ','SMCI','COIN','QQQ','SPY',
-    ...SCREENSHOT_STOCK_LIBRARY,
-  ].join(','));
+  const raw = String(req.query.symbols || PMH_DEFAULT_SYMBOLS.join(','));
   const requestedSymbols = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, 25);
   let catalog = null;
   let catalogEntry = null;
@@ -4106,31 +4109,32 @@ app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
   });
 });
 
-app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
-  const userId = req.session.userId;
-  const symbol = String(req.body?.symbol || '').toUpperCase();
-  if (!isBotEnabled(userId, 'pmh')) return res.status(409).json({ error: 'Opening Momentum automation is disabled.' });
+function pmhError(message, status, extra) {
+  return Object.assign(new Error(message), { status, ...extra });
+}
+
+async function executePmhEntry(userId, symbol, source = 'manual') {
+  if (!isBotEnabled(userId, 'pmh')) throw pmhError('Opening Momentum automation is disabled.', 409);
   const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
-  if (!pmhSetting?.enabled) return res.status(409).json({ error: 'Opening Momentum strategy is disabled in its persisted settings.' });
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  if (!pmhSetting?.enabled) throw pmhError('Opening Momentum strategy is disabled in its persisted settings.', 409);
   let clientOrderId = null;
   let submittedOrders = [];
   try {
-    if (!isMarketOpen()) return res.status(400).json({ error: 'Market is closed for regular-session PMH entries.' });
+    if (!isMarketOpen()) throw pmhError('Market is closed for regular-session PMH entries.', 400);
     await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'pmh' });
     const slots = await getOpenSlots(userId, 'PMH', 'pmh');
     // A PMH setup submits two independently protected BUY parents (partial +
     // runner), so reserve both shared entry units before either reaches Alpaca.
-    if (!canReserveEntryUnits(slots, 2)) return res.status(409).json({ error: 'PMH needs two available entry slots for its protected partial and runner lots.' });
+    if (!canReserveEntryUnits(slots, 2)) throw pmhError('PMH needs two available entry slots for its protected partial and runner lots.', 409);
     if (slots.positions.some(p => p.symbol === symbol) ||
-        slots.openOrders.some(o => o.symbol === symbol)) return res.status(409).json({ error: `${symbol} already has a position or pending order.` });
+        slots.openOrders.some(o => o.symbol === symbol)) throw pmhError(`${symbol} already has a position or pending order.`, 409);
     const allSymbolOrders = await alpacaFetchFor(userId, 'pmh', `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
-    if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) return res.status(409).json({ error: `${symbol} already has a broker-open order.` });
+    if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) throw pmhError(`${symbol} already has a broker-open order.`, 409);
     const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
     let config = DEFAULT_PMH_CONFIG;
     try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
     const candidate = await buildPmhCandidate(userId, symbol, config);
-    if (!candidate.eligible) return res.status(400).json({ error: 'Trade is not eligible.', candidate });
+    if (!candidate.eligible) throw pmhError('Trade is not eligible.', 400, { candidate });
     // Calculate risk from a fresh executable quote, not a 2-minute candle
     // close. A marketable limit bounds upward slippage; without a usable ask,
     // the trade is blocked rather than sized optimistically.
@@ -4138,7 +4142,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     const executableAsk = Number(freshSnapshot?.[symbol]?.latestQuote?.ap);
     const executableQuoteAt = freshSnapshot?.[symbol]?.latestQuote?.t;
     if (!(executableAsk > 0) || !pmhFresh(executableQuoteAt, 15 * 1000)) {
-      return res.status(400).json({ error: 'Fresh executable Alpaca ask is unavailable; PMH order blocked.' });
+      throw pmhError('Fresh executable Alpaca ask is unavailable; PMH order blocked.', 400);
     }
     const slippageCap = 0.0025; // 25 bps maximum accepted entry drift
     const boundedEntry = +(executableAsk * (1 + slippageCap)).toFixed(2);
@@ -4148,29 +4152,29 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     if (!(boundedRisk > 0) || boundedRiskPct > config.maxRiskPerSharePct ||
         !Number.isFinite(candidate.levels.resistance) ||
         candidate.levels.resistance - boundedEntry < boundedRisk * config.minRoomRiskMultiple) {
-      return res.status(400).json({ error: 'Fresh quote invalidates the configured stop or resistance-risk gate.' });
+      throw pmhError('Fresh quote invalidates the configured stop or resistance-risk gate.', 400);
     }
-    if (boundedEntry > MAX_TRADE_PRICE) return res.status(400).json({ error: `PMH preserves the account-wide $${MAX_TRADE_PRICE} maximum trade price.` });
+    if (boundedEntry > MAX_TRADE_PRICE) throw pmhError(`PMH preserves the account-wide $${MAX_TRADE_PRICE} maximum trade price.`, 400);
     const daily = db.prepare(`SELECT COUNT(DISTINCT COALESCE(entry_client_order_id, CAST(id AS TEXT))) AS trades,
       COALESCE(SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END), 0) AS losses
       FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
       AND date(timestamp, 'localtime')=date('now','localtime') AND status <> 'void'`).get(userId);
-    if (Number(daily.trades) >= config.maxTradesPerDay) return res.status(409).json({ error: 'PMH daily trade limit reached.' });
-    if (Number(daily.losses) >= config.maxDailyLoss) return res.status(409).json({ error: 'PMH daily loss limit reached.' });
+    if (Number(daily.trades) >= config.maxTradesPerDay) throw pmhError('PMH daily trade limit reached.', 409);
+    if (Number(daily.losses) >= config.maxDailyLoss) throw pmhError('PMH daily loss limit reached.', 409);
     const mode = getAlpacaCreds(userId, 'pmh')?.mode || 'paper';
     const riskShares = Math.floor(config.maxRiskDollars / boundedRisk);
     const positionShares = Math.floor(config.maxPositionDollars / boundedEntry);
     const shares = Math.min(riskShares, positionShares);
-    if (!Number.isInteger(shares) || shares < 1) return res.status(400).json({ error: 'Risk sizing produced less than one whole share.' });
+    if (!Number.isInteger(shares) || shares < 1) throw pmhError('Risk sizing produced less than one whole share.', 400);
     const entry = boundedEntry;
     const target = Number((entry + boundedRisk * config.partialTargetR).toFixed(2));
     const sessionDate = pmhEtParts(new Date())?.date;
-    if (!sessionDate) return res.status(400).json({ error: 'Trading session date is unavailable.' });
+    if (!sessionDate) throw pmhError('Trading session date is unavailable.', 400);
     try {
       db.prepare(`INSERT INTO pmh_entry_intents (user_id,symbol,session_date,status,detail) VALUES (?,?,?,?,?)`)
-        .run(userId, symbol, sessionDate, 'pending', 'PMH broker submission reserved');
+        .run(userId, symbol, sessionDate, 'pending', `PMH broker submission reserved (${source})`);
     } catch (e) {
-      return res.status(409).json({ error: `${symbol} already has a PMH entry intent for this session.` });
+      throw pmhError(`${symbol} already has a PMH entry intent for this session.`, 409);
     }
     // Use two broker-protected lots: a bracket lot realizes the configured
     // partial target, while an OTO lot is the independent EMA-managed runner.
@@ -4214,7 +4218,7 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
     await submitLot(runnerQty, 'runner');
     db.prepare(`UPDATE pmh_entry_intents SET status='submitted',detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
       .run(`Submitted ${orders.length} protected PMH lot(s)`, userId, symbol, sessionDate);
-    res.json({ ok: true, strategy: 'opening-momentum-pmh-v1', mode, orders, target, stop, candidate });
+    return { ok: true, strategy: 'opening-momentum-pmh-v1', mode, orders, target, stop, candidate };
   } catch (error) {
     const sessionDate = pmhEtParts(new Date())?.date;
     if (sessionDate) db.prepare(`UPDATE pmh_entry_intents SET status=?,detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
@@ -4223,10 +4227,26 @@ app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
         String(error.message || 'Broker submission failed').slice(0, 240),
         userId, symbol, sessionDate,
       );
-    res.status(error.alpacaTransient ? 503 : 400).json({
-      error: error.message, clientOrderId,
-      reconciliationRequired: submittedOrders.length > 0,
-      submittedLots: submittedOrders.map(order => ({ kind: order.kind, orderId: order.order?.id || null, qty: order.qty })),
+    error.clientOrderId = clientOrderId;
+    error.reconciliationRequired = submittedOrders.length > 0;
+    error.submittedLots = submittedOrders.map(order => ({ kind: order.kind, orderId: order.order?.id || null, qty: order.qty }));
+    throw error;
+  }
+}
+
+app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  const symbol = String(req.body?.symbol || '').toUpperCase();
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  try {
+    res.json(await executePmhEntry(userId, symbol, 'manual'));
+  } catch (error) {
+    res.status(error.status || (error.alpacaTransient ? 503 : 400)).json({
+      error: error.message,
+      candidate: error.candidate || null,
+      clientOrderId: error.clientOrderId || null,
+      reconciliationRequired: !!error.reconciliationRequired,
+      submittedLots: error.submittedLots || [],
     });
   } finally { releaseBotLock(userId); }
 });
@@ -4239,11 +4259,8 @@ app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
 
 // Reconcile only broker-confirmed PMH fills. The browser can request this while
 // open; it never manufactures a fill price, exit, or P&L from a quote.
-app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
-  const userId = req.session.userId;
+async function reconcilePmhTrades(userId) {
   const pmhFetch = (path, opts = {}) => alpacaFetchFor(userId, 'pmh', path, opts);
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot reconciliation cycle is in progress.' });
-  try {
   const settingRow = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
   let pmhConfig = DEFAULT_PMH_CONFIG;
   try { pmhConfig = { ...pmhConfig, ...(settingRow?.config_json ? JSON.parse(settingRow.config_json) : {}) }; } catch (_) {}
@@ -4418,7 +4435,17 @@ app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
   }
   const trades = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
     ORDER BY timestamp DESC LIMIT 30`).all(userId);
-  res.json({ ok: true, reconciled, trades });
+  return { reconciled, trades };
+}
+
+app.post('/api/opening-momentum/reconcile', requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot reconciliation cycle is in progress.' });
+  try {
+    const { reconciled, trades } = await reconcilePmhTrades(userId);
+    res.json({ ok: true, reconciled, trades });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   } finally {
     releaseBotLock(userId);
   }
@@ -7165,6 +7192,40 @@ setInterval(async () => {
       } finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
     }
   } finally { candlestickSchedulerRunning = false; }
+}, 60 * 1000);
+
+// PMH's scheduler mirrors the candlestick pattern above: server-owned so
+// entries, protective-leg reconciliation, and runner exits keep running once
+// a user enables the strategy, regardless of whether their browser tab is
+// open. It only acts for users who explicitly enabled PMH automation and
+// connected a dedicated PMH broker account.
+let pmhSchedulerRunning = false;
+setInterval(async () => {
+  if (pmhSchedulerRunning) return;
+  pmhSchedulerRunning = true;
+  try {
+    const users = db.prepare('SELECT user_id FROM pmh_settings WHERE enabled=1').all();
+    for (const { user_id: userId } of users) {
+      if (!isBotEnabled(userId, 'pmh')) continue;
+      const creds = getAlpacaCreds(userId, 'pmh');
+      if (!creds || !acquireBotLock(userId)) continue;
+      try {
+        // Reconciliation is always-on: entry fills, protective-leg fills, and
+        // runner exits must be recorded even when no browser tab is open.
+        await reconcilePmhTrades(userId);
+        if (!isMarketOpen()) continue;
+        const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
+        let config = DEFAULT_PMH_CONFIG;
+        try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+        const candidates = (await Promise.all(PMH_DEFAULT_SYMBOLS.slice(0, 20)
+          .map(symbol => buildPmhCandidate(userId, symbol, config).catch(() => null)))).filter(Boolean);
+        const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+        if (candidate) await executePmhEntry(userId, candidate.symbol, 'server-scheduler');
+      } catch (error) {
+        console.warn(`[PMH] user ${userId} cycle withheld: ${error.message}`);
+      } finally { releaseBotLock(userId); }
+    }
+  } finally { pmhSchedulerRunning = false; }
 }, 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {

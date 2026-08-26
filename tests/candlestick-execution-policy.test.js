@@ -24,5 +24,11 @@ test('counts a timeout-reserved journal entry even before broker visibility', ()
   const capacity = calculateCandlestickEntryCapacity([], [], [{ entry_order_id:'cndl_timeout', entry_client_order_id:'cndl_timeout' }]);
   assert.strictEqual(capacity.used, 1);
 });
+test('reserves a confirmed journal position until the broker positions feed catches up', () => {
+  const beforeBrokerPosition = calculateCandlestickEntryCapacity([], [], [{ symbol:'NVDA', entry_client_order_id:'cndl_filled' }]);
+  const afterBrokerPosition = calculateCandlestickEntryCapacity([{ symbol:'NVDA' }], [], [{ symbol:'NVDA', entry_client_order_id:'cndl_filled' }]);
+  assert.strictEqual(beforeBrokerPosition.used, 1);
+  assert.strictEqual(afterBrokerPosition.used, 1);
+});
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

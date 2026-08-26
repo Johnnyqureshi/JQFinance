@@ -26,6 +26,7 @@ const {
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const { sanitizeCandlestickExecutionConfig, calculateCandlestickEntryCapacity } = require('./lib/candlestick-execution-policy');
+const { summarizeCandlestickBrokerOrder, needsUnprotectedExit, cancellationAction } = require('./lib/candlestick-reconciliation');
 const {
   DEFAULT_CANDLE_CONFIG,
   evaluateCandlestickSetup,
@@ -216,6 +217,8 @@ db.exec(`
     pnl REAL,
     exit_reason TEXT,
     setup_json TEXT NOT NULL DEFAULT '{}',
+    signal_bar_at TEXT,
+    protection_grace_until TEXT,
     timestamp TEXT NOT NULL DEFAULT (datetime('now')),
     closed_at TEXT,
     UNIQUE(user_id, entry_client_order_id),
@@ -223,6 +226,31 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_candlestick_trade_open
     ON candlestick_trade_log (user_id, status);
+  CREATE TABLE IF NOT EXISTS candlestick_signal_reservations (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    signal_bar_at TEXT NOT NULL,
+    trade_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol, signal_bar_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_exit_fills (
+    trade_id INTEGER NOT NULL,
+    broker_order_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    reason TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (trade_id, broker_order_id),
+    FOREIGN KEY (trade_id) REFERENCES candlestick_trade_log(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS candlestick_execution_leases (
+    user_id INTEGER PRIMARY KEY,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
@@ -249,7 +277,12 @@ db.exec(`
   `ALTER TABLE bot_trade_log ADD COLUMN strategy TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN entry_client_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN rescue_stop_order_id TEXT`,
+  `ALTER TABLE candlestick_trade_log ADD COLUMN signal_bar_at TEXT`,
+  `ALTER TABLE candlestick_trade_log ADD COLUMN protection_grace_until TEXT`,
+  `ALTER TABLE candlestick_trade_log ADD COLUMN exit_requested_at TEXT`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_candlestick_trade_signal
+  ON candlestick_trade_log (user_id, symbol, signal_bar_at)`).run();
 
 // Paper/shadow evidence is global to the frozen study, never tied to a broker
 // account and never capable of submitting an order.
@@ -6354,6 +6387,31 @@ function acquireBotLock(userId) {
 }
 function releaseBotLock(userId) { _botLock.delete(String(userId)); }
 
+// The in-memory cross-bot lock is useful within one process, but UltraBot3
+// execution additionally needs a durable, ownership-fenced lease. A restart or
+// a second worker therefore cannot turn a check-then-insert into two entries.
+function acquireCandlestickExecutionLease(userId) {
+  const token = crypto.randomUUID();
+  const result = db.prepare(`INSERT INTO candlestick_execution_leases (user_id,token,expires_at)
+    VALUES (?, ?, datetime('now','+5 minutes'))
+    ON CONFLICT(user_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at
+    WHERE candlestick_execution_leases.expires_at <= datetime('now')`).run(userId, token);
+  return result.changes === 1 ? token : null;
+}
+function renewCandlestickExecutionLease(userId, token) {
+  if (!token) return false;
+  return db.prepare(`UPDATE candlestick_execution_leases SET expires_at=datetime('now','+5 minutes')
+    WHERE user_id=? AND token=? AND expires_at > datetime('now')`).run(userId, token).changes === 1;
+}
+function requireCandlestickExecutionLease(userId, token) {
+  if (!renewCandlestickExecutionLease(userId, token)) {
+    throw new Error('UltraBot3 execution lease expired or was replaced; reconciliation stopped without submitting another order.');
+  }
+}
+function releaseCandlestickExecutionLease(userId, token) {
+  if (token) db.prepare('DELETE FROM candlestick_execution_leases WHERE user_id=? AND token=?').run(userId, token);
+}
+
 // ── Slot counter: positions + all pending long entries ────────────────────────
 // Every open BUY consumes capacity, including simple manual, OTO, bracket and
 // PMH orders. Protective legs are SELLs and therefore do not consume a slot.
@@ -6442,28 +6500,105 @@ function candlestickPnl(trade, exitPrice, qty) {
   const multiplier = trade.direction === 'SHORT' ? -1 : 1;
   return +((Number(exitPrice) - Number(trade.entry_price)) * Number(qty) * multiplier).toFixed(6);
 }
-async function executeCandlestickEntry(userId, symbol, source = 'manual') {
-  const { enabled, liveArmed, config } = candlestickConfigFor(userId);
+function candlestickOrderLookupPath(orderId, clientOrderId) {
+  return orderId && orderId !== clientOrderId
+    ? `/v2/orders/${encodeURIComponent(orderId)}?nested=true`
+    : `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}&nested=true`;
+}
+function candlestickSignalAlreadyAttempted(userId, symbol, signalBarAt) {
+  if (!signalBarAt) return false;
+  return !!db.prepare(`SELECT 1 FROM candlestick_trade_log
+    WHERE user_id=? AND symbol=? AND signal_bar_at=? LIMIT 1`).get(userId, symbol, signalBarAt);
+}
+function reserveCandlestickSignal(userId, symbol, signalBarAt) {
+  return db.prepare(`INSERT OR IGNORE INTO candlestick_signal_reservations (user_id,symbol,signal_bar_at)
+    VALUES (?,?,?)`).run(userId, symbol, signalBarAt).changes === 1;
+}
+function releaseCandlestickSignalReservation(userId, symbol, signalBarAt) {
+  db.prepare(`DELETE FROM candlestick_signal_reservations
+    WHERE user_id=? AND symbol=? AND signal_bar_at=? AND trade_id IS NULL`).run(userId, symbol, signalBarAt);
+}
+function attachCandlestickSignalReservation(userId, symbol, signalBarAt, tradeId) {
+  db.prepare(`UPDATE candlestick_signal_reservations SET trade_id=?
+    WHERE user_id=? AND symbol=? AND signal_bar_at=?`).run(tradeId, userId, symbol, signalBarAt);
+}
+function recordCandlestickExitFill(trade, order, reason) {
+  const orderId = String(order?.id || order?.client_order_id || '');
+  const quantity = Number(order?.filled_qty);
+  const price = Number(order?.filled_avg_price);
+  if (!orderId || !(quantity > 0) || !(price > 0)) return false;
+  db.prepare(`INSERT INTO candlestick_exit_fills (trade_id,broker_order_id,quantity,price,reason,updated_at)
+    VALUES (?,?,?,?,?,datetime('now'))
+    ON CONFLICT(trade_id,broker_order_id) DO UPDATE SET
+      quantity=excluded.quantity,price=excluded.price,reason=excluded.reason,updated_at=datetime('now')`)
+    .run(trade.id, orderId, quantity, price, reason);
+  return true;
+}
+function candlestickRealizedPnl(trade) {
+  const fills = db.prepare('SELECT quantity,price FROM candlestick_exit_fills WHERE trade_id=?').all(trade.id);
+  if (!fills.length) return null;
+  const quantity = fills.reduce((sum, fill) => sum + Number(fill.quantity), 0);
+  const weightedExit = fills.reduce((sum, fill) => sum + Number(fill.quantity) * Number(fill.price), 0) / quantity;
+  return {
+    quantity,
+    averageExit: weightedExit,
+    pnl: fills.reduce((sum, fill) => sum + candlestickPnl(trade, fill.price, fill.quantity), 0),
+  };
+}
+async function candlestickPosition(userId, symbol) {
+  try { return await alpacaFetchFor(userId, 'candlestick', `/v2/positions/${encodeURIComponent(symbol)}`); }
+  catch (error) { if (error.alpacaStatus === 404) return null; throw error; }
+}
+async function candlestickBrokerState(userId) {
+  const [positions, openOrders] = await Promise.all([
+    alpacaFetchFor(userId, 'candlestick', '/v2/positions'),
+    alpacaFetchFor(userId, 'candlestick', '/v2/orders?status=open&limit=500'),
+  ]);
+  const pendingJournal = db.prepare(`SELECT symbol,entry_order_id,entry_client_order_id FROM candlestick_trade_log
+    WHERE user_id=? AND status IN ('entry_intent','entry_unknown','pending_entry','open','protection_pending','rescue_cancel_intent','rescue_cancel_pending','exit_intent','pending_exit','exit_unknown','exit_failed')`).all(userId);
+  return {
+    positions: Array.isArray(positions) ? positions : [],
+    openOrders: Array.isArray(openOrders) ? openOrders : [],
+    pendingJournal,
+  };
+}
+async function executeCandlestickEntry(userId, symbol, source = 'manual', leaseToken = null) {
+  let { enabled, liveArmed, config } = candlestickConfigFor(userId);
   if (!enabled) throw new Error('Candlestick automation is disabled in persisted settings.');
-  const creds = getAlpacaCreds(userId, 'candlestick');
+  let creds = getAlpacaCreds(userId, 'candlestick');
   if (!creds) throw new Error('Connect the dedicated Candlestick Automation Alpaca account first.');
   if (creds.mode === 'live' && !liveArmed) throw new Error('Live trading is connected but not explicitly armed.');
   if (!isMarketOpen()) throw new Error('Market is closed for candlestick automation.');
   await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'candlestick' });
-  const candidate = await buildCandlestickCandidate(userId, symbol, config);
+  let candidate = await buildCandlestickCandidate(userId, symbol, config);
   saveCandlestickCandidates(userId, [candidate]);
   if (!candidate.eligible) {
     const error = new Error('Trade is not eligible after fresh server-side re-evaluation.');
     error.candidate = candidate; throw error;
   }
-  const positions = await alpacaFetchFor(userId, 'candlestick', '/v2/positions');
-  const openOrders = await alpacaFetchFor(userId, 'candlestick', '/v2/orders?status=open&limit=500');
-  const pendingJournal = db.prepare(`SELECT entry_order_id,entry_client_order_id FROM candlestick_trade_log
-    WHERE user_id=? AND status='pending_entry'`).all(userId);
+  const signalBarAt = candidate.freshness?.barsAt;
+  if (!signalBarAt) throw new Error('The completed confirmation timestamp is unavailable.');
+  if (candlestickSignalAlreadyAttempted(userId, symbol, signalBarAt)) {
+    throw new Error('This completed UltraBot3 setup has already been submitted or withheld; wait for a new confirmation candle.');
+  }
+  // Re-read settings and rebuild the evidence at the commit point. A browser
+  // save, account change, or new completed candle can never leave a stale
+  // candidate authorized for submission.
+  ({ enabled, liveArmed, config } = candlestickConfigFor(userId));
+  creds = getAlpacaCreds(userId, 'candlestick');
+  if (!enabled || !creds || (creds.mode === 'live' && !liveArmed)) {
+    throw new Error('UltraBot3 settings or live authorization changed; no order was submitted.');
+  }
+  candidate = await buildCandlestickCandidate(userId, symbol, config);
+  saveCandlestickCandidates(userId, [candidate]);
+  if (!candidate.eligible || candidate.freshness?.barsAt !== signalBarAt) {
+    const error = new Error('The completed setup changed during broker revalidation.');
+    error.candidate = candidate; throw error;
+  }
+  const { positions, openOrders, pendingJournal } = await candlestickBrokerState(userId);
   const capacity = calculateCandlestickEntryCapacity(positions, openOrders, pendingJournal);
   if (capacity.used >= config.maxPositions) throw new Error('Candlestick position limit reached by open or pending entries.');
-  if ((Array.isArray(positions) ? positions : []).some(p => p.symbol === symbol) ||
-      (Array.isArray(openOrders) ? openOrders : []).some(o => o.symbol === symbol)) throw new Error(`${symbol} already has a candlestick position or broker-open order.`);
+  if (positions.some(p => p.symbol === symbol) || openOrders.some(o => o.symbol === symbol)) throw new Error(`${symbol} already has a candlestick position or broker-open order.`);
   const snapshot = await alpacaSnapshotFetch(userId, symbol, 'candlestick');
   const quote = snapshot?.[symbol]?.latestQuote;
   const executable = candidate.direction === 'SHORT' ? Number(quote?.bp) : Number(quote?.ap);
@@ -6476,11 +6611,40 @@ async function executeCandlestickEntry(userId, symbol, source = 'manual') {
   if (!(risk > 0) || !Number.isFinite(target)) throw new Error('Fresh quote invalidates the technical stop.');
   const shares = Math.floor(Math.min(config.maxPositionDollars / executable, config.maxRiskDollars / risk));
   if (!(shares >= 1)) throw new Error('Risk sizing produced less than one share.');
+  // This is the last state check before the durable intent and non-idempotent
+  // POST. It protects against a live-arm/config change while quote data arrived.
+  const finalSettings = candlestickConfigFor(userId);
+  const finalCreds = getAlpacaCreds(userId, 'candlestick');
+  if (!finalSettings.enabled || !finalCreds || (finalCreds.mode === 'live' && !finalSettings.liveArmed)) {
+    throw new Error('UltraBot3 authorization changed immediately before submission.');
+  }
+  if (JSON.stringify(finalSettings.config) !== JSON.stringify(config)) {
+    throw new Error('UltraBot3 risk settings changed during revalidation; scan again before submitting.');
+  }
+  if (candlestickSignalAlreadyAttempted(userId, symbol, signalBarAt)) {
+    throw new Error('This completed UltraBot3 setup was already reserved by another execution cycle.');
+  }
+  requireCandlestickExecutionLease(userId, leaseToken);
+  if (!reserveCandlestickSignal(userId, symbol, signalBarAt)) {
+    throw new Error('This completed UltraBot3 setup is already reserved by another execution cycle.');
+  }
   const clientId = `cndl_${userId}_${symbol}_${Date.now()}`.slice(0, 48);
-  const journal = db.prepare(`INSERT INTO candlestick_trade_log
-    (user_id,symbol,direction,entry_price,shares,stop_price,target_price,mode,status,entry_order_id,entry_client_order_id,setup_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, candidate.direction, executable, shares, stop, target,
-    creds.mode, 'pending_entry', clientId, clientId, JSON.stringify(candidate));
+  let journal;
+  try {
+    // Renew immediately before the all-synchronous reservation → journal →
+    // dispatch handoff. Once the durable row says pending_entry, this worker
+    // proceeds to the broker POST without another lease gap that could create
+    // an intent that was never dispatched.
+    requireCandlestickExecutionLease(userId, leaseToken);
+    journal = db.prepare(`INSERT INTO candlestick_trade_log
+      (user_id,symbol,direction,entry_price,shares,stop_price,target_price,mode,status,entry_order_id,entry_client_order_id,setup_json,signal_bar_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, candidate.direction, executable, shares, stop, target,
+      finalCreds.mode, 'entry_intent', clientId, clientId, JSON.stringify(candidate), signalBarAt);
+    attachCandlestickSignalReservation(userId, symbol, signalBarAt, journal.lastInsertRowid);
+  } catch (error) {
+    releaseCandlestickSignalReservation(userId, symbol, signalBarAt);
+    throw error;
+  }
   const order = {
     symbol, qty: String(shares), side: candlestickSide(candidate.direction), type: 'market', time_in_force: 'gtc',
     client_order_id: clientId, order_class: 'bracket',
@@ -6489,41 +6653,191 @@ async function executeCandlestickEntry(userId, symbol, source = 'manual') {
   beginAlpacaOrderRequest(userId);
   try {
     const submitted = await alpacaFetchFor(userId, 'candlestick', '/v2/orders', { method: 'POST', body: JSON.stringify(order) });
-    db.prepare('UPDATE candlestick_trade_log SET entry_order_id=? WHERE id=?').run(submitted?.id || clientId, journal.lastInsertRowid);
+    requireCandlestickExecutionLease(userId, leaseToken);
+    db.prepare(`UPDATE candlestick_trade_log SET status='pending_entry',entry_order_id=? WHERE id=?`)
+      .run(submitted?.id || clientId, journal.lastInsertRowid);
     return { ok: true, source, order: submitted, candidate, tradeId: journal.lastInsertRowid };
   } finally { endAlpacaOrderRequest(userId); }
 }
-async function reconcileCandlestickTrades(userId) {
+async function requestCandlestickProtectionCancellation(userId, trade, parent, summary, leaseToken) {
+  const cancellationIds = [
+    ...(summary?.parentActive && String(parent?.status || '').toLowerCase() !== 'pending_cancel' && parent?.id ? [parent.id] : []),
+    ...((summary?.activeLegs || [])
+      .filter(leg => String(leg?.status || '').toLowerCase() !== 'pending_cancel')
+      .map(leg => leg?.id).filter(Boolean)),
+  ];
+  if ((summary?.activeLegs || []).some(leg => !leg?.id) || (summary?.parentActive && !parent?.id)) {
+    throw new Error('Broker reported a live unprotected bracket order without a cancellable order ID.');
+  }
+  requireCandlestickExecutionLease(userId, leaseToken);
+  db.prepare(`UPDATE candlestick_trade_log SET status='rescue_cancel_intent',exit_reason=? WHERE id=?`)
+    .run('Missing broker stop/target protection; cancellation requested before emergency exit', trade.id);
+  // Every known live order is already pending cancellation. Do not POST a
+  // duplicate DELETE; retain the durable pending state and await terminal
+  // confirmation on the next broker snapshot.
+  if (!cancellationIds.length) {
+    db.prepare(`UPDATE candlestick_trade_log SET status='rescue_cancel_pending',exit_reason=? WHERE id=?`)
+      .run('Waiting for broker-confirmed parent and child cancellations before emergency exit', trade.id);
+    return;
+  }
+  for (const orderId of [...new Set(cancellationIds)]) {
+    await alpacaFetchFor(userId, 'candlestick', `/v2/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+  }
+  requireCandlestickExecutionLease(userId, leaseToken);
+  db.prepare(`UPDATE candlestick_trade_log SET status='rescue_cancel_pending',exit_reason=? WHERE id=?`)
+    .run('Waiting for broker-confirmed parent and child cancellations before emergency exit', trade.id);
+}
+async function requestCandlestickProtectiveExit(userId, trade, leaseToken) {
+  requireCandlestickExecutionLease(userId, leaseToken);
+  const position = await candlestickPosition(userId, trade.symbol);
+  const quantity = Math.abs(Number(position?.qty));
+  if (!(quantity > 0)) throw new Error('Broker did not return a closable unprotected position.');
+  // A broker-confirmed rejected/canceled rescue order may be safely replaced.
+  // Any ambiguous attempt keeps its original durable client ID for lookup.
+  const clientId = trade.status === 'exit_failed'
+    ? `cndl_exit_${trade.user_id}_${trade.symbol}_${Date.now()}`.slice(0, 48)
+    : (trade.exit_client_order_id || `cndl_exit_${trade.user_id}_${trade.symbol}_${Date.now()}`.slice(0, 48));
+  // A durable intent means dispatch has not yet been confirmed. If the process
+  // dies before/during POST, reconciliation can retry this exact client ID;
+  // Alpaca's client-order uniqueness prevents a second rescue close.
+  requireCandlestickExecutionLease(userId, leaseToken);
+  db.prepare(`UPDATE candlestick_trade_log SET status='exit_intent',exit_client_order_id=?,exit_order_id=?,exit_reason=?,
+    exit_requested_at=datetime('now') WHERE id=?`)
+    .run(clientId, clientId, 'Missing broker stop/target protection; emergency exit requested', trade.id);
+  const order = {
+    symbol: trade.symbol, qty: String(quantity),
+    side: Number(position.qty) < 0 ? 'buy' : 'sell',
+    type: 'market', time_in_force: 'day', client_order_id: clientId,
+  };
+  beginAlpacaOrderRequest(userId);
+  try {
+    const submitted = await alpacaFetchFor(userId, 'candlestick', '/v2/orders', { method: 'POST', body: JSON.stringify(order) });
+    requireCandlestickExecutionLease(userId, leaseToken);
+    db.prepare(`UPDATE candlestick_trade_log SET status='pending_exit',exit_order_id=? WHERE id=?`)
+      .run(submitted?.id || clientId, trade.id);
+    return submitted;
+  } finally { endAlpacaOrderRequest(userId); }
+}
+async function closeCandlestickTradeIfFlat(userId, trade, reason, leaseToken) {
+  const position = await candlestickPosition(userId, trade.symbol);
+  if (position && Math.abs(Number(position.qty)) > 0) return false;
+  const realized = candlestickRealizedPnl(trade);
+  if (!realized || !(realized.quantity > 0)) return false;
+  requireCandlestickExecutionLease(userId, leaseToken);
+  db.prepare(`UPDATE candlestick_trade_log SET status='closed',exit_price=?,pnl=?,exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+    .run(realized.averageExit, realized.pnl, reason, trade.id);
+  return true;
+}
+async function reconcileCandlestickTrades(userId, leaseToken = null) {
   const open = db.prepare(`SELECT * FROM candlestick_trade_log WHERE user_id=?
-    AND status IN ('pending_entry','open','pending_exit') ORDER BY id`).all(userId);
+    AND status IN ('entry_intent','entry_unknown','pending_entry','open','protection_pending','rescue_cancel_intent','rescue_cancel_pending','exit_intent','pending_exit','exit_unknown','exit_failed') ORDER BY id`).all(userId);
   const events = [];
   for (const trade of open) {
     try {
-      const path = trade.entry_order_id === trade.entry_client_order_id
-        ? `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`
-        : `/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`;
-      const parent = await alpacaFetchFor(userId, 'candlestick', path);
-      if (trade.status === 'pending_entry') {
-        // A canceled or partially-filled parent can still leave a real
-        // position. Broker fill quantity, never the parent status alone,
-        // decides whether the durable journal becomes an open lot.
-        if (Number(parent.filled_qty) > 0 && Number(parent.filled_avg_price) > 0) {
-          db.prepare(`UPDATE candlestick_trade_log SET status='open',entry_price=?,shares=?,entry_order_id=? WHERE id=?`)
-            .run(+parent.filled_avg_price, +parent.filled_qty, parent.id, trade.id);
-          events.push({ id: trade.id, event: parent.status === 'filled' ? 'entry fill confirmed' : `partial entry fill confirmed (${parent.status})` });
-        } else if (['canceled','rejected','expired'].includes(parent.status)) {
-          db.prepare(`UPDATE candlestick_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
-            .run(`Entry ${parent.status} by broker`, trade.id);
-          events.push({ id: trade.id, event: `entry ${parent.status}` });
+      requireCandlestickExecutionLease(userId, leaseToken);
+      if (trade.status === 'exit_intent') {
+        try {
+          const knownExit = await alpacaFetchFor(userId, 'candlestick', candlestickOrderLookupPath(trade.exit_order_id, trade.exit_client_order_id));
+          requireCandlestickExecutionLease(userId, leaseToken);
+          db.prepare(`UPDATE candlestick_trade_log SET status='pending_exit',exit_order_id=? WHERE id=?`)
+            .run(knownExit?.id || trade.exit_order_id, trade.id);
+          events.push({ id: trade.id, event: 'rescue exit broker order recovered' });
+        } catch (error) {
+          if (error.alpacaStatus === 404) {
+            // It may never have left the process. Retry the same client ID only:
+            // broker-level idempotency prevents a duplicate market close.
+            await requestCandlestickProtectiveExit(userId, trade, leaseToken);
+            events.push({ id: trade.id, event: 'rescue exit intent re-dispatched with the same client ID' });
+          } else throw error;
         }
         continue;
       }
-      const leg = (parent.legs || []).find(item => item.status === 'filled' && Number(item.filled_qty) > 0 && Number(item.filled_avg_price) > 0);
-      if (leg) {
-        const exit = Number(leg.filled_avg_price), qty = Number(leg.filled_qty);
-        db.prepare(`UPDATE candlestick_trade_log SET status='closed',exit_price=?,pnl=?,exit_reason=?,closed_at=datetime('now') WHERE id=?`)
-          .run(exit, candlestickPnl(trade, exit, qty), leg.type === 'limit' ? 'Broker target fill' : 'Broker protective stop fill', trade.id);
-        events.push({ id: trade.id, event: 'protective fill confirmed' });
+      if (trade.status === 'pending_exit' || trade.status === 'exit_unknown') {
+        let exit;
+        try {
+          exit = await alpacaFetchFor(userId, 'candlestick', candlestickOrderLookupPath(trade.exit_order_id, trade.exit_client_order_id));
+        } catch (error) {
+          if (error.alpacaStatus === 404) {
+            // A POST timeout and a temporarily unavailable client-order lookup
+            // are indistinguishable. Hold capacity and wait; submitting another
+            // market close here could reverse an already-accepted exit.
+            db.prepare(`UPDATE candlestick_trade_log SET status='exit_unknown',exit_reason=? WHERE id=?`)
+              .run('Emergency exit outcome is awaiting broker confirmation; no replacement order will be sent', trade.id);
+            events.push({ id: trade.id, event: 'emergency exit outcome remains unknown' });
+            continue;
+          }
+          throw error;
+        }
+        if (Number(exit.filled_qty) > 0 && Number(exit.filled_avg_price) > 0) {
+          recordCandlestickExitFill(trade, exit, 'Emergency exit fill');
+          if (await closeCandlestickTradeIfFlat(userId, trade, 'Emergency exit fill confirmed', leaseToken)) {
+            events.push({ id: trade.id, event: 'unprotected position exit confirmed' });
+          } else {
+            events.push({ id: trade.id, event: 'partial emergency exit fill confirmed; residual position remains protected by reconciliation' });
+          }
+        } else if (['canceled','rejected','expired'].includes(String(exit.status).toLowerCase())) {
+          db.prepare(`UPDATE candlestick_trade_log SET status='exit_failed',exit_reason=? WHERE id=?`)
+            .run(`Emergency exit ${String(exit.status).toLowerCase()} by broker; reconciliation will retry`, trade.id);
+          events.push({ id: trade.id, event: `emergency exit ${exit.status}` });
+        }
+        continue;
+      }
+      let parent;
+      try {
+        parent = await alpacaFetchFor(userId, 'candlestick', candlestickOrderLookupPath(trade.entry_order_id, trade.entry_client_order_id));
+      } catch (error) {
+        if (trade.status === 'entry_intent' && error.alpacaStatus === 404) {
+          requireCandlestickExecutionLease(userId, leaseToken);
+          db.prepare(`UPDATE candlestick_trade_log SET status='entry_unknown',exit_reason=? WHERE id=?`)
+            .run('Entry intent was not found at broker; no stale entry will be re-submitted automatically', trade.id);
+          events.push({ id: trade.id, event: 'entry intent outcome unknown; capacity remains reserved' });
+          continue;
+        }
+        throw error;
+      }
+      const positionForProtection = await candlestickPosition(userId, trade.symbol);
+      const remainingQuantity = positionForProtection && Math.abs(Number(positionForProtection.qty)) > 0
+        ? Math.abs(Number(positionForProtection.qty)) : null;
+      const summary = summarizeCandlestickBrokerOrder(parent, {
+        direction: trade.direction, symbol: trade.symbol, targetPrice: trade.target_price, stopPrice: trade.stop_price, remainingQuantity,
+      });
+      if (summary.exitFills.length) {
+        summary.exitFills.forEach(leg => recordCandlestickExitFill(trade, leg, leg.type === 'limit' ? 'Broker target fill' : 'Broker protective stop fill'));
+        const reason = summary.exitFills.some(leg => leg.type === 'limit') ? 'Broker target fill confirmed' : 'Broker protective stop fill confirmed';
+        if (await closeCandlestickTradeIfFlat(userId, trade, reason, leaseToken)) {
+          events.push({ id: trade.id, event: 'protective fill confirmed' });
+          continue;
+        } else {
+          events.push({ id: trade.id, event: 'partial protective fill confirmed; residual position remains open' });
+        }
+      }
+      if (summary.hasEntryFill) {
+        const nextStatus = summary.protection.complete ? 'open' : 'protection_pending';
+        db.prepare(`UPDATE candlestick_trade_log SET status=?,entry_price=?,shares=?,entry_order_id=?,
+          protection_grace_until=COALESCE(protection_grace_until,datetime('now','+30 seconds')) WHERE id=?`)
+          .run(nextStatus, summary.filledAveragePrice, summary.filledQty, parent.id, trade.id);
+        // A fully filled protective leg may have flattened the lot (handled
+        // above). When it was only partial, continue validating protection for
+        // the residual instead of letting its historical fill suppress rescue.
+        const residualSummary = summary.exitFills.length ? { ...summary, exitFills: [] } : summary;
+        if (needsUnprotectedExit(residualSummary, trade.protection_grace_until)) {
+          const cancelAction = cancellationAction(summary, trade.status);
+          if (cancelAction === 'submit_or_retry_cancel') {
+              await requestCandlestickProtectionCancellation(userId, trade, parent, summary, leaseToken);
+              events.push({ id: trade.id, event: 'missing protection; conflicting bracket orders canceled before emergency exit' });
+          } else if (cancelAction === 'parent_terminal') {
+            await requestCandlestickProtectiveExit(userId, { ...trade, entry_order_id: parent.id }, leaseToken);
+            events.push({ id: trade.id, event: 'missing protection after parent terminal state; emergency exit submitted' });
+          } else {
+            events.push({ id: trade.id, event: 'waiting for broker-confirmed parent cancellation before emergency exit' });
+          }
+        } else {
+          events.push({ id: trade.id, event: summary.protection.complete ? 'entry and bracket protection confirmed' : 'entry fill awaiting bracket protection' });
+        }
+      } else if (['canceled','rejected','expired'].includes(summary.parentStatus)) {
+          db.prepare(`UPDATE candlestick_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+            .run(`Entry ${summary.parentStatus} by broker`, trade.id);
+        events.push({ id: trade.id, event: `entry ${summary.parentStatus}` });
       }
     } catch (error) { events.push({ id: trade.id, error: error.message }); }
   }
@@ -6746,9 +7060,11 @@ app.post('/api/candlestick/execute', requireAuth, async (req, res) => {
   const symbol = String(req.body?.symbol || '').toUpperCase();
   if (!/^[A-Z0-9.-]{1,12}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
   if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
-  try { res.json(await executeCandlestickEntry(userId, symbol)); }
+  const lease = acquireCandlestickExecutionLease(userId);
+  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another UltraBot3 execution cycle is still reconciling this account.' }); }
+  try { res.json(await executeCandlestickEntry(userId, symbol, 'manual', lease)); }
   catch (error) { res.status(error.alpacaTransient ? 503 : 400).json({ error: error.message, candidate: error.candidate || null, reconciliationRequired: true }); }
-  finally { releaseBotLock(userId); }
+  finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
 });
 
 app.get('/api/candlestick/trades', requireAuth, (req, res) => {
@@ -6759,12 +7075,14 @@ app.get('/api/candlestick/trades', requireAuth, (req, res) => {
 app.post('/api/candlestick/reconcile', requireAuth, async (req, res) => {
   const userId = req.session.userId;
   if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
+  const lease = acquireCandlestickExecutionLease(userId);
+  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another UltraBot3 execution cycle is still reconciling this account.' }); }
   try {
-    const reconciled = await reconcileCandlestickTrades(userId);
+    const reconciled = await reconcileCandlestickTrades(userId, lease);
     const trades = db.prepare('SELECT * FROM candlestick_trade_log WHERE user_id=? ORDER BY timestamp DESC LIMIT 50').all(userId);
     res.json({ ok: true, reconciled, trades });
   } catch (error) { res.status(400).json({ error: error.message }); }
-  finally { releaseBotLock(userId); }
+  finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
 });
 
 app.get('/api/candlestick/backtest', requireAuth, async (req, res) => {
@@ -6812,20 +7130,22 @@ setInterval(async () => {
       const creds = getAlpacaCreds(userId, 'candlestick');
       const settings = candlestickConfigFor(userId);
       if (!creds || (creds.mode === 'live' && !settings.liveArmed) || !acquireBotLock(userId)) continue;
+      const lease = acquireCandlestickExecutionLease(userId);
+      if (!lease) { releaseBotLock(userId); continue; }
       try {
         // Reconciliation is always-on: entries are bounded to the market
         // window, but broker-confirmed fill recovery cannot wait for the page
         // to be open or for tomorrow's entry session.
-        await reconcileCandlestickTrades(userId);
+        await reconcileCandlestickTrades(userId, lease);
         if (!isMarketOpen()) continue;
         const candidates = (await Promise.all(CANDLESTICK_WATCHLIST.slice(0, settings.config.maxSymbols)
           .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
         saveCandlestickCandidates(userId, candidates);
         const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-        if (candidate) await executeCandlestickEntry(userId, candidate.symbol, 'server-scheduler');
+        if (candidate) await executeCandlestickEntry(userId, candidate.symbol, 'server-scheduler', lease);
       } catch (error) {
         console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
-      } finally { releaseBotLock(userId); }
+      } finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
     }
   } finally { candlestickSchedulerRunning = false; }
 }, 60 * 1000);

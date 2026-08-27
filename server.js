@@ -445,6 +445,19 @@ db.prepare(`
   )
 `).run();
 
+// Momentum used to retain its execution switch and every scanner threshold only
+// in localStorage.  Persist them beside the other strategy settings so a browser
+// closing cannot silently turn an enabled strategy into an inert one.
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS momentum_settings (
+    user_id     INTEGER PRIMARY KEY,
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT    NOT NULL DEFAULT '{}',
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`).run();
+
 // ── Security migration: retire a source-disclosed bootstrap account ──────────
 // This is deliberately one-way. It runs after every automation table exists,
 // so the legacy account cannot retain an enabled execution control.
@@ -3668,6 +3681,67 @@ const PMH_DEFAULT_SYMBOLS = [
   'AAPL','NVDA','AMD','TSLA','PLTR','SOFI','HOOD','MARA','IONQ','SMCI','COIN','QQQ','SPY',
   ...SCREENSHOT_STOCK_LIBRARY,
 ];
+// Broader discovery defaults deliberately retain the hard execution safeguards:
+// a current price, real liquidity, broker tradability, completed/fresh
+// price-action evidence, structural invalidation, market hours, risk sizing,
+// duplicate prevention, and broker-held exits are still mandatory.
+const DEFAULT_MOMENTUM_CONFIG = Object.freeze({
+  positionMode: 'pct',
+  positionValue: 15,
+  maxTradesPerDay: 5,
+  maxDailyLoss: 500,
+  minPrice: 1,
+  maxPrice: 100,
+  minGainPercent: 2,
+  minRelVol: 1.5,
+  requireNewsCatalyst: false,
+  maxFloat: 100_000_000,
+  minVolume: 100_000,
+  minScore: 2,
+  stopPercent: 5,
+  takeProfitPercent: 10,
+  minRR: 2,
+  emaFast: 9,
+  emaSlow: 21,
+  universeMode: 'alpaca',
+});
+function sanitizeMomentumExecutionConfig(input = {}) {
+  const config = { ...DEFAULT_MOMENTUM_CONFIG };
+  const numericBounds = {
+    positionValue: [1, 1_000_000],
+    maxTradesPerDay: [1, 50],
+    maxDailyLoss: [1, 1_000_000],
+    minPrice: [0.01, 10_000],
+    maxPrice: [0.01, 10_000],
+    minGainPercent: [-50, 500],
+    minRelVol: [0.1, 100],
+    maxFloat: [100_000, 10_000_000_000],
+    minVolume: [1_000, 10_000_000_000],
+    minScore: [0, 7],
+    stopPercent: [0.1, 25],
+    takeProfitPercent: [0.1, 100],
+    minRR: [1, 10],
+    emaFast: [2, 100],
+    emaSlow: [3, 300],
+  };
+  for (const [key, [min, max]] of Object.entries(numericBounds)) {
+    const value = Number(input[key]);
+    if (Number.isFinite(value)) config[key] = Math.min(max, Math.max(min, value));
+  }
+  config.maxPrice = Math.max(config.minPrice, config.maxPrice);
+  config.emaSlow = Math.max(config.emaFast + 1, config.emaSlow);
+  config.positionMode = input.positionMode === 'fixed' ? 'fixed' : 'pct';
+  config.requireNewsCatalyst = input.requireNewsCatalyst === true;
+  config.universeMode = input.universeMode === 'curated' ? 'curated' : 'alpaca';
+  return config;
+}
+function momentumConfigFor(userId) {
+  const row = db.prepare('SELECT enabled,config_json FROM momentum_settings WHERE user_id=?').get(userId);
+  let saved = {};
+  try { saved = row?.config_json ? JSON.parse(row.config_json) : {}; } catch (_) {}
+  return { enabled: !!row?.enabled, config: sanitizeMomentumExecutionConfig(saved) };
+}
+
 const MASTER_UNIVERSE = [
   // ── Mega-cap tech ──────────────────────────────────────────────────────────
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','PLTR','COIN',
@@ -5159,6 +5233,201 @@ app.get('/api/momentum/universe', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/momentum/settings', requireAuth, (req, res) => {
+  const settings = momentumConfigFor(req.session.userId);
+  res.set('Cache-Control', 'no-store').json(settings);
+});
+
+app.put('/api/momentum/settings', requireAuth, (req, res) => {
+  const config = sanitizeMomentumExecutionConfig(req.body?.config || {});
+  const enabled = req.body?.enabled === true;
+  db.prepare(`
+    INSERT INTO momentum_settings (user_id,enabled,config_json,updated_at)
+    VALUES (?,?,?,datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      enabled=excluded.enabled,config_json=excluded.config_json,updated_at=excluded.updated_at
+  `).run(req.session.userId, enabled ? 1 : 0, JSON.stringify(config));
+  res.json({ ok: true, enabled, config });
+});
+
+function momentumRowFromQuote(symbol, quote, config) {
+  const price = Number(quote?.regularMarketPrice);
+  const change = Number(quote?.regularMarketChangePercent ?? 0);
+  const volume = Number(quote?.regularMarketVolume ?? 0);
+  const averageVolume = Number(quote?.averageDailyVolume3Month ?? quote?.averageDailyVolume10Day ?? 0);
+  const relVol = averageVolume > 0 ? volume / averageVolume : null;
+  const floatShares = Number(quote?.floatShares);
+  const row = {
+    symbol,
+    price,
+    change,
+    volume,
+    relVol,
+    floatShares: Number.isFinite(floatShares) && floatShares > 0 ? floatShares : null,
+  };
+  if (!(price >= config.minPrice && price <= config.maxPrice)) return { eligible: false, reason: 'price outside configured range', row };
+  if (!(change >= config.minGainPercent)) return { eligible: false, reason: 'daily momentum below threshold', row };
+  if (!(volume >= config.minVolume)) return { eligible: false, reason: 'absolute volume below threshold', row };
+  if (!(relVol >= config.minRelVol)) return { eligible: false, reason: 'relative volume below threshold', row };
+  if (row.floatShares != null && row.floatShares > config.maxFloat) return { eligible: false, reason: 'float above configured maximum', row };
+  let score = 0;
+  if (change >= 2) score++;
+  if (change >= 10) score++;
+  if (change >= 30) score++;
+  if (relVol >= 1.5) score++;
+  if (relVol >= 5) score++;
+  if (row.floatShares != null && row.floatShares < 5_000_000) score++;
+  return { eligible: score >= config.minScore, reason: score >= config.minScore ? null : 'scanner score below threshold', row: { ...row, score } };
+}
+
+async function buildMomentumCandidate(userId, symbol, config) {
+  const sym = String(symbol || '').toUpperCase();
+  const quote = await yf.quote(sym, {}, { validateResult: false });
+  const basic = momentumRowFromQuote(sym, quote, config);
+  if (!basic.eligible) return { symbol: sym, eligible: false, stage: 'SCANNER', reason: basic.reason, ...basic.row };
+  // The scheduler does not trade on a scanner score alone.  It must obtain a
+  // newly completed 5-minute structural setup with VWAP, volume, relative
+  // strength, and invalidation evidence from the server-owned safety gate.
+  const priceAction = await evaluateMomentumEntryPriceAction(userId, sym, 'momentum');
+  if (!priceAction?.eligible || priceAction.direction !== 'LONG_ONLY') {
+    return {
+      symbol: sym, eligible: false, stage: 'PRICE_ACTION',
+      reason: (priceAction?.reasons || ['fresh structural evidence unavailable']).slice(0, 2).join(' '),
+      ...basic.row, priceAction,
+    };
+  }
+  return { symbol: sym, eligible: true, stage: 'READY', ...basic.row, priceAction };
+}
+
+function recordMomentumEntryIntent(userId, candidate, entryPrice, shares, stopPrice, clientOrderId, mode, takeProfitPct) {
+  const result = db.prepare(`
+    INSERT INTO bot_trade_log
+      (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_pct,entry_order_id,strategy)
+    VALUES (?,?,?,?,?,'open',?,?,?,'momentum')
+  `).run(userId, candidate.symbol, entryPrice, shares, mode, stopPrice, takeProfitPct, clientOrderId);
+  return db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(result.lastInsertRowid);
+}
+
+async function reconcileMomentumTrades(userId) {
+  const trades = db.prepare(`
+    SELECT * FROM bot_trade_log
+    WHERE user_id=? AND status='open' AND (strategy IS NULL OR strategy='momentum')
+  `).all(userId);
+  for (const trade of trades) {
+    const clientOrderId = String(trade.entry_order_id || '');
+    if (!clientOrderId) continue;
+    try {
+      const order = await alpacaFetchFor(userId, 'momentum',
+        `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}&nested=true`);
+      const status = String(order?.status || '').toLowerCase();
+      const filledEntry = Number(order?.filled_avg_price);
+      const filledShares = Number(order?.filled_qty);
+      if (status === 'filled' && filledEntry > 0 && filledShares > 0) {
+        db.prepare('UPDATE bot_trade_log SET entry_price=?,shares=? WHERE id=?')
+          .run(filledEntry, filledShares, trade.id);
+      } else if (['canceled', 'rejected', 'expired'].includes(status) && !(filledShares > 0)) {
+        db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+          .run(`Broker entry ${status}`, trade.id);
+        continue;
+      }
+      const exit = (Array.isArray(order?.legs) ? order.legs : []).find(leg =>
+        String(leg?.side || '').toLowerCase() === 'sell' &&
+        String(leg?.status || '').toLowerCase() === 'filled' &&
+        Number(leg?.filled_avg_price) > 0 && Number(leg?.filled_qty) > 0
+      );
+      if (!exit) continue;
+      const entry = filledEntry > 0 ? filledEntry : Number(trade.entry_price);
+      const quantity = Number(exit.filled_qty);
+      const exitPrice = Number(exit.filled_avg_price);
+      if (!(entry > 0 && quantity > 0 && exitPrice > 0)) continue;
+      db.prepare(`
+        UPDATE bot_trade_log
+        SET entry_price=?,shares=?,exit_price=?,pnl=?,status='closed',
+            pending_exit_order_id=NULL,pending_exit_reason=NULL,
+            exit_reason=?,closed_at=datetime('now')
+        WHERE id=? AND status='open'
+      `).run(
+        entry, quantity, exitPrice, +((exitPrice - entry) * quantity).toFixed(6),
+        String(exit.type || '').startsWith('stop') ? 'Broker stop-loss filled' : 'Broker take-profit filled',
+        trade.id
+      );
+    } catch (error) {
+      // Network failures and ambiguous broker POSTs are intentionally left open
+      // for a later exact-client-order reconciliation; never infer a close.
+      console.warn(`[Momentum] reconciliation deferred for ${trade.symbol}: ${error.message}`);
+    }
+  }
+}
+
+async function executeMomentumEntry(userId, candidate) {
+  const { enabled, config } = momentumConfigFor(userId);
+  if (!enabled) throw new Error('Momentum automation is disabled in persisted settings.');
+  const creds = getAlpacaCreds(userId, 'momentum');
+  if (!creds) throw new Error('Connect the dedicated Momentum Alpaca account first.');
+  if (!isMarketOpen()) throw new Error('Market is closed for Momentum automation.');
+  await assertAlpacaTradableEquity(userId, candidate.symbol, { fresh: true, scope: 'momentum' });
+  const fresh = await buildMomentumCandidate(userId, candidate.symbol, config);
+  if (!fresh.eligible) throw new Error(`Fresh Momentum verification blocked entry: ${fresh.reason}`);
+  const slots = await getOpenSlots(userId, 'Momentum', 'momentum');
+  if (!canReserveEntryUnits(slots)) throw new Error('Position limit reached or account data is unavailable.');
+  if (slots.positions.some(position => position.symbol === fresh.symbol) ||
+      slots.openOrders.some(order => order.symbol === fresh.symbol)) {
+    throw new Error(`${fresh.symbol} already has a position or pending broker order.`);
+  }
+  const daily = db.prepare(`
+    SELECT COUNT(*) AS entries,
+      COALESCE(SUM(CASE WHEN status='closed' AND pnl < 0 THEN -pnl ELSE 0 END),0) AS losses
+    FROM bot_trade_log
+    WHERE user_id=? AND (strategy IS NULL OR strategy='momentum')
+      AND date(timestamp,'localtime')=date('now','localtime') AND status<>'void'
+  `).get(userId);
+  if (Number(daily.entries) >= config.maxTradesPerDay) throw new Error('Momentum daily trade limit reached.');
+  if (Number(daily.losses) >= config.maxDailyLoss) throw new Error('Momentum daily loss limit reached.');
+  const [account, liveQuote] = await Promise.all([
+    alpacaFetchFor(userId, 'momentum', '/v2/account'),
+    fetchLiveQuote(fresh.symbol, userId, 'momentum'),
+  ]);
+  const entryPrice = Number(liveQuote?.price ?? liveQuote?.regularMarketPrice);
+  const equity = Number(account?.equity);
+  if (!(entryPrice > 0 && equity > 0)) throw new Error('Fresh executable price or account equity is unavailable.');
+  const structuralStop = Number(fresh.priceAction?.invalidation);
+  const structuralSlPct = structuralStop > 0 && structuralStop < entryPrice
+    ? (entryPrice - structuralStop) / entryPrice * 100 : null;
+  const slPct = structuralSlPct == null ? config.stopPercent : Math.min(config.stopPercent, structuralSlPct);
+  const tpPct = config.takeProfitPercent;
+  if (!(slPct > 0 && tpPct > 0 && tpPct / slPct >= config.minRR)) {
+    throw new Error('Configured target does not meet the required protected risk/reward ratio.');
+  }
+  const amount = config.positionMode === 'fixed' ? config.positionValue : equity * config.positionValue / 100;
+  const riskPctOfEquity = amount * slPct / 100 / equity * 100;
+  if (!(amount > 0) || riskPctOfEquity > 5) throw new Error('Momentum position would exceed the 5% equity risk cap.');
+  const shares = Math.floor(amount / entryPrice);
+  if (shares < 1) throw new Error('Configured position size is below one share at the current price.');
+  const clientOrderId = `mt-${userId}-${fresh.symbol}-${Date.now().toString(36)}`.slice(0, 48);
+  const stopPrice = +(entryPrice * (1 - slPct / 100)).toFixed(2);
+  const targetPrice = +(entryPrice * (1 + tpPct / 100)).toFixed(2);
+  const trade = recordMomentumEntryIntent(userId, fresh, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
+  try {
+    const order = await alpacaFetchFor(userId, 'momentum', '/v2/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        symbol: fresh.symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day',
+        order_class: 'bracket',
+        take_profit: { limit_price: targetPrice.toFixed(2) },
+        stop_loss: { stop_price: stopPrice.toFixed(2) },
+        client_order_id: clientOrderId,
+      }),
+    });
+    return { trade, order, candidate: fresh };
+  } catch (error) {
+    if (!error.alpacaTransient) {
+      db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+        .run(`Broker entry was not accepted: ${error.message}`.slice(0, 200), trade.id);
+    }
+    throw error;
+  }
+}
+
 app.get('/api/bots/status', requireAuth, async (req, res) => {
   try {
     const spyLevels = await getSPYLevels();
@@ -5175,6 +5444,35 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
        FROM auto_trade_log WHERE user_id = ?
        ORDER BY created_at DESC LIMIT 10`
     ).all(req.session.userId);
+    const userId = req.session.userId;
+    const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
+    const botSettings = [
+      { name: 'momentum', enabled: momentumConfigFor(userId).enabled, scope: 'momentum' },
+      { name: 'opening-momentum', enabled: !!pmhSetting?.enabled && isBotEnabled(userId, 'pmh'), scope: 'pmh' },
+      { name: 'candlestick', enabled: candlestickConfigFor(userId).enabled, scope: 'candlestick' },
+    ];
+    const botReadiness = await Promise.all(botSettings.map(async bot => {
+      const creds = getAlpacaCreds(userId, bot.scope);
+      if (!creds) return { ...bot, connected: false, executable: false, mode: null, reason: 'Dedicated broker account is not connected.' };
+      try {
+        const brokerAccount = await alpacaFetchFor(userId, bot.scope, '/v2/account');
+        const accountActive = String(brokerAccount?.status || '').toUpperCase() === 'ACTIVE';
+        return {
+          ...bot,
+          connected: true,
+          mode: creds.mode,
+          accountActive,
+          executable: bot.enabled && accountActive && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live'),
+          reason: !bot.enabled ? 'Strategy is disabled.'
+            : !accountActive ? 'Broker account is not active.'
+            : bot.scope === 'candlestick' && creds.mode === 'live' && !candlestickConfigFor(userId).liveArmed
+              ? 'Live candlestick authorization is not armed.'
+              : null,
+        };
+      } catch (error) {
+        return { ...bot, connected: true, executable: false, mode: creds.mode, reason: `Broker readiness check failed: ${error.message}` };
+      }
+    }));
 
     res.json({
       universeSize: MASTER_UNIVERSE.length,
@@ -5185,6 +5483,7 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
              equity: account ? parseFloat(account.equity || 0) : null,
              patternDayTrader: false },
       recentTrades,
+      botReadiness,
       timestamp: new Date().toISOString()
     });
   } catch (e) {
@@ -5193,19 +5492,19 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
 });
 
 // ── Bot toggle helpers ─────────────────────────────────────────────────────────
-const BOT_NAMES = ['countertrend', 'pmh'];
+const BOT_NAMES = ['countertrend', 'pmh', 'momentum', 'candlestick'];
 
 function isBotEnabled(userId, botName) {
   const row = db.prepare('SELECT enabled FROM bot_toggles WHERE user_id=? AND bot_name=?').get(userId, botName);
   // PMH is deliberately opt-in; an account connection must never silently
   // activate a new opening-range strategy.
-  return row ? !!row.enabled : botName === 'pmh' ? false : true;
+  return row ? !!row.enabled : ['pmh', 'momentum', 'candlestick'].includes(botName) ? false : true;
 }
 
 // GET /api/bots/toggles — returns { bounce: true, volatility_expansion: false, … }
 app.get('/api/bots/toggles', requireAuth, (req, res) => {
   const rows = db.prepare('SELECT bot_name, enabled FROM bot_toggles WHERE user_id=?').all(req.session.userId);
-  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, b === 'pmh' ? false : true]));
+  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, ['pmh', 'momentum', 'candlestick'].includes(b) ? false : true]));
   rows.forEach(r => { map[r.bot_name] = !!r.enabled; });
   res.json(map);
 });
@@ -7217,7 +7516,11 @@ setInterval(async () => {
         const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
         let config = DEFAULT_PMH_CONFIG;
         try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
-        const candidates = (await Promise.all(PMH_DEFAULT_SYMBOLS.slice(0, 20)
+        const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'pmh' });
+        const rotation = nextAlpacaCatalogRotation(catalogEntry, PMH_DEFAULT_SYMBOLS, {
+          strategy: 'pmh-scheduler', limit: 25, priorityLimit: 13, rotationLimit: 12,
+        });
+        const candidates = (await Promise.all(rotation.symbols
           .map(symbol => buildPmhCandidate(userId, symbol, config).catch(() => null)))).filter(Boolean);
         const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
         if (candidate) await executePmhEntry(userId, candidate.symbol, 'server-scheduler');
@@ -7226,6 +7529,73 @@ setInterval(async () => {
       } finally { releaseBotLock(userId); }
     }
   } finally { pmhSchedulerRunning = false; }
+}, 60 * 1000);
+
+// Momentum is server-owned for the same reason as PMH and UltraBot3: an enabled
+// strategy must continue scanning, reconciling broker fills, and retaining its
+// broker-held protection after the browser disconnects. Discovery is bounded per
+// cycle but rotates across the complete broker catalog, so no fixed top-three
+// shortlist can starve the rest of the tradable universe.
+let momentumSchedulerRunning = false;
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+setInterval(async () => {
+  if (momentumSchedulerRunning) return;
+  momentumSchedulerRunning = true;
+  try {
+    const users = db.prepare('SELECT user_id FROM momentum_settings WHERE enabled=1').all();
+    for (const { user_id: userId } of users) {
+      const creds = getAlpacaCreds(userId, 'momentum');
+      if (!creds) continue;
+      try {
+        // Exact client-order-ID reconciliation is always-on and is deliberately
+        // outside the entry-hours guard. A failed data request never means an
+        // open broker position was closed.
+        await reconcileMomentumTrades(userId);
+        if (!isMarketOpen() || !acquireBotLock(userId)) continue;
+        try {
+          const { config } = momentumConfigFor(userId);
+          const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'momentum' });
+          const rotation = nextAlpacaCatalogRotation(catalogEntry, MASTER_UNIVERSE, {
+            strategy: 'momentum-scheduler', limit: 80, priorityLimit: 20, rotationLimit: 60,
+          });
+          // Quote discovery runs first; only the highest-scoring liquid movers
+          // then consume 5-minute structural-evidence requests.
+          const raw = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
+            try {
+              const quote = await yf.quote(symbol, {}, { validateResult: false });
+              const basic = momentumRowFromQuote(symbol, quote, config);
+              return basic.eligible ? basic.row : null;
+            } catch (_) { return null; }
+          });
+          const shortlist = raw.filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 12);
+          const candidates = (await Promise.all(shortlist
+            .map(row => buildMomentumCandidate(userId, row.symbol, config).catch(error => {
+              console.warn(`[Momentum] ${row.symbol} evidence unavailable: ${error.message}`);
+              return null;
+            })))).filter(Boolean);
+          const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+          if (candidate) await executeMomentumEntry(userId, candidate);
+        } finally {
+          releaseBotLock(userId);
+        }
+      } catch (error) {
+        console.warn(`[Momentum] user ${userId} cycle withheld: ${error.message}`);
+      }
+    }
+  } finally {
+    momentumSchedulerRunning = false;
+  }
 }, 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {

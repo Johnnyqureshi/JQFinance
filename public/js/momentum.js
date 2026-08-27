@@ -61,23 +61,18 @@
       // Daily limits
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
-      // ── 5 PILLARS (hard filters — all must pass) ─────────────────────────
-      // Pillar 1: Price $3–$20 (low-priced volatile small-caps — per profile)
-      minPrice:       3.00,
-      maxPrice:       20.00,
-      // Pillar 2: Daily gain ≥ 10% (intraday momentum already present)
-      minGainPercent: 10.0,
-      // Pillar 3: Relative volume ≥ 5× (heavy market participation)
-      minRelVol:      5.0,
-      // Pillar 4: News catalyst required (breaking headline confirms the move)
-      requireNewsCatalyst: true,
-      // Pillar 5: Float — ideal < 5M shares (scores the supply point);
-      // hard ceiling 10M (anything above is rejected — too much supply)
-      maxFloat:       10_000_000,
+      // Broader discovery gates. Volume, price validity, fresh structural
+      // confirmation, broker tradability, risk, and protected exits remain
+      // mandatory at execution time.
+      minPrice:       1.00,
+      maxPrice:       100.00,
+      minGainPercent: 2.0,
+      minRelVol:      1.5,
+      requireNewsCatalyst: false,
+      maxFloat:       100_000_000,
       // Minimum absolute volume sanity check (independent of pillars)
       minVolume:      100000,
-      // Score threshold: max 7 — all 5 pillars = 6 pts, rvol≥10× adds 1 bonus
-      minScore:       4,
+      minScore:       2,
       // Risk
       stopPercent:    5,        // 5% stop — backtest shows 2% is too tight for gap-up plays; avg intraday LOW is -6.6% from open
       takeProfitPercent: 10,    // broker-protected target above entry
@@ -93,20 +88,6 @@
     load() {
       try {
         const saved = JSON.parse(localStorage.getItem('mtConfig') || '{}');
-        // Migration: old default minPrice was $2 — profile is now $3–$20.
-        // Only migrate the exact legacy default so intentional custom values survive.
-        if (saved.minPrice === 2 && !saved._migratedPrice3) {
-          saved.minPrice = 3;
-          saved._migratedPrice3 = true;
-          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
-        }
-        // Migration reversal: a brief interim build raised the ceiling to 20M —
-        // policy is 5M ideal / 10M max, so restore anyone that migration touched.
-        if (saved._migratedFloat20) {
-          if (saved.maxFloat === 20_000_000) saved.maxFloat = 10_000_000;
-          delete saved._migratedFloat20;
-          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
-        }
         // Older browser settings used an RSI exit rather than a broker-held
         // target. Retain every other user choice but move those settings to the
         // conservative default target used by the current protected bracket.
@@ -167,11 +148,11 @@
      * Apply momentum pre-filters — the 5 pillars as hard gates.
      * Mirrors the filter() method in scanner.py.
      *
-     * Pillar 1: Price $2–$20
-     * Pillar 2: Daily gain ≥ 10%
-     * Pillar 3: Relative volume ≥ 5× (configurable)
+      * Price $1–$100
+      * Daily gain ≥ 2%
+      * Relative volume ≥ 1.5× (configurable)
      * Pillar 4: News catalyst — checked AFTER Pass 2 in scan()
-     * Pillar 5: Float < 10M shares — if float is known, reject over-limit; if unknown, allow through
+      * Float < 100M shares — if float is known, reject over-limit; if unknown, allow through
      */
     filter(results, cfg) {
       return results.filter(r => {
@@ -222,12 +203,14 @@
       const rvol  = r.relVol  ?? 0;
       const float = r.float ?? r.floatSh ?? null;
 
-      // ── PILLAR 2: MOMENTUM ────────────────────────────────────────────────
-      if (gain >= 10) { score += 2; reasons.push('Strong momentum (≥ 10%)'); }
+        // ── MOMENTUM ─────────────────────────────────────────────────────────
+        if (gain >= 2)  { score += 1; reasons.push('Positive momentum (≥ 2%)'); }
+        if (gain >= 10) { score += 1; reasons.push('Strong momentum (≥ 10%)'); }
       if (gain >= 30) { score += 1; reasons.push('Full profile: already up 30% on the day'); }
 
-      // ── PILLAR 3: RELATIVE VOLUME ─────────────────────────────────────────
-      if (rvol >= 5)  { score += 1; reasons.push('Relative volume ≥ 5×'); }
+        // ── VOLUME ───────────────────────────────────────────────────────────
+        if (rvol >= 1.5) { score += 1; reasons.push('Relative volume ≥ 1.5×'); }
+        if (rvol >= 5)  { score += 1; reasons.push('Relative volume ≥ 5×'); }
       if (rvol >= 10) { score += 1; reasons.push('Extreme volume surge ≥ 10×'); }
 
       // ── PILLAR 4: NEWS CATALYST (set by scan() Pass 2) ───────────────────
@@ -347,9 +330,9 @@
     getSignal(row) {
       const score = row.momentumScore ?? 0;
       let signal, badge;
-      if (score >= 5)      { signal = 'STRONG BUY'; badge = 'mt-signal-strong'; }
-      else if (score >= 3) { signal = 'BUY';        badge = 'mt-signal-buy';    }
-      else if (score >= 2) { signal = 'WATCH';      badge = 'mt-signal-watch';  }
+       if (score >= 5)      { signal = 'STRONG BUY'; badge = 'mt-signal-strong'; }
+       else if (score >= 2) { signal = 'BUY';        badge = 'mt-signal-buy';    }
+       else if (score >= 1) { signal = 'WATCH';      badge = 'mt-signal-watch';  }
       else                 { signal = 'AVOID';      badge = 'mt-signal-avoid';  }
       return { signal, badge, score };
     },
@@ -371,24 +354,24 @@
       // ── 5 PILLARS — show pass/fail + points earned ────────────────────────
       return [
         {
-          label:  '① Price $3 – $20',
+          label:  '① Price $1 – $100',
           value:  price ? '$' + price.toFixed(2) : '--',
-          note:   price >= 3 && price <= 20 ? '✓ Hard filter passed' : '✗ Outside $3–$20',
-          status: price >= 3 && price <= 20 ? 'good' : 'bad',
+          note:   price >= 1 && price <= 100 ? '✓ Default range passed' : '✗ Outside $1–$100',
+          status: price >= 1 && price <= 100 ? 'good' : 'bad',
           pillar: true,
         },
         {
-          label:  '② Daily Gain ≥ 10% (30% = full profile)',
+          label:  '② Daily Gain ≥ 2% (10% / 30% add quality points)',
           value:  gain != null ? (gain >= 0 ? '+' : '') + gain.toFixed(2) + '%' : '--',
-          note:   gain >= 30 ? '+3 pts: full profile — up 30% on the day' : gain >= 10 ? '+2 pts: strong momentum' : '✗ Needs ≥ 10%',
-          status: gain >= 30 ? 'good' : gain >= 10 ? 'ok' : 'bad',
+          note:   gain >= 30 ? '+3 pts: full profile — up 30% on the day' : gain >= 10 ? '+2 pts: strong momentum' : gain >= 2 ? '+1 pt: positive momentum' : '✗ Needs ≥ 2%',
+          status: gain >= 30 ? 'good' : gain >= 2 ? 'ok' : 'bad',
           pillar: true,
         },
         {
-          label:  '③ Relative Volume ≥ 5×',
+          label:  '③ Relative Volume ≥ 1.5×',
           value:  rvol ? rvol.toFixed(2) + '×' : '--',
-          note:   rvol >= 10 ? '+1 pt + bonus: extreme surge ≥ 10×' : rvol >= 5 ? '+1 pt: ≥ 5× confirmed' : '✗ Needs ≥ 5×',
-          status: rvol >= 10 ? 'good' : rvol >= 5 ? 'ok' : 'bad',
+          note:   rvol >= 10 ? '+3 pts: extreme surge' : rvol >= 5 ? '+2 pts: strong participation' : rvol >= 1.5 ? '+1 pt: active participation' : '✗ Needs ≥ 1.5×',
+          status: rvol >= 5 ? 'good' : rvol >= 1.5 ? 'ok' : 'bad',
           pillar: true,
         },
         {
@@ -401,14 +384,14 @@
           pillar: true,
         },
         {
-          label:  '⑤ Float < 5M ideal · 10M max (supply)',
+          label:  '⑤ Float < 5M ideal · 100M max (supply)',
           value:  floatM ?? 'Unknown',
           note:   float == null
             ? 'Float data unavailable (Yahoo)'
             : float < 5_000_000  ? '+1 pt: low supply (< 5M) ✓'
-            : float < 10_000_000 ? 'Passes ceiling but no point (5–10M)'
-            : '✗ Float too high (> 10M)',
-          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 10_000_000 ? 'ok' : 'bad',
+            : float < 100_000_000 ? 'Passes ceiling but no low-float point'
+            : '✗ Float too high (> 100M)',
+          status: float == null ? 'ok' : float < 5_000_000 ? 'good' : float < 100_000_000 ? 'ok' : 'bad',
           pillar: true,
         },
       ];
@@ -993,11 +976,42 @@
         // new positions until the user explicitly starts automation.
         if (this.botPositions.size) this._startPositionMonitor();
       });
-      AlpacaClient.checkConnection().then(() => {
+      this._loadServerSettings().finally(() => AlpacaClient.checkConnection().then(() => {
         this._renderStatus();
         this._renderBotStatus();
         this.run();
+      }));
+    },
+
+    async _loadServerSettings() {
+      try {
+        const response = await fetch('/api/momentum/settings', { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) return;
+        const settings = await response.json();
+        if (settings?.config) {
+          this.config = { ...MomentumConfig.defaults, ...settings.config };
+          MomentumConfig.save(this.config);
+        }
+        this.botEnabled = settings?.enabled === true;
+        this._renderConfigPanel();
+        this._renderBotStatus();
+      } catch (error) {
+        console.warn('[Momentum] Could not load server settings:', error.message);
+      }
+    },
+
+    async _saveServerSettings() {
+      const response = await fetch('/api/momentum/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled: this.botEnabled, config: this.config }),
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Settings request failed (${response.status})`);
+      this.config = { ...MomentumConfig.defaults, ...(data.config || this.config) };
+      this.botEnabled = data.enabled === true;
+      MomentumConfig.save(this.config);
     },
 
     async _loadValidationReport() {
@@ -1080,7 +1094,9 @@
         const meta = MomentumScanner._lastUniverseMeta;
         this._setScanStatus('done', results.length, '', 0, meta?.count || 0, meta);
         this._startCountdown();
-        if (this.botEnabled && !this._flattenInProgress) this._autoTrade(results).catch(() => {});
+        // The browser renders the scanner only. The server scheduler is the
+        // sole execution owner, so closing this page cannot suspend entries or
+        // exits and an open tab cannot create a second execution path.
       } catch (err) {
         this._setScanStatus('error', 0, err.message);
       }
@@ -2846,22 +2862,25 @@
     },
 
     // ── Bot toggle — enable/disable auto-trading ──────────────────────────
-    _toggleBot() {
-      if (!this.botEnabled && !AlpacaClient.connected) {
-        this.addLog('BOT', 'Cannot start', 'Connect your Alpaca account first', 'err');
-        return;
-      }
+    async _toggleBot() {
       if (!this.botEnabled) {
         // Starting automation must honor the values the trader can currently
         // see, even when they did not separately press Apply Settings.
         this.config = this._readConfig();
-        MomentumConfig.save(this.config);
       }
       this.botEnabled = !this.botEnabled;
+      try {
+        await this._saveServerSettings();
+      } catch (error) {
+        this.botEnabled = !this.botEnabled;
+        this.addLog('BOT', 'Settings not saved', error.message, 'err');
+        this._renderBotStatus();
+        return;
+      }
       this._renderBotStatus();
       if (this.botEnabled) {
         this.addLog('BOT', '▶ Auto-trading ON',
-          `${AlpacaClient.mode.toUpperCase()} account · bracket orders · scan every ${this.REFRESH_SEC}s`, 'ok');
+          `Server-owned ${AlpacaClient.mode.toUpperCase()} cycle · broker-held bracket exits · continues when this page closes`, 'ok');
         this._startPositionMonitor();
         this.run(); // trigger an immediate scan + trade cycle
       } else {
@@ -2901,6 +2920,7 @@
       $('mtRefreshBtn')?.addEventListener('click', () => {
         this.config = this._readConfig();
         MomentumConfig.save(this.config);
+        this._saveServerSettings().catch(error => this.addLog('CONFIG', 'Settings not saved', error.message, 'err'));
         this.selectedRow = null;
         this.run();
       });
@@ -2918,6 +2938,7 @@
       $('mtApplyConfig')?.addEventListener('click', () => {
         this.config = this._readConfig();
         MomentumConfig.save(this.config);
+        this._saveServerSettings().catch(error => this.addLog('CONFIG', 'Settings not saved', error.message, 'err'));
         this.selectedRow = null;
         const c = this.config;
         this.addLog('CONFIG', 'Settings updated',
@@ -2929,6 +2950,7 @@
       $('mtResetConfig')?.addEventListener('click', () => {
         this.config = { ...MomentumConfig.defaults };
         MomentumConfig.save(this.config);
+        this._saveServerSettings().catch(error => this.addLog('CONFIG', 'Settings not saved', error.message, 'err'));
         this._renderConfigPanel();
         this.addLog('CONFIG', 'Reset to defaults', '', 'info');
         this.run();
@@ -2978,7 +3000,7 @@
 
 
       // Bot ON/OFF toggle
-      $('mtBotToggle')?.addEventListener('click', () => this._toggleBot());
+      $('mtBotToggle')?.addEventListener('click', () => { this._toggleBot(); });
       $('atCloseAllPos')?.addEventListener('click', () => this._flattenAllPositions());
 
       // Clear log

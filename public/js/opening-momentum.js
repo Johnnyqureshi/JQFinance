@@ -15,7 +15,7 @@
     maxRiskPerSharePct:8, maxTradePrice:15, maxTradesPerDay:3, maxDailyLoss:500, partialTargetR:2, partialPercent:50,
     requireMarketStrength:true, requireRelativeStrength:true, requireSectorStrength:false,
   };
-  let config = { ...defaults }, enabled = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
+  let config = { ...defaults }, enabled = false, liveAutomationPaused = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
   let connectionBound = false;
 
   function readConfig() {
@@ -74,7 +74,9 @@
     btn.classList.toggle('mt-bot-toggle--off', !enabled);
     bar.classList.toggle('mt-bot-bar--on', enabled);
     $('pmhBotStatus').textContent = enabled
-      ? 'Automation is active: only server-confirmed TRADE ELIGIBLE setups can submit.'
+      ? (liveAutomationPaused
+        ? 'Paper automation is available. PMH live submissions are paused for safety validation.'
+        : 'Automation is active: only server-confirmed TRADE ELIGIBLE setups can submit.')
       : 'Automation is off. Scans remain read-only.';
   }
   function statusClass(status) {
@@ -219,7 +221,8 @@
     await refreshBrokerStatus();
     try {
       const saved = await request('/api/opening-momentum/settings');
-      enabled = saved.enabled; putConfig(saved.config); renderBot();
+    enabled = saved.enabled; liveAutomationPaused = saved.liveAutomationPaused === true;
+    putConfig(saved.config); renderBot();
     } catch (e) { $('pmhBotStatus').textContent = 'Sign in and connect Alpaca to use Opening Momentum.'; }
     await refreshTrades(); await scan(false);
   }

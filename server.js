@@ -3759,6 +3759,17 @@ const PMH_DEFAULT_SYMBOLS = [
   'AAPL','NVDA','AMD','TSLA','PLTR','SOFI','HOOD','MARA','IONQ','SMCI','COIN','QQQ','SPY',
   ...SCREENSHOT_STOCK_LIBRARY,
 ];
+// PMH remains available for paper validation, but live submissions are paused
+// until its broker-race and partial-fill evidence is complete. An explicit
+// environment override is required to re-enable live execution.
+const PMH_LIVE_AUTOMATION_PAUSED = process.env.PMH_LIVE_AUTOMATION_PAUSED !== 'false';
+
+function pmhLivePauseReason(userId) {
+  const creds = getAlpacaCreds(userId, 'pmh');
+  return PMH_LIVE_AUTOMATION_PAUSED && creds?.mode === 'live'
+    ? 'PMH live automation is paused for safety validation. Paper mode remains available.'
+    : null;
+}
 // Broader discovery defaults deliberately retain the hard execution safeguards:
 // a current price, real liquidity, broker tradability, completed/fresh
 // price-action evidence, structural invalidation, market hours, risk sizing,
@@ -4197,7 +4208,11 @@ app.get('/api/opening-momentum/settings', requireAuth, (req, res) => {
   const row = db.prepare('SELECT enabled, config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
   let config = DEFAULT_PMH_CONFIG;
   try { config = { ...DEFAULT_PMH_CONFIG, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
-  res.json({ enabled: !!row?.enabled, config });
+  res.json({
+    enabled: !!row?.enabled,
+    config,
+    liveAutomationPaused: PMH_LIVE_AUTOMATION_PAUSED,
+  });
 });
 
 app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
@@ -4269,6 +4284,8 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
   if (!isBotEnabled(userId, 'pmh')) throw pmhError('Opening Momentum automation is disabled.', 409);
   const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
   if (!pmhSetting?.enabled) throw pmhError('Opening Momentum strategy is disabled in its persisted settings.', 409);
+  const livePause = pmhLivePauseReason(userId);
+  if (livePause) throw pmhError(livePause, 409);
   let clientOrderId = null;
   let submittedOrders = [];
   try {
@@ -7665,6 +7682,9 @@ async function runPmhCycle(userId, source = 'server-scheduler') {
   if (!settings?.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
   const creds = getAlpacaCreds(userId, 'pmh');
   if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  if (PMH_LIVE_AUTOMATION_PAUSED && creds.mode === 'live') {
+    return { ...outcome, status: 'paused_live', reason: 'PMH live automation is paused for safety validation. Paper mode remains available.' };
+  }
   if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
   try {
     const reconciliation = await reconcilePmhTrades(userId);

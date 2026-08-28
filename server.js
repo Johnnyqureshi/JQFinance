@@ -55,6 +55,10 @@ const {
   canReserveEntryUnits,
   isLikelyCryptoSymbol,
 } = require('./lib/broker-universe');
+const {
+  CANDLESTICK_WATCHLIST,
+  nextCandlestickWatchlistBatch,
+} = require('./lib/candlestick-watchlist');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -6941,10 +6945,7 @@ const CANDLESTICK_DEFAULTS = Object.freeze({
   maxPositions: 1,
   maxSymbols: 16,
 });
-const CANDLESTICK_WATCHLIST = [...new Set([
-  'AAPL','AMD','COIN','HOOD','IONQ','MARA','MSFT','NVDA','PLTR','QQQ','SMCI','SOFI','SPY','TSLA',
-  ...SCREENSHOT_STOCK_LIBRARY,
-])];
+const candlestickWatchlistRotation = new Map();
 const candleBarTime = bar => {
   const raw = bar?.t ?? bar?.timestamp;
   const n = typeof raw === 'number' ? (raw < 10_000_000_000 ? raw * 1000 : raw) : Date.parse(raw || '');
@@ -7551,19 +7552,35 @@ app.put('/api/candlestick/settings', requireAuth, (req, res) => {
 
 app.get('/api/candlestick/scan', requireAuth, async (req, res) => {
   const { config } = candlestickConfigFor(req.session.userId);
-  const requested = String(req.query.symbols || CANDLESTICK_WATCHLIST.join(',')).split(',')
-    .map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, config.maxSymbols);
+  const requestedParam = String(req.query.symbols || '').trim();
+  const requested = requestedParam
+    ? requestedParam.split(',').map(s => s.trim().toUpperCase())
+      .filter(s => /^[A-Z0-9.-]{1,12}$/.test(s)).slice(0, config.maxSymbols)
+    : null;
+  const batch = requested
+    ? { symbols: requested, batch: null, totalBatches: null }
+    : nextCandlestickWatchlistBatch(CANDLESTICK_WATCHLIST, candlestickWatchlistRotation, String(req.session.userId), config.maxSymbols);
   if (!getAlpacaCreds(req.session.userId, 'candlestick')) {
     return res.status(400).json({ error: 'Connect the dedicated Candlestick Automation Alpaca account to scan.' });
   }
-  const results = await Promise.all(requested.map(symbol => buildCandlestickCandidate(req.session.userId, symbol, config)
+  const results = await Promise.all(batch.symbols.map(symbol => buildCandlestickCandidate(req.session.userId, symbol, config)
     .catch(error => ({ symbol, status: 'NO TRADE', eligible: false, score: 0, reasons: [`Market data unavailable: ${error.message}`] }))));
   saveCandlestickCandidates(req.session.userId, results);
   const funnel = results.reduce((acc, row) => {
     const key = row.eligible ? 'eligible' : row.direction ? 'rejected' : 'noPattern';
     acc[key]++; return acc;
   }, { eligible: 0, rejected: 0, noPattern: 0 });
-  res.set('Cache-Control', 'no-store').json({ strategy: 'candlestick-automation-v1', results, config, funnel, evaluatedAt: new Date().toISOString() });
+  res.set('Cache-Control', 'no-store').json({
+    strategy: 'candlestick-automation-v1', results, config, funnel,
+    coverage: {
+      watchlistSize: CANDLESTICK_WATCHLIST.length,
+      scanned: batch.symbols.length,
+      rotationBatch: batch.batch,
+      totalBatches: batch.totalBatches,
+      note: requested ? 'Explicit symbols requested.' : 'UltraBot3 rotates through its complete dedicated watchlist across scan cycles.',
+    },
+    evaluatedAt: new Date().toISOString(),
+  });
 });
 
 app.post('/api/candlestick/execute', requireAuth, async (req, res) => {
@@ -7648,13 +7665,16 @@ async function runCandlestickCycle(userId, source = 'server-scheduler') {
     const events = await reconcileCandlestickTrades(userId, lease);
     outcome.reconciled = events.length;
     if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
-    const candidates = (await Promise.all(CANDLESTICK_WATCHLIST.slice(0, settings.config.maxSymbols)
+    const batch = nextCandlestickWatchlistBatch(
+      CANDLESTICK_WATCHLIST, candlestickWatchlistRotation, String(userId), settings.config.maxSymbols
+    );
+    const candidates = (await Promise.all(batch.symbols
       .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
     saveCandlestickCandidates(userId, candidates);
     const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-    if (!candidate) return { ...outcome, status: 'no_entry' };
+    if (!candidate) return { ...outcome, status: 'no_entry', scanned: batch.symbols.length };
     await executeCandlestickEntry(userId, candidate.symbol, source, lease);
-    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol };
+    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol, scanned: batch.symbols.length };
   } catch (error) {
     console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
     return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };

@@ -5587,13 +5587,17 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
       try {
         const brokerAccount = await alpacaFetchFor(userId, bot.scope, '/v2/account');
         const accountActive = String(brokerAccount?.status || '').toUpperCase() === 'ACTIVE';
+        const livePaused = bot.scope === 'pmh' && creds.mode === 'live' && PMH_LIVE_AUTOMATION_PAUSED;
         return {
           ...bot,
           connected: true,
           mode: creds.mode,
           accountActive,
-          executable: bot.enabled && accountActive && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live'),
+          livePaused,
+          executable: bot.enabled && accountActive && !livePaused
+            && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live'),
           reason: !bot.enabled ? 'Strategy is disabled.'
+            : livePaused ? 'PMH live automation is paused for safety validation. Paper mode remains available.'
             : !accountActive ? 'Broker account is not active.'
             : bot.scope === 'candlestick' && creds.mode === 'live' && !candlestickConfigFor(userId).liveArmed
               ? 'Live candlestick authorization is not armed.'

@@ -1,0 +1,3672 @@
+{
+  "generatedAt": "deterministic",
+  "mode": "PAPER_SIMULATION_ONLY",
+  "liveOrdersPlaced": false,
+  "total": 69,
+  "passed": 69,
+  "failed": 0,
+  "blocked": 6,
+  "results": [
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "full-fill",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "full-fill",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-full-fill-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "partial-fill",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "partial-fill",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-partial-fill-1",
+          "status": "partially_filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 5
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 2
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "multiple-partial-fills",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "multiple-partial-fills",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-multiple-partial-fills-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "delayed-fill",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "delayed-fill",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-delayed-fill-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "broker-timeout",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "broker-timeout",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-broker-timeout-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "broker-response-timeout",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "broker-response-timeout",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-broker-response-timeout-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "rejected-order",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "rejected-order",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-rejected-order-1",
+          "status": "rejected",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 2
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "cancelled-order",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "cancelled-order",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-cancelled-order-1",
+          "status": "canceled",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "cancel-request-timeout",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "cancel-request-timeout",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-cancel-request-timeout-1",
+          "status": "canceled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "lost-broker-response",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "lost-broker-response",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-lost-broker-response-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "duplicate-broker-response",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "duplicate-broker-response",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-duplicate-broker-response-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "restart-pending",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "restart-pending",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-restart-pending-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "restart-partial",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "restart-partial",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-restart-partial-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "restart-holding",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "restart-holding",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-restart-holding-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "restart-protected",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "restart-protected",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-restart-protected-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "reconnect",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "reconnect",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-reconnect-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "browser-closed-exit",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "browser-closed-exit",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-browser-closed-exit-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "logged-out-exit",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "logged-out-exit",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-logged-out-exit-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "position-at-startup",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "position-at-startup",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 4
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "order-at-startup",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "order-at-startup",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "unexpected-broker-state",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "unexpected-broker-state",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "cross-bot-isolation",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "cross-bot-isolation",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-cross-bot-isolation-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "momentum",
+      "symbol": "MOMQA",
+      "scenario": "duplicate-entry",
+      "initialState": {
+        "strategy": "momentum",
+        "symbol": "MOMQA",
+        "scenario": "duplicate-entry",
+        "accountId": "paper-account-momentum"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "momentum-entry-duplicate-entry-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "MOMQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "full-fill",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "full-fill",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-full-fill-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-full-fill-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "partial-fill",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "partial-fill",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-partial-fill-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-partial-fill-2",
+          "status": "partially_filled",
+          "filledQty": 2
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 7
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 7,
+          "position": 7,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 7,
+          "position": 7,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "multiple-partial-fills",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "multiple-partial-fills",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-multiple-partial-fills-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-multiple-partial-fills-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "delayed-fill",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "delayed-fill",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-delayed-fill-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-delayed-fill-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "broker-timeout",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "broker-timeout",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-broker-timeout-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-broker-timeout-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "broker-response-timeout",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "broker-response-timeout",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-broker-response-timeout-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-broker-response-timeout-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "rejected-order",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "rejected-order",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-rejected-order-1",
+          "status": "rejected",
+          "filledQty": 0
+        },
+        {
+          "clientOrderId": "pmh-entry-rejected-order-2",
+          "status": "rejected",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "cancelled-order",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "cancelled-order",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-cancelled-order-1",
+          "status": "canceled",
+          "filledQty": 0
+        },
+        {
+          "clientOrderId": "pmh-entry-cancelled-order-2",
+          "status": "canceled",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "cancel-request-timeout",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "cancel-request-timeout",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-cancel-request-timeout-1",
+          "status": "canceled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-cancel-request-timeout-2",
+          "status": "canceled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 10
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "lost-broker-response",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "lost-broker-response",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-lost-broker-response-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-lost-broker-response-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "duplicate-broker-response",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "duplicate-broker-response",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-duplicate-broker-response-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-duplicate-broker-response-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "restart-pending",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "restart-pending",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-restart-pending-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-restart-pending-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 7
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "restart-partial",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "restart-partial",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-restart-partial-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-restart-partial-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 7,
+          "position": 7,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 7,
+          "position": 7,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "restart-holding",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "restart-holding",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-restart-holding-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-restart-holding-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "restart-protected",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "restart-protected",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-restart-protected-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-restart-protected-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "reconnect",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "reconnect",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-reconnect-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-reconnect-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 12
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "browser-closed-exit",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "browser-closed-exit",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-browser-closed-exit-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-browser-closed-exit-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "logged-out-exit",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "logged-out-exit",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-logged-out-exit-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-logged-out-exit-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "position-at-startup",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "position-at-startup",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 4
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "order-at-startup",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "order-at-startup",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "unexpected-broker-state",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "unexpected-broker-state",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "cross-bot-isolation",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "cross-bot-isolation",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-cross-bot-isolation-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-cross-bot-isolation-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 7
+    },
+    {
+      "strategy": "pmh",
+      "symbol": "PMHQA",
+      "scenario": "duplicate-entry",
+      "initialState": {
+        "strategy": "pmh",
+        "symbol": "PMHQA",
+        "scenario": "duplicate-entry",
+        "accountId": "paper-account-pmh"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "pmh-entry-duplicate-entry-1",
+          "status": "filled",
+          "filledQty": 5
+        },
+        {
+          "clientOrderId": "pmh-entry-duplicate-entry-2",
+          "status": "filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "PMHQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "separate-protected-lot"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "full-fill",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "full-fill",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-full-fill-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "partial-fill",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "partial-fill",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-partial-fill-1",
+          "status": "partially_filled",
+          "filledQty": 5
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 5
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 2
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "multiple-partial-fills",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "multiple-partial-fills",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-multiple-partial-fills-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "delayed-fill",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "delayed-fill",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-delayed-fill-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "broker-timeout",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "broker-timeout",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-broker-timeout-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "broker-response-timeout",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "broker-response-timeout",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-broker-response-timeout-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "rejected-order",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "rejected-order",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-rejected-order-1",
+          "status": "rejected",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 2
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "cancelled-order",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "cancelled-order",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-cancelled-order-1",
+          "status": "canceled",
+          "filledQty": 0
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "void"
+        }
+      ],
+      "finalState": "void",
+      "expectedState": "void",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "cancel-request-timeout",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "cancel-request-timeout",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-cancel-request-timeout-1",
+          "status": "canceled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "lost-broker-response",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "lost-broker-response",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "lost-after-acceptance",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-lost-broker-response-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "duplicate-broker-response",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "duplicate-broker-response",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-duplicate-broker-response-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "restart-pending",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "restart-pending",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-restart-pending-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 0,
+          "position": 0,
+          "state": "idle"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "restart-partial",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "restart-partial",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-restart-partial-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 5,
+          "position": 5,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "restart-holding",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "restart-holding",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-restart-holding-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "restart-protected",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "restart-protected",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-restart-protected-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 10
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        }
+      ],
+      "finalState": "open",
+      "expectedState": "open",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 3
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "reconnect",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "reconnect",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-reconnect-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 20,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 8
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "browser-closed-exit",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "browser-closed-exit",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-browser-closed-exit-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "logged-out-exit",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "logged-out-exit",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-logged-out-exit-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 4
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "position-at-startup",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "position-at-startup",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 4
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "order-at-startup",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "order-at-startup",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "unexpected-broker-state",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "unexpected-broker-state",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": false,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "not-active",
+        "target": "not-active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [],
+      "finalState": "blocked",
+      "expectedState": "blocked",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 1
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "cross-bot-isolation",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "cross-bot-isolation",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-cross-bot-isolation-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 5
+    },
+    {
+      "strategy": "candlestick",
+      "symbol": "CANQA",
+      "scenario": "duplicate-entry",
+      "initialState": {
+        "strategy": "candlestick",
+        "symbol": "CANQA",
+        "scenario": "duplicate-entry",
+        "accountId": "paper-account-candlestick"
+      },
+      "orderSubmitted": true,
+      "brokerResponse": "accepted",
+      "partialFillStatus": [
+        {
+          "clientOrderId": "candlestick-entry-duplicate-entry-1",
+          "status": "filled",
+          "filledQty": 10
+        }
+      ],
+      "positionState": {
+        "symbol": "CANQA",
+        "qty": 0
+      },
+      "protectionState": {
+        "stop": "active",
+        "target": "active",
+        "runner": "not-applicable"
+      },
+      "reconciliationResult": [
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 10,
+          "state": "open"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        },
+        {
+          "event": "reconciliation",
+          "entryFilled": 10,
+          "position": 0,
+          "state": "closed"
+        }
+      ],
+      "finalState": "closed",
+      "expectedState": "closed",
+      "status": "PASS",
+      "errorDetails": null,
+      "eventCount": 6
+    }
+  ],
+  "readiness": [
+    {
+      "strategy": "momentum",
+      "status": "NOT READY",
+      "simulatedScenarios": 23,
+      "simulatedPassed": 23,
+      "simulatedFailed": 0,
+      "blocked": [
+        "REAL_PAPER_BROKER_EXECUTION",
+        "PRODUCTION_OBSERVABILITY_REVIEW"
+      ],
+      "reason": "Simulation passed, but a real paper-account run and production observability review remain unverified."
+    },
+    {
+      "strategy": "pmh",
+      "status": "NOT READY",
+      "simulatedScenarios": 23,
+      "simulatedPassed": 23,
+      "simulatedFailed": 0,
+      "blocked": [
+        "REAL_PAPER_BROKER_EXECUTION",
+        "PRODUCTION_OBSERVABILITY_REVIEW"
+      ],
+      "reason": "Simulation passed, but a real paper-account run and production observability review remain unverified."
+    },
+    {
+      "strategy": "candlestick",
+      "status": "NOT READY",
+      "simulatedScenarios": 23,
+      "simulatedPassed": 23,
+      "simulatedFailed": 0,
+      "blocked": [
+        "REAL_PAPER_BROKER_EXECUTION",
+        "PRODUCTION_OBSERVABILITY_REVIEW"
+      ],
+      "reason": "Simulation passed, but a real paper-account run and production observability review remain unverified."
+    }
+  ],
+  "criticalRemainingIssues": [
+    "No external Alpaca paper-account execution was performed by this offline suite.",
+    "Production deployment observability and operator readiness still require a controlled paper run."
+  ]
+}

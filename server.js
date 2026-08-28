@@ -25,7 +25,11 @@ const {
   buildHistoricalForecast,
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
-const { sanitizeCandlestickExecutionConfig, calculateCandlestickEntryCapacity } = require('./lib/candlestick-execution-policy');
+const {
+  sanitizeCandlestickExecutionConfig,
+  calculateCandlestickEntryCapacity,
+  buildCandlestickBracketOrder,
+} = require('./lib/candlestick-execution-policy');
 const { summarizeCandlestickBrokerOrder, needsUnprotectedExit, cancellationAction } = require('./lib/candlestick-reconciliation');
 const {
   DEFAULT_CANDLE_CONFIG,
@@ -6995,7 +6999,6 @@ function saveCandlestickCandidates(userId, candidates) {
   const save = db.transaction(rows => rows.forEach(row => statement.run(userId, row.symbol, JSON.stringify(row))));
   save(candidates);
 }
-function candlestickSide(direction) { return direction === 'SHORT' ? 'sell_short' : 'buy'; }
 function candlestickPnl(trade, exitPrice, qty) {
   const multiplier = trade.direction === 'SHORT' ? -1 : 1;
   return +((Number(exitPrice) - Number(trade.entry_price)) * Number(qty) * multiplier).toFixed(6);
@@ -7145,11 +7148,10 @@ async function executeCandlestickEntry(userId, symbol, source = 'manual', leaseT
     releaseCandlestickSignalReservation(userId, symbol, signalBarAt);
     throw error;
   }
-  const order = {
-    symbol, qty: String(shares), side: candlestickSide(candidate.direction), type: 'market', time_in_force: 'gtc',
-    client_order_id: clientId, order_class: 'bracket',
-    take_profit: { limit_price: target.toFixed(2) }, stop_loss: { stop_price: stop.toFixed(2) },
-  };
+  const order = buildCandlestickBracketOrder({
+    symbol, qty: shares, direction: candidate.direction, clientOrderId: clientId,
+    target, stop,
+  });
   beginAlpacaOrderRequest(userId);
   try {
     const submitted = await alpacaFetchFor(userId, 'candlestick', '/v2/orders', { method: 'POST', body: JSON.stringify(order) });

@@ -1,0 +1,702 @@
+TRADING BOT — FINAL QA, PAPER-TRADING VALIDATION & PRODUCTION-READINESS INSTRUCTIONS
+
+You are now entering the final validation and reliability phase of the trading system.
+
+Do NOT redesign, replace, or materially alter the existing Momentum, PMH, or Candlestick strategies at this stage. The priority is to prove that the current system behaves correctly under realistic trading conditions before trusting it with live capital.
+
+Your job is to systematically address EVERY item below.
+
+⸻
+
+1. HIGHEST PRIORITY: COMPLETE PAPER-TRADING VERIFICATION
+
+Create and execute a comprehensive automated paper-trading test suite covering all three strategies:
+
+* Momentum
+* PMH
+* Candlestick
+
+The tests must simulate realistic broker behavior rather than only successful instant fills.
+
+Required scenarios
+
+Test each bot through:
+
+1. Full order fill
+2. Partial fill
+3. Multiple partial fills
+4. Delayed fill
+5. Broker timeout
+6. Broker response timeout
+7. Rejected order
+8. Cancelled order
+9. Cancel-request timeout
+10. Lost broker response
+11. Duplicate broker response
+12. Process restart while an order is pending
+13. Process restart after an order partially fills
+14. Process restart while holding a position
+15. Process restart while protective orders exist
+16. Recovery after broker/API reconnection
+17. Exit while browser is closed
+18. Exit while user is logged out
+19. Position existing at startup
+20. Order existing at startup
+21. Unexpected broker position/order discovered during reconciliation
+
+Every scenario must produce a deterministic test result.
+
+Required test report
+
+For every test record:
+
+* Strategy
+* Symbol
+* Initial state
+* Order submitted
+* Broker response
+* Partial/full fill status
+* Position state
+* Stop state
+* Target/runner state
+* Reconciliation result
+* Final state
+* Expected state
+* PASS/FAIL
+* Error details if failed
+
+Do not mark a test PASS merely because the application did not crash. Verify that the resulting broker state and internal state agree.
+
+⸻
+
+2. PMH RACE-TESTING
+
+PMH live entries are currently PAUSED.
+
+Keep that pause in place.
+
+The pause must ONLY prevent new PMH live entries.
+
+It must NOT interfere with:
+
+* Existing PMH positions
+* Existing PMH orders
+* Stop protection
+* Stop cancellation
+* Runner exits
+* Broker reconciliation
+* Recovery
+* Journal updates
+
+Create paper tests specifically for PMH:
+
+PMH tests
+
+* Entry
+* Partial fill
+* Stop placement
+* Stop cancellation
+* Runner creation
+* Runner exit
+* Broker timeout
+* Cancel timeout
+* Reconciliation
+* Process restart
+* Browser logout
+* Broker disconnect/reconnect
+* Existing position while PMH entries are paused
+
+Confirm that an existing PMH position continues to be managed correctly even while new PMH entries are disabled.
+
+⸻
+
+3. INTERRUPTED BROKER ORDER RECOVERY
+
+Implement and test robust recovery for:
+
+* Momentum
+* PMH
+* Candlestick
+
+The system must survive:
+
+Scenario A
+
+Order submitted → broker response lost → process continues.
+
+Scenario B
+
+Order submitted → broker response lost → process restarts.
+
+Scenario C
+
+Order submitted → partial fill → process restarts.
+
+Scenario D
+
+Order submitted → complete fill → process restarts before local state updates.
+
+Scenario E
+
+Exit submitted → broker response lost → process restarts.
+
+Scenario F
+
+Cancel submitted → broker response lost → process restarts.
+
+After restart, the system MUST query the broker and reconstruct the actual state.
+
+Never assume:
+
+“No response = no order.”
+
+Instead:
+
+1. Query broker orders.
+2. Query broker positions.
+3. Match orders using persistent client/order IDs.
+4. Reconcile local state.
+5. Restore protection.
+6. Resume management.
+
+⸻
+
+4. IDEMPOTENCY / DUPLICATE-ORDER PROTECTION
+
+A major requirement is preventing duplicate entries.
+
+Before submitting a new entry, check:
+
+* Existing local position
+* Existing broker position
+* Existing open entry order
+* Existing pending order
+* Existing strategy position
+* Recently submitted client order
+* Reconciliation state
+
+If the symbol is already held by the same strategy, DO NOT submit another entry unless the strategy explicitly permits scaling.
+
+If an order submission may have succeeded but the response was lost, DO NOT blindly submit another order.
+
+First reconcile with the broker.
+
+Use persistent unique client/order identifiers wherever supported.
+
+⸻
+
+5. CROSS-BOT ISOLATION
+
+Momentum, PMH, and Candlestick must be completely isolated.
+
+One strategy must NEVER accidentally:
+
+* Cancel another strategy’s order
+* Modify another strategy’s stop
+* Exit another strategy’s position
+* Reconcile another strategy’s order as its own
+* Treat another strategy’s position as its own
+* Duplicate another strategy’s entry
+* Overwrite another strategy’s journal record
+
+Build explicit strategy ownership into order/position state.
+
+Every managed order should have identifiable metadata such as:
+
+* strategy
+* symbol
+* bot/session
+* position identifier
+* client order ID
+* lifecycle state
+
+When reconciling, only modify orders that belong to that strategy.
+
+Also test hostile/unusual broker responses where:
+
+* Orders are returned out of order
+* Multiple strategies trade the same symbol
+* An order appears without local state
+* A local order disappears temporarily
+* Broker returns duplicate records
+* Broker returns delayed status information
+
+⸻
+
+6. MOMENTUM BOT VALIDATION
+
+Do NOT redesign the Momentum strategy.
+
+Instead validate that the existing strategy executes correctly.
+
+Confirm:
+
+* It does NOT skip valid setups.
+* It does NOT enter twice on the same setup.
+* It does NOT duplicate entries for already-held symbols.
+* It respects existing risk controls.
+* It correctly handles partial fills.
+* It correctly handles rejected entries.
+* It correctly handles timeouts.
+* It correctly exits positions.
+* It correctly reconciles after restart.
+
+⸻
+
+7. BROADENED PRICE-ACTION RULES
+
+The broadened price-action rules must be tested using historical/replay and paper-trading scenarios.
+
+Create positive and negative test cases.
+
+Confirm:
+
+* Valid setups are accepted.
+* Invalid setups remain rejected.
+* The broadened rules do not cause uncontrolled over-entry.
+* Scanner signals match strategy eligibility.
+* The execution engine uses the same eligibility rules displayed to the user.
+
+Do not tighten or loosen the strategy merely because a test fails.
+
+First determine whether the failure is:
+
+* Data
+* Scanner
+* Signal generation
+* State management
+* Execution
+* Reconciliation
+* UI
+
+Only modify strategy logic if the existing documented strategy itself is proven incorrect.
+
+⸻
+
+8. SCANNER REGRESSION TESTING
+
+Test the scanner after every relevant change.
+
+Verify:
+
+* Valid stocks are detected.
+* Valid setups are not silently dropped.
+* Duplicate symbols are handled correctly.
+* Stale signals expire correctly.
+* Invalid/stale setups cannot trigger entries.
+* Scanner data timestamps are tracked.
+* Game plans refresh when underlying market conditions materially change.
+
+STALE GAME PLAN PROTECTION
+
+Every game plan should have:
+
+* Creation timestamp
+* Last refresh timestamp
+* Market-data timestamp
+* Expiration/staleness status
+
+If market conditions change materially, invalidate or refresh the game plan rather than allowing an outdated plan to trigger a trade.
+
+Never execute a stale signal simply because it was previously valid.
+
+⸻
+
+9. EXITS MUST WORK WITHOUT THE BROWSER
+
+Trading protection must NOT depend on the browser being open.
+
+Test:
+
+1. User logs out.
+2. Browser closes.
+3. App tab closes.
+4. User’s device disconnects.
+5. Server continues operating.
+6. Broker remains connected.
+
+The broker-protective exit mechanism must continue functioning.
+
+The backend must independently manage:
+
+* Protective stops
+* Runner exits
+* Position reconciliation
+* Broker order monitoring
+* Journal reconciliation
+
+The browser/UI should be considered a monitoring interface, NOT the component responsible for protecting capital.
+
+If broker-native protective orders are available, prefer broker-side protection where appropriate.
+
+⸻
+
+10. LIVE/PAPER MODE SAFETY
+
+The user can select:
+
+* Paper trading
+* Live trading
+
+The application must clearly identify the current environment.
+
+Before submitting an order:
+
+* Verify trading mode.
+* Verify broker connection.
+* Verify account identity/environment.
+* Verify strategy status.
+* Verify symbol eligibility.
+* Verify no duplicate position/order exists.
+* Verify risk controls.
+* Verify order parameters.
+
+Never allow a paper order to accidentally route to the live account.
+
+Never allow a live order to be silently simulated as paper.
+
+⸻
+
+11. RECONCILIATION ENGINE
+
+Build/verify a reliable reconciliation process.
+
+At startup and periodically afterward:
+
+1. Retrieve broker positions.
+2. Retrieve broker open orders.
+3. Retrieve relevant recent orders.
+4. Compare against local database/state.
+5. Identify discrepancies.
+6. Resolve safe discrepancies automatically.
+7. Flag ambiguous discrepancies for user review.
+8. Never create duplicate orders during reconciliation.
+
+Important:
+
+Broker state is authoritative for actual positions and orders.
+
+Local state should track and explain that broker state, not blindly override it.
+
+⸻
+
+12. JOURNALING
+
+Every significant trading lifecycle event must be recorded.
+
+Examples:
+
+* Setup detected
+* Setup rejected
+* Entry submitted
+* Entry partially filled
+* Entry filled
+* Stop submitted
+* Stop cancelled
+* Target reached
+* Runner activated
+* Exit submitted
+* Exit filled
+* Order rejected
+* Broker timeout
+* Reconciliation
+* Recovery
+* Strategy paused
+* Strategy resumed
+
+Each journal entry should include timestamp, strategy, symbol, order/position identifier, event, and reason.
+
+⸻
+
+13. PRODUCT FEATURES STILL PENDING
+
+After reliability testing is functioning, implement the following without destabilizing execution:
+
+A. Headlines in stock detail panel
+
+Add relevant recent headlines with timestamps and source attribution.
+
+Do not allow headlines to directly trigger trades unless explicitly part of a documented strategy.
+
+B. Catalyst scores in scanner
+
+Display a catalyst score with a clear explanation of what contributes to the score.
+
+The score should be informational unless explicitly incorporated into an existing strategy rule.
+
+C. Live bot-session P&L
+
+Display:
+
+* Realized P&L
+* Unrealized P&L
+* Total session P&L
+* Number of trades
+* Winners
+* Losers
+* Win rate
+* Average winner
+* Average loser
+* Current open exposure
+
+P&L must reconcile against broker data.
+
+D. Historical explanations for rejected setups
+
+For every rejected setup, preserve:
+
+* Timestamp
+* Symbol
+* Strategy
+* Signal data
+* Rejection reason
+* Relevant thresholds
+* Market conditions
+
+The user should be able to understand WHY the setup was rejected.
+
+E. Inverse ETF behavior during broad market declines
+
+Validate inverse-ETF handling independently.
+
+Do not assume that a broad-market decline automatically means every inverse ETF is eligible.
+
+Apply the existing strategy’s normal:
+
+* Liquidity
+* Volume
+* Price
+* Spread
+* Signal
+* Risk
+* Execution
+
+requirements.
+
+F. More complete bot controls/readiness status
+
+Create a clear bot readiness panel showing:
+
+* Broker connected
+* Correct trading mode
+* Market status
+* Data feed healthy
+* Scanner healthy
+* Strategy enabled/paused
+* Risk controls active
+* Reconciliation healthy
+* Protective-order monitoring active
+* Last successful broker synchronization
+* Last scanner update
+* Last strategy evaluation
+* Any current blocking errors
+
+⸻
+
+14. READINESS GATES
+
+Do NOT declare the system “live ready” simply because the UI works.
+
+Create explicit readiness gates.
+
+A bot is READY only if:
+
+[ ] Paper tests pass
+[ ] Partial-fill tests pass
+[ ] Timeout tests pass
+[ ] Rejection tests pass
+[ ] Recovery tests pass
+[ ] Restart tests pass
+[ ] Browser-independent exit tests pass
+[ ] Reconciliation tests pass
+[ ] Duplicate-order protection passes
+[ ] Cross-bot isolation passes
+[ ] Scanner regression tests pass
+[ ] Stale-game-plan protection passes
+[ ] Risk controls pass
+[ ] Broker connectivity passes
+[ ] Correct paper/live environment is verified
+
+If any critical safety test fails, show:
+
+NOT READY
+
+and clearly identify the failed test.
+
+⸻
+
+15. AUTOMATED REGRESSION SUITE
+
+Create a repeatable test suite that can be run after future code changes.
+
+The suite should be divided into:
+
+CORE EXECUTION
+
+* Entry
+* Exit
+* Partial fills
+* Stops
+* Runner
+
+BROKER FAILURE
+
+* Timeout
+* Rejection
+* Lost response
+* Disconnect
+* Duplicate response
+
+RECOVERY
+
+* Restart
+* Reconnect
+* Reconciliation
+
+STRATEGY
+
+* Momentum
+* PMH
+* Candlestick
+
+ISOLATION
+
+* Strategy ownership
+* Same-symbol conflicts
+* Cross-bot cancellation protection
+
+SCANNER
+
+* Setup detection
+* Stale signals
+* Game-plan refresh
+
+SAFETY
+
+* Paper/live environment
+* Duplicate entries
+* Position protection
+
+⸻
+
+16. DO NOT HIDE FAILURES
+
+If a test fails, do NOT simply suppress the error.
+
+Show:
+
+* What was expected
+* What actually happened
+* Which component failed
+* Whether broker state or local state was incorrect
+* Whether capital could potentially be exposed
+* Recommended code area for repair
+
+Do not mark a test as PASS because an exception was caught.
+
+⸻
+
+17. IMPLEMENTATION PRIORITY
+
+Follow this exact order:
+
+PRIORITY 1 — SAFETY
+
+1. Paper-trading test harness
+2. Partial fills
+3. Timeouts
+4. Rejections
+5. Recovery
+6. Restart recovery
+7. Broker reconciliation
+8. Browser-independent exits
+9. Duplicate-order prevention
+10. Cross-bot isolation
+
+PRIORITY 2 — STRATEGY VALIDATION
+
+11. Momentum setup validation
+12. PMH validation
+13. Candlestick validation
+14. Broadened price-action validation
+15. Scanner regression testing
+16. Stale game-plan protection
+
+PRIORITY 3 — PRODUCT FEATURES
+
+17. Headlines
+18. Catalyst scores
+19. Live session P&L
+20. Rejected-setup explanations
+21. Inverse-ETF validation
+22. Bot readiness controls
+
+⸻
+
+18. FINAL REQUIREMENT
+
+Do NOT perform another major strategy redesign right now.
+
+The strategies should be treated as the current specification.
+
+The immediate objective is:
+
+PROVE THAT THE EXISTING SYSTEM EXECUTES, RECOVERS, RECONCILES, AND PROTECTS POSITIONS CORRECTLY UNDER REALISTIC PAPER-TRADING CONDITIONS.
+
+Build the necessary automated tests, run them, repair failures, and rerun them.
+
+After completing the work, provide a final QA report containing:
+
+Overall status
+
+READY / NOT READY
+
+Test summary
+
+* Total tests
+* Passed
+* Failed
+* Blocked
+* Not yet tested
+
+By strategy
+
+* Momentum
+* PMH
+* Candlestick
+
+By failure type
+
+* Entry
+* Exit
+* Partial fill
+* Timeout
+* Rejection
+* Recovery
+* Reconciliation
+* Restart
+* Cross-bot isolation
+* Scanner
+* Game-plan staleness
+
+Critical remaining issues
+
+List every unresolved issue.
+
+Live-trading blockers
+
+Explicitly identify anything that MUST be fixed before live trading.
+
+Changes made
+
+List the actual code/system changes made.
+
+Evidence
+
+Provide test IDs/logs/results showing that each critical scenario was actually exercised.
+
+DO NOT claim a test passed unless it was actually executed and verified.
+
+The goal is not to make the system look ready.
+
+The goal is to make the system demonstrably reliable and safe enough to justify moving forward.

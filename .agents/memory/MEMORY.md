@@ -10,3 +10,4 @@
 - [Bot Alpaca account isolation](bot-alpaca-account-isolation.md) — automated strategies use separate broker credentials; live arming resets after every broker identity change.
 - [Historical forecast evidence](historical-forecast-evidence.md) — historical pattern guidance must purge overlapping outcome windows and withhold probabilities for weak samples.
 - [PMH server-side automation scheduler](pmh-server-scheduler.md) — extract a bot's route logic into functions, then add a setInterval scheduler, to make automation survive a closed browser tab.
+- [Broker credential vault](broker-credential-vault.md) — broker keys are encrypted at rest, migrated lazily, and never used as cache keys or response data.

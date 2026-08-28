@@ -40,6 +40,8 @@ const {
 } = require('./lib/opening-momentum-pmh');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
+const { createCredentialVault } = require('./lib/credential-vault');
+const { brokerOrderMatchesIntent } = require('./lib/broker-order-ownership');
 const {
   buildTradableEquityCatalog,
   selectTradableEquityCandidates,
@@ -91,6 +93,8 @@ db.exec(`
     user_id    INTEGER PRIMARY KEY,
     api_key    TEXT    NOT NULL,
     api_secret TEXT    NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
     mode       TEXT    DEFAULT 'paper',
     account_id TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -137,6 +141,7 @@ db.exec(`
     take_profit_pct     REAL,
     entry_order_id      TEXT,
     pending_exit_order_id TEXT,
+    pending_exit_client_order_id TEXT,
     pending_exit_reason TEXT,
     exit_reason         TEXT,
     timestamp           TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -272,6 +277,7 @@ db.exec(`
   `ALTER TABLE bot_trade_log ADD COLUMN take_profit_pct REAL`,
   `ALTER TABLE bot_trade_log ADD COLUMN entry_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_order_id TEXT`,
+  `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_client_order_id TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN pending_exit_reason TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN exit_reason TEXT`,
   `ALTER TABLE bot_trade_log ADD COLUMN strategy TEXT`,
@@ -280,6 +286,12 @@ db.exec(`
   `ALTER TABLE candlestick_trade_log ADD COLUMN signal_bar_at TEXT`,
   `ALTER TABLE candlestick_trade_log ADD COLUMN protection_grace_until TEXT`,
   `ALTER TABLE candlestick_trade_log ADD COLUMN exit_requested_at TEXT`,
+  `ALTER TABLE alpaca_creds ADD COLUMN api_key_enc TEXT`,
+  `ALTER TABLE alpaca_creds ADD COLUMN api_secret_enc TEXT`,
+  `ALTER TABLE bot_alpaca_creds ADD COLUMN api_key_enc TEXT`,
+  `ALTER TABLE bot_alpaca_creds ADD COLUMN api_secret_enc TEXT`,
+  `ALTER TABLE candlestick_alpaca_creds ADD COLUMN api_key_enc TEXT`,
+  `ALTER TABLE candlestick_alpaca_creds ADD COLUMN api_secret_enc TEXT`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_candlestick_trade_signal
   ON candlestick_trade_log (user_id, symbol, signal_bar_at)`).run();
@@ -305,12 +317,14 @@ const paperShadow = createPaperShadow({
           user_id    INTEGER NOT NULL,
           api_key    TEXT    NOT NULL,
           api_secret TEXT    NOT NULL,
+          api_key_enc TEXT,
+          api_secret_enc TEXT,
           mode       TEXT    NOT NULL DEFAULT 'paper',
           PRIMARY KEY (user_id, mode),
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-        INSERT OR IGNORE INTO alpaca_creds_new (user_id, api_key, api_secret, mode)
-          SELECT user_id, api_key, api_secret, COALESCE(mode,'paper') FROM alpaca_creds;
+        INSERT OR IGNORE INTO alpaca_creds_new (user_id, api_key, api_secret, api_key_enc, api_secret_enc, mode)
+          SELECT user_id, api_key, api_secret, api_key_enc, api_secret_enc, COALESCE(mode,'paper') FROM alpaca_creds;
         DROP TABLE alpaca_creds;
         ALTER TABLE alpaca_creds_new RENAME TO alpaca_creds;
       `);
@@ -342,6 +356,8 @@ db.exec(`
     mode       TEXT    NOT NULL CHECK (mode IN ('paper', 'live')),
     api_key    TEXT    NOT NULL,
     api_secret TEXT    NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
     account_id TEXT,
     PRIMARY KEY (user_id, bot, mode),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -360,6 +376,8 @@ db.exec(`
     mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
     api_key TEXT NOT NULL,
     api_secret TEXT NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
     account_id TEXT,
     PRIMARY KEY (user_id, mode),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -398,6 +416,7 @@ function getSessionSecret() {
   return envSecret;
 }
 const SESSION_SECRET = getSessionSecret();
+const credentialVault = createCredentialVault(SESSION_SECRET);
 
 // ── In-memory rate limiter for auth endpoints ──────────────────────────────────
 const authAttempts = new Map();
@@ -2417,6 +2436,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // Sentinel key written to DB when the user explicitly disconnects so that the
 // environment-variable fallback is suppressed for that user.
 const DISCONNECTED_SENTINEL = '__disconnected__';
+const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick']);
 const isCandlestickScope = scope => scope === 'candlestick';
 const brokerScopeLabel = scope => scope === 'pmh' ? 'Opening Momentum'
@@ -2431,26 +2451,60 @@ function requestAlpacaScope(req, fallback = 'manual') {
   return normalizeAlpacaScope(req.body?.connection ?? req.query?.connection, fallback);
 }
 
+function decryptStoredAlpacaCredentials(row, table, whereClause, whereValues) {
+  if (!row || row.api_key === DISCONNECTED_SENTINEL) return row;
+  try {
+    let apiKey;
+    let apiSecret;
+    if (row.api_key_enc && row.api_secret_enc) {
+      apiKey = credentialVault.decrypt(row.api_key_enc);
+      apiSecret = credentialVault.decrypt(row.api_secret_enc);
+    } else {
+      // Upgrade older plaintext records atomically on their first use. The
+      // legacy columns retain a non-secret marker because their schema is
+      // NOT NULL; the actual values live only in authenticated ciphertext.
+      if (row.api_key === ENCRYPTED_CREDENTIAL_MARKER || row.api_secret === ENCRYPTED_CREDENTIAL_MARKER) {
+        throw new Error('Encrypted credential payload is missing.');
+      }
+      apiKey = row.api_key;
+      apiSecret = row.api_secret;
+      const encryptedKey = credentialVault.encrypt(apiKey);
+      const encryptedSecret = credentialVault.encrypt(apiSecret);
+      db.prepare(`UPDATE ${table}
+        SET api_key=?, api_secret=?, api_key_enc=?, api_secret_enc=?
+        WHERE ${whereClause}`)
+        .run(ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, ...whereValues);
+    }
+    if (!apiKey || !apiSecret) throw new Error('Encrypted credential payload is empty.');
+    return { ...row, api_key: apiKey, api_secret: apiSecret };
+  } catch (error) {
+    // Do not leak ciphertext, key material, or a broker response. A corrupt
+    // record fails closed and requires a fresh authenticated connection.
+    console.warn(`[Alpaca] Stored ${table} credential is unavailable: ${error.message}`);
+    return null;
+  }
+}
+
 function getAlpacaCreds(userId, scope = 'manual') {
   if (isCandlestickScope(scope)) {
     const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?')
       .get(userId)?.mode || 'paper';
-    const row = db.prepare(`SELECT api_key, api_secret, mode, account_id
+    const row = db.prepare(`SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id
       FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, active);
     if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
-    return row;
+    return decryptStoredAlpacaCredentials(row, 'candlestick_alpaca_creds', 'user_id=? AND mode=?', [userId, active]);
   }
   if (BOT_ALPACA_SCOPES.has(scope)) {
     const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
       .get(userId, scope)?.mode || 'paper';
     const row = db.prepare(`
-      SELECT api_key, api_secret, mode, account_id
+      SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id
       FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?
     `).get(userId, scope, active);
     // Credentials saved before broker identity verification must be reconnected
     // before an automated bot can use them.
     if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
-    return row;
+    return decryptStoredAlpacaCredentials(row, 'bot_alpaca_creds', 'user_id=? AND bot=? AND mode=?', [userId, scope, active]);
   }
   // Determine which mode this user has active
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(userId);
@@ -2458,27 +2512,35 @@ function getAlpacaCreds(userId, scope = 'manual') {
 
   // Strict: only return credentials for the ACTIVE mode — never silently fall back
   // to the other mode, as that could send "live mode" orders to a paper account.
-  const row = db.prepare('SELECT api_key, api_secret, mode, account_id FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
+  const row = db.prepare('SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
   // Do not permit a legacy manual key pair to trade until it has been
   // revalidated and associated with a specific broker account ID.
   if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
-  return row;
+  return decryptStoredAlpacaCredentials(row, 'alpaca_creds', 'user_id=? AND mode=?', [userId, activeMode]);
 }
 
 // Helper: check if a specific mode has valid (non-sentinel) credentials in DB
+function storedCredentialExists(row) {
+  if (!row || row.api_key === DISCONNECTED_SENTINEL) return false;
+  if (row.api_key === ENCRYPTED_CREDENTIAL_MARKER) {
+    return !!row.api_key_enc && !!row.api_secret_enc;
+  }
+  return !!row.api_key && !!row.api_secret;
+}
+
 function _alpacaCredsExist(userId, mode, scope = 'manual') {
   if (isCandlestickScope(scope)) {
-    const row = db.prepare('SELECT api_key FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?')
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?')
       .get(userId, mode);
-    return !!row && row.api_key !== DISCONNECTED_SENTINEL;
+    return storedCredentialExists(row);
   }
   if (BOT_ALPACA_SCOPES.has(scope)) {
-    const row = db.prepare('SELECT api_key FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
       .get(userId, scope, mode);
-    return !!row && row.api_key !== DISCONNECTED_SENTINEL;
+    return storedCredentialExists(row);
   }
-  const row = db.prepare('SELECT api_key FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
-  return !!row && row.api_key !== DISCONNECTED_SENTINEL;
+  const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
+  return storedCredentialExists(row);
 }
 
 async function alpacaFetchFor(userId, scope, path, opts = {}, _attempt = 0) {
@@ -2565,7 +2627,8 @@ const _alpacaCatalogRotationState = new Map();
 async function getAlpacaTradableEquityCatalog(userId, { force = false, scope = 'manual' } = {}) {
   const creds = getAlpacaCreds(userId, scope);
   if (!creds) throw new Error('Alpaca not connected. Connect an account before verifying tradable symbols.');
-  const key = `${userId}:${scope}:${creds.mode}:${creds.api_key}`;
+  const credentialFingerprint = crypto.createHash('sha256').update(creds.api_key).digest('hex').slice(0, 24);
+  const key = `${userId}:${scope}:${creds.mode}:${credentialFingerprint}`;
   const cached = _alpacaAssetCatalogCache.get(key);
   if (!force && cached && Date.now() - cached.at < ALPACA_ASSET_CATALOG_TTL_MS) return cached;
 
@@ -2675,6 +2738,8 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const m = mode === 'live' ? 'live' : 'paper';
   let verifiedAccountId = '';
   let uid;
+  let encryptedKey = '';
+  let encryptedSecret = '';
 
   try {
     uid = await ensureSessionUserInTradingStore(req);
@@ -2712,6 +2777,8 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     if (!verifiedAccountId) {
       return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this connection cannot be safely verified.' });
     }
+    encryptedKey = credentialVault.encrypt(key);
+    encryptedSecret = credentialVault.encrypt(sec);
     if (scope !== 'manual') {
       const candlestickConflict = isCandlestickScope(scope)
         ? db.prepare(`SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`)
@@ -2739,10 +2806,13 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         return res.status(409).json({ error: 'This Alpaca account is already connected for manual trading. Use a separate account for each automated bot.' });
       }
       if (isCandlestickScope(scope)) {
-        db.prepare(`INSERT INTO candlestick_alpaca_creds (user_id,mode,api_key,api_secret,account_id)
-          VALUES (?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
-          api_key=excluded.api_key,api_secret=excluded.api_secret,account_id=excluded.account_id`)
-          .run(uid, m, key, sec, verifiedAccountId);
+        db.prepare(`INSERT INTO candlestick_alpaca_creds
+          (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+          VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
+          api_key=excluded.api_key,api_secret=excluded.api_secret,
+          api_key_enc=excluded.api_key_enc,api_secret_enc=excluded.api_secret_enc,
+          account_id=excluded.account_id`)
+          .run(uid, m, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, verifiedAccountId);
         db.prepare('INSERT OR REPLACE INTO candlestick_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
         // A verified credential or account change always revokes the prior
         // explicit live-order acknowledgement. Merely connecting a live key
@@ -2750,11 +2820,13 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
       } else {
         db.prepare(`
-          INSERT INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
-          VALUES (?,?,?,?,?,?)
+          INSERT INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+          VALUES (?,?,?,?,?,?,?,?)
           ON CONFLICT(user_id,bot,mode) DO UPDATE SET
-            api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
-        `).run(uid, scope, m, key, sec, verifiedAccountId);
+            api_key=excluded.api_key, api_secret=excluded.api_secret,
+            api_key_enc=excluded.api_key_enc, api_secret_enc=excluded.api_secret_enc,
+            account_id=excluded.account_id
+        `).run(uid, scope, m, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, verifiedAccountId);
         db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
           .run(uid, scope, m);
       }
@@ -2768,7 +2840,8 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         error: 'Your signed-in account could not be linked to the trading store. Sign out, sign back in, and try again.',
       });
     }
-    return res.status(400).json({ error: 'Could not reach Alpaca to verify credentials: ' + e.message });
+    console.warn('[Alpaca] Credential verification did not complete:', e.name || 'unknown error');
+    return res.status(400).json({ error: 'Could not reach Alpaca to verify credentials. Check the connection and try again.' });
   }
 
   const botConflict = db.prepare(`
@@ -2788,10 +2861,12 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     });
   }
   db.prepare(`
-    INSERT INTO alpaca_creds (user_id,api_key,api_secret,mode,account_id) VALUES (?,?,?,?,?)
+    INSERT INTO alpaca_creds (user_id,api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id) VALUES (?,?,?,?,?,?,?)
     ON CONFLICT(user_id,mode) DO UPDATE SET
-      api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=excluded.account_id
-  `).run(uid, key, sec, m, verifiedAccountId);
+      api_key=excluded.api_key, api_secret=excluded.api_secret,
+      api_key_enc=excluded.api_key_enc, api_secret_enc=excluded.api_secret_enc,
+      account_id=excluded.account_id
+  `).run(uid, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, m, verifiedAccountId);
   db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
   res.json({ ok: true, mode: m, accountId: verifiedAccountId });
 });
@@ -2804,27 +2879,30 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   if (scope !== 'manual') {
     if (isCandlestickScope(scope)) {
       const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
-      db.prepare(`INSERT OR REPLACE INTO candlestick_alpaca_creds (user_id,mode,api_key,api_secret,account_id)
-        VALUES (?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
+      db.prepare(`INSERT OR REPLACE INTO candlestick_alpaca_creds
+        (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+        VALUES (?,?,?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
       db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
       return res.json({ ok: true, connection: scope });
     }
     const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
       .get(uid, scope)?.mode || 'paper';
     db.prepare(`
-      INSERT OR REPLACE INTO bot_alpaca_creds (user_id,bot,mode,api_key,api_secret,account_id)
-      VALUES (?,?,?,?,?,NULL)
-    `).run(uid, scope, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
+      INSERT OR REPLACE INTO bot_alpaca_creds
+        (user_id,bot,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+      VALUES (?,?,?,?,?,?,?,NULL)
+    `).run(uid, scope, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
     return res.json({ ok: true, connection: scope });
   }
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
   const m = activeModeRow?.mode || 'paper';
   db.prepare(`
-    INSERT INTO alpaca_creds (user_id,api_key,api_secret,mode,account_id) VALUES (?,?,?,?,NULL)
+    INSERT INTO alpaca_creds (user_id,api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id) VALUES (?,?,?,?,?,?,NULL)
     ON CONFLICT(user_id,mode) DO UPDATE SET
-      api_key=excluded.api_key, api_secret=excluded.api_secret, account_id=NULL
+      api_key=excluded.api_key, api_secret=excluded.api_secret,
+      api_key_enc=NULL, api_secret_enc=NULL, account_id=NULL
   `).run(
-    uid, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, m
+    uid, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null, m
   );
   res.json({ ok: true });
 });
@@ -4348,10 +4426,13 @@ async function reconcilePmhTrades(userId) {
         const order = trade.entry_order_id === trade.entry_client_order_id
           ? await pmhFetch(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`)
           : await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
-        if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
+        if (!brokerOrderMatchesIntent(order, trade.entry_client_order_id)) {
+          throw new Error('Broker response does not match the PMH entry intent.');
+        }
+        if (Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
           db.prepare(`UPDATE bot_trade_log SET status='open', entry_price=?, shares=?, entry_order_id=? WHERE id=?`)
             .run(Number(order.filled_avg_price), Number(order.filled_qty), order.id, trade.id);
-          reconciled.push({ id: trade.id, status: 'open', event: 'entry fill confirmed' });
+          reconciled.push({ id: trade.id, status: 'open', event: order.status === 'filled' ? 'entry fill confirmed' : 'partial entry fill confirmed' });
         } else if (['canceled', 'rejected', 'expired'].includes(order.status)) {
           db.prepare(`UPDATE bot_trade_log SET status='void', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
             .run(`Entry ${order.status} by broker`, trade.id);
@@ -4361,12 +4442,29 @@ async function reconcilePmhTrades(userId) {
       }
       if (trade.status === 'pending_exit' && trade.pending_exit_order_id) {
         const order = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.pending_exit_order_id)}`);
+        let expectedExitClientId = trade.pending_exit_client_order_id;
+        // Older journal rows predate durable runner-exit client IDs. Recover
+        // them only when the broker ID matches this user's and symbol's PMH
+        // namespace; otherwise do not apply the response to the journal.
+        if (!expectedExitClientId) {
+          const recovered = String(order?.client_order_id || '');
+          const legacyPrefix = `pmhx_${userId}_${trade.symbol}_`;
+          if (!recovered.startsWith(legacyPrefix)) {
+            throw new Error('Broker response cannot be bound to the legacy PMH exit intent.');
+          }
+          expectedExitClientId = recovered;
+          db.prepare('UPDATE bot_trade_log SET pending_exit_client_order_id=? WHERE id=?')
+            .run(expectedExitClientId, trade.id);
+        }
+        if (!brokerOrderMatchesIntent(order, expectedExitClientId)) {
+          throw new Error('Broker response does not match the PMH exit intent.');
+        }
         if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
           const filledQty = Number(order.filled_qty);
           const exitPrice = Number(order.filled_avg_price);
           const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
           db.prepare(`UPDATE bot_trade_log SET status='closed', exit_price=?, shares=?, pnl=?, exit_reason=?,
-            pending_exit_order_id=NULL, pending_exit_reason=NULL, closed_at=datetime('now') WHERE id=?`)
+            pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,closed_at=datetime('now') WHERE id=?`)
             .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
           reconciled.push({ id: trade.id, status: 'closed', event: 'exit fill confirmed' });
         }
@@ -4375,6 +4473,9 @@ async function reconcilePmhTrades(userId) {
       // Parent orders expose their protective child legs. A broker-filled
       // bracket target/stop is the only source of a realized partial result.
       const parent = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      if (!brokerOrderMatchesIntent(parent, trade.entry_client_order_id)) {
+        throw new Error('Broker response does not match the PMH journal owner.');
+      }
       const filledLeg = (parent?.legs || []).find(leg =>
         leg.status === 'filled' && Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0
       );
@@ -4414,8 +4515,10 @@ async function reconcilePmhTrades(userId) {
       // A durable compare-and-swap is the second line of defense after the
       // in-process bot lock. Only the winning request may cancel a stop or
       // submit a runner exit.
-      const claimed = db.prepare(`UPDATE bot_trade_log SET status='exit_reserving', pending_exit_reason=?
-        WHERE id=? AND user_id=? AND status='open'`).run(runner.reason, trade.id, userId);
+      const exitClientId = `pmhx_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48);
+      const claimed = db.prepare(`UPDATE bot_trade_log SET status='exit_reserving',
+        pending_exit_reason=?,pending_exit_client_order_id=?
+        WHERE id=? AND user_id=? AND status='open'`).run(runner.reason, exitClientId, trade.id, userId);
       if (claimed.changes !== 1) continue;
       const position = await pmhFetch(`/v2/positions/${trade.symbol}`);
       const qty = Math.min(Number(position?.qty), Number(trade.shares));
@@ -4438,6 +4541,9 @@ async function reconcilePmhTrades(userId) {
       // ambiguous state, do not submit a discretionary sell; reconcile the
       // terminal broker state on the next cycle instead.
       const afterCancel = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
+      if (!brokerOrderMatchesIntent(afterCancel, trade.entry_client_order_id)) {
+        throw new Error('Broker response does not match the PMH journal owner after cancellation.');
+      }
       const stopFilledDuringCancel = (afterCancel?.legs || []).some(leg => leg.status === 'filled');
       if (stopCancelAmbiguous || stopFilledDuringCancel) {
         reconciled.push({ id: trade.id, status: 'open', event: 'runner stop cancellation unsettled; no discretionary sell submitted' });
@@ -4446,7 +4552,6 @@ async function reconcilePmhTrades(userId) {
       const currentPosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
       const remainingRunnerQty = Math.min(Number(currentPosition?.qty), Number(trade.shares));
       if (!(remainingRunnerQty > 0)) continue;
-      const exitClientId = `pmhx_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48);
       beginAlpacaOrderRequest(userId);
       let exitOrder;
       try {
@@ -4467,14 +4572,14 @@ async function reconcilePmhTrades(userId) {
               client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
             }) });
             db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
-              pending_exit_order_id=NULL, pending_exit_reason=? WHERE id=?`)
+              pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=? WHERE id=?`)
               .run(rescueOrder.id, 'Runner exit failed; replacement stop submitted', trade.id);
           }
         } catch (_) {}
         throw exitError;
       } finally { endAlpacaOrderRequest(userId); }
       db.prepare(`UPDATE bot_trade_log SET status='pending_exit', pending_exit_order_id=?, pending_exit_reason=? WHERE id=?`)
-        .run(exitOrder.id, runner.reason, trade.id);
+        .run(exitOrder?.id || exitClientId, runner.reason, trade.id);
       reconciled.push({ id: trade.id, status: 'pending_exit', event: runner.reason });
     } catch (error) {
       // Any failure after the original runner stop was terminally canceled must
@@ -4498,7 +4603,7 @@ async function reconcilePmhTrades(userId) {
                 }) });
               } finally { endAlpacaOrderRequest(userId); }
               db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
-                pending_exit_order_id=NULL, pending_exit_reason=? WHERE id=?`)
+                pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=? WHERE id=?`)
                 .run(rescueOrder.id, 'Runner reconciliation failed; replacement stop submitted', trade.id);
             }
           }
@@ -5313,21 +5418,27 @@ async function reconcileMomentumTrades(userId) {
     SELECT * FROM bot_trade_log
     WHERE user_id=? AND status='open' AND (strategy IS NULL OR strategy='momentum')
   `).all(userId);
+  const reconciled = [];
   for (const trade of trades) {
     const clientOrderId = String(trade.entry_order_id || '');
     if (!clientOrderId) continue;
     try {
       const order = await alpacaFetchFor(userId, 'momentum',
         `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}&nested=true`);
+      if (!brokerOrderMatchesIntent(order, clientOrderId)) {
+        throw new Error('Broker response does not match the Momentum order intent.');
+      }
       const status = String(order?.status || '').toLowerCase();
       const filledEntry = Number(order?.filled_avg_price);
       const filledShares = Number(order?.filled_qty);
-      if (status === 'filled' && filledEntry > 0 && filledShares > 0) {
+      if (filledEntry > 0 && filledShares > 0) {
         db.prepare('UPDATE bot_trade_log SET entry_price=?,shares=? WHERE id=?')
           .run(filledEntry, filledShares, trade.id);
+        reconciled.push({ id: trade.id, event: status === 'filled' ? 'entry fill confirmed' : 'partial entry fill confirmed' });
       } else if (['canceled', 'rejected', 'expired'].includes(status) && !(filledShares > 0)) {
         db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
           .run(`Broker entry ${status}`, trade.id);
+        reconciled.push({ id: trade.id, event: `entry ${status}` });
         continue;
       }
       const exit = (Array.isArray(order?.legs) ? order.legs : []).find(leg =>
@@ -5351,12 +5462,14 @@ async function reconcileMomentumTrades(userId) {
         String(exit.type || '').startsWith('stop') ? 'Broker stop-loss filled' : 'Broker take-profit filled',
         trade.id
       );
+      reconciled.push({ id: trade.id, event: 'protected exit fill confirmed' });
     } catch (error) {
       // Network failures and ambiguous broker POSTs are intentionally left open
       // for a later exact-client-order reconciliation; never infer a close.
       console.warn(`[Momentum] reconciliation deferred for ${trade.symbol}: ${error.message}`);
     }
   }
+  return reconciled;
 }
 
 async function executeMomentumEntry(userId, candidate) {
@@ -5521,11 +5634,34 @@ app.post('/api/bots/toggle', requireAuth, (req, res) => {
   res.json({ ok: true, bot, enabled: !!enabled });
 });
 
-// ── POST /api/bots/trigger — manually fire one scan cycle on all 4 bots ──────
+// ── POST /api/bots/trigger — manually fire one server-owned cycle per bot ────
 app.post('/api/bots/trigger', requireAuth, async (req, res) => {
-  if (!isMarketOpen()) return res.json({ ok: false, message: 'Market is closed — bots only trade during market hours (9:30–16:00 ET Mon–Fri).' });
-  res.json({ ok: true, message: 'Scan cycle triggered — check the trade log in a few seconds.' });
-  // No auto-traders remaining (Swing and ORB removed)
+  const userId = req.session.userId;
+  // Run sequentially. The shared account-level execution lock remains the
+  // boundary between a triggered cycle, a scheduler tick, and manual orders.
+  const outcomes = [];
+  for (const runCycle of [runMomentumCycle, runPmhCycle, runCandlestickCycle]) {
+    try {
+      outcomes.push(await runCycle(userId, 'manual-trigger'));
+    } catch (error) {
+      outcomes.push({ bot: 'unknown', status: 'error', error: 'Cycle could not complete safely.' });
+      console.warn('[Bot trigger] cycle withheld:', error.message);
+    }
+  }
+  const submitted = outcomes.filter(outcome => outcome?.submitted).map(outcome => outcome.bot);
+  const reconciled = outcomes.filter(outcome => outcome?.reconciled > 0).map(outcome => outcome.bot);
+  res.json({
+    ok: outcomes.some(outcome => outcome?.status !== 'error'),
+    marketOpen: isMarketOpen(),
+    outcomes,
+    message: submitted.length
+      ? `Cycle completed; ${submitted.join(', ')} submitted a broker-reviewed entry.`
+      : reconciled.length
+        ? `Cycle completed; reconciled ${reconciled.join(', ')} broker records.`
+        : isMarketOpen()
+          ? 'Cycle completed; no enabled strategy found a broker-approved entry.'
+          : 'Cycle completed; reconciled enabled strategies. New entries remain closed outside market hours.',
+  });
 });
 
 
@@ -7081,6 +7217,9 @@ async function reconcileCandlestickTrades(userId, leaseToken = null) {
       if (trade.status === 'exit_intent') {
         try {
           const knownExit = await alpacaFetchFor(userId, 'candlestick', candlestickOrderLookupPath(trade.exit_order_id, trade.exit_client_order_id));
+          if (!brokerOrderMatchesIntent(knownExit, trade.exit_client_order_id)) {
+            throw new Error('Broker response does not match the Candlestick exit intent.');
+          }
           requireCandlestickExecutionLease(userId, leaseToken);
           db.prepare(`UPDATE candlestick_trade_log SET status='pending_exit',exit_order_id=? WHERE id=?`)
             .run(knownExit?.id || trade.exit_order_id, trade.id);
@@ -7099,6 +7238,9 @@ async function reconcileCandlestickTrades(userId, leaseToken = null) {
         let exit;
         try {
           exit = await alpacaFetchFor(userId, 'candlestick', candlestickOrderLookupPath(trade.exit_order_id, trade.exit_client_order_id));
+          if (!brokerOrderMatchesIntent(exit, trade.exit_client_order_id)) {
+            throw new Error('Broker response does not match the Candlestick exit intent.');
+          }
         } catch (error) {
           if (error.alpacaStatus === 404) {
             // A POST timeout and a temporarily unavailable client-order lookup
@@ -7137,6 +7279,9 @@ async function reconcileCandlestickTrades(userId, leaseToken = null) {
           continue;
         }
         throw error;
+      }
+      if (!brokerOrderMatchesIntent(parent, trade.entry_client_order_id)) {
+        throw new Error('Broker response does not match the Candlestick entry intent.');
       }
       const positionForProtection = await candlestickPosition(userId, trade.symbol);
       const remainingQuantity = positionForProtection && Math.abs(Number(positionForProtection.qty)) > 0
@@ -7463,6 +7608,39 @@ app.get('/api/candlestick/backtest', requireAuth, async (req, res) => {
 // connected scope, persisted enablement, an explicit live arm, fresh evidence,
 // and an available broker position. Closing the page never disables protection
 // or reconciliation, but no condition ever forces a demonstration trade.
+async function runCandlestickCycle(userId, source = 'server-scheduler') {
+  const outcome = { bot: 'candlestick', status: 'skipped', reconciled: 0, submitted: false };
+  const creds = getAlpacaCreds(userId, 'candlestick');
+  const settings = candlestickConfigFor(userId);
+  if (!settings.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
+  if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  if (creds.mode === 'live' && !settings.liveArmed) return { ...outcome, reason: 'Live authorization is not armed.' };
+  if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
+  const lease = acquireCandlestickExecutionLease(userId);
+  if (!lease) {
+    releaseBotLock(userId);
+    return { ...outcome, status: 'busy', reason: 'Candlestick reconciliation is already in progress.' };
+  }
+  try {
+    const events = await reconcileCandlestickTrades(userId, lease);
+    outcome.reconciled = events.length;
+    if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
+    const candidates = (await Promise.all(CANDLESTICK_WATCHLIST.slice(0, settings.config.maxSymbols)
+      .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
+    saveCandlestickCandidates(userId, candidates);
+    const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+    if (!candidate) return { ...outcome, status: 'no_entry' };
+    await executeCandlestickEntry(userId, candidate.symbol, source, lease);
+    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol };
+  } catch (error) {
+    console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
+    return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };
+  } finally {
+    releaseCandlestickExecutionLease(userId, lease);
+    releaseBotLock(userId);
+  }
+}
+
 let candlestickSchedulerRunning = false;
 setInterval(async () => {
   if (candlestickSchedulerRunning) return;
@@ -7470,25 +7648,7 @@ setInterval(async () => {
   try {
     const users = db.prepare('SELECT user_id FROM candlestick_settings WHERE enabled=1').all();
     for (const { user_id: userId } of users) {
-      const creds = getAlpacaCreds(userId, 'candlestick');
-      const settings = candlestickConfigFor(userId);
-      if (!creds || (creds.mode === 'live' && !settings.liveArmed) || !acquireBotLock(userId)) continue;
-      const lease = acquireCandlestickExecutionLease(userId);
-      if (!lease) { releaseBotLock(userId); continue; }
-      try {
-        // Reconciliation is always-on: entries are bounded to the market
-        // window, but broker-confirmed fill recovery cannot wait for the page
-        // to be open or for tomorrow's entry session.
-        await reconcileCandlestickTrades(userId, lease);
-        if (!isMarketOpen()) continue;
-        const candidates = (await Promise.all(CANDLESTICK_WATCHLIST.slice(0, settings.config.maxSymbols)
-          .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
-        saveCandlestickCandidates(userId, candidates);
-        const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-        if (candidate) await executeCandlestickEntry(userId, candidate.symbol, 'server-scheduler', lease);
-      } catch (error) {
-        console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
-      } finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
+      await runCandlestickCycle(userId);
     }
   } finally { candlestickSchedulerRunning = false; }
 }, 60 * 1000);
@@ -7498,6 +7658,38 @@ setInterval(async () => {
 // a user enables the strategy, regardless of whether their browser tab is
 // open. It only acts for users who explicitly enabled PMH automation and
 // connected a dedicated PMH broker account.
+async function runPmhCycle(userId, source = 'server-scheduler') {
+  const outcome = { bot: 'pmh', status: 'skipped', reconciled: 0, submitted: false };
+  if (!isBotEnabled(userId, 'pmh')) return { ...outcome, reason: 'Strategy is disabled.' };
+  const settings = db.prepare('SELECT enabled,config_json FROM pmh_settings WHERE user_id=?').get(userId);
+  if (!settings?.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
+  const creds = getAlpacaCreds(userId, 'pmh');
+  if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
+  try {
+    const reconciliation = await reconcilePmhTrades(userId);
+    outcome.reconciled = reconciliation.reconciled.length;
+    if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
+    let config = DEFAULT_PMH_CONFIG;
+    try { config = { ...config, ...(settings.config_json ? JSON.parse(settings.config_json) : {}) }; } catch (_) {}
+    const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'pmh' });
+    const rotation = nextAlpacaCatalogRotation(catalogEntry, PMH_DEFAULT_SYMBOLS, {
+      strategy: 'pmh-scheduler', limit: 25, priorityLimit: 13, rotationLimit: 12,
+    });
+    const candidates = (await Promise.all(rotation.symbols
+      .map(symbol => buildPmhCandidate(userId, symbol, config).catch(() => null)))).filter(Boolean);
+    const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+    if (!candidate) return { ...outcome, status: 'no_entry' };
+    await executePmhEntry(userId, candidate.symbol, source);
+    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol };
+  } catch (error) {
+    console.warn(`[PMH] user ${userId} cycle withheld: ${error.message}`);
+    return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };
+  } finally {
+    releaseBotLock(userId);
+  }
+}
+
 let pmhSchedulerRunning = false;
 setInterval(async () => {
   if (pmhSchedulerRunning) return;
@@ -7505,28 +7697,7 @@ setInterval(async () => {
   try {
     const users = db.prepare('SELECT user_id FROM pmh_settings WHERE enabled=1').all();
     for (const { user_id: userId } of users) {
-      if (!isBotEnabled(userId, 'pmh')) continue;
-      const creds = getAlpacaCreds(userId, 'pmh');
-      if (!creds || !acquireBotLock(userId)) continue;
-      try {
-        // Reconciliation is always-on: entry fills, protective-leg fills, and
-        // runner exits must be recorded even when no browser tab is open.
-        await reconcilePmhTrades(userId);
-        if (!isMarketOpen()) continue;
-        const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
-        let config = DEFAULT_PMH_CONFIG;
-        try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
-        const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'pmh' });
-        const rotation = nextAlpacaCatalogRotation(catalogEntry, PMH_DEFAULT_SYMBOLS, {
-          strategy: 'pmh-scheduler', limit: 25, priorityLimit: 13, rotationLimit: 12,
-        });
-        const candidates = (await Promise.all(rotation.symbols
-          .map(symbol => buildPmhCandidate(userId, symbol, config).catch(() => null)))).filter(Boolean);
-        const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-        if (candidate) await executePmhEntry(userId, candidate.symbol, 'server-scheduler');
-      } catch (error) {
-        console.warn(`[PMH] user ${userId} cycle withheld: ${error.message}`);
-      } finally { releaseBotLock(userId); }
+      await runPmhCycle(userId);
     }
   } finally { pmhSchedulerRunning = false; }
 }, 60 * 1000);
@@ -7549,49 +7720,55 @@ async function mapWithConcurrency(items, limit, mapper) {
   await Promise.all(workers);
   return results;
 }
+
+async function runMomentumCycle(userId, source = 'server-scheduler') {
+  const outcome = { bot: 'momentum', status: 'skipped', reconciled: 0, submitted: false };
+  const { enabled, config } = momentumConfigFor(userId);
+  if (!enabled) return { ...outcome, reason: 'Strategy is disabled.' };
+  if (!getAlpacaCreds(userId, 'momentum')) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
+  try {
+    // Exact client-order-ID reconciliation runs even outside market hours and
+    // under the same lock as submission, so a trigger cannot race a scheduler
+    // tick into a duplicate decision.
+    outcome.reconciled = (await reconcileMomentumTrades(userId)).length;
+    if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
+    const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'momentum' });
+    const rotation = nextAlpacaCatalogRotation(catalogEntry, MASTER_UNIVERSE, {
+      strategy: 'momentum-scheduler', limit: 80, priorityLimit: 20, rotationLimit: 60,
+    });
+    const raw = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
+      try {
+        const quote = await yf.quote(symbol, {}, { validateResult: false });
+        const basic = momentumRowFromQuote(symbol, quote, config);
+        return basic.eligible ? basic.row : null;
+      } catch (_) { return null; }
+    });
+    const shortlist = raw.filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 12);
+    const candidates = (await Promise.all(shortlist
+      .map(row => buildMomentumCandidate(userId, row.symbol, config).catch(error => {
+        console.warn(`[Momentum] ${row.symbol} evidence unavailable: ${error.message}`);
+        return null;
+      })))).filter(Boolean);
+    const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
+    if (!candidate) return { ...outcome, status: 'no_entry' };
+    await executeMomentumEntry(userId, candidate);
+    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol, source };
+  } catch (error) {
+    console.warn(`[Momentum] user ${userId} cycle withheld: ${error.message}`);
+    return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };
+  } finally {
+    releaseBotLock(userId);
+  }
+}
+
 setInterval(async () => {
   if (momentumSchedulerRunning) return;
   momentumSchedulerRunning = true;
   try {
     const users = db.prepare('SELECT user_id FROM momentum_settings WHERE enabled=1').all();
     for (const { user_id: userId } of users) {
-      const creds = getAlpacaCreds(userId, 'momentum');
-      if (!creds) continue;
-      try {
-        // Exact client-order-ID reconciliation is always-on and is deliberately
-        // outside the entry-hours guard. A failed data request never means an
-        // open broker position was closed.
-        await reconcileMomentumTrades(userId);
-        if (!isMarketOpen() || !acquireBotLock(userId)) continue;
-        try {
-          const { config } = momentumConfigFor(userId);
-          const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'momentum' });
-          const rotation = nextAlpacaCatalogRotation(catalogEntry, MASTER_UNIVERSE, {
-            strategy: 'momentum-scheduler', limit: 80, priorityLimit: 20, rotationLimit: 60,
-          });
-          // Quote discovery runs first; only the highest-scoring liquid movers
-          // then consume 5-minute structural-evidence requests.
-          const raw = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
-            try {
-              const quote = await yf.quote(symbol, {}, { validateResult: false });
-              const basic = momentumRowFromQuote(symbol, quote, config);
-              return basic.eligible ? basic.row : null;
-            } catch (_) { return null; }
-          });
-          const shortlist = raw.filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 12);
-          const candidates = (await Promise.all(shortlist
-            .map(row => buildMomentumCandidate(userId, row.symbol, config).catch(error => {
-              console.warn(`[Momentum] ${row.symbol} evidence unavailable: ${error.message}`);
-              return null;
-            })))).filter(Boolean);
-          const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-          if (candidate) await executeMomentumEntry(userId, candidate);
-        } finally {
-          releaseBotLock(userId);
-        }
-      } catch (error) {
-        console.warn(`[Momentum] user ${userId} cycle withheld: ${error.message}`);
-      }
+      await runMomentumCycle(userId);
     }
   } finally {
     momentumSchedulerRunning = false;

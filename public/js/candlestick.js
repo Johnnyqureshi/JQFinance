@@ -15,13 +15,11 @@
     return data;
   }
   function readConfig() {
-    return { ...config, minScore:+$('candleScore').value, minRelativeVolume:+$('candleRelVol').value, minRewardRisk:+$('candleRR').value,
-      maxSymbols:+$('candleSymbols').value, maxPositionDollars:+$('candlePosition').value, maxRiskDollars:+$('candleRisk').value };
+    return { ...defaults, maxPositionDollars:+$('candlePosition').value || config.maxPositionDollars };
   }
   function putConfig(next) {
     config = { ...defaults, ...(next || {}) };
-    const fields = { candleScore:'minScore', candleRelVol:'minRelativeVolume', candleRR:'minRewardRisk', candleSymbols:'maxSymbols', candlePosition:'maxPositionDollars', candleRisk:'maxRiskDollars' };
-    Object.entries(fields).forEach(([id,key]) => { if ($(id)) $(id).value = config[key]; });
+    if ($('candlePosition')) $('candlePosition').value = config.maxPositionDollars;
   }
   async function refreshConnection() {
     try {
@@ -47,6 +45,7 @@
     $('candleBotToggle').classList.toggle('mt-bot-toggle--off', !enabled);
     $('candleBotBar').classList.toggle('mt-bot-bar--on', enabled);
     $('candleLiveArm').checked = liveArmed;
+    $('candleLiveArm').disabled = readiness?.mode !== 'live';
     const last = readiness?.lastCycleAt
       ? ` Last cycle: ${readiness.lastCycleStatus || 'unknown'} · ${readiness.lastCycleReason || 'No detail recorded.'}`
       : '';
@@ -80,10 +79,9 @@
     const row = selected, evidence = row.evidence || {};
     box.innerHTML = `<div class="pmh-detail-top"><div><div class="pmh-detail-symbol">${esc(row.symbol)} · ${esc(row.direction || 'NO TRADE')}</div><span class="pmh-detail-price">${num(row.score,0)}/100 · ${esc(pattern(row))}</span></div><span class="pmh-status pmh-status--${statusClass(row)}">${esc(row.status)}</span></div>
       <div class="pmh-grid">${metric('Entry / stop', `${money(row.entry)} / ${money(row.stop)}`)}${metric('Target / reward', `${money(row.target)} / ${num(row.riskReward,2)}R`)}${metric('VWAP / rel. volume', `${money(evidence.vwap)} / ${num(evidence.relativeVolume,2)}×`)}${metric('Support / resistance', `${money(evidence.support)} / ${money(evidence.resistance)}`)}${metric('Trend / structure', `${esc(evidence.regime?.trend)} / ${esc(evidence.regime?.structure)}`)}${metric('Confirmation', evidence.confirmation ? '<span class="pmh-pass">Closed trigger passed</span>' : 'Waiting')}</div>
-      <div class="pmh-reason-title">${row.reasons?.length ? 'Rejected or pending gates' : 'All safety gates passed'}</div>${row.reasons?.length ? `<ul class="pmh-reasons">${row.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>` : '<div class="pmh-pass">Fresh server evidence is complete. Order submission re-checks this setup.</div>'}
-      ${enabled && row.eligible ? '<button class="mt-trade-buy pmh-execute" id="candleExecuteBtn">Submit broker-protected entry</button>' : ''}`;
+      <div class="pmh-reason-title">${row.reasons?.length ? 'Rejected or pending gates' : 'All safety gates passed'}</div>${row.reasons?.length ? `<ul class="pmh-reasons">${row.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>` : '<div class="pmh-pass">Fresh server evidence is complete. The server scheduler owns order submission.</div>'}
+      ${enabled && row.eligible ? '<div class="pmh-pass">Queued for the server automation scheduler.</div>' : ''}`;
     $('candleDetailTime').textContent = row.evaluatedAt ? new Date(row.evaluatedAt).toLocaleTimeString() : '—';
-    $('candleExecuteBtn')?.addEventListener('click', () => execute(row.symbol));
   }
   async function scan() {
     const generation = ++scanGeneration;
@@ -99,12 +97,6 @@
       if (generation === scanGeneration) $('candleScanStatus').textContent = `Scan unavailable: ${error.message}. Previous results are retained.`;
     } finally { if (generation === scanGeneration) scanning = false; }
   }
-  async function execute(symbol) {
-    const button = $('candleExecuteBtn'); if (button) { button.disabled = true; button.textContent = 'Re-checking broker gates…'; }
-    try { await request('/api/candlestick/execute', { method:'POST', body:JSON.stringify({ symbol }) }); $('candleBotStatus').textContent = `${symbol}: order intent recorded; awaiting broker-confirmed fill.`; await refreshTrades(); }
-    catch (error) { $('candleBotStatus').textContent = `${symbol}: ${error.message}`; }
-    finally { if ($('candleExecuteBtn')) { $('candleExecuteBtn').disabled = false; $('candleExecuteBtn').textContent = 'Submit broker-protected entry'; } }
-  }
   function renderTrades(trades) { $('candleTradesBody').innerHTML = trades?.length ? trades.map(t => `<div class="pmh-trade"><span><strong>${esc(t.symbol)}</strong> · ${esc(t.direction)} · ${esc(t.status)}</span><span>${num(t.shares,0)} sh · ${money(t.entry_price)}</span></div>`).join('') : 'No UltraBot3 order intents have been recorded.'; }
   async function refreshTrades() {
     try { const { trades } = await request('/api/candlestick/trades'); renderTrades(trades); }
@@ -117,7 +109,10 @@
   }
   async function save(nextEnabled = enabled, refreshScan = true) {
     config = readConfig(); liveArmed = $('candleLiveArm').checked;
-    const out = await request('/api/candlestick/settings', { method:'PUT', body:JSON.stringify({ enabled:nextEnabled, liveArmed, config }) });
+    const out = await request('/api/candlestick/settings', {
+      method:'PUT',
+      body:JSON.stringify({ enabled:nextEnabled, liveArmed, maxPositionDollars:config.maxPositionDollars }),
+    });
     enabled = out.enabled; liveArmed = out.liveArmed; putConfig(out.config); await refreshConnection();
     if (refreshScan) { selected = null; await scan(); }
   }
@@ -131,11 +126,9 @@
   }
   async function init() {
     if (initialized) return; initialized = true;
-    $('candleConfigToggle').addEventListener('click', () => { const hidden = $('candleConfigBody').style.display === 'none'; $('candleConfigBody').style.display = hidden ? '' : 'none'; $('candleConfigToggle').textContent = hidden ? '▲ Hide settings' : '▼ Configure'; });
     $('candleConnBtn').addEventListener('click', () => window.alpacaTrader?.openConnectModal('candlestick'));
     $('candleRefreshBtn').addEventListener('click', scan);
     $('candleSaveBtn').addEventListener('click', async () => { try { await save(enabled); } catch (error) { $('candleBotStatus').textContent = `Settings not saved: ${error.message}`; } });
-    $('candleResetBtn').addEventListener('click', async () => { const prior = { ...config }; putConfig(defaults); try { await save(enabled); } catch (error) { putConfig(prior); $('candleBotStatus').textContent = `Defaults not saved: ${error.message}`; } });
     $('candleBotToggle').addEventListener('click', async () => { try { await save(!enabled); } catch (error) { $('candleBotStatus').textContent = error.message; } });
     $('candleTradesRefresh').addEventListener('click', refreshTrades); $('candleBacktestBtn').addEventListener('click', backtest);
     window.addEventListener('alpaca-connection-changed', event => { if (event.detail?.connection === 'candlestick') queueRefresh(); });

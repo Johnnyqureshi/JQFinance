@@ -866,141 +866,40 @@
     <!-- PDT + Market Hours Banner -->
     <div class="at-pdt-banner" id="atPDTBanner" style="display:none"></div>
 
-    <!-- ── Scanner & Trade Settings (merged config panel) ──────────────── -->
+    <!-- Strategy rules are server-owned. Position dollars is the only editable
+         strategy value; pause and Live arm remain explicit safety controls. -->
     <div class="mt-config-section">
       <div class="mt-config-header">
         <div class="mt-config-title">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-          Scanner &amp; Trade Settings
-          <span class="mt-config-sub">scanner · risk · execution — all in one place</span>
+          Momentum Position Sizing
+          <span class="mt-config-sub">all signals, risk rules, and execution thresholds are automatic</span>
         </div>
-        <button class="mt-config-toggle" id="mtConfigToggle">▲ Hide settings</button>
       </div>
       <div class="mt-config-body" id="mtConfigBody">
-
-        <!-- ── Universe ── -->
-        <div class="mt-cpt-block mt-cpt-block--uni">
-          <span class="mt-cpt-block-label">Universe</span>
-          <div class="mt-universe-row">
-            <label class="mt-uni-pill">
-              <input type="radio" name="mtUniverse" id="mtUniCurated" value="curated">
-              <span>📋 Curated (50)</span>
-            </label>
-            <label class="mt-uni-pill">
-              <input type="radio" name="mtUniverse" id="mtUniAlpaca" value="alpaca" checked>
-              <span>⚡ Alpaca catalog rotation · broker verified</span>
-            </label>
-          </div>
-          <span class="mt-cpt-hint">Alpaca prioritizes live market movers and rotates through the verified stock &amp; ETF catalog — price and gain filters apply on top</span>
-        </div>
-
-        <!-- ── Scan Filters — 5 Pillars ── -->
         <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Scan Filters
-            <span class="mt-cpt-hint mt-cpt-hint--inline">5-pillar system · all must pass</span>
-          </span>
-          <div class="mt-cpt-grid">
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMinPrice">① Min Price $</label>
-              <input type="number" id="mtMinPrice" class="mt-cpt-input" min="0.01" max="100" step="0.25" value="3.00" title="Pillar 1 — profile: $3.00–$20.00; sub-$3 stocks carry pump-and-dump risk">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMaxPrice">① Max Price $</label>
-              <input type="number" id="mtMaxPrice" class="mt-cpt-input" min="1" max="2000" step="1" value="20" title="Pillar 1 — over $20 stocks lack retail explosive momentum">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMinGain">② Min Gain %</label>
-              <input type="number" id="mtMinGain" class="mt-cpt-input" min="0" max="100" step="0.5" value="10" title="Pillar 2 — must already show active intraday momentum">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtRelVol">③ Min Rel Vol ×</label>
-              <input type="number" id="mtRelVol" class="mt-cpt-input" min="0.5" max="50" step="0.5" value="5.0" title="Pillar 3 — ≥5× confirms heavy market participation">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMaxFloat">⑤ Max Float M</label>
-              <input type="number" id="mtMaxFloat" class="mt-cpt-input" min="0" max="999" step="1" value="10" title="Pillar 5 — float in millions; <5M scores the supply point (ideal), 10M is the hard ceiling">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMinScore">Min Score /7</label>
-              <input type="number" id="mtMinScore" class="mt-cpt-input" min="0" max="7" step="1" value="4" title="Minimum score out of 7 to appear in results">
-            </div>
-            <div class="mt-cpt-field mt-cpt-field--full">
-              <label class="mt-cpt-label mt-cpt-label--check">
-                <input type="checkbox" id="mtRequireNews" checked>
-                <span>④ Require news catalyst <span class="mt-cpt-hint mt-cpt-hint--inline">breaking headline must be found for stock to qualify</span></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Risk & Execution ── -->
-        <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Risk &amp; Execution <span class="ts-saved" id="tsSavedBadge"></span></span>
+          <span class="mt-cpt-block-label">Automatic Execution <span class="ts-saved" id="tsSavedBadge"></span></span>
           <div class="mt-cpt-grid mt-cpt-grid--risk">
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtStopPct">Stop Loss %</label>
-              <input type="number" id="mtStopPct" class="mt-cpt-input" min="0.1" max="50" step="0.25" value="5"
-                title="% below entry — the tighter structural invalidation remains authoritative">
-              <span class="mt-cpt-hint">Broker-protected; structural stops can only tighten it</span>
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtTpPct">Take Profit %</label>
-              <input type="number" id="mtTpPct" class="mt-cpt-input" min="0.25" max="100" step="0.25" value="10" title="% above entry — submitted as a broker-protected target">
-              <span class="mt-cpt-hint">Broker-protected target above entry</span>
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMinRR">Min R : R</label>
-              <input type="number" id="mtMinRR" class="mt-cpt-input" min="0.5" max="10" step="0.5" value="2.0" title="Minimum reward-to-risk ratio required to enter">
-            </div>
             <div class="mt-cpt-field mt-cpt-field--pos">
-              <label class="mt-cpt-label">Position Size</label>
+              <label class="mt-cpt-label" for="tsPositionValue">Maximum dollars per position</label>
               <div class="mt-cpt-pos-row">
-                <div class="ts-mode-group">
-                  <button class="ts-mode-btn active" data-mode="pct" id="tsBtnPct">% equity</button>
-                  <button class="ts-mode-btn" data-mode="fixed" id="tsBtnFixed">Fixed $</button>
-                </div>
                 <div class="ts-input-wrap">
-                  <span class="ts-input-prefix" id="tsInputPrefix">%</span>
-                  <input type="number" id="tsPositionValue" class="ts-input" min="1" step="1" value="15" title="Position size per trade">
+                  <span class="ts-input-prefix" id="tsInputPrefix">$</span>
+                  <input type="number" id="tsPositionValue" class="ts-input" min="1" step="50" value="1000" inputmode="decimal" title="Maximum dollars per automated position">
                 </div>
               </div>
-            </div>
-            <div class="mt-cpt-field mt-cpt-field--lev">
-              <label class="mt-cpt-label">Leverage</label>
-              <div class="ts-lev-group" id="tsLevGroup">
-                <button class="ts-lev-btn active" data-lev="1">1×</button>
-                <button class="ts-lev-btn" data-lev="1.5">1.5×</button>
-                <button class="ts-lev-btn" data-lev="2">2×</button>
-                <button class="ts-lev-btn" data-lev="3">3×</button>
-              </div>
+              <span class="mt-cpt-hint">The server automatically selects setups, stops, targets, and risk thresholds.</span>
             </div>
             <div class="mt-cpt-field mt-cpt-field--full">
               <label class="mt-cpt-label mt-cpt-label--check">
-                <input type="checkbox" id="mtRequireAboveVwap" checked disabled>
-                <span>Require price above VWAP <span class="mt-cpt-hint mt-cpt-hint--inline">required for automated entries; compare a fresh quote with regular-session VWAP</span></span>
+                <input type="checkbox" id="mtLiveArm">
+                <span>I explicitly arm <strong>LIVE</strong> orders after connecting the dedicated Live account</span>
               </label>
             </div>
           </div>
         </div>
-
-        <!-- ── Daily Limits ── -->
-        <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Daily Limits</span>
-          <div class="mt-cpt-grid">
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMaxTrades">Max Trades / Day</label>
-              <input type="number" id="mtMaxTrades" class="mt-cpt-input" min="1" max="50" step="1" value="5" title="Stop opening new trades after this many">
-            </div>
-            <div class="mt-cpt-field">
-              <label class="mt-cpt-label" for="mtMaxDailyLoss">Max Daily Loss $</label>
-              <input type="number" id="mtMaxDailyLoss" class="mt-cpt-input" min="0" step="50" value="500" title="Halt trading when realized loss reaches this amount">
-            </div>
-          </div>
-        </div>
-
         <div class="mt-config-actions">
-          <button class="mt-btn-apply" id="mtApplyConfig">Apply &amp; Rescan</button>
-          <button class="mt-btn-reset" id="mtResetConfig">Reset Defaults</button>
+          <button class="mt-btn-apply" id="mtApplyConfig">Save position size</button>
         </div>
       </div>
     </div>
@@ -1237,34 +1136,6 @@
           <div class="mt-risk-valid" id="mtRiskValid">Select a stock to calculate risk</div>
         </div><!-- /.mt-panel risk -->
 
-        <!-- Trade panel (alpaca_client.py) -->
-        <div class="mt-panel mt-trade-panel">
-          <div class="mt-panel-head">
-            <span class="mt-panel-title">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              Execute Trade
-            </span>
-            <span class="mt-panel-sub">alpaca_client.py · main.py</span>
-          </div>
-          <div class="mt-trade-body">
-            <div class="mt-trade-row">
-              <span class="mt-trade-lbl">Symbol</span>
-              <span class="mt-trade-val" id="mtTradeSymbol">—</span>
-            </div>
-            <div class="mt-trade-row">
-              <span class="mt-trade-lbl">Est. Price</span>
-              <span class="mt-trade-val" id="mtTradePriceDisplay">—</span>
-            </div>
-            <div class="mt-trade-hint">
-              Orders use position size from Risk Manager above. Connect Alpaca using the button in the top bar to enable execution.
-            </div>
-            <div id="mtTradeMsg" class="mt-trade-msg" style="display:none"></div>
-            <div class="mt-trade-btns">
-              <button class="mt-trade-buy" id="mtBuyBtn" style="width:100%">▲ BUY</button>
-            </div>
-          </div>
-        </div><!-- /.mt-trade-panel -->
-
       </div><!-- /.mt-right-col -->
     </div><!-- /.mt-body -->
 
@@ -1391,20 +1262,13 @@
       <strong>Closed-candle, multi-timeframe price action.</strong> Engulfing, rejection, star, momentum and level patterns require trend, VWAP, relative-volume, structure, confirmation, and at least 2R. A pattern alone never opens a trade.
     </section>
     <div class="mt-config-section">
-      <div class="mt-config-header"><div class="mt-config-title">UltraBot3 rules &amp; risk <span class="mt-config-sub">separate account, settings, automation and journal</span></div><button class="mt-config-toggle" id="candleConfigToggle">▲ Hide settings</button></div>
+      <div class="mt-config-header"><div class="mt-config-title">UltraBot3 position sizing <span class="mt-config-sub">all strategy rules are automatic and server-owned</span></div></div>
       <div class="mt-config-body" id="candleConfigBody">
-        <div class="mt-cpt-block"><span class="mt-cpt-block-label">Evidence gates</span><div class="mt-cpt-grid">
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleScore">Min setup score /100</label><input id="candleScore" class="mt-cpt-input" type="number" min="0" max="100" value="65"></div>
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRelVol">Relative volume ×</label><input id="candleRelVol" class="mt-cpt-input" type="number" min="1" step=".1" value="1.2"></div>
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRR">Minimum reward / risk</label><input id="candleRR" class="mt-cpt-input" type="number" min="2" step=".25" value="2"></div>
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleSymbols">Symbols per cycle</label><input id="candleSymbols" class="mt-cpt-input" type="number" min="1" max="30" value="16"></div>
-        </div></div>
         <div class="mt-cpt-block"><span class="mt-cpt-block-label">Risk controls</span><div class="mt-cpt-grid">
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candlePosition">Position limit $</label><input id="candlePosition" class="mt-cpt-input" type="number" min="1" step="50" value="1000"></div>
-          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candleRisk">Max dollar risk</label><input id="candleRisk" class="mt-cpt-input" type="number" min="1" step="10" value="100"></div>
+          <div class="mt-cpt-field"><label class="mt-cpt-label" for="candlePosition">Maximum dollars per position</label><input id="candlePosition" class="mt-cpt-input" type="number" min="1" step="50" value="1000" inputmode="decimal"><span class="mt-cpt-hint">The server automatically chooses all evidence and risk thresholds.</span></div>
           <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input id="candleLiveArm" type="checkbox"><span>I explicitly arm <strong>LIVE</strong> orders after connecting a live account</span></label></div>
         </div></div>
-        <div class="mt-config-actions"><button class="mt-btn-apply" id="candleSaveBtn">Save settings</button><button class="mt-btn-reset" id="candleResetBtn">Reset defaults</button></div>
+        <div class="mt-config-actions"><button class="mt-btn-apply" id="candleSaveBtn">Save position size</button></div>
       </div>
     </div>
     <div class="mt-bot-bar" id="candleBotBar">
@@ -1462,39 +1326,18 @@
 
     <div class="mt-config-section">
       <div class="mt-config-header">
-        <div class="mt-config-title">PMH rules &amp; risk <span class="mt-config-sub">saved separately from Momentum Trader</span></div>
-        <button class="mt-config-toggle" id="pmhConfigToggle">▲ Hide settings</button>
+        <div class="mt-config-title">PMH position sizing <span class="mt-config-sub">all setup, stop, target, and runner rules are automatic</span></div>
       </div>
       <div class="mt-config-body" id="pmhConfigBody">
         <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Confirmation</span>
+          <span class="mt-cpt-block-label">Automatic Execution</span>
           <div class="mt-cpt-grid">
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMinScore">Min setup score /100</label><input id="pmhMinScore" class="mt-cpt-input" type="number" min="0" max="100" value="80"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRelVol">Same-time rel. volume ×</label><input id="pmhRelVol" class="mt-cpt-input" type="number" min="1" step=".1" value="2"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhVolZ">Volume z-score</label><input id="pmhVolZ" class="mt-cpt-input" type="number" min="0" step=".1" value="1.5"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhBody">Min body / range</label><input id="pmhBody" class="mt-cpt-input" type="number" min=".1" max="1" step=".05" value=".55"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhWick">Max upper wick / range</label><input id="pmhWick" class="mt-cpt-input" type="number" min=".05" max=".9" step=".05" value=".28"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhResistance">Minimum room / risk</label><input id="pmhResistance" class="mt-cpt-input" type="number" min=".5" step=".25" value="2"></div>
-          </div>
-        </div>
-        <div class="mt-cpt-block">
-          <span class="mt-cpt-block-label">Position, stop &amp; target</span>
-          <div class="mt-cpt-grid">
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPosition">Position size limit $</label><input id="pmhMaxPosition" class="mt-cpt-input" type="number" min="1" step="25" value="5000"><span class="mt-cpt-hint">Maximum notional per automated entry</span></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhRisk">Max dollar risk</label><input id="pmhRisk" class="mt-cpt-input" type="number" min="1" step="5" value="100"><span class="mt-cpt-hint">Safety cap; cannot be exceeded</span></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPrice">Max trade price</label><input id="pmhMaxPrice" class="mt-cpt-input" type="number" min="1" max="15" step=".5" value="15"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxStop">Stop loss limit %</label><input id="pmhMaxStop" class="mt-cpt-input" type="number" min=".5" step=".5" value="8"><span class="mt-cpt-hint">Breakout-candle low stays the actual stop</span></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialR">Take profit (R)</label><input id="pmhPartialR" class="mt-cpt-input" type="number" min="1" step=".25" value="2"><span class="mt-cpt-hint">Protected partial target; runner remains automated</span></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhPartialPct">Partial exit %</label><input id="pmhPartialPct" class="mt-cpt-input" type="number" min="1" max="99" value="50"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxTrades">Max trades / day</label><input id="pmhMaxTrades" class="mt-cpt-input" type="number" min="1" max="10" value="3"></div>
-            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxLoss">Max daily loss $</label><input id="pmhMaxLoss" class="mt-cpt-input" type="number" min="1" step="25" value="500"></div>
-            <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input type="checkbox" id="pmhRequireMarket" checked><span>Require SPY to be positive from its regular-session open</span></label></div>
-            <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input type="checkbox" id="pmhRequireRS" checked><span>Require the symbol to outperform SPY from the open</span></label></div>
+            <div class="mt-cpt-field"><label class="mt-cpt-label" for="pmhMaxPosition">Maximum dollars per position</label><input id="pmhMaxPosition" class="mt-cpt-input" type="number" min="1" step="50" value="5000" inputmode="decimal"><span class="mt-cpt-hint">Only editable strategy value; final sizing remains server-validated.</span></div>
+            <div class="mt-cpt-field mt-cpt-field--full"><label class="mt-cpt-label mt-cpt-label--check"><input type="checkbox" id="pmhLiveArm"><span>I explicitly arm <strong>LIVE</strong> orders after connecting the dedicated Live account</span></label></div>
           </div>
         </div>
         <div class="mt-config-actions">
-          <button class="mt-btn-apply" id="pmhApplyConfig">Save &amp; rescan</button>
-          <button class="mt-btn-reset" id="pmhResetConfig">Reset defaults</button>
+          <button class="mt-btn-apply" id="pmhApplyConfig">Save position size</button>
         </div>
       </div>
     </div>

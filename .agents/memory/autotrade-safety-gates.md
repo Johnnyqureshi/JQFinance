@@ -1,8 +1,18 @@
 ---
-name: Auto-trade safety gates
-description: Pre-trade gating rules and pitfalls for the momentum bot's auto-trade path
+name: Automatic trading controls
+description: Durable safety and ownership rules for every automated trading strategy
 ---
-# Auto-trade safety gates
+# Automatic trading controls
+
+- All strategy thresholds, filters, universes, stop/target formulas, risk limits, and scan limits are server-owned. The only user-editable strategy value is maximum dollars per position.
+  **Why:** browser-persisted tuning creates inconsistent behavior and lets stale or direct requests weaken automated safety policy.
+  **How to apply:** rebuild execution config from server defaults on every read/write and copy only the validated position-dollar override; ignore all other submitted fields.
+- Candidate pages are observational. A server scheduler is the sole owner of automated candidate selection and entry submission; strategy-specific browser entry endpoints stay closed.
+  **Why:** browser-owned submissions create duplicate execution owners, stop when tabs close, and can bypass persisted enable, sizing, or Live-arm controls.
+  **How to apply:** UI scans may refresh evidence and request reconciliation, but must not submit entries or automated exits. Scheduler functions call execution functions directly under strategy locks.
+- A verified dedicated Paper connection enables that strategy automatically. Connecting or switching to Live never arms orders; every broker identity or mode change clears the prior Live arm.
+  **Why:** Paper should be hands-off while Live requires an explicit, current authorization that cannot carry across account changes.
+  **How to apply:** Paper credential verification updates persisted enablement; Live eligibility checks both enabled state and a separately persisted arm before any broker POST.
 
 - The order API applies leverage server-side (`amount * leverage`). Clients must send the BASE dollar amount plus `leverage` — pre-multiplying on the client doubles leverage silently.
   **Why:** caused risk-cap checks to evaluate half the real exposure.
@@ -18,7 +28,5 @@ description: Pre-trade gating rules and pitfalls for the momentum bot's auto-tra
 - Signal filtering must accept both `BUY` and `STRONG BUY`; strict `=== 'BUY'` silently excluded the highest-scoring setups.
 - Pre-trade gate order: signal → dump flags (hard: high-vol red candle or large topping tail; soft: 2+ of below-VWAP/below-EMA9/MACD-neg) → bearish pattern strength ≥2 → risk ≤5% of equity.
 - NO-SHORT policy: platform never opens shorts. Sells require a verified held position, are quantity-based, and cancel the symbol's open orders first (else a leftover OTO stop-loss child could later flip short).
-- User decision: NO manual inverse button — bot trades anything passing criteria (leveraged/inverse ETFs included) fully automatically. Users only set position size, stop loss, take profit.
-- Exit model: bot entries are OTO orders (market buy + 5% stop-loss leg only, integer qty); take profit is an RSI(14, 1-min) ≥ configurable level (default 75) checked by the 20s position poller, which needs an in-flight mutex or overlapping polls double-sell.
-- Criteria per user (final): price $3–$20, gain ≥10% gate with +1 bonus at ≥30%, relVol ≥5×/10×, news, float <5M ideal (scores point) with 10M hard ceiling. Legacy saved minPrice:2 auto-migrates to 3.
+- User decision: NO manual inverse button — the strategy trades any eligible instrument, including leveraged or inverse ETFs, through server automation rather than a separate manual control.
 - Gotcha: server-side calcRSI was referenced in 3 endpoints but never defined — try/catch silently nulled RSI everywhere for a long time. Watch for other referenced-but-undefined helpers hidden by catch(_){}.

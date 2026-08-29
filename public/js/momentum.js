@@ -55,9 +55,10 @@
     ],
 
     defaults: {
-      // Position size
-      positionMode:    'pct',   // pct of equity or fixed dollar amount
-      positionValue:   15,
+      // Maximum dollars per position is the only user-editable strategy value.
+      positionMode:    'fixed',
+      positionValue:   1000,
+      maxPositionDollars: 1000,
       // Daily limits
       maxTradesPerDay: 5,
       maxDailyLoss:   500.00,
@@ -88,15 +89,14 @@
     load() {
       try {
         const saved = JSON.parse(localStorage.getItem('mtConfig') || '{}');
-        // Older browser settings used an RSI exit rather than a broker-held
-        // target. Retain every other user choice but move those settings to the
-        // conservative default target used by the current protected bracket.
-        if (saved.takeProfitPercent == null) {
-          saved.takeProfitPercent = this.defaults.takeProfitPercent;
-          delete saved.takeProfitRsi;
-          try { localStorage.setItem('mtConfig', JSON.stringify(saved)); } catch {}
-        }
-        return { ...this.defaults, ...saved };
+        const dollars = saved.positionMode === 'fixed'
+          ? Number(saved.positionValue)
+          : Number(saved.maxPositionDollars);
+        return {
+          ...this.defaults,
+          positionValue: Number.isFinite(dollars) && dollars > 0 ? dollars : this.defaults.positionValue,
+          maxPositionDollars: Number.isFinite(dollars) && dollars > 0 ? dollars : this.defaults.positionValue,
+        };
       } catch { return { ...this.defaults }; }
     },
 
@@ -649,53 +649,6 @@
     getCash()    { return parseFloat(this.account?.cash       || 0); },
     getBP()      { return parseFloat(this.account?.buying_power || 0); },
 
-    /**
-     * Place a bracket market order: entry at market, SL + TP as bracket legs.
-     * Mirrors place_order() in alpaca_client.py.
-     */
-    async placeOrder({ symbol, side, shares, stopPrice, takeProfitPrice }) {
-      const body = {
-        symbol,
-        qty:           String(Math.max(1, Math.floor(shares))),
-        side:          side.toLowerCase(),
-        type:          'market',
-        time_in_force: 'day',
-        order_class:   'bracket',
-        stop_loss:     { stop_price: String(stopPrice.toFixed(2)) },
-        take_profit:   { limit_price: String(takeProfitPrice.toFixed(2)) },
-      };
-      const r = await fetch('/api/momentum/order', {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body:        JSON.stringify({
-          symbol, side, amount: shares * stopPrice, // rough notional for existing endpoint
-          tpPct: null, slPct: null, _rawBody: body, // pass-through intent
-        }),
-      });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.error || 'Order failed');
-      }
-      return r.json();
-    },
-
-    /**
-     * Simple notional order without bracket (for quick entries).
-     */
-    async placeSimpleOrder(symbol, side, notional) {
-      const r = await fetch('/api/momentum/order', {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body:        JSON.stringify({ symbol, side, amount: notional, connection: 'momentum' }),
-      });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.error || 'Order failed');
-      }
-      return r.json();
-    },
   };
 
   /* ════════════════════════════════════════════════════════════════════════════
@@ -958,6 +911,7 @@
     _activeScanFilter: null,
     // ── Automation state ─────────────────────────────────────────────────────
     botEnabled:    false,          // true when auto-trading is running
+    liveArmed:     false,
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
     _activeTrades: new Set(),      // symbols with pending/live bot orders (prevents double-entry)
     posMonitorId:  null,           // setInterval handle for position polling
@@ -993,6 +947,7 @@
           MomentumConfig.save(this.config);
         }
         this.botEnabled = settings?.enabled === true;
+        this.liveArmed = settings?.liveArmed === true;
         this._renderConfigPanel();
         this._renderBotStatus();
       } catch (error) {
@@ -1005,13 +960,19 @@
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ enabled: this.botEnabled, config: this.config }),
+        body: JSON.stringify({
+          enabled: this.botEnabled,
+          liveArmed: this.liveArmed,
+          maxPositionDollars: this.config.positionValue,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Settings request failed (${response.status})`);
       this.config = { ...MomentumConfig.defaults, ...(data.config || this.config) };
       this.botEnabled = data.enabled === true;
+      this.liveArmed = data.liveArmed === true;
       MomentumConfig.save(this.config);
+      this._renderConfigPanel();
     },
 
     async _loadValidationReport() {
@@ -1110,56 +1071,21 @@
         if (!el) return;
         el.value = (v == null || v === '') ? '' : v;
       };
-      setVal('mtMaxTrades',     cfg.maxTradesPerDay);
-      setVal('mtMaxDailyLoss',  cfg.maxDailyLoss);
-      setVal('mtMinPrice',      cfg.minPrice);
-      setVal('mtMaxPrice',      cfg.maxPrice);
-      setVal('mtMinGain',       cfg.minGainPercent);
-      setVal('mtRelVol',        cfg.minRelVol);
-      setVal('mtMinVolume',     cfg.minVolume);
-      setVal('mtMinScore',      cfg.minScore);
-      setVal('mtMaxFloat',      cfg.maxFloat != null ? cfg.maxFloat / 1_000_000 : '');
-      setVal('mtStopPct',       cfg.stopPercent);
-      setVal('mtTpPct',         cfg.takeProfitPercent);
-      setVal('mtMinRR',         cfg.minRR);
       setVal('tsPositionValue', cfg.positionValue);
-      const positionMode = cfg.positionMode === 'fixed' ? 'fixed' : 'pct';
-      $('tsBtnPct')?.classList.toggle('active', positionMode === 'pct');
-      $('tsBtnFixed')?.classList.toggle('active', positionMode === 'fixed');
       const prefix = $('tsInputPrefix');
-      if (prefix) prefix.textContent = positionMode === 'pct' ? '%' : '$';
-      // News required toggle
-      const newsChk = $('mtRequireNews');
-      if (newsChk) newsChk.checked = cfg.requireNewsCatalyst ?? true;
-      const vwapChk = $('mtRequireAboveVwap');
-      if (vwapChk) vwapChk.checked = true;
-      // Universe radio
-      const radio = document.querySelector(`input[name="mtUniverse"][value="${cfg.universeMode || 'curated'}"]`);
-      if (radio) radio.checked = true;
+      if (prefix) prefix.textContent = '$';
+      if ($('mtLiveArm')) $('mtLiveArm').checked = this.liveArmed;
+      if ($('mtLiveArm')) $('mtLiveArm').disabled = AlpacaClient.mode !== 'live';
     },
 
     _readConfig() {
       const n = id => { const v = parseFloat($(id)?.value); return isNaN(v) ? null : v; };
-      const uni = document.querySelector('input[name="mtUniverse"]:checked')?.value || 'curated';
-      const rawFloat = n('mtMaxFloat');  // stored in millions in UI; convert to raw count
+      const positionValue = n('tsPositionValue') ?? this.config.positionValue;
       return {
-        ...this.config,
-        positionMode:         this._getPosMode(),
-        positionValue:        n('tsPositionValue') ?? this.config.positionValue,
-        maxTradesPerDay:     n('mtMaxTrades')    ?? this.config.maxTradesPerDay,
-        maxDailyLoss:        n('mtMaxDailyLoss') ?? this.config.maxDailyLoss,
-        minPrice:            n('mtMinPrice')     ?? this.config.minPrice,
-        maxPrice:            n('mtMaxPrice')     ?? this.config.maxPrice,
-        minGainPercent:      n('mtMinGain')      ?? this.config.minGainPercent,
-        minRelVol:           n('mtRelVol')       ?? this.config.minRelVol,
-        minVolume:           n('mtMinVolume')    ?? this.config.minVolume,
-        minScore:            n('mtMinScore')     ?? this.config.minScore,
-        maxFloat:            rawFloat != null ? rawFloat * 1_000_000 : this.config.maxFloat,
-        requireNewsCatalyst: $('mtRequireNews')?.checked ?? this.config.requireNewsCatalyst,
-        stopPercent:         n('mtStopPct'),
-        takeProfitPercent:   n('mtTpPct')        ?? this.config.takeProfitPercent,
-        minRR:               n('mtMinRR')        ?? this.config.minRR,
-        universeMode:        uni,
+        ...MomentumConfig.defaults,
+        positionMode: 'fixed',
+        positionValue,
+        maxPositionDollars: positionValue,
       };
     },
 
@@ -2263,7 +2189,7 @@
       const btn = document.querySelector('#tsLevGroup .ts-lev-btn.active');
       return btn ? Math.max(1, parseFloat(btn.dataset.lev) || 1) : 1;
     },
-    _getPosMode()  { return $('tsBtnPct')?.classList.contains('active') ? 'pct' : 'fixed'; },
+    _getPosMode()  { return 'fixed'; },
     _getPosValue() { return parseFloat($('tsPositionValue')?.value) || 15; },
     _newJournalOrderId() {
       const suffix = globalThis.crypto?.randomUUID
@@ -2361,22 +2287,9 @@
 
     // ── Main auto-trade method — called after every scan when bot is ON ────
     async _autoTrade(results) {
-      // BUG FIX: null guard — results could be undefined if scan throws
-      if (!results?.length) return;
-      if (!this.botEnabled || this._flattenInProgress || !AlpacaClient.connected) return;
-
-      // Concurrency mutex — prevent overlapping auto-trade cycles (manual refresh,
-      // timer scan, or config change could each trigger a cycle in flight)
-      if (this._autoTradeBusy) return;
-      this._autoTradeBusy = true;
-      const cycle = this._autoTradeInner(results);
-      this._autoTradePromise = cycle;
-      try {
-        await cycle;
-      } finally {
-        this._autoTradeBusy = false;
-        if (this._autoTradePromise === cycle) this._autoTradePromise = null;
-      }
+      // Display-only by design. Candidate selection and order submission are
+      // exclusively owned by the server automation scheduler.
+      return;
     },
 
     async _autoTradeInner(results) {
@@ -2677,16 +2590,8 @@
           }
         }
 
-        // ── RSI take-profit exit: sell when intraday RSI(14) ≥ configured level ──
-        if (this.botEnabled && !this._flattenInProgress && this._isMarketOpen()) {
-          const exitCycle = this._checkRsiExits(positions || []);
-          this._rsiExitPromise = exitCycle;
-          try {
-            await exitCycle;
-          } finally {
-            if (this._rsiExitPromise === exitCycle) this._rsiExitPromise = null;
-          }
-        }
+        // Broker-held brackets and the server scheduler own automated exits.
+        // The browser only reconciles confirmed broker state for display.
       } catch (_) {}
       finally { this._pollBusy = false; }
     },
@@ -2921,7 +2826,9 @@
         btn.textContent = '⏹ STOP BOT';
         btn.className   = 'mt-bot-toggle mt-bot-toggle--on';
         if (status) status.textContent =
-          `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
+          AlpacaClient.mode === 'live' && !this.liveArmed
+            ? 'AUTOMATION ACTIVE · Live entries blocked until explicitly armed'
+            : `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
         if (bar) bar.className = 'mt-bot-bar mt-bot-bar--on';
         if (dot) { dot.style.background = '#22c55e'; dot.title = 'Bot active'; }
       } else {
@@ -2968,35 +2875,16 @@
         this.run();
       });
 
-      // Reset config to defaults
-      $('mtResetConfig')?.addEventListener('click', () => {
-        this.config = { ...MomentumConfig.defaults };
-        MomentumConfig.save(this.config);
-        this._saveServerSettings().catch(error => this.addLog('CONFIG', 'Settings not saved', error.message, 'err'));
-        this._renderConfigPanel();
-        this.addLog('CONFIG', 'Reset to defaults', '', 'info');
-        this.run();
+      $('mtLiveArm')?.addEventListener('change', event => {
+        this.liveArmed = event.target.checked;
+        this._saveServerSettings()
+          .then(() => this._renderBotStatus())
+          .catch(error => {
+            this.liveArmed = false;
+            event.target.checked = false;
+            this.addLog('BOT', 'Live arm not saved', error.message, 'err');
+          });
       });
-
-      // Toggle config panel
-      $('mtConfigToggle')?.addEventListener('click', () => {
-        const body = $('mtConfigBody');
-        if (!body) return;
-        const hidden = body.style.display === 'none';
-        body.style.display = hidden ? '' : 'none';
-        $('mtConfigToggle').textContent = hidden ? '▲ Collapse' : '▼ Configure';
-      });
-
-      // Position sizing is part of the saved bot configuration, not a
-      // temporary display preference. Update the prefix and active mode
-      // immediately; Apply Settings persists it before the next scan.
-      [$('tsBtnPct'), $('tsBtnFixed')].forEach(button => button?.addEventListener('click', () => {
-        const fixed = button.id === 'tsBtnFixed';
-        $('tsBtnPct')?.classList.toggle('active', !fixed);
-        $('tsBtnFixed')?.classList.toggle('active', fixed);
-        const prefix = $('tsInputPrefix');
-        if (prefix) prefix.textContent = fixed ? '$' : '%';
-      }));
 
       // Quick buy — checks daily limits, uses manual or auto shares
       $('mtBuyBtn')?.addEventListener('click', async () => {
@@ -3036,8 +2924,10 @@
         if (AlpacaClient.mode === 'paper') return;
         $('mtSwitchPaper').textContent = 'Switching…';
         const ok = await AlpacaClient.switchMode('paper');
+        if (ok) await this._loadServerSettings();
         $('mtSwitchPaper').textContent = 'PAPER';
         this._renderStatus();
+        this._renderConfigPanel();
         if (ok) this.addLog('BOT', 'Switched to PAPER', 'Paper trading account active', 'info');
         else    this.addLog('BOT', 'Switch failed', AlpacaClient.accountError || 'Could not switch to paper', 'err');
       });
@@ -3045,8 +2935,10 @@
         if (AlpacaClient.mode === 'live') return;
         $('mtSwitchLive').textContent = 'Switching…';
         const ok = await AlpacaClient.switchMode('live');
+        if (ok) await this._loadServerSettings();
         $('mtSwitchLive').textContent = 'LIVE';
         this._renderStatus();
+        this._renderConfigPanel();
         if (ok) this.addLog('BOT', 'Switched to LIVE', '⚠ Live account active — real money trades', 'warn');
         else    this.addLog('BOT', 'Switch failed', AlpacaClient.accountError || 'Save live API keys first', 'err');
       });
@@ -3054,7 +2946,11 @@
       // Re-check connection whenever alpacatrader.js saves or disconnects credentials
       window.addEventListener('alpaca-connection-changed', event => {
         if (event.detail?.connection && event.detail.connection !== 'momentum') return;
-        AlpacaClient.checkConnection().then(() => this._renderStatus());
+        Promise.all([AlpacaClient.checkConnection(), this._loadServerSettings()])
+          .then(() => {
+            this._renderStatus();
+            this._renderBotStatus();
+          });
       });
       $('atConnBtn')?.addEventListener('click', event => {
         event.stopImmediatePropagation();

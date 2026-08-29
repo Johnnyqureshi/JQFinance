@@ -11,6 +11,11 @@ const session      = require('express-session');
 const { createPostgresAuthStore } = require('./lib/postgres-auth-store');
 const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
 const { requiresPriceActionForEntry } = require('./lib/order-entry-policy');
+const {
+  serverOwnedConfig,
+  serverOwnedMomentumConfig,
+  shouldAutoEnableAfterConnection,
+} = require('./lib/automatic-bot-settings');
 const helmet       = require('helmet');
 const crypto       = require('crypto');
 const {
@@ -233,6 +238,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS pmh_settings (
     user_id    INTEGER PRIMARY KEY,
     enabled    INTEGER NOT NULL DEFAULT 0,
+    live_armed INTEGER NOT NULL DEFAULT 0,
     config_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
@@ -868,11 +874,14 @@ db.prepare(`
   CREATE TABLE IF NOT EXISTS momentum_settings (
     user_id     INTEGER PRIMARY KEY,
     enabled     INTEGER NOT NULL DEFAULT 0,
+    live_armed  INTEGER NOT NULL DEFAULT 0,
     config_json TEXT    NOT NULL DEFAULT '{}',
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
 `).run();
+try { db.prepare(`ALTER TABLE pmh_settings ADD COLUMN live_armed INTEGER NOT NULL DEFAULT 0`).run(); } catch (_) {}
+try { db.prepare(`ALTER TABLE momentum_settings ADD COLUMN live_armed INTEGER NOT NULL DEFAULT 0`).run(); } catch (_) {}
 
 // ── Security migration: retire a source-disclosed bootstrap account ──────────
 // This is deliberately one-way. It runs after every automation table exists,
@@ -3300,6 +3309,47 @@ async function cancelAlpacaOpenOrders(userId, orders) {
   }));
 }
 
+function autoEnablePaperStrategy(userId, scope, mode) {
+  if (!shouldAutoEnableAfterConnection(mode)) return false;
+  if (scope === 'momentum') {
+    const config = momentumConfigFor(userId).config;
+    db.prepare(`INSERT INTO momentum_settings (user_id,enabled,live_armed,config_json,updated_at)
+      VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,config_json=excluded.config_json,updated_at=datetime('now')`)
+      .run(userId, JSON.stringify(config));
+  } else if (scope === 'pmh') {
+    const config = pmhConfigFor(userId).config;
+    db.prepare(`INSERT INTO pmh_settings (user_id,enabled,live_armed,config_json)
+      VALUES (?,1,0,?) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,config_json=excluded.config_json`)
+      .run(userId, JSON.stringify(config));
+    db.prepare(`INSERT INTO bot_toggles (user_id,bot_name,enabled) VALUES (?,'pmh',1)
+      ON CONFLICT(user_id,bot_name) DO UPDATE SET enabled=1`).run(userId);
+  } else if (scope === 'candlestick') {
+    const config = candlestickConfigFor(userId).config;
+    db.prepare(`INSERT INTO candlestick_settings (user_id,enabled,live_armed,config_json,updated_at)
+      VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,config_json=excluded.config_json,updated_at=datetime('now')`)
+      .run(userId, JSON.stringify(config));
+  } else if (scope === 'swing') {
+    const settings = swingConfigFor(userId);
+    db.prepare(`INSERT INTO swing_settings (user_id,enabled,live_armed,max_position_dollars,updated_at)
+      VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,updated_at=datetime('now')`)
+      .run(userId, settings.maxPositionDollars);
+  } else if (scope === 'options') {
+    const settings = optionsConfigFor(userId);
+    db.prepare(`INSERT INTO options_settings (user_id,enabled,live_armed,max_position_dollars,updated_at)
+      VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,updated_at=datetime('now')`)
+      .run(userId, settings.maxPositionDollars);
+  } else {
+    return false;
+  }
+  console.log(`[Automation] ${brokerScopeLabel(scope)} Paper automation enabled after verified broker connection.`);
+  return true;
+}
+
 // Save credentials — stores the key pair for the given mode, sets it as active
 app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const { apiKey, apiSecret, mode } = req.body || {};
@@ -3462,11 +3512,24 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         `).run(uid, scope, m, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, verifiedAccountId);
         db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
           .run(uid, scope, m);
+        if (scope === 'momentum') {
+          db.prepare('UPDATE momentum_settings SET live_armed=0 WHERE user_id=?').run(uid);
+        } else if (scope === 'pmh') {
+          db.prepare('UPDATE pmh_settings SET live_armed=0 WHERE user_id=?').run(uid);
+        }
       }
+      autoEnablePaperStrategy(uid, scope, m);
       if (previousAccountId && previousAccountId !== verifiedAccountId) {
         releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
       }
-      return res.json({ ok: true, mode: m, connection: scope, accountId: verifiedAccountId });
+      return res.json({
+        ok: true,
+        mode: m,
+        connection: scope,
+        accountId: verifiedAccountId,
+        automationEnabled: shouldAutoEnableAfterConnection(m),
+        liveArmed: false,
+      });
     }
   } catch (e) {
     if (verifiedAccountId && storedBrokerAccountId(uid, scope, m) !== verifiedAccountId) {
@@ -3583,6 +3646,11 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
         (user_id,bot,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
       VALUES (?,?,?,?,?,?,?,NULL)
     `).run(uid, scope, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
+    if (scope === 'momentum') {
+      db.prepare('UPDATE momentum_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    } else if (scope === 'pmh') {
+      db.prepare('UPDATE pmh_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    }
     releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
     return res.json({ ok: true, connection: scope });
   }
@@ -3662,8 +3730,20 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
   } else {
     db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
       .run(uid, scope, m);
+    if (scope === 'momentum') {
+      db.prepare('UPDATE momentum_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    } else if (scope === 'pmh') {
+      db.prepare('UPDATE pmh_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    }
   }
-  res.json({ ok: true, mode: m, connection: scope });
+  autoEnablePaperStrategy(uid, scope, m);
+  res.json({
+    ok: true,
+    mode: m,
+    connection: scope,
+    automationEnabled: shouldAutoEnableAfterConnection(m),
+    liveArmed: false,
+  });
 });
 
 // Account info
@@ -4053,16 +4133,14 @@ async function placeAlpacaOrder(req, res) {
   }
 }
 
-// Manual orders retain their existing endpoint and safeguards. The Momentum
-// browser uses the dedicated route below, whose setup gate cannot be disabled
-// by changing a client-supplied request field.
+// Manual trading remains isolated from strategy automation. Strategy entries
+// are owned exclusively by their server schedulers.
 app.post('/api/alpaca/order', requireAuth, (req, res) => {
   req._alpacaScope = 'manual';
   return placeAlpacaOrder(req, res);
 });
 app.post('/api/momentum/order', requireAuth, (req, res) => {
-  req._alpacaScope = 'momentum';
-  return placeAlpacaOrder(req, res);
+  res.status(409).json({ error: 'Momentum entries are submitted only by the server automation scheduler.' });
 });
 
 // Cancel order
@@ -4555,8 +4633,11 @@ function pmhLivePauseReason(userId) {
 // price-action evidence, structural invalidation, market hours, risk sizing,
 // duplicate prevention, and broker-held exits are still mandatory.
 const DEFAULT_MOMENTUM_CONFIG = Object.freeze({
-  positionMode: 'pct',
-  positionValue: 15,
+  // Position dollars is the only user-editable strategy value. Every signal,
+  // risk, universe, and execution threshold below is server-owned.
+  positionMode: 'fixed',
+  positionValue: 1000,
+  maxPositionDollars: 1000,
   maxTradesPerDay: 5,
   maxDailyLoss: 500,
   minPrice: 1,
@@ -4575,40 +4656,28 @@ const DEFAULT_MOMENTUM_CONFIG = Object.freeze({
   universeMode: 'alpaca',
 });
 function sanitizeMomentumExecutionConfig(input = {}) {
-  const config = { ...DEFAULT_MOMENTUM_CONFIG };
-  const numericBounds = {
-    positionValue: [1, 1_000_000],
-    maxTradesPerDay: [1, 50],
-    maxDailyLoss: [1, 1_000_000],
-    minPrice: [0.01, 10_000],
-    maxPrice: [0.01, 10_000],
-    minGainPercent: [-50, 500],
-    minRelVol: [0.1, 100],
-    maxFloat: [100_000, 10_000_000_000],
-    minVolume: [1_000, 10_000_000_000],
-    minScore: [0, 7],
-    stopPercent: [0.1, 25],
-    takeProfitPercent: [0.1, 100],
-    minRR: [1, 10],
-    emaFast: [2, 100],
-    emaSlow: [3, 300],
-  };
-  for (const [key, [min, max]] of Object.entries(numericBounds)) {
-    const value = Number(input[key]);
-    if (Number.isFinite(value)) config[key] = Math.min(max, Math.max(min, value));
-  }
-  config.maxPrice = Math.max(config.minPrice, config.maxPrice);
-  config.emaSlow = Math.max(config.emaFast + 1, config.emaSlow);
-  config.positionMode = input.positionMode === 'fixed' ? 'fixed' : 'pct';
-  config.requireNewsCatalyst = input.requireNewsCatalyst === true;
-  config.universeMode = input.universeMode === 'curated' ? 'curated' : 'alpaca';
-  return config;
+  return serverOwnedMomentumConfig(DEFAULT_MOMENTUM_CONFIG, input);
 }
 function momentumConfigFor(userId) {
-  const row = db.prepare('SELECT enabled,config_json FROM momentum_settings WHERE user_id=?').get(userId);
+  const row = db.prepare('SELECT enabled,live_armed,config_json FROM momentum_settings WHERE user_id=?').get(userId);
   let saved = {};
   try { saved = row?.config_json ? JSON.parse(row.config_json) : {}; } catch (_) {}
-  return { enabled: !!row?.enabled, config: sanitizeMomentumExecutionConfig(saved) };
+  return {
+    enabled: !!row?.enabled,
+    liveArmed: !!row?.live_armed,
+    config: serverOwnedMomentumConfig(DEFAULT_MOMENTUM_CONFIG, saved),
+  };
+}
+
+function pmhConfigFor(userId) {
+  const row = db.prepare('SELECT enabled,live_armed,config_json FROM pmh_settings WHERE user_id=?').get(userId);
+  let saved = {};
+  try { saved = row?.config_json ? JSON.parse(row.config_json) : {}; } catch (_) {}
+  return {
+    enabled: !!row?.enabled,
+    liveArmed: !!row?.live_armed,
+    config: serverOwnedConfig(DEFAULT_PMH_CONFIG, saved),
+  };
 }
 
 const MASTER_UNIVERSE = [
@@ -4985,31 +5054,30 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
 }
 
 app.get('/api/opening-momentum/settings', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT enabled, config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
-  let config = DEFAULT_PMH_CONFIG;
-  try { config = { ...DEFAULT_PMH_CONFIG, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+  const settings = pmhConfigFor(req.session.userId);
   res.json({
-    enabled: !!row?.enabled,
-    config,
+    enabled: settings.enabled,
+    liveArmed: settings.liveArmed,
+    config: settings.config,
     liveAutomationPaused: PMH_LIVE_AUTOMATION_PAUSED,
   });
 });
 
 app.put('/api/opening-momentum/settings', requireAuth, (req, res) => {
   const body = req.body || {};
-  const config = { ...DEFAULT_PMH_CONFIG };
-  for (const key of Object.keys(DEFAULT_PMH_CONFIG)) {
-    if (typeof body.config?.[key] === 'boolean') config[key] = body.config[key];
-    else if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
-  }
-  // The shared bot safety cap remains authoritative even if a stale browser
-  // setting attempts to widen it.
-  config.maxTradePrice = Math.min(MAX_TRADE_PRICE, Math.max(1, Number(config.maxTradePrice) || MAX_TRADE_PRICE));
-  config.maxPositionDollars = Math.min(1_000_000, Math.max(1, Number(config.maxPositionDollars) || DEFAULT_PMH_CONFIG.maxPositionDollars));
-  db.prepare(`INSERT INTO pmh_settings (user_id,enabled,config_json) VALUES (?,?,?)
-    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,config_json=excluded.config_json`)
-    .run(req.session.userId, body.enabled ? 1 : 0, JSON.stringify(config));
-  res.json({ ok: true, enabled: !!body.enabled, config });
+  const prior = pmhConfigFor(req.session.userId);
+  const config = serverOwnedConfig(
+    DEFAULT_PMH_CONFIG,
+    prior.config,
+    body.maxPositionDollars ?? body.config?.maxPositionDollars
+  );
+  const creds = getAlpacaCreds(req.session.userId, 'pmh');
+  const liveArmed = body.liveArmed === true && creds?.mode === 'live';
+  const enabled = body.enabled === true;
+  db.prepare(`INSERT INTO pmh_settings (user_id,enabled,live_armed,config_json) VALUES (?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,config_json=excluded.config_json`)
+    .run(req.session.userId, enabled ? 1 : 0, liveArmed ? 1 : 0, JSON.stringify(config));
+  res.json({ ok: true, enabled, liveArmed, config });
 });
 
 app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
@@ -5030,9 +5098,7 @@ app.get('/api/opening-momentum/scan', requireAuth, async (req, res) => {
     })
     : null;
   const symbols = rotation ? rotation.symbols : selection.symbols;
-  const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(req.session.userId);
-  let config = DEFAULT_PMH_CONFIG;
-  try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+  const config = pmhConfigFor(req.session.userId).config;
   const results = await Promise.all(symbols.map(sym => buildPmhCandidate(req.session.userId, sym, config).catch(error => ({
     symbol: sym, status: 'BLOCKED', eligible: false, score: 0, reasons: [`Market data unavailable: ${error.message}`],
   }))));
@@ -5064,6 +5130,11 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
   if (!isBotEnabled(userId, 'pmh')) throw pmhError('Opening Momentum automation is disabled.', 409);
   const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
   if (!pmhSetting?.enabled) throw pmhError('Opening Momentum strategy is disabled in its persisted settings.', 409);
+  const settings = pmhConfigFor(userId);
+  const creds = getAlpacaCreds(userId, 'pmh');
+  if (creds?.mode === 'live' && !settings.liveArmed) {
+    throw pmhError('Opening Momentum Live orders are not explicitly armed.', 409);
+  }
   const livePause = pmhLivePauseReason(userId);
   if (livePause) throw pmhError(livePause, 409);
   let clientOrderId = null;
@@ -5079,9 +5150,7 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
         slots.openOrders.some(o => o.symbol === symbol)) throw pmhError(`${symbol} already has a position or pending order.`, 409);
     const allSymbolOrders = await alpacaFetchFor(userId, 'pmh', `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
     if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) throw pmhError(`${symbol} already has a broker-open order.`, 409);
-    const row = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
-    let config = DEFAULT_PMH_CONFIG;
-    try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
+    const config = settings.config;
     const candidate = await buildPmhCandidate(userId, symbol, config);
     if (!candidate.eligible) throw pmhError('Trade is not eligible.', 400, { candidate });
     // Calculate risk from a fresh executable quote, not a 2-minute candle
@@ -5184,20 +5253,7 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
 }
 
 app.post('/api/opening-momentum/execute', requireAuth, async (req, res) => {
-  const userId = req.session.userId;
-  const symbol = String(req.body?.symbol || '').toUpperCase();
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
-  try {
-    res.json(await executePmhEntry(userId, symbol, 'manual'));
-  } catch (error) {
-    res.status(error.status || (error.alpacaTransient ? 503 : 400)).json({
-      error: error.message,
-      candidate: error.candidate || null,
-      clientOrderId: error.clientOrderId || null,
-      reconciliationRequired: !!error.reconciliationRequired,
-      submittedLots: error.submittedLots || [],
-    });
-  } finally { releaseBotLock(userId); }
+  res.status(409).json({ error: 'Opening Momentum entries are submitted only by the server automation scheduler.' });
 });
 
 app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
@@ -5210,9 +5266,7 @@ app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
 // open; it never manufactures a fill price, exit, or P&L from a quote.
 async function reconcilePmhTrades(userId) {
   const pmhFetch = (path, opts = {}) => alpacaFetchFor(userId, 'pmh', path, opts);
-  const settingRow = db.prepare('SELECT config_json FROM pmh_settings WHERE user_id=?').get(userId);
-  let pmhConfig = DEFAULT_PMH_CONFIG;
-  try { pmhConfig = { ...pmhConfig, ...(settingRow?.config_json ? JSON.parse(settingRow.config_json) : {}) }; } catch (_) {}
+  const pmhConfig = pmhConfigFor(userId).config;
   const open = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
     AND status IN ('pending_entry','open','pending_exit','exit_reserving') ORDER BY id`).all(userId);
   const reconciled = [];
@@ -6141,15 +6195,26 @@ app.get('/api/momentum/settings', requireAuth, (req, res) => {
 });
 
 app.put('/api/momentum/settings', requireAuth, (req, res) => {
-  const config = sanitizeMomentumExecutionConfig(req.body?.config || {});
+  const prior = momentumConfigFor(req.session.userId);
+  const requestedPositionDollars = req.body?.maxPositionDollars
+    ?? req.body?.config?.maxPositionDollars
+    ?? req.body?.config?.positionValue;
+  const config = serverOwnedMomentumConfig(
+    DEFAULT_MOMENTUM_CONFIG,
+    prior.config,
+    requestedPositionDollars
+  );
   const enabled = req.body?.enabled === true;
+  const creds = getAlpacaCreds(req.session.userId, 'momentum');
+  const liveArmed = req.body?.liveArmed === true && creds?.mode === 'live';
   db.prepare(`
-    INSERT INTO momentum_settings (user_id,enabled,config_json,updated_at)
-    VALUES (?,?,?,datetime('now'))
+    INSERT INTO momentum_settings (user_id,enabled,live_armed,config_json,updated_at)
+    VALUES (?,?,?,?,datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
-      enabled=excluded.enabled,config_json=excluded.config_json,updated_at=excluded.updated_at
-  `).run(req.session.userId, enabled ? 1 : 0, JSON.stringify(config));
-  res.json({ ok: true, enabled, config });
+      enabled=excluded.enabled,live_armed=excluded.live_armed,
+      config_json=excluded.config_json,updated_at=excluded.updated_at
+  `).run(req.session.userId, enabled ? 1 : 0, liveArmed ? 1 : 0, JSON.stringify(config));
+  res.json({ ok: true, enabled, liveArmed, config });
 });
 
 function momentumRowFromQuote(symbol, quote, config) {
@@ -6270,10 +6335,13 @@ async function reconcileMomentumTrades(userId) {
 }
 
 async function executeMomentumEntry(userId, candidate) {
-  const { enabled, config } = momentumConfigFor(userId);
+  const { enabled, liveArmed, config } = momentumConfigFor(userId);
   if (!enabled) throw new Error('Momentum automation is disabled in persisted settings.');
   const creds = getAlpacaCreds(userId, 'momentum');
   if (!creds) throw new Error('Connect the dedicated Momentum Alpaca account first.');
+  if (creds.mode === 'live' && !liveArmed) {
+    throw new Error('Momentum Live orders are not explicitly armed.');
+  }
   if (!isMarketOpen()) throw new Error('Market is closed for Momentum automation.');
   await assertAlpacaTradableEquity(userId, candidate.symbol, { fresh: true, scope: 'momentum' });
   const fresh = await buildMomentumCandidate(userId, candidate.symbol, config);
@@ -6377,12 +6445,18 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
           accountActive,
           livePaused,
           executable: bot.enabled && accountActive && !livePaused
+            && (bot.scope !== 'momentum' || momentumConfigFor(userId).liveArmed || creds.mode !== 'live')
+            && (bot.scope !== 'pmh' || pmhConfigFor(userId).liveArmed || creds.mode !== 'live')
             && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live')
             && (bot.scope !== 'swing' || swingConfigFor(userId).liveArmed || creds.mode !== 'live')
             && (bot.scope !== 'options' || optionsConfigFor(userId).liveArmed || creds.mode !== 'live'),
           reason: !bot.enabled ? 'Strategy is disabled.'
             : livePaused ? 'PMH live automation is paused for safety validation. Paper mode remains available.'
             : !accountActive ? 'Broker account is not active.'
+            : bot.scope === 'momentum' && creds.mode === 'live' && !momentumConfigFor(userId).liveArmed
+              ? 'Live Momentum authorization is not armed.'
+              : bot.scope === 'pmh' && creds.mode === 'live' && !pmhConfigFor(userId).liveArmed
+                ? 'Live Opening Momentum authorization is not armed.'
             : bot.scope === 'candlestick' && creds.mode === 'live' && !candlestickConfigFor(userId).liveArmed
               ? 'Live candlestick authorization is not armed.'
               : bot.scope === 'swing' && creds.mode === 'live' && !swingConfigFor(userId).liveArmed
@@ -7745,9 +7819,12 @@ function candlestickFresh(bars, maxAgeMs = 8 * 60 * 1000) {
 }
 function candlestickConfigFor(userId) {
   const row = db.prepare('SELECT enabled,live_armed,config_json FROM candlestick_settings WHERE user_id=?').get(userId);
-  let config = { ...CANDLESTICK_DEFAULTS };
-  try { config = { ...config, ...(row?.config_json ? JSON.parse(row.config_json) : {}) }; } catch (_) {}
-  config = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
+  let saved = {};
+  try { saved = row?.config_json ? JSON.parse(row.config_json) : {}; } catch (_) {}
+  const config = sanitizeCandlestickExecutionConfig(
+    serverOwnedConfig(CANDLESTICK_DEFAULTS, saved, undefined, { maximum: 100_000 }),
+    CANDLESTICK_DEFAULTS
+  );
   return { enabled: !!row?.enabled, liveArmed: !!row?.live_armed, config };
 }
 function candlestickRuntimeFor(userId) {
@@ -9186,23 +9263,7 @@ app.get('/api/swing/candidates', requireAuth, async (req, res) => {
 });
 
 app.post('/api/swing/execute', requireAuth, async (req, res) => {
-  let userId;
-  try { userId = await ensureSessionUserInTradingStore(req); }
-  catch (_) { return res.status(503).json({ error: 'Swing trading identity could not be verified.' }); }
-  const symbol = String(req.body?.symbol || '').trim().toUpperCase();
-  if (!/^[A-Z][A-Z0-9.-]{0,11}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another broker order cycle is in progress.' });
-  const lease = acquireSwingExecutionLease(userId);
-  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another Swing cycle is still reconciling.' }); }
-  try { res.json(await executeSwingEntry(userId, symbol, 'manual', lease)); }
-  catch (error) {
-    res.status(error.alpacaTransient ? 503 : 400).json({
-      error: error.message, candidate: error.candidate || null, reconciliationRequired: true,
-    });
-  } finally {
-    releaseSwingExecutionLease(userId, lease);
-    releaseBotLock(userId);
-  }
+  res.status(409).json({ error: 'Swing entries are submitted only by the server automation scheduler.' });
 });
 
 app.get('/api/swing/trades', requireAuth, async (req, res) => {
@@ -10241,23 +10302,7 @@ app.get('/api/options/candidates', requireAuth, async (req, res) => {
 });
 
 app.post('/api/options/execute', requireAuth, async (req, res) => {
-  let userId;
-  try { userId = await ensureSessionUserInTradingStore(req); }
-  catch (_) { return res.status(503).json({ error: 'Options trading identity could not be verified.' }); }
-  const symbol = String(req.body?.symbol || '').trim().toUpperCase();
-  if (!LEAP_UNDERLYINGS.includes(symbol)) return res.status(400).json({ error: 'Only QQQ, TQQQ, and SOXL are eligible.' });
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another broker order cycle is in progress.' });
-  const lease = acquireOptionsExecutionLease(userId);
-  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another Options cycle is still reconciling.' }); }
-  try { res.json(await executeOptionsEntry(userId, symbol, 'manual', lease)); }
-  catch (error) {
-    res.status(error.alpacaTransient ? 503 : 400).json({
-      error: error.message, candidate: error.candidate || null, reconciliationRequired: true,
-    });
-  } finally {
-    releaseOptionsExecutionLease(userId, lease);
-    releaseBotLock(userId);
-  }
+  res.status(409).json({ error: 'LEAP Options entries are submitted only by the server automation scheduler.' });
 });
 
 app.get('/api/options/trades', requireAuth, async (req, res) => {
@@ -10513,10 +10558,12 @@ app.put('/api/candlestick/settings', requireAuth, (req, res) => {
     const userId = await ensureSessionUserInTradingStore(req);
     const body = req.body || {};
     const prior = candlestickConfigFor(userId);
-    const config = { ...prior.config };
-    for (const key of Object.keys(CANDLESTICK_DEFAULTS)) {
-      if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
-    }
+    const config = serverOwnedConfig(
+      CANDLESTICK_DEFAULTS,
+      prior.config,
+      body.maxPositionDollars ?? body.config?.maxPositionDollars,
+      { maximum: 100_000 }
+    );
     const safeConfig = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
     // Live execution must be deliberately armed after the user has connected a
     // live broker account; connecting keys alone never turns on real orders.
@@ -10629,17 +10676,7 @@ app.get('/api/candlestick/scan', requireAuth, async (req, res) => {
 });
 
 app.post('/api/candlestick/execute', requireAuth, async (req, res) => {
-  let userId;
-  try { userId = await ensureSessionUserInTradingStore(req); }
-  catch (error) { return res.status(503).json({ error: 'UltraBot3 trading identity could not be verified.' }); }
-  const symbol = String(req.body?.symbol || '').toUpperCase();
-  if (!/^[A-Z0-9.-]{1,12}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
-  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another bot order cycle is in progress.' });
-  const lease = acquireCandlestickExecutionLease(userId);
-  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another UltraBot3 execution cycle is still reconciling this account.' }); }
-  try { res.json(await executeCandlestickEntry(userId, symbol, 'manual', lease)); }
-  catch (error) { res.status(error.alpacaTransient ? 503 : 400).json({ error: error.message, candidate: error.candidate || null, reconciliationRequired: true }); }
-  finally { releaseCandlestickExecutionLease(userId, lease); releaseBotLock(userId); }
+  res.status(409).json({ error: 'UltraBot3 entries are submitted only by the server automation scheduler.' });
 });
 
 app.get('/api/candlestick/trades', requireAuth, async (req, res) => {
@@ -10800,20 +10837,22 @@ setInterval(async () => {
 async function runPmhCycle(userId, source = 'server-scheduler') {
   const outcome = { bot: 'pmh', status: 'skipped', reconciled: 0, submitted: false };
   if (!isBotEnabled(userId, 'pmh')) return { ...outcome, reason: 'Strategy is disabled.' };
-  const settings = db.prepare('SELECT enabled,config_json FROM pmh_settings WHERE user_id=?').get(userId);
-  if (!settings?.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
+  const settings = pmhConfigFor(userId);
+  if (!settings.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
   const creds = getAlpacaCreds(userId, 'pmh');
   if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
   if (PMH_LIVE_AUTOMATION_PAUSED && creds.mode === 'live') {
     return { ...outcome, status: 'paused_live', reason: 'PMH live automation is paused for safety validation. Paper mode remains available.' };
+  }
+  if (creds.mode === 'live' && !settings.liveArmed) {
+    return { ...outcome, status: 'live_unarmed', reason: 'PMH Live orders are not explicitly armed.' };
   }
   if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
   try {
     const reconciliation = await reconcilePmhTrades(userId);
     outcome.reconciled = reconciliation.reconciled.length;
     if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
-    let config = DEFAULT_PMH_CONFIG;
-    try { config = { ...config, ...(settings.config_json ? JSON.parse(settings.config_json) : {}) }; } catch (_) {}
+    const config = settings.config;
     const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'pmh' });
     const rotation = nextAlpacaCatalogRotation(catalogEntry, PMH_DEFAULT_SYMBOLS, {
       strategy: 'pmh-scheduler', limit: 25, priorityLimit: 13, rotationLimit: 12,
@@ -10865,9 +10904,13 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 async function runMomentumCycle(userId, source = 'server-scheduler') {
   const outcome = { bot: 'momentum', status: 'skipped', reconciled: 0, submitted: false };
-  const { enabled, config } = momentumConfigFor(userId);
+  const { enabled, liveArmed, config } = momentumConfigFor(userId);
   if (!enabled) return { ...outcome, reason: 'Strategy is disabled.' };
-  if (!getAlpacaCreds(userId, 'momentum')) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  const creds = getAlpacaCreds(userId, 'momentum');
+  if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
+  if (creds.mode === 'live' && !liveArmed) {
+    return { ...outcome, status: 'live_unarmed', reason: 'Momentum Live orders are not explicitly armed.' };
+  }
   if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
   try {
     // Exact client-order-ID reconciliation runs even outside market hours and

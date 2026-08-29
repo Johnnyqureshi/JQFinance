@@ -15,27 +15,22 @@
     maxRiskPerSharePct:8, maxTradePrice:15, maxTradesPerDay:3, maxDailyLoss:500, partialTargetR:2, partialPercent:50,
     requireMarketStrength:true, requireRelativeStrength:true, requireSectorStrength:false,
   };
-  let config = { ...defaults }, enabled = false, liveAutomationPaused = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
+  let config = { ...defaults }, enabled = false, liveArmed = false, brokerMode = 'paper', liveAutomationPaused = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
   let connectionBound = false;
 
   function readConfig() {
     return {
-      ...config,
-      minScore:input('pmhMinScore'), minRelativeVolume:input('pmhRelVol'), minVolumeZScore:input('pmhVolZ'),
-      minBodyRatio:input('pmhBody'), maxUpperWickRatio:input('pmhWick'), minRoomRiskMultiple:input('pmhResistance'),
-      maxRiskDollars:input('pmhRisk'), maxPositionDollars:input('pmhMaxPosition'), maxTradePrice:input('pmhMaxPrice'), maxTradesPerDay:input('pmhMaxTrades'), maxDailyLoss:input('pmhMaxLoss'), maxRiskPerSharePct:input('pmhMaxStop'),
-      partialTargetR:input('pmhPartialR'), partialPercent:input('pmhPartialPct'),
-      requireMarketStrength:$('pmhRequireMarket')?.checked === true,
-      requireRelativeStrength:$('pmhRequireRS')?.checked === true,
-      requireSectorStrength:false,
+      ...defaults,
+      maxPositionDollars: input('pmhMaxPosition') || config.maxPositionDollars,
     };
   }
   function putConfig(c) {
     config = { ...defaults, ...(c || {}) };
-    const pairs = { pmhMinScore:'minScore', pmhRelVol:'minRelativeVolume', pmhVolZ:'minVolumeZScore', pmhBody:'minBodyRatio', pmhWick:'maxUpperWickRatio', pmhResistance:'minRoomRiskMultiple', pmhRisk:'maxRiskDollars', pmhMaxPosition:'maxPositionDollars', pmhMaxPrice:'maxTradePrice', pmhMaxStop:'maxRiskPerSharePct', pmhPartialR:'partialTargetR', pmhPartialPct:'partialPercent', pmhMaxTrades:'maxTradesPerDay', pmhMaxLoss:'maxDailyLoss' };
-    Object.entries(pairs).forEach(([id,key]) => { if ($(id)) $(id).value = config[key]; });
-    if ($('pmhRequireMarket')) $('pmhRequireMarket').checked = config.requireMarketStrength !== false;
-    if ($('pmhRequireRS')) $('pmhRequireRS').checked = config.requireRelativeStrength !== false;
+    if ($('pmhMaxPosition')) $('pmhMaxPosition').value = config.maxPositionDollars;
+    if ($('pmhLiveArm')) {
+      $('pmhLiveArm').checked = liveArmed;
+      $('pmhLiveArm').disabled = brokerMode !== 'live';
+    }
   }
   async function request(url, opts = {}) {
     const response = await fetch(url, { credentials:'include', headers: { 'Content-Type':'application/json', ...(opts.headers || {}) }, ...opts });
@@ -49,6 +44,7 @@
     try {
       const status = await request('/api/alpaca/credentials?connection=pmh');
       const connected = status.connected === true;
+      brokerMode = status.mode || 'paper';
       dot.className = `at-conn-dot ${connected ? 'dot-green' : 'dot-red'}`;
       text.textContent = connected
         ? `Connected · ${String(status.mode || 'paper').toUpperCase()} · Account ${status.accountId || 'verifying…'}`
@@ -62,8 +58,15 @@
   }
   async function saveSettings(nextEnabled = enabled) {
     config = readConfig();
-    const saved = await request('/api/opening-momentum/settings', { method:'PUT', body:JSON.stringify({ enabled:nextEnabled, config }) });
-    enabled = saved.enabled; putConfig(saved.config);
+    const saved = await request('/api/opening-momentum/settings', {
+      method:'PUT',
+      body:JSON.stringify({
+        enabled:nextEnabled,
+        liveArmed:$('pmhLiveArm')?.checked === true,
+        maxPositionDollars:config.maxPositionDollars,
+      }),
+    });
+    enabled = saved.enabled; liveArmed = saved.liveArmed === true; putConfig(saved.config);
     await request('/api/bots/toggle', { method:'POST', body:JSON.stringify({ bot:'pmh', enabled }) });
     renderBot();
   }
@@ -74,7 +77,9 @@
     btn.classList.toggle('mt-bot-toggle--off', !enabled);
     bar.classList.toggle('mt-bot-bar--on', enabled);
     $('pmhBotStatus').textContent = enabled
-      ? (liveAutomationPaused
+      ? (brokerMode === 'live' && !liveArmed
+        ? 'Automation is active, but Live entries remain blocked until explicitly armed.'
+        : liveAutomationPaused
         ? 'Paper automation is available. PMH live submissions are paused for safety validation.'
         : 'Automation is active: only server-confirmed TRADE ELIGIBLE setups can submit.')
       : 'Automation is off. Scans remain read-only.';
@@ -131,20 +136,9 @@
     <div class="pmh-reason-title">${reasons.length ? 'Blocked or pending conditions' : 'All configured conditions passed'}</div>
     ${reasons.length ? `<ul class="pmh-reasons">${reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="pmh-pass">Complete fresh evidence. Entry still re-checks all conditions server-side.</div>'}
     ${r.priceAction?.reasons?.length ? `<div class="pmh-reason-title">Price-action context (informational only)</div><ul class="pmh-reasons">${r.priceAction.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-    ${enabled && r.eligible ? '<button class="mt-trade-buy pmh-execute" id="pmhExecuteBtn">Submit protected PMH entry</button>' : ''}
+    ${enabled && r.eligible ? '<div class="pmh-pass">Queued for the server automation scheduler.</div>' : ''}
     `;
     $('pmhDetailTime').textContent = r.freshness?.barsAt ? `bars ${new Date(r.freshness.barsAt).toLocaleTimeString()}` : 'no fresh bars';
-    $('pmhExecuteBtn')?.addEventListener('click', () => execute(r.symbol));
-  }
-  async function execute(symbol) {
-    const btn = $('pmhExecuteBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Re-checking broker gates…'; }
-    try {
-      const out = await request('/api/opening-momentum/execute', { method:'POST', body:JSON.stringify({ symbol }) });
-      $('pmhBotStatus').textContent = `${symbol}: order intent recorded; awaiting Alpaca fill confirmation.`;
-      await refreshTrades(); await scan(false);
-    } catch (e) {
-      $('pmhBotStatus').textContent = `${symbol}: ${e.message}`;
-    } finally { if ($('pmhExecuteBtn')) { $('pmhExecuteBtn').disabled = false; $('pmhExecuteBtn').textContent = 'Submit protected PMH entry'; } }
   }
   async function refreshTrades() {
     const box = $('pmhTradesBody'); if (!box) return;
@@ -164,7 +158,7 @@
       $('pmhBotStatus').textContent = `Broker reconciliation unavailable: ${e.message}`;
     }
   }
-  async function scan(allowAuto = true) {
+  async function scan() {
     if (scanning) return;
     scanning = true; $('pmhScanStatus').textContent = 'Fetching fresh 1-minute Alpaca bars…';
     try {
@@ -182,10 +176,9 @@
         : `Session unavailable · ${coverageLabel}`;
       $('pmhScanStatus').textContent = `${results.filter(x => x.eligible).length} eligible · ${results.filter(x => x.status === 'BLOCKED').length} blocked · ${coverage.candidateSource || 'PMH watchlist'}`;
       renderRows(); renderDetail();
-      if (enabled && allowAuto) {
-        const candidate = results.find(x => x.eligible);
-        if (candidate) await execute(candidate.symbol);
-      }
+      // The browser only displays fresh candidates. Automated submission is
+      // exclusively owned by the server scheduler so closing or opening tabs
+      // cannot start, stop, or duplicate an execution cycle.
     } catch (e) {
       $('pmhScanStatus').textContent = e.message.includes('Not authenticated') ? 'Sign in to scan PMH candidates' : `Scan unavailable: ${e.message}`;
       results = []; renderRows();
@@ -194,13 +187,14 @@
   async function init() {
     if (initialized) return;
     initialized = true;
-    $('pmhConfigToggle')?.addEventListener('click', () => {
-      const panel = $('pmhConfigBody'); const open = panel?.style.display !== 'none';
-      if (panel) panel.style.display = open ? 'none' : ''; $('pmhConfigToggle').textContent = open ? '▼ Configure' : '▲ Hide settings';
-    });
     $('pmhRefreshBtn')?.addEventListener('click', () => scan());
     $('pmhApplyConfig')?.addEventListener('click', async () => { await saveSettings(enabled); await scan(false); });
-    $('pmhResetConfig')?.addEventListener('click', async () => { putConfig(defaults); await saveSettings(enabled); await scan(false); });
+    $('pmhLiveArm')?.addEventListener('change', async () => {
+      try { await saveSettings(enabled); } catch (e) {
+        liveArmed = false; $('pmhLiveArm').checked = false;
+        $('pmhBotStatus').textContent = `Could not change Live authorization: ${e.message}`;
+      }
+    });
     $('pmhBotToggle')?.addEventListener('click', async () => {
       try { await saveSettings(!enabled); if (enabled) await scan(); } catch (e) { $('pmhBotStatus').textContent = `Could not change automation: ${e.message}`; }
     });
@@ -214,14 +208,19 @@
       window.addEventListener('alpaca-connection-changed', async event => {
         if (event.detail?.connection && event.detail.connection !== 'pmh') return;
         await refreshBrokerStatus();
-        await refreshTrades();
-        await scan(false);
+        try {
+          const saved = await request('/api/opening-momentum/settings');
+          enabled = saved.enabled; liveArmed = saved.liveArmed === true;
+          liveAutomationPaused = saved.liveAutomationPaused === true;
+          putConfig(saved.config); renderBot();
+        } catch (_) {}
+        await refreshTrades(); await scan(false);
       });
     }
     await refreshBrokerStatus();
     try {
       const saved = await request('/api/opening-momentum/settings');
-    enabled = saved.enabled; liveAutomationPaused = saved.liveAutomationPaused === true;
+    enabled = saved.enabled; liveArmed = saved.liveArmed === true; liveAutomationPaused = saved.liveAutomationPaused === true;
     putConfig(saved.config); renderBot();
     } catch (e) { $('pmhBotStatus').textContent = 'Sign in and connect Alpaca to use Opening Momentum.'; }
     await refreshTrades(); await scan(false);

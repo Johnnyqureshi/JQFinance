@@ -4,6 +4,8 @@ const {
   sanitizeCandlestickExecutionConfig,
   candlestickEntrySide,
   buildCandlestickBracketOrder,
+  candlestickBarsFromResponse,
+  requireCandlestickBrokerCollection,
   calculateCandlestickEntryCapacity,
 } = require('../lib/candlestick-execution-policy');
 
@@ -38,6 +40,19 @@ test('builds a paper/live-compatible bracket market order', () => {
     client_order_id: 'cndl_test_1', order_class: 'bracket',
     take_profit: { limit_price: '98.12' }, stop_loss: { stop_price: '104.57' },
   });
+});
+test('accepts both documented single-symbol and keyed Alpaca bars responses', () => {
+  const bars = [{ t:'2026-08-28T15:00:00Z', o:10, h:11, l:9, c:10.5, v:1000 }];
+  assert.strictEqual(candlestickBarsFromResponse({ bars }, 'AAPL'), bars);
+  assert.strictEqual(candlestickBarsFromResponse({ bars:{ AAPL:bars } }, 'aapl'), bars);
+  assert.throws(() => candlestickBarsFromResponse({ bars:{} }, 'AAPL'), /unexpected bars response/);
+  assert.throws(() => candlestickBarsFromResponse(null, 'AAPL'), /did not return a response/);
+});
+test('fails closed when broker position or order collections are malformed', () => {
+  const rows = [{ symbol:'AAPL' }];
+  assert.strictEqual(requireCandlestickBrokerCollection(rows, 'positions'), rows);
+  assert.throws(() => requireCandlestickBrokerCollection({ data:rows }, 'positions'), /unexpected positions response/);
+  assert.throws(() => requireCandlestickBrokerCollection(null, 'open-orders'), /unexpected open-orders response/);
 });
 test('counts a timeout-reserved journal entry even before broker visibility', () => {
   const capacity = calculateCandlestickEntryCapacity([], [], [{ entry_order_id:'cndl_timeout', entry_client_order_id:'cndl_timeout' }]);

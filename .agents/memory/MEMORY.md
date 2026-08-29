@@ -11,3 +11,4 @@
 - [Historical forecast evidence](historical-forecast-evidence.md) — historical pattern guidance must purge overlapping outcome windows and withhold probabilities for weak samples.
 - [PMH server-side automation scheduler](pmh-server-scheduler.md) — extract a bot's route logic into functions, then add a setInterval scheduler, to make automation survive a closed browser tab.
 - [Broker credential vault](broker-credential-vault.md) — broker keys are encrypted at rest, migrated lazily, and never used as cache keys or response data.
+- [Paused bot reconciliation](paused-bot-reconciliation.md) — disabling new entries must never stop reconciliation or protection of existing broker positions.

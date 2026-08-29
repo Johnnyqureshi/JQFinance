@@ -7,7 +7,7 @@
   const num = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—';
   const money = value => Number.isFinite(Number(value)) ? `$${num(value)}` : '—';
   const defaults = { minScore:65, minRelativeVolume:1.2, minRewardRisk:2, maxPositionDollars:1000, maxRiskDollars:100, maxSymbols:16 };
-  let config = { ...defaults }, enabled = false, liveArmed = false, readiness = null, results = [], selected = null, interval = null, initialized = false, scanning = false;
+  let config = { ...defaults }, enabled = false, liveArmed = false, readiness = null, results = [], selected = null, interval = null, initialized = false, scanning = false, scanGeneration = 0, refreshChain = Promise.resolve();
   async function request(url, opts = {}) {
     const response = await fetch(url, { credentials:'include', headers:{ 'Content-Type':'application/json', ...(opts.headers || {}) }, ...opts });
     const data = await response.json().catch(() => ({}));
@@ -29,13 +29,17 @@
       readiness = status;
       enabled = !!status.enabled;
       liveArmed = !!status.liveArmed;
-      $('candleConnDot').className = `at-conn-dot ${status.connected ? 'dot-green':'dot-red'}`;
-      $('candleConnText').textContent = status.connected ? `Connected · ${String(status.mode).toUpperCase()} · ${status.accountId}` : 'Not connected';
+      const brokerUsable = status.connected && status.broker?.reachable && status.broker?.active
+        && !status.broker?.tradingBlocked && !status.broker?.accountBlocked;
+      $('candleConnDot').className = `at-conn-dot ${brokerUsable ? 'dot-green':'dot-red'}`;
+      $('candleConnText').textContent = brokerUsable
+        ? `Broker verified · ${String(status.mode).toUpperCase()} · ${status.accountId}`
+        : status.connected ? `Credentials saved · broker unavailable · ${String(status.mode).toUpperCase()}` : 'Not connected';
       $('candleConnBtn').textContent = status.connected ? 'Account Settings' : 'Connect Alpaca';
       renderBot();
-    } catch {
-      readiness = null;
+    } catch (error) {
       $('candleConnText').textContent = 'Connection status unavailable';
+      $('candleBotStatus').textContent = `Readiness unavailable: ${error.message}`;
     }
   }
   function renderBot() {
@@ -78,14 +82,18 @@
     $('candleExecuteBtn')?.addEventListener('click', () => execute(row.symbol));
   }
   async function scan() {
-    if (scanning) return; scanning = true; $('candleScanStatus').textContent = 'Fetching completed 5-minute Alpaca bars…';
+    const generation = ++scanGeneration;
+    scanning = true; $('candleScanStatus').textContent = 'Fetching completed 5-minute Alpaca bars…';
     try {
-      const data = await request('/api/candlestick/scan'); results = data.results || []; config = { ...config, ...(data.config || {}) };
+      const data = await request('/api/candlestick/scan');
+      if (generation !== scanGeneration) return;
+      results = data.results || []; config = { ...config, ...(data.config || {}) };
       if (!selected || !results.some(row => row.symbol === selected.symbol)) selected = results[0] || null;
       const funnel = data.funnel || {}; $('candleScanStatus').textContent = `${funnel.eligible || 0} eligible · ${funnel.rejected || 0} context rejects · ${funnel.noPattern || 0} no pattern`;
       $('candleSession').textContent = `Server-side scan · ${new Date(data.evaluatedAt || Date.now()).toLocaleTimeString()}`; renderRows(); renderDetail();
-    } catch (error) { results = []; renderRows(); $('candleScanStatus').textContent = `Scan unavailable: ${error.message}`; }
-    finally { scanning = false; }
+    } catch (error) {
+      if (generation === scanGeneration) $('candleScanStatus').textContent = `Scan unavailable: ${error.message}. Previous results are retained.`;
+    } finally { if (generation === scanGeneration) scanning = false; }
   }
   async function execute(symbol) {
     const button = $('candleExecuteBtn'); if (button) { button.disabled = true; button.textContent = 'Re-checking broker gates…'; }
@@ -93,31 +101,43 @@
     catch (error) { $('candleBotStatus').textContent = `${symbol}: ${error.message}`; }
     finally { if ($('candleExecuteBtn')) { $('candleExecuteBtn').disabled = false; $('candleExecuteBtn').textContent = 'Submit broker-protected entry'; } }
   }
+  function renderTrades(trades) { $('candleTradesBody').innerHTML = trades?.length ? trades.map(t => `<div class="pmh-trade"><span><strong>${esc(t.symbol)}</strong> · ${esc(t.direction)} · ${esc(t.status)}</span><span>${num(t.shares,0)} sh · ${money(t.entry_price)}</span></div>`).join('') : 'No UltraBot3 order intents have been recorded.'; }
   async function refreshTrades() {
-    try { const { trades } = await request('/api/candlestick/trades'); $('candleTradesBody').innerHTML = trades?.length ? trades.map(t => `<div class="pmh-trade"><span><strong>${esc(t.symbol)}</strong> · ${esc(t.direction)} · ${esc(t.status)}</span><span>${num(t.shares,0)} sh · ${money(t.entry_price)}</span></div>`).join('') : 'No UltraBot3 order intents have been recorded.'; }
+    try { const { trades } = await request('/api/candlestick/trades'); renderTrades(trades); }
     catch { $('candleTradesBody').textContent = 'Connect Alpaca to view the UltraBot3 broker journal.'; }
   }
-  async function reconcile() { if (!enabled) return; try { const out = await request('/api/candlestick/reconcile', { method:'POST', body:'{}' }); if (out.reconciled?.length) await refreshTrades(); } catch (error) { $('candleBotStatus').textContent = `Broker reconciliation unavailable: ${error.message}`; } }
+  async function reconcile() { if (!readiness?.reconciliationReady) return; try { const out = await request('/api/candlestick/reconcile', { method:'POST', body:'{}' }); renderTrades(out.trades); } catch (error) { $('candleBotStatus').textContent = `Broker reconciliation unavailable: ${error.message}`; } }
   async function backtest() {
     $('candleBacktestBody').textContent = 'Replaying completed historical bars without lookahead…';
     try { const data = await request('/api/candlestick/backtest?symbol=SPY'); const m = data.metrics || {}; $('candleBacktestBody').innerHTML = `<strong>${data.insufficientEvidence ? 'Insufficient evidence' : 'Historical replay'}</strong><br>${esc(data.note || '')}<br>${m.trades || 0} closed samples · win rate ${m.winRate == null ? '—' : `${(m.winRate*100).toFixed(1)}%`} · expectancy ${num(m.expectancyR,2)}R · max drawdown ${num(m.maxDrawdownR,2)}R`; } catch (error) { $('candleBacktestBody').textContent = `Backtest unavailable: ${error.message}`; }
   }
-  async function save(nextEnabled = enabled) {
+  async function save(nextEnabled = enabled, refreshScan = true) {
     config = readConfig(); liveArmed = $('candleLiveArm').checked;
     const out = await request('/api/candlestick/settings', { method:'PUT', body:JSON.stringify({ enabled:nextEnabled, liveArmed, config }) });
     enabled = out.enabled; liveArmed = out.liveArmed; putConfig(out.config); await refreshConnection();
+    if (refreshScan) { selected = null; await scan(); }
+  }
+  function queueRefresh({ includeScan = true, includeTrades = true } = {}) {
+    refreshChain = refreshChain.catch(() => {}).then(async () => {
+      await refreshConnection();
+      if (includeScan) await scan();
+      if (includeTrades) await refreshTrades();
+    });
+    return refreshChain;
   }
   async function init() {
     if (initialized) return; initialized = true;
     $('candleConfigToggle').addEventListener('click', () => { const hidden = $('candleConfigBody').style.display === 'none'; $('candleConfigBody').style.display = hidden ? '' : 'none'; $('candleConfigToggle').textContent = hidden ? '▲ Hide settings' : '▼ Configure'; });
     $('candleConnBtn').addEventListener('click', () => window.alpacaTrader?.openConnectModal('candlestick'));
-    $('candleRefreshBtn').addEventListener('click', scan); $('candleSaveBtn').addEventListener('click', () => save(enabled)); $('candleResetBtn').addEventListener('click', () => { putConfig(defaults); save(enabled); });
-    $('candleBotToggle').addEventListener('click', async () => { try { await save(!enabled); if (enabled) await scan(); } catch (error) { $('candleBotStatus').textContent = error.message; } });
+    $('candleRefreshBtn').addEventListener('click', scan);
+    $('candleSaveBtn').addEventListener('click', async () => { try { await save(enabled); } catch (error) { $('candleBotStatus').textContent = `Settings not saved: ${error.message}`; } });
+    $('candleResetBtn').addEventListener('click', async () => { const prior = { ...config }; putConfig(defaults); try { await save(enabled); } catch (error) { putConfig(prior); $('candleBotStatus').textContent = `Defaults not saved: ${error.message}`; } });
+    $('candleBotToggle').addEventListener('click', async () => { try { await save(!enabled); } catch (error) { $('candleBotStatus').textContent = error.message; } });
     $('candleTradesRefresh').addEventListener('click', refreshTrades); $('candleBacktestBtn').addEventListener('click', backtest);
-    window.addEventListener('alpaca-connection-changed', event => { if (!event.detail?.connection || event.detail.connection === 'candlestick') { refreshConnection(); scan(); } });
+    window.addEventListener('alpaca-connection-changed', event => { if (event.detail?.connection === 'candlestick') queueRefresh(); });
     await refreshConnection();
     try { const saved = await request('/api/candlestick/settings'); enabled = saved.enabled; liveArmed = saved.liveArmed; putConfig(saved.config); renderBot(); } catch { $('candleBotStatus').textContent = 'Sign in and connect a dedicated Alpaca account to use this bot.'; }
     await refreshTrades(); await scan(); await refreshConnection();
   }
-  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await scan(); await refreshConnection(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
+  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await queueRefresh(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
 }());

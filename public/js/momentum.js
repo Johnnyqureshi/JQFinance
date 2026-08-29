@@ -2871,7 +2871,7 @@
         this.selectedRow = null;
         const c = this.config;
         this.addLog('CONFIG', 'Settings updated',
-          `$${c.minPrice}–$${c.maxPrice} · Gain≥${c.minGainPercent}% · RelVol≥${c.minRelVol} · Vol≥${fmtVol(c.minVolume)} · Score≥${c.minScore}/7`, 'info');
+          `Maximum position size $${Number(c.positionValue || 0).toLocaleString()}; all strategy rules remain server-owned`, 'info');
         this.run();
       });
 
@@ -2885,29 +2885,6 @@
             this.addLog('BOT', 'Live arm not saved', error.message, 'err');
           });
       });
-
-      // Quick buy — checks daily limits, uses manual or auto shares
-      $('mtBuyBtn')?.addEventListener('click', async () => {
-        const row   = this.selectedRow;
-        const rc    = this.riskCalc;
-        const limitMsg = this._checkDailyLimits();
-        if (limitMsg) return this._showTradeError(limitMsg);
-        if (!row || !rc?.shares) return this.addLog(row?.sym || '?', 'BUY', 'No valid risk calc — set stop % or ATR', 'err');
-        if (!AlpacaClient.connected) return this.addLog(row.sym, 'BUY', 'Not connected to Alpaca', 'err');
-        const btn = $('mtBuyBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Placing…'; }
-        try {
-          await AlpacaClient.placeSimpleOrder(row.sym, 'buy', rc.shares * row.price);
-          this._recordTrade(row.sym, 'buy', rc.shares, row.price, rc.stopLoss);
-          this._showTradeSuccess(`BUY ${row.sym} — ${rc.shares} shares placed`);
-        } catch (err) {
-          this.addLog(row.sym, 'BUY FAILED', err.message, 'err');
-          this._showTradeError(err.message);
-        } finally {
-          if (btn) { btn.disabled = false; btn.textContent = '▲ BUY'; }
-        }
-      });
-
 
       // Bot ON/OFF toggle
       $('mtBotToggle')?.addEventListener('click', () => { this._toggleBot(); });

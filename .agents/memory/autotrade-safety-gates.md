@@ -8,6 +8,12 @@ description: Pre-trade gating rules and pitfalls for the momentum bot's auto-tra
   **Why:** caused risk-cap checks to evaluate half the real exposure.
   **How to apply:** any new order-placing code sends un-levered `amount`; risk math uses `base * leverage` once.
 - Safety gates in an autonomous trading path must FAIL CLOSED: if analysis/pattern data is unavailable, skip the trade rather than proceed on score alone.
+- An entry safety signal must be enforced at the authenticated broker-order boundary, not only in browser automation; re-fetch fast-moving market evidence immediately before the broker POST.
+  **Why:** a direct API caller or a delayed browser request can bypass an otherwise correct client-side gate.
+  **How to apply:** use the strategy's broker credential scope on the server and fail the order when a final fresh-evidence recheck cannot confirm the constraint.
+- VWAP confirmation for a momentum entry is regular-session-only (9:30 AM–4:00 PM New York time) and needs a timestamp-fresh executable/current quote; exclude premarket, after-hours, and prior-session bars.
+  **Why:** rolling intraday windows or stale snapshot prices can make price appear above an obsolete VWAP and permit the exact reversal entry the gate is meant to prevent.
+  **How to apply:** use a session-bounded VWAP calculation and reject a missing, stale, or implausibly future-dated quote before comparing it with VWAP.
 - Auto-trade cycles need a mutex — scans can be triggered by timer, manual refresh, and config changes concurrently, causing duplicate orders.
 - Signal filtering must accept both `BUY` and `STRONG BUY`; strict `=== 'BUY'` silently excluded the highest-scoring setups.
 - Pre-trade gate order: signal → dump flags (hard: high-vol red candle or large topping tail; soft: 2+ of below-VWAP/below-EMA9/MACD-neg) → bearish pattern strength ≥2 → risk ≤5% of equity.

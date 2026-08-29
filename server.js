@@ -25,6 +25,8 @@ const {
   buildHistoricalForecast,
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
+const { regularSessionWindow } = require('./lib/intraday-vwap');
+const { evaluateMomentumOrderVwapGate } = require('./lib/momentum-vwap-gate');
 const {
   sanitizeCandlestickExecutionConfig,
   calculateCandlestickEntryCapacity,
@@ -1763,29 +1765,45 @@ app.get('/api/intraday/:symbol', requireAuth, async (req, res) => {
   const sym = req.params.symbol.toUpperCase();
   try {
     const uid = req.session.userId;
+    const now = new Date();
+    const { start: sessionStart } = regularSessionWindow(now);
 
     // ── Alpaca path ───────────────────────────────────────────────────────────
     if (uid) {
+      // The VWAP entry gate deliberately uses only today's 9:30 AM–4:00 PM ET
+      // session. Premarket, after-hours, and prior-session bars are not part of
+      // institutional regular-session VWAP and must not influence an entry.
+      const regularSessionStarted = now >= sessionStart;
+      const barsPath = regularSessionStarted
+        ? `/v2/stocks/${sym}/bars?timeframe=5Min&start=${encodeURIComponent(sessionStart.toISOString())}&limit=1000&adjustment=all&feed=iex`
+        : `/v2/stocks/${sym}/bars?timeframe=5Min&limit=100&adjustment=all&feed=iex`;
       const [barsData, snapData] = await Promise.all([
-        alpacaDataFetch(uid, `/v2/stocks/${sym}/bars?timeframe=5Min&limit=100&adjustment=all&feed=iex`).catch(() => null),
+        alpacaDataFetch(uid, barsPath).catch(() => null),
         alpacaSnapshotFetch(uid, sym).catch(() => null),
       ]);
       if (barsData?.bars?.length) {
         const bars  = barsData.bars.map(b => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
         const snap  = snapData?.[sym];
         const normQ = snap ? _normaliseAlpacaSnapshot(sym, snap) : null;
+        const vwapEntry = evaluateMomentumOrderVwapGate({ bars, snapshot: snap, now });
+        const currentPrice = vwapEntry.price ?? normQ?.price ?? bars.at(-1)?.c ?? null;
         const marketState = currentMarketState();
         const intradayPatterns = detectCandlePatterns(bars.slice(-10)).all;
         return res.json({
           bars,
           intradayPatterns,
-          price:         normQ?.price ?? bars.at(-1)?.c ?? null,
+          price:         currentPrice,
+          priceTimestamp: vwapEntry.priceTimestamp,
+          priceFresh:    vwapEntry.priceFresh,
           regularClose:  normQ?.regularClose ?? bars.at(-1)?.c ?? null,
           extendedPrice: normQ?.extendedPrice ?? null,
           extendedType:  normQ?.extendedType  ?? null,
           marketState,
           previousClose: normQ?.previousClose ?? null,
           open:          normQ?.open ?? bars[0]?.o ?? null,
+          vwap:          vwapEntry.vwap,
+          vwapSession:   vwapEntry.vwapSession,
+          vwapEntry,
         });
       }
     }
@@ -1819,6 +1837,7 @@ app.get('/api/intraday/:symbol', requireAuth, async (req, res) => {
     if (isPost)     extendedPrice = yfQuote?.postMarketPrice ?? null;
     else if (isPre) extendedPrice = yfQuote?.preMarketPrice ?? yfQuote?.postMarketPrice ?? null;
 
+    const vwapEntry = evaluateMomentumOrderVwapGate({ bars, snapshot: null, now });
     res.json({
       bars,
       intradayPatterns,
@@ -1829,6 +1848,11 @@ app.get('/api/intraday/:symbol', requireAuth, async (req, res) => {
       marketState,
       previousClose: yfQuote?.regularMarketPreviousClose ?? null,
       open:          yfQuote?.regularMarketOpen ?? bars[0]?.o ?? null,
+      priceTimestamp: null,
+      priceFresh:    vwapEntry.priceFresh,
+      vwap:          vwapEntry.vwap,
+      vwapSession:   vwapEntry.vwapSession,
+      vwapEntry,
     });
   } catch (e) {
     console.error('Intraday error:', e.message);
@@ -3503,6 +3527,29 @@ async function evaluateMomentumEntryPriceAction(userId, symbol, scope = 'momentu
   });
 }
 
+async function evaluateMomentumOrderVwap(userId, symbol, now = new Date()) {
+  const { start, end } = regularSessionWindow(now);
+  if (now < start || now >= end) {
+    return evaluateMomentumOrderVwapGate({ bars: [], snapshot: null, now });
+  }
+  const [barData, snapshotData] = await Promise.all([
+    alpacaDataFetch(
+      userId,
+      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=1000&adjustment=all&feed=iex`,
+      'momentum'
+    ),
+    alpacaSnapshotFetch(userId, symbol, 'momentum'),
+  ]);
+  const bars = (barData?.bars || []).map(bar => ({
+    t: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c, v: bar.v,
+  }));
+  return evaluateMomentumOrderVwapGate({
+    bars,
+    snapshot: snapshotData?.[symbol] || null,
+    now,
+  });
+}
+
 // Place order (market with optional TP/SL bracket)
 async function placeAlpacaOrder(req, res) {
   if (isAlpacaFlattening(req.session.userId)) {
@@ -3516,6 +3563,8 @@ async function placeAlpacaOrder(req, res) {
   if (!/^[A-Z0-9.\-]{1,12}$/i.test(symbol)) return res.status(400).json({ error: 'Invalid symbol.' });
   const sideL = side.toLowerCase();
   if (sideL !== 'buy' && sideL !== 'sell') return res.status(400).json({ error: 'side must be buy or sell.' });
+  const isCryptoSym = isLikelyCryptoSymbol(symbol);
+  const requiresMomentumVwap = scope === 'momentum' && sideL === 'buy' && !isCryptoSym;
 
   const amtNum = parseFloat(amount);
   if (!isFinite(amtNum) || amtNum <= 0) return res.status(400).json({ error: 'amount must be a positive number.' });
@@ -3570,7 +3619,6 @@ async function placeAlpacaOrder(req, res) {
   const lev = Math.min(4, Math.max(1, isFinite(+leverage) ? +leverage : 1));
 
   // ── Market-hours guard (equity only — crypto trades 24/7) ─────────────────
-  const isCryptoSym = isLikelyCryptoSymbol(symbol);
   const requiresPriceAction = requiresPriceActionForEntry({ side: sideL, isCrypto: isCryptoSym });
   if (!isCryptoSym && !isMarketOpen()) {
     return res.status(400).json({ error: 'Market is closed. Equity orders are only accepted during regular market hours (9:35 AM – 3:50 PM ET, Mon–Fri). Use Alpaca directly for extended-hours orders.' });
@@ -3578,6 +3626,7 @@ async function placeAlpacaOrder(req, res) {
 
   let entryLockHeld = false;
   let momentumPriceAction = null;
+  let momentumVwapEntry = null;
   try {
     // The order endpoint is shared by manual orders and the Momentum bot.
     // Reserve the cross-bot lock before looking at capacity, so simultaneous
@@ -3588,6 +3637,15 @@ async function placeAlpacaOrder(req, res) {
       }
       entryLockHeld = true;
       if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true, scope });
+      if (requiresMomentumVwap) {
+        momentumVwapEntry = await evaluateMomentumOrderVwap(req.session.userId, symbol.toUpperCase());
+        if (!momentumVwapEntry.eligible) {
+          return res.status(409).json({
+            error: `Momentum VWAP gate blocked entry: ${momentumVwapEntry.reason}`,
+            vwap: momentumVwapEntry,
+          });
+        }
+      }
       // A non-PMH buy cannot bypass structural setup validation by using the
       // generic order URL. PMH has an independent frozen-opening contract.
       if (requiresPriceAction) {
@@ -3605,10 +3663,37 @@ async function placeAlpacaOrder(req, res) {
       }
     }
 
+    // Re-check the safety gates immediately before building the broker request.
+    // The VWAP confirmation is server-owned and deliberately fetched again: a
+    // browser response or earlier quote must never authorize a later entry.
+    if (requiresPriceAction) {
+      momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase(), scope);
+      if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
+        return res.status(409).json({
+          error: `Momentum price-action recheck blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
+          priceAction: momentumPriceAction,
+        });
+      }
+    }
+    if (requiresMomentumVwap) {
+      momentumVwapEntry = await evaluateMomentumOrderVwap(req.session.userId, symbol.toUpperCase());
+      if (!momentumVwapEntry.eligible) {
+        return res.status(409).json({
+          error: `Momentum VWAP recheck blocked entry: ${momentumVwapEntry.reason}`,
+          vwap: momentumVwapEntry,
+        });
+      }
+    }
+
     // Get live price to calculate shares and TP/SL levels (Alpaca-first, 24/7)
-    const quote = await fetchLiveQuote(symbol.toUpperCase(), req.session.userId, scope);
-    // BUG FIX: use live `price` field — regularClose is prior-session close and causes stale bracket levels
-    const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.regularClose;
+    const quote = requiresMomentumVwap
+      ? null
+      : await fetchLiveQuote(symbol.toUpperCase(), req.session.userId, scope);
+    // Momentum entries use the fresh executable ask that just cleared the
+    // server-side VWAP recheck. Other routes retain the general live quote.
+    const price = requiresMomentumVwap
+      ? momentumVwapEntry.price
+      : quote?.price ?? quote?.regularMarketPrice ?? quote?.regularClose;
     if (!price || !isFinite(price) || price <= 0) throw new Error('Could not fetch a valid current price for ' + symbol.toUpperCase());
     const leveragedAmount = amtNum * lev;
     let orderBody;
@@ -3682,14 +3767,19 @@ async function placeAlpacaOrder(req, res) {
     if (isAlpacaFlattening(req.session.userId)) {
       return res.status(409).json({ error: 'Emergency flatten is in progress. New orders are temporarily blocked.' });
     }
-    if (requiresPriceAction) {
-      momentumPriceAction = await evaluateMomentumEntryPriceAction(req.session.userId, symbol.toUpperCase(), scope);
-      if (!momentumPriceAction.eligible || momentumPriceAction.direction !== 'LONG_ONLY') {
+    // Last possible control-boundary check before the broker POST. This remains
+    // separate from the admission check so a direct caller cannot reuse a
+    // previously valid browser quote while the stock has moved below VWAP.
+    if (requiresMomentumVwap) {
+      momentumVwapEntry = await evaluateMomentumOrderVwap(req.session.userId, symbol.toUpperCase());
+      if (!momentumVwapEntry.eligible) {
         return res.status(409).json({
-          error: `Momentum price-action recheck blocked entry: ${(momentumPriceAction.reasons || ['no confirmed long setup']).slice(0, 2).join(' ')}`,
-          priceAction: momentumPriceAction,
+          error: `Momentum VWAP final recheck blocked entry: ${momentumVwapEntry.reason}`,
+          vwap: momentumVwapEntry,
         });
       }
+    }
+    if (requiresPriceAction) {
       const roundedStop = Number((price * (1 - slNum / 100)).toFixed(2));
       if (!(slNum > 0) || !Number.isFinite(roundedStop) || roundedStop < Number(momentumPriceAction.invalidation)) {
         throw new Error('Momentum protective stop must be at or above the fresh rounded structural invalidation level.');

@@ -144,4 +144,7 @@
     await refreshTrades(); await scan(); await refreshConnection();
   }
   window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await queueRefresh(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
+  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await queueRefresh(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
+  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await queueRefresh(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
+  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await queueRefresh(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
 }());

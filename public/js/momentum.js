@@ -1131,6 +1131,8 @@
       // News required toggle
       const newsChk = $('mtRequireNews');
       if (newsChk) newsChk.checked = cfg.requireNewsCatalyst ?? true;
+      const vwapChk = $('mtRequireAboveVwap');
+      if (vwapChk) vwapChk.checked = true;
       // Universe radio
       const radio = document.querySelector(`input[name="mtUniverse"][value="${cfg.universeMode || 'curated'}"]`);
       if (radio) radio.checked = true;
@@ -2425,6 +2427,26 @@
       if (!this.botEnabled || this._flattenInProgress) return;
       const cfg   = this.config;
       const entry = row.price;
+
+      // Browser-side preview of the mandatory server gate. The order endpoint
+      // performs its own Momentum-scoped regular-session VWAP checks again,
+      // including the final fresh-ask recheck immediately before broker submit.
+      let intraday = null;
+      try {
+        const response = await fetch(`/api/intraday/${encodeURIComponent(row.sym)}`, {
+          credentials: 'include',
+        });
+        if (response.ok) intraday = await response.json();
+      } catch (_) {}
+      if (!intraday?.vwapEntry?.eligible) {
+        this.addLog(
+          row.sym,
+          'SKIP',
+          intraday?.vwapEntry?.reason || 'Fresh VWAP or quote data unavailable — cannot verify price support',
+          'warn'
+        );
+        return;
+      }
 
       // ── Calculate stop loss % ────────────────────────────────────────────
       let slPct = (cfg.stopPercent != null && cfg.stopPercent > 0) ? cfg.stopPercent : null;

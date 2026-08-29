@@ -58,7 +58,11 @@
   }
   function statusClass(row) { return row.eligible ? 'eligible' : row.direction ? 'waiting' : 'blocked'; }
   function pattern(row) {
-    return Object.entries(row.evidence?.patterns || {}).filter(([, active]) => active).map(([name]) => name.replace(/([A-Z])/g, ' $1').trim()).join(', ') || 'No confirmed pattern';
+    const candlePatterns = Object.entries(row.evidence?.patterns || {})
+      .filter(([, active]) => active).map(([name]) => name.replace(/([A-Z])/g, ' $1').trim());
+    const momentumPatterns = row.evidence?.patternAnalysis?.confirmed || [];
+    return [...new Set([...candlePatterns, ...momentumPatterns.map(name => name.replaceAll('_', ' ').toLowerCase())])].join(', ')
+      || 'No confirmed pattern';
   }
   function renderRows() {
     const body = $('candleScanBody'); if (!body) return;

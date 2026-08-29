@@ -1,0 +1,692 @@
+UPGRADE MY TRADING BOT INTO AN ADVANCED NEWS + MACRO + MOMENTUM STOCK SCANNER.
+
+IMPORTANT:
+Do not remove or break any existing functionality. Inspect the existing codebase first, understand the current architecture, then integrate these features cleanly.
+
+==================================================
+1. MARKET + MACRO NEWS ENGINE
+==================================================
+
+Build a real-time market intelligence engine that continuously monitors:
+
+A. FINVIZ NEWS
+- Scan Finviz news for breaking/recent market-moving headlines.
+- Identify stocks receiving significant news attention.
+- Extract:
+  - Ticker
+  - Headline
+  - Timestamp
+  - News source
+  - News sentiment
+  - Catalyst category
+- Prioritize news from the last:
+  - 15 minutes
+  - 1 hour
+  - 4 hours
+  - 24 hours
+- Give newer news greater weight.
+- Avoid treating old/recycled news as a fresh catalyst.
+
+B. INDIVIDUAL STOCK NEWS
+For every candidate stock, search for recent catalysts including:
+- Earnings
+- Earnings guidance
+- Revenue/profit surprises
+- Analyst upgrades/downgrades
+- Price target changes
+- FDA/clinical trial news
+- SEC filings
+- M&A
+- Partnerships
+- Contracts
+- Government contracts
+- Product launches
+- AI-related announcements
+- Semiconductor/memory industry news
+- Buybacks
+- Insider buying/selling
+- Institutional activity
+- Regulatory news
+- Lawsuits
+- Bankruptcy/financial distress
+- Management changes
+- Production/supply announcements
+- Short-squeeze related news
+
+Classify each catalyst as:
+VERY BULLISH
+BULLISH
+NEUTRAL
+BEARISH
+VERY BEARISH
+
+Do NOT assume that every news headline is bullish.
+
+==================================================
+2. FEDERAL RESERVE / INTEREST RATE ENGINE
+==================================================
+
+Create a macro engine that monitors Federal Reserve policy.
+
+Track:
+- FOMC decisions
+- Fed meeting dates
+- Rate changes
+- Fed funds expectations
+- Powell speeches
+- Fed minutes
+- Inflation commentary
+- Employment commentary
+- Quantitative tightening/easing
+- Balance sheet changes
+- Forward guidance
+- Market-implied rate expectations
+
+Determine whether the current Fed environment is:
+
+STRONGLY RISK-ON
+RISK-ON
+NEUTRAL
+RISK-OFF
+STRONGLY RISK-OFF
+
+Explain WHY.
+
+The bot should identify whether Fed developments are likely to benefit or hurt:
+- Growth stocks
+- Technology
+- Semiconductors
+- Small caps
+- Speculative/momentum stocks
+- Financials
+- Energy
+- Crypto-related stocks
+
+==================================================
+3. BOND MARKET ENGINE
+==================================================
+
+Monitor the bond market and its effect on equities.
+
+Track:
+- 2-Year Treasury yield
+- 10-Year Treasury yield
+- 30-Year Treasury yield
+- Yield curve
+- Real yields when available
+- Treasury volatility
+- Major yield changes
+
+Pay special attention to:
+- Rapid increases in Treasury yields
+- Rapid decreases in Treasury yields
+- Yield curve steepening
+- Yield curve flattening
+- Significant moves in real yields
+
+Determine whether the bond market is currently:
+RISK-ON
+NEUTRAL
+RISK-OFF
+
+Explain how Treasury yields could affect high-growth/high-beta stocks.
+
+==================================================
+4. GEOPOLITICAL / GLOBAL MACRO ENGINE
+==================================================
+
+Monitor major geopolitical and macroeconomic developments.
+
+Track events involving:
+- Wars/conflicts
+- Middle East
+- Iran
+- Israel
+- Russia/Ukraine
+- China/Taiwan
+- U.S./China relations
+- Tariffs
+- Sanctions
+- Oil supply disruptions
+- Energy crises
+- Shipping disruptions
+- OPEC
+- Global inflation
+- Major political/economic events
+
+Classify the impact on:
+- SPY
+- QQQ
+- IWM
+- Technology
+- Semiconductors
+- Energy
+- Defense
+- Financials
+- Crypto
+- Small-cap momentum stocks
+
+Create a MACRO RISK SCORE from 0-100.
+
+0 = extremely favorable risk environment
+100 = extremely dangerous risk environment
+
+==================================================
+5. OVERALL MARKET REGIME
+==================================================
+
+Combine:
+
+Fed Policy
++
+Treasury/Bond Market
++
+Geopolitics
++
+Inflation
++
+Economic Data
++
+SPY trend
++
+QQQ trend
++
+IWM trend
++
+VIX
++
+Market breadth
+
+Create:
+
+MARKET REGIME:
+STRONG BULLISH
+BULLISH
+NEUTRAL
+BEARISH
+STRONG BEARISH
+
+Also generate:
+
+RISK SCORE: 0-100
+MARKET MOMENTUM: 0-100
+MACRO SCORE: 0-100
+
+The bot must explain the reasoning behind the score.
+
+==================================================
+6. HIGH RELATIVE VOLUME STOCK SCANNER
+==================================================
+
+Build a scanner specifically designed to find stocks experiencing unusual volume.
+
+Calculate:
+
+Relative Volume (RVOL) =
+Current/Recent volume compared with the stock's historical average volume for the equivalent period.
+
+Prioritize:
+
+RVOL >= 1.5 = interesting
+RVOL >= 2.0 = strong
+RVOL >= 3.0 = very strong
+RVOL >= 5.0 = exceptional
+
+Also track:
+- Volume acceleration
+- Dollar volume
+- Premarket volume
+- Intraday volume
+- Volume compared with previous sessions
+
+Do not rank a stock highly based on RVOL alone.
+
+==================================================
+7. PRICE ACTION / BREAKOUT ENGINE
+==================================================
+
+Detect stocks that are breaking out of important technical levels.
+
+Identify:
+- Previous day high
+- Premarket high
+- 5-day high
+- 20-day high
+- 50-day high
+- 52-week high
+- Resistance levels
+- Consolidation ranges
+- Breakout levels
+- VWAP
+- Opening range
+
+Confirm breakouts using volume.
+
+A breakout should receive a higher score when:
+
+Price breaks resistance
++
+Volume expands
++
+RVOL is elevated
++
+Momentum indicators confirm
++
+Recent catalyst exists
+
+Distinguish:
+
+CONFIRMED BREAKOUT
+POSSIBLE BREAKOUT
+FAILED BREAKOUT
+FALSE BREAKOUT
+
+==================================================
+8. CANDLE-OVER-CANDLE PATTERN
+==================================================
+
+Detect bullish candle-over-candle setups.
+
+Identify:
+- Strong bullish candle
+- Follow-through candle
+- Higher highs
+- Higher lows
+- Increasing volume
+- Breakout above previous candle/range
+
+Look for continuation rather than isolated green candles.
+
+Assign a setup score from 0-100.
+
+==================================================
+9. BULL FLAG DETECTION
+==================================================
+
+Automatically detect bullish flag patterns.
+
+Requirements should include:
+
+1. Strong upward impulse
+2. Significant volume during the impulse
+3. Controlled consolidation/pullback
+4. Higher lows or orderly price structure
+5. Decreasing volume during consolidation
+6. Breakout above flag resistance
+7. Volume expansion on breakout
+
+Identify:
+
+EARLY BULL FLAG
+FORMING BULL FLAG
+BREAKOUT BULL FLAG
+FAILED BULL FLAG
+
+Give each setup a confidence score.
+
+==================================================
+10. ABCD PATTERN DETECTION
+==================================================
+
+Detect intraday ABCD patterns.
+
+Identify:
+
+A = Initial momentum/high
+B = Pullback/consolidation
+C = Higher low/retest
+D = Breakout toward/through B
+
+Look for:
+- Strong initial volume
+- Momentum catalyst
+- Healthy pullback
+- Higher low
+- Increasing volume toward D
+- Breakout through B
+
+Flag potential ABCD setups before D when possible.
+
+Display:
+A price
+B price
+C price
+D trigger price
+Current price
+Stop/invalidation level
+Potential target levels
+
+==================================================
+11. TECHNICAL INDICATOR ENGINE
+==================================================
+
+Calculate and use:
+
+- VWAP
+- EMA 9
+- EMA 20
+- EMA 50
+- SMA 50
+- SMA 200
+- RSI
+- MACD
+- ATR
+- ADX
+- Relative Strength
+- Volume
+- RVOL
+- Volume moving average
+- Price momentum
+
+For bullish momentum setups, prioritize:
+
+Price > VWAP
+EMA 9 > EMA 20
+EMA 20 > EMA 50
+RSI generally 50-75
+Positive MACD momentum
+Increasing volume
+Strong ADX
+Higher highs/higher lows
+
+Do NOT require every indicator to be bullish. Use weighted scoring instead.
+
+==================================================
+12. CATALYST + TECHNICAL CONFLUENCE
+==================================================
+
+This is extremely important.
+
+Do NOT simply return stocks with good charts.
+
+The strongest candidates should have:
+
+RECENT CATALYST
++
+HIGH RVOL
++
+PRICE MOMENTUM
++
+TECHNICAL SETUP
++
+BREAKOUT/KEY LEVEL
++
+MARKET CONDITIONS THAT SUPPORT THE TRADE
+
+Create a CONFLUENCE SCORE from 0-100.
+
+Suggested weighting:
+
+News/Catalyst: 25%
+Relative Volume: 20%
+Price Action/Breakout: 20%
+Technical Indicators: 15%
+Pattern Quality: 10%
+Market/Macro Environment: 10%
+
+==================================================
+13. BEARISH SCANNER
+==================================================
+
+Also create the inverse scanner.
+
+Find stocks with:
+
+- Negative catalysts
+- High RVOL
+- Failed breakouts
+- Support breakdowns
+- VWAP rejection
+- Bear flags
+- Lower highs/lower lows
+- EMA deterioration
+- Negative MACD
+- RSI weakness
+- Heavy selling volume
+
+Classify:
+
+SHORT SETUP
+BREAKDOWN
+FAILED BREAKOUT
+BEAR FLAG
+MOMENTUM REVERSAL
+
+==================================================
+14. STOCK RANKING SYSTEM
+==================================================
+
+Every scan should produce a ranked list.
+
+Example:
+
+#1 NVDA
+CONFLUENCE SCORE: 94/100
+RVOL: 4.2
+NEWS: Strong bullish catalyst
+PATTERN: Bull Flag Breakout
+BREAKOUT: Confirmed
+VWAP: Above
+RSI: 67
+MACD: Bullish
+MARKET REGIME: Bullish
+
+WHY IT RANKS HIGH:
+- Fresh catalyst
+- Exceptional relative volume
+- Breakout above resistance
+- Bull flag confirmation
+- Strong market environment
+
+KEY LEVEL:
+$XXX
+
+INVALIDATION:
+$XXX
+
+POTENTIAL TARGET:
+$XXX
+
+==================================================
+15. REAL-TIME ALERT SYSTEM
+==================================================
+
+Create alerts when a stock suddenly develops:
+
+- Major breaking news
+- RVOL spike
+- Breakout
+- VWAP reclaim
+- Bull flag breakout
+- ABCD breakout
+- Candle-over-candle confirmation
+- Major support breakdown
+- Negative catalyst
+
+Alerts should explain WHY the alert fired.
+
+Example:
+
+🚨 MOMENTUM ALERT
+
+Ticker: XYZ
+Price: $XX.XX
+
+Catalyst: FDA announcement
+RVOL: 5.4
+Pattern: Bull Flag
+Breakout: YES
+VWAP: ABOVE
+MACD: BULLISH
+RSI: 68
+
+CONFLUENCE: 91/100
+
+Reason:
+Fresh catalyst + extreme RVOL + bull flag breakout + strong technical confirmation.
+
+==================================================
+16. IMPORTANT: AVOID GARBAGE SIGNALS
+==================================================
+
+Do NOT rank a stock highly simply because:
+- It is up a lot
+- It has high volume
+- RSI is high
+- It appears on Finviz
+- It has old news
+
+Require multiple independent confirmations.
+
+Avoid:
+- Low-volume breakouts
+- News that is several days/weeks old
+- Extremely extended stocks without continuation volume
+- Illiquid stocks unless explicitly enabled
+- False breakouts
+- Pump-and-dump style signals
+- Stocks with massive spreads
+
+Add liquidity filters:
+- Minimum average daily dollar volume
+- Minimum share volume
+- Maximum spread when data is available
+
+Make these thresholds configurable.
+
+==================================================
+17. SCAN MODES
+==================================================
+
+Create these scanning modes:
+
+1. MARKET-WIDE MOMENTUM
+2. BREAKOUTS
+3. BULL FLAGS
+4. ABCD
+5. CANDLE-OVER-CANDLE
+6. HIGH RVOL
+7. NEWS CATALYSTS
+8. BEARISH/BREAKDOWN
+9. BEST OVERALL SETUPS
+
+Allow the user to run individual scans or ALL SCANS.
+
+==================================================
+18. DASHBOARD
+==================================================
+
+Create a clean professional dashboard.
+
+Top section:
+
+MARKET REGIME
+RISK SCORE
+SPY
+QQQ
+IWM
+VIX
+10Y YIELD
+2Y YIELD
+BTC
+
+Then:
+
+🔥 TOP MOMENTUM SETUPS
+
+Display the highest-conviction stocks.
+
+Columns:
+
+Ticker
+Price
+% Change
+RVOL
+News
+Pattern
+Breakout
+VWAP
+RSI
+MACD
+Confluence Score
+Catalyst
+Setup
+
+Use visual badges for:
+BULLISH
+BEARISH
+BREAKOUT
+HIGH RVOL
+NEWS
+BULL FLAG
+ABCD
+
+==================================================
+19. DATA RELIABILITY
+==================================================
+
+Use reliable APIs/data sources wherever possible.
+
+If Finviz scraping is unreliable or blocked:
+- Do NOT crash the application.
+- Use an alternative news/data source if one already exists in the project.
+- Clearly label which data source produced each signal.
+
+Handle:
+- API failures
+- Rate limits
+- Missing data
+- Delayed quotes
+- Duplicate news
+- Invalid tickers
+
+Cache data where appropriate.
+
+==================================================
+20. HISTORICAL BACKTESTING
+==================================================
+
+Build the architecture so each pattern can eventually be backtested.
+
+Track:
+
+Pattern
+Entry
+Exit
+Maximum favorable excursion
+Maximum adverse excursion
+Win/loss
+RVOL
+Catalyst type
+Market regime
+Technical conditions
+
+This will allow us to determine which combinations actually produce the best results.
+
+==================================================
+FINAL OBJECTIVE
+==================================================
+
+The goal is NOT to create a generic stock screener.
+
+The goal is to create an AI-assisted MOMENTUM TRADING RADAR that answers:
+
+"What stocks RIGHT NOW have a fresh catalyst, unusual volume, strong price action, a recognizable technical setup, and favorable market conditions?"
+
+Prioritize CONFLUENCE over individual indicators.
+
+Before modifying the project:
+1. Inspect the entire existing codebase.
+2. Identify current data sources/APIs.
+3. Identify existing scanners and technical indicators.
+4. Reuse existing components where possible.
+5. Do not duplicate functionality.
+6. Preserve existing features.
+7. Implement this modularly.
+8. Test every new component.
+9. Make API keys/configuration environment-variable based.
+10. After implementation, give me a concise summary of exactly what was added and any API keys or configuration variables I need to provide.
+
+Do not merely describe how to implement this.
+
+ACTUALLY IMPLEMENT IT INTO THE EXISTING REPLIT PROJECT.

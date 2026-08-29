@@ -64,6 +64,34 @@ test('FDA rejection is very bearish', () => {
 test('unrelated popular-stock headline is not treated as a catalyst', () => {
   assert.strictEqual(classifyCatalyst('Analysts discuss technology stocks before the open'), null);
 });
+test('classifies broader positive and negative market catalysts without assuming every headline is bullish', () => {
+  assert.strictEqual(classifyCatalyst('Company raises full-year guidance after earnings beat').category, 'Earnings / Guidance Beat');
+  assert.strictEqual(classifyCatalyst('Analyst downgrades shares and cuts price target').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company wins major government contract').category, 'Major Contract / Award');
+  assert.strictEqual(classifyCatalyst('SEC investigation and class action lawsuit announced').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company reports earnings miss').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company revenue misses estimates').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company cuts outlook for the year').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company withdraws forecast').direction, 'BEARISH');
+  assert.strictEqual(classifyCatalyst('Company posts wider than expected loss').direction, 'BEARISH');
+});
+
+test('labels catalyst freshness using explicit 15-minute, 1-hour, 4-hour, and 24-hour buckets', () => {
+  const market = { price:10, marketCap:100e6, relVol:2 };
+  const make = hours => buildCatalystEvent({
+    symbol:'ABCD', headline:'ABCD wins major government contract', source:'Reuters',
+    url:'https://www.reuters.com/example', association:'provider',
+    publishedAt:new Date(NOW - hours * 36e5).toISOString(),
+  }, market, NOW);
+  assert.strictEqual(make(.1).freshnessBucket, 'LAST_15_MINUTES');
+  assert.strictEqual(make(.5).freshnessBucket, 'LAST_HOUR');
+  assert.strictEqual(make(3).freshnessBucket, 'LAST_4_HOURS');
+  assert.strictEqual(make(12).freshnessBucket, 'LAST_24_HOURS');
+  assert.strictEqual(make(30).freshnessBucket, 'OLDER');
+  assert.strictEqual(make(30).actionableFresh, false);
+  assert(make(30).opportunityScore <= 35);
+  assert(make(.1).opportunityScore > make(30).opportunityScore);
+});
 
 console.log('\nDilution and source quality\n');
 

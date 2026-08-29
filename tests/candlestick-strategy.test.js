@@ -38,6 +38,18 @@ test('rejects choppy patterns without a high-strength breakout', () => {
   const result = evaluateCandlestickSetup(input(bars));
   assert.strictEqual(result.eligible, false); assert(result.reasons.some(reason => /choppy|neutral/i.test(reason)));
 });
+test('a bullish pattern score cannot make a long below VWAP eligible', () => {
+  const bars = rising();
+  bars.push(bar(10.48, 10.9, 2200), bar(10.91, 11.02, 1600));
+  const result = evaluateCandlestickSetup(input(bars, { support: 1, resistance: 10.7 }));
+  // Force session VWAP above the signal by adding a large-volume high-price
+  // completed bar to the historical evidence, while preserving the long pattern.
+  const altered = bars.map((item, index) => index === 0 ? { ...item, o:20, h:20.1, l:19.9, c:20, v:1_000_000 } : item);
+  const blocked = evaluateCandlestickSetup(input(altered));
+  assert.strictEqual(blocked.direction, 'LONG');
+  assert.strictEqual(blocked.eligible, false);
+  assert(blocked.reasons.some(reason => /VWAP/i.test(reason)));
+});
 test('backtest records use only later bars for outcomes', () => {
   const bars = rising(); bars.push(bar(10.48, 10.9, 2200), bar(10.91, 11.02, 1600), bar(11.03, 11.4, 1600));
   const result = simulateCandlestickBacktest(input(bars));

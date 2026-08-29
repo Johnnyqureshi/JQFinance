@@ -294,6 +294,13 @@ db.exec(`
   `ALTER TABLE candlestick_trade_log ADD COLUMN signal_bar_at TEXT`,
   `ALTER TABLE candlestick_trade_log ADD COLUMN protection_grace_until TEXT`,
   `ALTER TABLE candlestick_trade_log ADD COLUMN exit_requested_at TEXT`,
+  `ALTER TABLE candlestick_settings ADD COLUMN updated_at TEXT`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_at TEXT`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_status TEXT`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_reason TEXT`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_scanned INTEGER`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_eligible INTEGER`,
+  `ALTER TABLE candlestick_settings ADD COLUMN last_cycle_source TEXT`,
   `ALTER TABLE alpaca_creds ADD COLUMN api_key_enc TEXT`,
   `ALTER TABLE alpaca_creds ADD COLUMN api_secret_enc TEXT`,
   `ALTER TABLE bot_alpaca_creds ADD COLUMN api_key_enc TEXT`,
@@ -6970,6 +6977,36 @@ function candlestickConfigFor(userId) {
   config = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
   return { enabled: !!row?.enabled, liveArmed: !!row?.live_armed, config };
 }
+function candlestickRuntimeFor(userId) {
+  const row = db.prepare(`SELECT updated_at,last_cycle_at,last_cycle_status,last_cycle_reason,
+    last_cycle_scanned,last_cycle_eligible,last_cycle_source
+    FROM candlestick_settings WHERE user_id=?`).get(userId);
+  return row ? {
+    settingsUpdatedAt: row.updated_at || null,
+    lastCycleAt: row.last_cycle_at || null,
+    lastCycleStatus: row.last_cycle_status || null,
+    lastCycleReason: row.last_cycle_reason || null,
+    lastCycleScanned: Number(row.last_cycle_scanned || 0),
+    lastCycleEligible: Number(row.last_cycle_eligible || 0),
+    lastCycleSource: row.last_cycle_source || null,
+  } : {
+    settingsUpdatedAt: null, lastCycleAt: null, lastCycleStatus: null,
+    lastCycleReason: null, lastCycleScanned: 0, lastCycleEligible: 0, lastCycleSource: null,
+  };
+}
+function recordCandlestickCycle(userId, outcome) {
+  db.prepare(`UPDATE candlestick_settings SET
+    last_cycle_at=datetime('now'),last_cycle_status=?,last_cycle_reason=?,
+    last_cycle_scanned=?,last_cycle_eligible=?,last_cycle_source=?
+    WHERE user_id=?`).run(
+      String(outcome?.status || 'unknown').slice(0, 40),
+      String(outcome?.reason || '').slice(0, 300) || null,
+      Math.max(0, Number(outcome?.scanned || 0)),
+      Math.max(0, Number(outcome?.eligible || 0)),
+      String(outcome?.source || 'server-scheduler').slice(0, 40),
+      userId,
+    );
+}
 async function buildCandlestickCandidate(userId, symbol, config = CANDLESTICK_DEFAULTS) {
   const sym = String(symbol || '').toUpperCase();
   const now = new Date();
@@ -7528,26 +7565,92 @@ function groupDailyToWeekly(dailyBars) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── Candlestick Automation API ─────────────────────────────────────────────────
-app.get('/api/candlestick/settings', requireAuth, (req, res) => {
-  const { enabled, liveArmed, config } = candlestickConfigFor(req.session.userId);
-  res.json({ enabled, liveArmed, config });
+app.get('/api/candlestick/settings', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const { enabled, liveArmed, config } = candlestickConfigFor(userId);
+    res.json({ enabled, liveArmed, config });
+  } catch (error) {
+    console.error('[Candlestick] Could not load persisted settings:', error.message);
+    res.status(503).json({ error: 'UltraBot3 settings are temporarily unavailable. Sign out, sign back in, and try again.' });
+  }
 });
 
 app.put('/api/candlestick/settings', requireAuth, (req, res) => {
-  const body = req.body || {};
-  const prior = candlestickConfigFor(req.session.userId);
-  const config = { ...prior.config };
-  for (const key of Object.keys(CANDLESTICK_DEFAULTS)) {
-    if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
+  (async () => {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const body = req.body || {};
+    const prior = candlestickConfigFor(userId);
+    const config = { ...prior.config };
+    for (const key of Object.keys(CANDLESTICK_DEFAULTS)) {
+      if (Number.isFinite(Number(body.config?.[key]))) config[key] = Number(body.config[key]);
+    }
+    const safeConfig = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
+    // Live execution must be deliberately armed after the user has connected a
+    // live broker account; connecting keys alone never turns on real orders.
+    const liveArmed = body.liveArmed === true && getAlpacaCreds(userId, 'candlestick')?.mode === 'live';
+    db.prepare(`INSERT INTO candlestick_settings (user_id,enabled,live_armed,config_json,updated_at) VALUES (?,?,?,?,datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,
+        config_json=excluded.config_json,updated_at=datetime('now')`)
+      .run(userId, body.enabled === true ? 1 : 0, liveArmed ? 1 : 0, JSON.stringify(safeConfig));
+    res.json({ ok: true, enabled: body.enabled === true, liveArmed, config: safeConfig });
+  })().catch(error => {
+    console.error('[Candlestick] Could not persist settings:', error.message);
+    res.status(503).json({ error: 'UltraBot3 settings could not be saved. Sign out, sign back in, and try again.' });
+  });
+});
+
+app.get('/api/candlestick/readiness', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const settings = candlestickConfigFor(userId);
+    const runtime = candlestickRuntimeFor(userId);
+    const creds = getAlpacaCreds(userId, 'candlestick');
+    let broker = { reachable: false, active: false, tradingBlocked: false, accountBlocked: false };
+    let brokerError = null;
+    if (creds) {
+      try {
+        const account = await alpacaFetchFor(userId, 'candlestick', '/v2/account');
+        broker = {
+          reachable: true,
+          active: String(account?.status || '').toUpperCase() === 'ACTIVE',
+          tradingBlocked: account?.trading_blocked === true,
+          accountBlocked: account?.account_blocked === true,
+        };
+      } catch (error) {
+        brokerError = error.message;
+      }
+    }
+    const blockers = [];
+    if (!creds) blockers.push('Dedicated Alpaca account is not connected to UltraBot3.');
+    else if (!broker.reachable) blockers.push(`Broker readiness check failed: ${brokerError || 'Alpaca did not respond.'}`);
+    else {
+      if (!broker.active) blockers.push('Alpaca reports that the account is not active.');
+      if (broker.tradingBlocked || broker.accountBlocked) blockers.push('Alpaca reports that trading is blocked on this account.');
+    }
+    if (!settings.enabled) blockers.push('UltraBot3 automation is disabled.');
+    if (creds?.mode === 'live' && !settings.liveArmed) blockers.push('Live trading is connected but not explicitly armed.');
+    if (!isMarketOpen()) blockers.push('The regular-session entry window is closed.');
+    res.set('Cache-Control', 'no-store').json({
+      connected: !!creds,
+      accountId: creds?.account_id || null,
+      mode: creds?.mode || null,
+      enabled: settings.enabled,
+      liveArmed: settings.liveArmed,
+      broker,
+      marketOpen: isMarketOpen(),
+      schedulerEligible: !!creds && settings.enabled && broker.reachable && broker.active
+        && !broker.tradingBlocked && !broker.accountBlocked
+        && (creds.mode !== 'live' || settings.liveArmed),
+      entryReadyNow: blockers.length === 0,
+      blockers,
+      watchlistSize: CANDLESTICK_WATCHLIST.length,
+      ...runtime,
+    });
+  } catch (error) {
+    console.error('[Candlestick] Readiness check failed:', error.message);
+    res.status(503).json({ error: 'UltraBot3 readiness could not be verified.' });
   }
-  const safeConfig = sanitizeCandlestickExecutionConfig(config, CANDLESTICK_DEFAULTS);
-  // Live execution must be deliberately armed after the user has connected a
-  // live broker account; connecting keys alone never turns on real orders.
-  const liveArmed = body.liveArmed === true && getAlpacaCreds(req.session.userId, 'candlestick')?.mode === 'live';
-  db.prepare(`INSERT INTO candlestick_settings (user_id,enabled,live_armed,config_json) VALUES (?,?,?,?)
-    ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,config_json=excluded.config_json`)
-    .run(req.session.userId, body.enabled === true ? 1 : 0, liveArmed ? 1 : 0, JSON.stringify(safeConfig));
-  res.json({ ok: true, enabled: body.enabled === true, liveArmed, config: safeConfig });
 });
 
 app.get('/api/candlestick/scan', requireAuth, async (req, res) => {
@@ -7649,35 +7752,64 @@ app.get('/api/candlestick/backtest', requireAuth, async (req, res) => {
 // and an available broker position. Closing the page never disables protection
 // or reconciliation, but no condition ever forces a demonstration trade.
 async function runCandlestickCycle(userId, source = 'server-scheduler') {
-  const outcome = { bot: 'candlestick', status: 'skipped', reconciled: 0, submitted: false };
+  const outcome = { bot: 'candlestick', source, status: 'skipped', reconciled: 0, submitted: false };
+  const finish = details => {
+    const result = { ...outcome, ...details };
+    recordCandlestickCycle(userId, result);
+    return result;
+  };
   const creds = getAlpacaCreds(userId, 'candlestick');
   const settings = candlestickConfigFor(userId);
-  if (!settings.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
-  if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
-  if (creds.mode === 'live' && !settings.liveArmed) return { ...outcome, reason: 'Live authorization is not armed.' };
-  if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
+  if (!settings.enabled) return finish({ reason: 'Strategy is disabled.' });
+  if (!creds) return finish({ reason: 'Dedicated broker account is not connected.' });
+  if (creds.mode === 'live' && !settings.liveArmed) return finish({ reason: 'Live authorization is not armed.' });
+  if (!acquireBotLock(userId)) return finish({ status: 'busy', reason: 'Another broker cycle is in progress.' });
   const lease = acquireCandlestickExecutionLease(userId);
   if (!lease) {
     releaseBotLock(userId);
-    return { ...outcome, status: 'busy', reason: 'Candlestick reconciliation is already in progress.' };
+    return finish({ status: 'busy', reason: 'Candlestick reconciliation is already in progress.' });
   }
   try {
     const events = await reconcileCandlestickTrades(userId, lease);
     outcome.reconciled = events.length;
-    if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
+    if (!isMarketOpen()) return finish({ status: 'market_closed', reason: 'The regular-session entry window is closed.' });
     const batch = nextCandlestickWatchlistBatch(
       CANDLESTICK_WATCHLIST, candlestickWatchlistRotation, String(userId), settings.config.maxSymbols
     );
     const candidates = (await Promise.all(batch.symbols
-      .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(() => null)))).filter(Boolean);
+      .map(symbol => buildCandlestickCandidate(userId, symbol, settings.config).catch(error => ({
+        symbol,
+        status: 'DATA ERROR',
+        eligible: false,
+        score: 0,
+        technicalError: true,
+        reasons: [`Market data unavailable: ${error.message}`],
+        evaluatedAt: new Date().toISOString(),
+      }))))).filter(Boolean);
     saveCandlestickCandidates(userId, candidates);
-    const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-    if (!candidate) return { ...outcome, status: 'no_entry', scanned: batch.symbols.length };
+    const eligible = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score);
+    const candidate = eligible[0];
+    const dataErrors = candidates.filter(row => row.technicalError).length;
+    if (!candidate) return finish({
+      status: dataErrors === candidates.length ? 'data_unavailable' : 'no_entry',
+      reason: dataErrors === candidates.length
+        ? `Market data failed for all ${candidates.length} scanned symbols.`
+        : `No qualifying setup in ${candidates.length} scanned symbols${dataErrors ? `; ${dataErrors} had market-data errors` : ''}.`,
+      scanned: candidates.length,
+      eligible: 0,
+    });
     await executeCandlestickEntry(userId, candidate.symbol, source, lease);
-    return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol, scanned: batch.symbols.length };
+    return finish({
+      status: 'submitted', submitted: true, symbol: candidate.symbol,
+      scanned: candidates.length, eligible: eligible.length,
+      reason: `Submitted the highest-scoring eligible setup: ${candidate.symbol}.`,
+    });
   } catch (error) {
     console.warn(`[Candlestick] user ${userId} cycle withheld: ${error.message}`);
-    return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };
+    return finish({
+      status: 'withheld',
+      reason: String(error.message || 'Broker or market evidence did not permit a safe cycle.').slice(0, 300),
+    });
   } finally {
     releaseCandlestickExecutionLease(userId, lease);
     releaseBotLock(userId);

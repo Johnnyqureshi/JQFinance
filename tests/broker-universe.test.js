@@ -13,14 +13,16 @@ const {
 } = require('../lib/broker-universe');
 
 const catalog = buildTradableEquityCatalog([
-  { symbol: 'AAPL', status: 'active', tradable: true, asset_class: 'us_equity', name: 'Apple' },
+  // Alpaca's real /v2/assets response names this field `class`.
+  { symbol: 'AAPL', status: 'active', tradable: true, class: 'us_equity', name: 'Apple' },
   { symbol: 'SPY', status: 'active', tradable: true, asset_class: 'us_equity', name: 'SPDR S&P 500 ETF Trust' },
   { symbol: 'OLD', status: 'inactive', tradable: true, asset_class: 'us_equity' },
   { symbol: 'HALT', status: 'active', tradable: false, asset_class: 'us_equity' },
-  { symbol: 'BTC/USD', status: 'active', tradable: true, asset_class: 'crypto' },
+  { symbol: 'BTC/USD', status: 'active', tradable: true, class: 'crypto' },
 ]);
 
 assert.deepStrictEqual([...catalog.keys()], ['AAPL', 'SPY'], 'only active tradable US stocks/ETFs enter broker catalog');
+assert.strictEqual(catalog.get('AAPL').assetClass, 'us_equity', 'real Alpaca asset responses using class are accepted');
 
 const selection = selectTradableEquityCandidates(
   ['aapl', 'AAPL', 'SPY', 'BTC-USD', 'HALT', 'UNKNOWN'],

@@ -7,7 +7,7 @@
   const num = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—';
   const money = value => Number.isFinite(Number(value)) ? `$${num(value)}` : '—';
   const defaults = { minScore:65, minRelativeVolume:1.2, minRewardRisk:2, maxPositionDollars:1000, maxRiskDollars:100, maxSymbols:16 };
-  let config = { ...defaults }, enabled = false, liveArmed = false, results = [], selected = null, interval = null, initialized = false, scanning = false;
+  let config = { ...defaults }, enabled = false, liveArmed = false, readiness = null, results = [], selected = null, interval = null, initialized = false, scanning = false;
   async function request(url, opts = {}) {
     const response = await fetch(url, { credentials:'include', headers:{ 'Content-Type':'application/json', ...(opts.headers || {}) }, ...opts });
     const data = await response.json().catch(() => ({}));
@@ -25,20 +25,32 @@
   }
   async function refreshConnection() {
     try {
-      const status = await request('/api/alpaca/credentials?connection=candlestick');
+      const status = await request('/api/candlestick/readiness');
+      readiness = status;
+      enabled = !!status.enabled;
+      liveArmed = !!status.liveArmed;
       $('candleConnDot').className = `at-conn-dot ${status.connected ? 'dot-green':'dot-red'}`;
       $('candleConnText').textContent = status.connected ? `Connected · ${String(status.mode).toUpperCase()} · ${status.accountId}` : 'Not connected';
       $('candleConnBtn').textContent = status.connected ? 'Account Settings' : 'Connect Alpaca';
-    } catch { $('candleConnText').textContent = 'Not connected'; }
+      renderBot();
+    } catch {
+      readiness = null;
+      $('candleConnText').textContent = 'Connection status unavailable';
+    }
   }
   function renderBot() {
     $('candleBotToggle').textContent = enabled ? '■ PAUSE AUTOMATION' : '▶ ENABLE AUTOMATION';
     $('candleBotToggle').classList.toggle('mt-bot-toggle--off', !enabled);
     $('candleBotBar').classList.toggle('mt-bot-bar--on', enabled);
     $('candleLiveArm').checked = liveArmed;
-    $('candleBotStatus').textContent = enabled
-      ? (liveArmed ? 'Automation is on. Live account explicitly armed; every trade still needs fresh server approval.' : 'Automation is on. Paper mode only unless a live account is explicitly armed.')
-      : 'Automation is off. Server scans stay read-only.';
+    const last = readiness?.lastCycleAt
+      ? ` Last cycle: ${readiness.lastCycleStatus || 'unknown'} · ${readiness.lastCycleReason || 'No detail recorded.'}`
+      : '';
+    $('candleBotStatus').textContent = readiness?.blockers?.length
+      ? `${readiness.blockers.join(' ')}${last}`
+      : enabled
+        ? `Automation is on and the broker is verified.${last}`
+        : 'Automation is off. Server scans stay read-only.';
   }
   function statusClass(row) { return row.eligible ? 'eligible' : row.direction ? 'waiting' : 'blocked'; }
   function pattern(row) {
@@ -93,7 +105,7 @@
   async function save(nextEnabled = enabled) {
     config = readConfig(); liveArmed = $('candleLiveArm').checked;
     const out = await request('/api/candlestick/settings', { method:'PUT', body:JSON.stringify({ enabled:nextEnabled, liveArmed, config }) });
-    enabled = out.enabled; liveArmed = out.liveArmed; putConfig(out.config); renderBot();
+    enabled = out.enabled; liveArmed = out.liveArmed; putConfig(out.config); await refreshConnection();
   }
   async function init() {
     if (initialized) return; initialized = true;
@@ -105,7 +117,7 @@
     window.addEventListener('alpaca-connection-changed', event => { if (!event.detail?.connection || event.detail.connection === 'candlestick') { refreshConnection(); scan(); } });
     await refreshConnection();
     try { const saved = await request('/api/candlestick/settings'); enabled = saved.enabled; liveArmed = saved.liveArmed; putConfig(saved.config); renderBot(); } catch { $('candleBotStatus').textContent = 'Sign in and connect a dedicated Alpaca account to use this bot.'; }
-    await refreshTrades(); await scan();
+    await refreshTrades(); await scan(); await refreshConnection();
   }
-  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); if (!interval) interval = setInterval(async () => { await reconcile(); await scan(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
+  window.candlestickBot = { async open() { await init(); await reconcile(); if (!results.length) await scan(); await refreshConnection(); if (!interval) interval = setInterval(async () => { await reconcile(); await scan(); await refreshConnection(); }, 120000); }, pause() { if (interval) { clearInterval(interval); interval = null; } } };
 }());

@@ -149,6 +149,8 @@ function goPage(page) {
   else if (window.openingMomentumBot) openingMomentumBot.pause();
   if (page==='candlestick') { if (window.candlestickBot) candlestickBot.open(); }
   else if (window.candlestickBot) candlestickBot.pause();
+  if (page==='swing') { if (window.swingBot) swingBot.open(); }
+  else if (window.swingBot) swingBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

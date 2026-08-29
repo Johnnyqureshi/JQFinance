@@ -335,6 +335,7 @@ const alpacaTrader = (() => {
     return connection === 'pmh' ? 'Opening Momentum'
       : connection === 'momentum' ? 'Momentum Trader'
       : connection === 'candlestick' ? 'UltraBot3'
+      : connection === 'swing' ? 'Swing Trading Bot'
       : 'Manual Trading';
   }
 
@@ -344,7 +345,7 @@ const alpacaTrader = (() => {
   }
 
   function showModal(connection = 'manual', requestedMode = alpacaMode) {
-    modalConnection = ['momentum', 'pmh', 'candlestick'].includes(connection) ? connection : 'manual';
+    modalConnection = ['momentum', 'pmh', 'candlestick', 'swing'].includes(connection) ? connection : 'manual';
     modalMode = requestedMode === 'live' ? 'live' : 'paper';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';
@@ -484,14 +485,14 @@ const alpacaTrader = (() => {
 })();
 
 // Bot pages call the shared connection modal through window so each bot can
-// select its own isolated broker scope (momentum or pmh). Top-level const
+// select its own isolated broker scope. Top-level const
 // bindings are not window properties in browsers.
 window.alpacaTrader = alpacaTrader;
 
 document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 
 
-// ── Simulator Status Panel removed (Swing and ORB bots removed) ──────────────
+// ── Legacy simulator status shim (the live Swing Bot now has its own page) ───
 const simPanel = (() => {
   function init() {}
   function load() {}

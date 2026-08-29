@@ -40,6 +40,29 @@ const {
   simulateCandlestickBacktest,
 } = require('./lib/candlestick-strategy');
 const {
+  DEFAULT_SWING_CONFIG,
+  evaluateSwingSetup,
+  simulateSwingBacktest,
+  aggregateSwingWeeklyBars,
+  ema: swingEma,
+  atr: swingAtr,
+} = require('./lib/swing-strategy');
+const {
+  sanitizeSwingExecutionConfig,
+  calculateLongQuantity,
+  buildSwingEntryOrder,
+} = require('./lib/swing-execution-policy');
+const {
+  calculateSwingAllocations,
+  ratchetSwingStop,
+  buildSwingClientOrderId,
+} = require('./lib/swing-management');
+const {
+  summarizeSwingLotProtection,
+  assertSwingOwnedBrokerTree,
+} = require('./lib/swing-reconciliation');
+const { findDuplicateBrokerAssignments } = require('./lib/broker-account-isolation');
+const {
   DEFAULT_PMH_CONFIG,
   evaluatePmhBreak,
   evaluatePmhRunnerExit,
@@ -268,6 +291,138 @@ db.exec(`
   );
 `);
 
+// Swing automation is deliberately isolated from every intraday strategy.
+// Its credentials, settings, catalog cursor, candidates, reservations, order
+// journal, and durable lease cannot be read by another bot's execution path.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS swing_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    live_armed INTEGER NOT NULL DEFAULT 0,
+    max_position_dollars REAL NOT NULL DEFAULT 1000,
+    rotation_offset INTEGER NOT NULL DEFAULT 0,
+    last_cycle_at TEXT,
+    last_cycle_status TEXT,
+    last_cycle_reason TEXT,
+    last_cycle_scanned INTEGER NOT NULL DEFAULT 0,
+    last_cycle_eligible INTEGER NOT NULL DEFAULT 0,
+    last_cycle_source TEXT,
+    last_scan_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_alpaca_creds (
+    user_id INTEGER NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
+    api_key TEXT NOT NULL,
+    api_secret TEXT NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
+    account_id TEXT,
+    PRIMARY KEY (user_id, mode),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_swing_alpaca_creds_account
+    ON swing_alpaca_creds (user_id, account_id)
+    WHERE account_id IS NOT NULL AND api_key <> '__disconnected__';
+  CREATE TABLE IF NOT EXISTS swing_alpaca_active_mode (
+    user_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'paper' CHECK(mode IN ('paper','live')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_candidates (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    signal_bar_at TEXT,
+    evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'paper',
+    account_id TEXT,
+    status TEXT NOT NULL DEFAULT 'entry_intent',
+    requested_shares INTEGER NOT NULL,
+    filled_shares INTEGER NOT NULL DEFAULT 0,
+    shares_remaining INTEGER NOT NULL DEFAULT 0,
+    entry_price REAL,
+    stop_price REAL NOT NULL,
+    tp1_price REAL NOT NULL,
+    tp2_price REAL NOT NULL,
+    tp3_price REAL NOT NULL,
+    trailing_stop REAL,
+    signal_bar_at TEXT NOT NULL,
+    setup_json TEXT NOT NULL DEFAULT '{}',
+    entry_orders_json TEXT NOT NULL DEFAULT '[]',
+    exit_client_order_id TEXT,
+    exit_order_id TEXT,
+    exit_reason TEXT,
+    pnl REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT,
+    UNIQUE(user_id, symbol, signal_bar_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_trades_open
+    ON swing_trades (user_id, status, symbol);
+  CREATE TABLE IF NOT EXISTS swing_entry_reservations (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    signal_bar_at TEXT NOT NULL,
+    trade_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, symbol, signal_bar_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_exit_fills (
+    trade_id INTEGER NOT NULL,
+    broker_order_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    purpose TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (trade_id, broker_order_id),
+    FOREIGN KEY (trade_id) REFERENCES swing_trades(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS swing_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    trade_id INTEGER,
+    symbol TEXT,
+    event_type TEXT NOT NULL,
+    reason_code TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    source_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (trade_id) REFERENCES swing_trades(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_swing_events_user_created
+    ON swing_events (user_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS swing_execution_leases (
+    user_id INTEGER PRIMARY KEY,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+try { db.prepare(`ALTER TABLE swing_trades ADD COLUMN account_id TEXT`).run(); } catch (_) {}
+
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
 [
   `ALTER TABLE auto_trade_settings ADD COLUMN investment_amount REAL DEFAULT 1000.0`,
@@ -413,6 +568,70 @@ try {
   // Do not silently overwrite a historical duplicate. New connections are
   // still checked below and the owner can reconnect the affected bot safely.
   console.error('[Alpaca] Existing bot account duplication needs reconnection:', error.message);
+}
+
+// One broker account can belong to exactly one application user and one
+// strategy scope. This durable registry closes the read-then-write race that
+// separate credential tables cannot prevent across processes.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS broker_account_owners (
+    account_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    scope TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS broker_account_quarantine (
+    account_id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+  );
+`);
+for (const seed of [
+  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
+   SELECT account_id,user_id,'manual',mode FROM alpaca_creds
+   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
+  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
+   SELECT account_id,user_id,bot,mode FROM bot_alpaca_creds
+   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
+  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
+   SELECT account_id,user_id,'candlestick',mode FROM candlestick_alpaca_creds
+   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
+  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
+   SELECT account_id,user_id,'swing',mode FROM swing_alpaca_creds
+   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
+]) {
+  try { db.prepare(seed).run(); } catch (error) {
+    console.error('[Alpaca] Broker ownership registry seed failed:', error.message);
+  }
+}
+const legacyBrokerAssignments = db.prepare(`
+  SELECT account_id,user_id,scope FROM (
+    SELECT account_id,user_id,'manual' AS scope FROM alpaca_creds
+      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
+    UNION ALL
+    SELECT account_id,user_id,bot AS scope FROM bot_alpaca_creds
+      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
+    UNION ALL
+    SELECT account_id,user_id,'candlestick' AS scope FROM candlestick_alpaca_creds
+      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
+    UNION ALL
+    SELECT account_id,user_id,'swing' AS scope FROM swing_alpaca_creds
+      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
+  )
+`).all();
+const duplicatedBrokerAccounts = findDuplicateBrokerAssignments(legacyBrokerAssignments);
+db.prepare(`UPDATE broker_account_quarantine SET resolved_at=datetime('now') WHERE resolved_at IS NULL`).run();
+for (const accountId of duplicatedBrokerAccounts) {
+  db.prepare(`INSERT INTO broker_account_quarantine(account_id,reason,detected_at,resolved_at)
+    VALUES (?,'LEGACY_DUPLICATE_ASSIGNMENT',datetime('now'),NULL)
+    ON CONFLICT(account_id) DO UPDATE SET reason=excluded.reason,detected_at=excluded.detected_at,resolved_at=NULL`)
+    .run(accountId);
+}
+if (duplicatedBrokerAccounts.length) {
+  console.error(`[Alpaca] Quarantined ${duplicatedBrokerAccounts.length} broker account assignment conflict(s); reconnect each strategy with a unique account.`);
 }
 
 // ── App settings table (persists generated secrets etc.) ──────────────────────
@@ -2454,11 +2673,15 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // environment-variable fallback is suppressed for that user.
 const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
-const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick']);
+const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick', 'swing']);
 const isCandlestickScope = scope => scope === 'candlestick';
+const isSwingScope = scope => scope === 'swing';
+const hasActiveSwingTrades = userId => !!db.prepare(`SELECT 1 FROM swing_trades
+  WHERE user_id=? AND status NOT IN ('closed','rejected','canceled') LIMIT 1`).get(userId);
 const brokerScopeLabel = scope => scope === 'pmh' ? 'Opening Momentum'
   : scope === 'momentum' ? 'Momentum Trader'
-    : scope === 'candlestick' ? 'Candlestick Automation' : 'manual trading';
+    : scope === 'candlestick' ? 'Candlestick Automation'
+      : scope === 'swing' ? 'Swing Trading Bot' : 'manual trading';
 
 function normalizeAlpacaScope(value, fallback = 'manual') {
   return BOT_ALPACA_SCOPES.has(value) ? value : fallback;
@@ -2466,6 +2689,106 @@ function normalizeAlpacaScope(value, fallback = 'manual') {
 
 function requestAlpacaScope(req, fallback = 'manual') {
   return normalizeAlpacaScope(req.body?.connection ?? req.query?.connection, fallback);
+}
+
+function alpacaAccountConflict(userId, scope, accountId) {
+  const registered = db.prepare(`SELECT user_id,scope FROM broker_account_owners WHERE account_id=?`).get(accountId);
+  if (registered && !(registered.user_id === userId && registered.scope === scope)) {
+    return { owner: brokerScopeLabel(registered.scope) };
+  }
+  const queries = [
+    {
+      owner: 'manual trading',
+      rows: db.prepare(`SELECT user_id FROM alpaca_creds
+        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
+      same: row => scope === 'manual' && row.user_id === userId,
+    },
+    {
+      owner: 'Momentum Trader or Opening Momentum',
+      rows: db.prepare(`SELECT user_id,bot FROM bot_alpaca_creds
+        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
+      same: row => row.user_id === userId && row.bot === scope,
+    },
+    {
+      owner: 'Candlestick Automation',
+      rows: db.prepare(`SELECT user_id FROM candlestick_alpaca_creds
+        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
+      same: row => scope === 'candlestick' && row.user_id === userId,
+    },
+    {
+      owner: 'Swing Trading Bot',
+      rows: db.prepare(`SELECT user_id FROM swing_alpaca_creds
+        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
+      same: row => scope === 'swing' && row.user_id === userId,
+    },
+  ];
+  return queries.find(item => item.rows.some(row => !item.same(row))) || null;
+}
+
+function claimBrokerAccountOwnership(userId, scope, mode, accountId) {
+  refreshBrokerAccountQuarantine(accountId);
+  if (isBrokerAccountQuarantined(accountId)) return false;
+  const result = db.prepare(`INSERT INTO broker_account_owners(account_id,user_id,scope,mode,claimed_at)
+    VALUES (?,?,?,?,datetime('now'))
+    ON CONFLICT(account_id) DO UPDATE SET mode=excluded.mode,claimed_at=datetime('now')
+    WHERE broker_account_owners.user_id=excluded.user_id
+      AND broker_account_owners.scope=excluded.scope`)
+    .run(accountId, userId, scope, mode);
+  return result.changes === 1;
+}
+
+function brokerAccountOwnerCount(accountId) {
+  const rows = db.prepare(`
+    SELECT user_id,scope FROM (
+      SELECT user_id,'manual' AS scope FROM alpaca_creds WHERE account_id=? AND api_key<>?
+      UNION ALL SELECT user_id,bot AS scope FROM bot_alpaca_creds WHERE account_id=? AND api_key<>?
+      UNION ALL SELECT user_id,'candlestick' AS scope FROM candlestick_alpaca_creds WHERE account_id=? AND api_key<>?
+      UNION ALL SELECT user_id,'swing' AS scope FROM swing_alpaca_creds WHERE account_id=? AND api_key<>?
+    )
+  `).all(
+    accountId, DISCONNECTED_SENTINEL,
+    accountId, DISCONNECTED_SENTINEL,
+    accountId, DISCONNECTED_SENTINEL,
+    accountId, DISCONNECTED_SENTINEL,
+  );
+  return new Set(rows.map(row => `${row.user_id}:${row.scope}`)).size;
+}
+
+function refreshBrokerAccountQuarantine(accountId) {
+  if (!accountId) return;
+  const count = brokerAccountOwnerCount(accountId);
+  if (count > 1) {
+    db.prepare(`INSERT INTO broker_account_quarantine(account_id,reason,detected_at,resolved_at)
+      VALUES (?,'DUPLICATE_ASSIGNMENT',datetime('now'),NULL)
+      ON CONFLICT(account_id) DO UPDATE SET reason=excluded.reason,resolved_at=NULL`).run(accountId);
+  } else {
+    db.prepare(`UPDATE broker_account_quarantine SET resolved_at=datetime('now')
+      WHERE account_id=? AND resolved_at IS NULL`).run(accountId);
+  }
+}
+
+function isBrokerAccountQuarantined(accountId) {
+  if (!accountId) return false;
+  return !!db.prepare(`SELECT 1 FROM broker_account_quarantine
+    WHERE account_id=? AND resolved_at IS NULL`).get(accountId);
+}
+
+function storedBrokerAccountId(userId, scope, mode) {
+  if (scope === 'manual') return db.prepare(`SELECT account_id FROM alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
+  if (scope === 'candlestick') return db.prepare(`SELECT account_id FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
+  if (scope === 'swing') return db.prepare(`SELECT account_id FROM swing_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
+  return db.prepare(`SELECT account_id FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?`).get(userId, scope, mode)?.account_id || null;
+}
+
+function releaseBrokerAccountOwnershipIfUnused(userId, scope, accountId) {
+  if (!accountId) return;
+  let inUse;
+  if (scope === 'manual') inUse = db.prepare(`SELECT 1 FROM alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
+  else if (scope === 'candlestick') inUse = db.prepare(`SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
+  else if (scope === 'swing') inUse = db.prepare(`SELECT 1 FROM swing_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
+  else inUse = db.prepare(`SELECT 1 FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, scope, accountId, DISCONNECTED_SENTINEL);
+  if (!inUse) db.prepare(`DELETE FROM broker_account_owners WHERE account_id=? AND user_id=? AND scope=?`).run(accountId, userId, scope);
+  refreshBrokerAccountQuarantine(accountId);
 }
 
 function decryptStoredAlpacaCredentials(row, table, whereClause, whereValues) {
@@ -2503,12 +2826,20 @@ function decryptStoredAlpacaCredentials(row, table, whereClause, whereValues) {
 }
 
 function getAlpacaCreds(userId, scope = 'manual') {
+  if (isSwingScope(scope)) {
+    const active = db.prepare('SELECT mode FROM swing_alpaca_active_mode WHERE user_id=?')
+      .get(userId)?.mode || 'paper';
+    const row = db.prepare(`SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id
+      FROM swing_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, active);
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
+    return decryptStoredAlpacaCredentials(row, 'swing_alpaca_creds', 'user_id=? AND mode=?', [userId, active]);
+  }
   if (isCandlestickScope(scope)) {
     const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?')
       .get(userId)?.mode || 'paper';
     const row = db.prepare(`SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id
       FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, active);
-    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
     return decryptStoredAlpacaCredentials(row, 'candlestick_alpaca_creds', 'user_id=? AND mode=?', [userId, active]);
   }
   if (BOT_ALPACA_SCOPES.has(scope)) {
@@ -2520,7 +2851,7 @@ function getAlpacaCreds(userId, scope = 'manual') {
     `).get(userId, scope, active);
     // Credentials saved before broker identity verification must be reconnected
     // before an automated bot can use them.
-    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
     return decryptStoredAlpacaCredentials(row, 'bot_alpaca_creds', 'user_id=? AND bot=? AND mode=?', [userId, scope, active]);
   }
   // Determine which mode this user has active
@@ -2532,7 +2863,7 @@ function getAlpacaCreds(userId, scope = 'manual') {
   const row = db.prepare('SELECT api_key, api_secret, api_key_enc, api_secret_enc, mode, account_id FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, activeMode);
   // Do not permit a legacy manual key pair to trade until it has been
   // revalidated and associated with a specific broker account ID.
-  if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) return null;
+  if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
   return decryptStoredAlpacaCredentials(row, 'alpaca_creds', 'user_id=? AND mode=?', [userId, activeMode]);
 }
 
@@ -2546,23 +2877,38 @@ function storedCredentialExists(row) {
 }
 
 function _alpacaCredsExist(userId, mode, scope = 'manual') {
-  if (isCandlestickScope(scope)) {
-    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?')
+  if (isSwingScope(scope)) {
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM swing_alpaca_creds WHERE user_id=? AND mode=?')
       .get(userId, mode);
-    return storedCredentialExists(row);
+    return storedCredentialExists(row) && !isBrokerAccountQuarantined(row.account_id);
+  }
+  if (isCandlestickScope(scope)) {
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?')
+      .get(userId, mode);
+    return storedCredentialExists(row) && !isBrokerAccountQuarantined(row.account_id);
   }
   if (BOT_ALPACA_SCOPES.has(scope)) {
-    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?')
       .get(userId, scope, mode);
-    return storedCredentialExists(row);
+    return storedCredentialExists(row) && !isBrokerAccountQuarantined(row.account_id);
   }
-  const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
-  return storedCredentialExists(row);
+  const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM alpaca_creds WHERE user_id=? AND mode=?').get(userId, mode);
+  return storedCredentialExists(row) && !isBrokerAccountQuarantined(row.account_id);
 }
 
 async function alpacaFetchFor(userId, scope, path, opts = {}, _attempt = 0) {
   const creds = getAlpacaCreds(userId, scope);
   if (!creds) throw new Error('Alpaca not connected. Please add your API credentials.');
+  return alpacaFetchWithCredentials(creds, path, opts, _attempt);
+}
+
+// Lifecycle-sensitive bots pin the decrypted credential record that was
+// verified and journaled for a trade. This prevents an active-mode change from
+// redirecting later requests to a different broker account.
+async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) {
+  if (!creds?.api_key || !creds?.api_secret || !['paper', 'live'].includes(creds.mode)) {
+    throw new Error('Pinned Alpaca credentials are unavailable.');
+  }
   const base = creds.mode === 'live'
     ? 'https://api.alpaca.markets'
     : 'https://paper-api.alpaca.markets';
@@ -2590,7 +2936,7 @@ async function alpacaFetchFor(userId, scope, path, opts = {}, _attempt = 0) {
       const delay = Math.min(1000 * 2 ** _attempt, 8000);
       console.warn(`[AT] Alpaca network error on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms: ${netErr.message}`);
       await new Promise(res => setTimeout(res, delay));
-      return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
+      return alpacaFetchWithCredentials(creds, path, opts, _attempt + 1);
     }
     const error = new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
     error.alpacaTransient = true;
@@ -2603,14 +2949,14 @@ async function alpacaFetchFor(userId, scope, path, opts = {}, _attempt = 0) {
     const delay = Math.min(2000 * (_attempt + 1), 8000);
     console.warn(`[AT] Alpaca 429 rate-limit on ${path} — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
-    return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
+    return alpacaFetchWithCredentials(creds, path, opts, _attempt + 1);
   }
   // Transient server errors (502/503/504) — retry GET requests only
   if ([502, 503, 504].includes(r.status) && isGet && _attempt < MAX_ATTEMPTS - 1) {
     const delay = Math.min(1500 * 2 ** _attempt, 8000);
     console.warn(`[AT] Alpaca ${r.status} on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms`);
     await new Promise(res => setTimeout(res, delay));
-    return alpacaFetchFor(userId, scope, path, opts, _attempt + 1);
+    return alpacaFetchWithCredentials(creds, path, opts, _attempt + 1);
   }
   if (r.status === 204) return {};
   const data = await r.json().catch(() => ({}));
@@ -2755,15 +3101,22 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const m = mode === 'live' ? 'live' : 'paper';
   let verifiedAccountId = '';
   let uid;
+  let previousAccountId = null;
   let encryptedKey = '';
   let encryptedSecret = '';
 
   try {
     uid = await ensureSessionUserInTradingStore(req);
+    previousAccountId = storedBrokerAccountId(uid, scope, m);
   } catch (error) {
     console.error('[Auth] Could not reconcile authenticated user for broker connection:', error.message);
     return res.status(503).json({
       error: 'Your signed-in account could not be prepared for broker connections. Sign out, sign back in, and try again.',
+    });
+  }
+  if (isSwingScope(scope) && hasActiveSwingTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Swing positions before replacing this broker connection.',
     });
   }
 
@@ -2794,35 +3147,62 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     if (!verifiedAccountId) {
       return res.status(400).json({ error: 'Alpaca did not return a broker account ID, so this connection cannot be safely verified.' });
     }
+    if (isSwingScope(scope) && hasActiveSwingTrades(uid)) {
+      return res.status(409).json({
+        error: 'A Swing entry became active while Alpaca was verifying this connection. Reconcile it before changing accounts.',
+      });
+    }
+    const ownershipConflict = alpacaAccountConflict(uid, scope, verifiedAccountId);
+    if (ownershipConflict) {
+      return res.status(409).json({
+        error: `This Alpaca account is already assigned to ${ownershipConflict.owner}. Every app user and trading strategy requires a different broker account.`,
+      });
+    }
+    if (!claimBrokerAccountOwnership(uid, scope, m, verifiedAccountId)) {
+      return res.status(409).json({
+        error: 'This Alpaca account was assigned to another app user or strategy while it was being verified.',
+      });
+    }
     encryptedKey = credentialVault.encrypt(key);
     encryptedSecret = credentialVault.encrypt(sec);
     if (scope !== 'manual') {
-      const candlestickConflict = isCandlestickScope(scope)
-        ? db.prepare(`SELECT bot FROM bot_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`)
-          .get(uid, verifiedAccountId, DISCONNECTED_SENTINEL)
-        : db.prepare(`SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`)
-          .get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
-      if (candlestickConflict) {
-        const owner = isCandlestickScope(scope) ? brokerScopeLabel(candlestickConflict.bot) : 'Candlestick Automation';
-        return res.status(409).json({ error: `This Alpaca account is already connected to ${owner}. Each bot must use a different Alpaca account.` });
-      }
       const conflict = db.prepare(`
         SELECT bot FROM bot_alpaca_creds
-        WHERE user_id=? AND bot<>? AND account_id=? AND api_key<>?
+        WHERE user_id=? AND account_id=? AND api_key<>? AND bot<>?
         LIMIT 1
-      `).get(uid, scope, verifiedAccountId, DISCONNECTED_SENTINEL);
-      if (conflict) {
-        return res.status(409).json({
-          error: `This Alpaca account is already connected to ${brokerScopeLabel(conflict.bot)}. Each bot must use a different Alpaca account.`,
-        });
-      }
+      `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL, ['momentum', 'pmh'].includes(scope) ? scope : '');
+      if (conflict) return res.status(409).json({
+        error: `This Alpaca account is already connected to ${brokerScopeLabel(conflict.bot)}. Each bot must use a different Alpaca account.`,
+      });
+      const candleConflict = !isCandlestickScope(scope) && db.prepare(`
+        SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+      `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+      if (candleConflict) return res.status(409).json({
+        error: 'This Alpaca account is already connected to Candlestick Automation. Each bot must use a different Alpaca account.',
+      });
+      const swingConflict = !isSwingScope(scope) && db.prepare(`
+        SELECT 1 FROM swing_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+      `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+      if (swingConflict) return res.status(409).json({
+        error: 'This Alpaca account is already connected to the Swing Trading Bot. Each bot must use a different Alpaca account.',
+      });
       const manualConflict = db.prepare(`
         SELECT 1 FROM alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
       `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
       if (manualConflict) {
         return res.status(409).json({ error: 'This Alpaca account is already connected for manual trading. Use a separate account for each automated bot.' });
       }
-      if (isCandlestickScope(scope)) {
+      if (isSwingScope(scope)) {
+        db.prepare(`INSERT INTO swing_alpaca_creds
+          (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+          VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
+          api_key=excluded.api_key,api_secret=excluded.api_secret,
+          api_key_enc=excluded.api_key_enc,api_secret_enc=excluded.api_secret_enc,
+          account_id=excluded.account_id`)
+          .run(uid, m, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, verifiedAccountId);
+        db.prepare('INSERT OR REPLACE INTO swing_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
+        db.prepare('UPDATE swing_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      } else if (isCandlestickScope(scope)) {
         db.prepare(`INSERT INTO candlestick_alpaca_creds
           (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
           VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
@@ -2847,9 +3227,15 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         db.prepare('INSERT OR REPLACE INTO bot_alpaca_active_mode (user_id,bot,mode) VALUES (?,?,?)')
           .run(uid, scope, m);
       }
+      if (previousAccountId && previousAccountId !== verifiedAccountId) {
+        releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
+      }
       return res.json({ ok: true, mode: m, connection: scope, accountId: verifiedAccountId });
     }
   } catch (e) {
+    if (verifiedAccountId && storedBrokerAccountId(uid, scope, m) !== verifiedAccountId) {
+      releaseBrokerAccountOwnershipIfUnused(uid, scope, verifiedAccountId);
+    }
     if (e.name === 'AbortError') return res.status(400).json({ error: 'Alpaca did not respond in time — check your connection.' });
     if (e.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
       console.error('[Alpaca] Trading-store identity reconciliation failed:', e.message);
@@ -2867,6 +3253,14 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const candleConflict = db.prepare(`
     SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
   `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  const swingConflict = db.prepare(`
+    SELECT 1 FROM swing_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+  `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  if (swingConflict) {
+    return res.status(409).json({
+      error: 'This Alpaca account is already connected to the Swing Trading Bot. Manual trading requires its own broker account.',
+    });
+  }
   if (candleConflict) {
     return res.status(409).json({
       error: 'This Alpaca account is already connected to Candlestick Automation. Manual trading requires its own broker account.',
@@ -2885,6 +3279,9 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       account_id=excluded.account_id
   `).run(uid, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, m, verifiedAccountId);
   db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  if (previousAccountId && previousAccountId !== verifiedAccountId) {
+    releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
+  }
   res.json({ ok: true, mode: m, accountId: verifiedAccountId });
 });
 
@@ -2893,26 +3290,46 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
 app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   const uid = req.session.userId;
   const scope = requestAlpacaScope(req);
+  if (isSwingScope(scope) && hasActiveSwingTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Swing positions before disconnecting this broker account.',
+    });
+  }
   if (scope !== 'manual') {
+    if (isSwingScope(scope)) {
+      const active = db.prepare('SELECT mode FROM swing_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
+      const accountId = storedBrokerAccountId(uid, scope, active);
+      db.prepare(`INSERT OR REPLACE INTO swing_alpaca_creds
+        (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+        VALUES (?,?,?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
+      db.prepare('UPDATE swing_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
+      return res.json({ ok: true, connection: scope });
+    }
     if (isCandlestickScope(scope)) {
       const active = db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
+      const accountId = storedBrokerAccountId(uid, scope, active);
       db.prepare(`INSERT OR REPLACE INTO candlestick_alpaca_creds
         (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
         VALUES (?,?,?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
       db.prepare('UPDATE candlestick_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
       return res.json({ ok: true, connection: scope });
     }
     const active = db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?')
       .get(uid, scope)?.mode || 'paper';
+    const accountId = storedBrokerAccountId(uid, scope, active);
     db.prepare(`
       INSERT OR REPLACE INTO bot_alpaca_creds
         (user_id,bot,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
       VALUES (?,?,?,?,?,?,?,NULL)
     `).run(uid, scope, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
+    releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
     return res.json({ ok: true, connection: scope });
   }
   const activeModeRow = db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid);
   const m = activeModeRow?.mode || 'paper';
+  const accountId = storedBrokerAccountId(uid, scope, m);
   db.prepare(`
     INSERT INTO alpaca_creds (user_id,api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id) VALUES (?,?,?,?,?,?,NULL)
     ON CONFLICT(user_id,mode) DO UPDATE SET
@@ -2921,6 +3338,7 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
   `).run(
     uid, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null, m
   );
+  releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
   res.json({ ok: true });
 });
 
@@ -2933,6 +3351,8 @@ app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
   const liveConnected  = _alpacaCredsExist(uid, 'live', scope);
   const activeModeRow  = scope === 'manual'
     ? db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid)
+    : isSwingScope(scope)
+      ? db.prepare('SELECT mode FROM swing_alpaca_active_mode WHERE user_id=?').get(uid)
     : isCandlestickScope(scope)
       ? db.prepare('SELECT mode FROM candlestick_alpaca_active_mode WHERE user_id=?').get(uid)
       : db.prepare('SELECT mode FROM bot_alpaca_active_mode WHERE user_id=? AND bot=?').get(uid, scope);
@@ -2953,11 +3373,19 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
   const m   = mode === 'live' ? 'live' : 'paper';
   const uid = req.session.userId;
   const scope = requestAlpacaScope(req);
+  if (isSwingScope(scope) && hasActiveSwingTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Swing positions before switching its broker mode.',
+    });
+  }
   if (!_alpacaCredsExist(uid, m, scope)) {
     return res.status(400).json({ error: `No ${m} account connected. Save your ${m} API keys first.` });
   }
   if (scope === 'manual') {
     db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  } else if (isSwingScope(scope)) {
+    db.prepare('INSERT OR REPLACE INTO swing_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
+    db.prepare('UPDATE swing_settings SET live_armed=0 WHERE user_id=?').run(uid);
   } else if (isCandlestickScope(scope)) {
     db.prepare('INSERT OR REPLACE INTO candlestick_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
     // Switching accounts/modes also requires an intentional new live arm.
@@ -5597,6 +6025,7 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
       { name: 'momentum', enabled: momentumConfigFor(userId).enabled, scope: 'momentum' },
       { name: 'opening-momentum', enabled: !!pmhSetting?.enabled && isBotEnabled(userId, 'pmh'), scope: 'pmh' },
       { name: 'candlestick', enabled: candlestickConfigFor(userId).enabled, scope: 'candlestick' },
+      { name: 'swing', enabled: swingConfigFor(userId).enabled, scope: 'swing' },
     ];
     const botReadiness = await Promise.all(botSettings.map(async bot => {
       const creds = getAlpacaCreds(userId, bot.scope);
@@ -5612,12 +6041,15 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
           accountActive,
           livePaused,
           executable: bot.enabled && accountActive && !livePaused
-            && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live'),
+            && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live')
+            && (bot.scope !== 'swing' || swingConfigFor(userId).liveArmed || creds.mode !== 'live'),
           reason: !bot.enabled ? 'Strategy is disabled.'
             : livePaused ? 'PMH live automation is paused for safety validation. Paper mode remains available.'
             : !accountActive ? 'Broker account is not active.'
             : bot.scope === 'candlestick' && creds.mode === 'live' && !candlestickConfigFor(userId).liveArmed
               ? 'Live candlestick authorization is not armed.'
+              : bot.scope === 'swing' && creds.mode === 'live' && !swingConfigFor(userId).liveArmed
+                ? 'Live Swing authorization is not armed.'
               : null,
         };
       } catch (error) {
@@ -5678,7 +6110,7 @@ app.post('/api/bots/trigger', requireAuth, async (req, res) => {
   // Run sequentially. The shared account-level execution lock remains the
   // boundary between a triggered cycle, a scheduler tick, and manual orders.
   const outcomes = [];
-  for (const runCycle of [runMomentumCycle, runPmhCycle, runCandlestickCycle]) {
+  for (const runCycle of [runMomentumCycle, runPmhCycle, runCandlestickCycle, runSwingCycle]) {
     try {
       outcomes.push(await runCycle(userId, 'manual-trigger'));
     } catch (error) {
@@ -7464,36 +7896,1126 @@ function detectEarningsBarIdx(bars, fiscalQuarterEndDate) {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SWING TRADING BOT — Weekly/Daily Chart Strategy
-// Minimum hold: 5 trading days. No day trading. Weekly candle confirmation only.
-// Instruments: SPY / QQQ (long bottom signal) | SH / SPXS (inverse top signal)
-// Entry: Limit order Monday morning. Size: 15% of account equity.
-// Exit: TP1 33% @ 21w EMA → TP2 33% @ 50w SMA → TP3 34% @ prior high / +8%
-// Trailing stop: breakeven after TP1, moves to TP1 after TP2.
+// SWING TRADING BOT — isolated multi-week stock / ETF automation
 // ══════════════════════════════════════════════════════════════════════════════
 
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS swing_trade_log (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id          INTEGER NOT NULL,
-    symbol           TEXT    NOT NULL,
-    direction        TEXT    NOT NULL,
-    entry_price      REAL,
-    shares           INTEGER,
-    shares_remaining INTEGER,
-    alpaca_order_id  TEXT,
-    stop_level       REAL,
-    trailing_stop    REAL,
-    tp1_price        REAL,
-    tp2_price        REAL,
-    tp3_price        REAL,
-    phase            TEXT DEFAULT 'open',
-    signal_date      TEXT,
-    notes            TEXT,
-    created_at       TEXT DEFAULT (datetime('now')),
-    closed_at        TEXT
-  )
-`).run();
+const SWING_SCOPE = 'swing';
+const SWING_CEILINGS = Object.freeze({
+  maxPositionDollars: 100000,
+  maxRiskDollars: 500,
+  maxPositions: 5,
+  maxAggregateExposure: 250000,
+  maxSectorPositions: 2,
+  maxSymbols: 40,
+  minAverageDollarVolume: 5000000,
+  minRewardRisk: 2,
+});
+const _swingContextCache = new Map();
+const _swingCalendarCache = new Map();
+
+function swingConfigFor(userId) {
+  const row = db.prepare(`SELECT enabled,live_armed,max_position_dollars,rotation_offset,
+    last_cycle_at,last_cycle_status,last_cycle_reason,last_cycle_scanned,last_cycle_eligible,last_cycle_source,last_scan_at,updated_at
+    FROM swing_settings WHERE user_id=?`).get(userId);
+  const requested = { maxPositionDollars: row?.max_position_dollars ?? 1000 };
+  const execution = sanitizeSwingExecutionConfig(requested, SWING_CEILINGS);
+  execution.maxRiskDollars = Math.min(
+    SWING_CEILINGS.maxRiskDollars,
+    Math.max(10, execution.maxPositionDollars * 0.02)
+  );
+  return {
+    enabled: !!row?.enabled,
+    liveArmed: !!row?.live_armed,
+    maxPositionDollars: execution.maxPositionDollars,
+    execution,
+    rotationOffset: Math.max(0, Number(row?.rotation_offset || 0)),
+    runtime: {
+      settingsUpdatedAt: row?.updated_at || null,
+      lastCycleAt: row?.last_cycle_at || null,
+      lastCycleStatus: row?.last_cycle_status || null,
+      lastCycleReason: row?.last_cycle_reason || null,
+      lastCycleScanned: Number(row?.last_cycle_scanned || 0),
+      lastCycleEligible: Number(row?.last_cycle_eligible || 0),
+      lastCycleSource: row?.last_cycle_source || null,
+      lastScanAt: row?.last_scan_at || null,
+    },
+  };
+}
+
+function getPinnedSwingCreds(userId, mode, expectedAccountId) {
+  if (!expectedAccountId) {
+    throw new Error('This Swing lifecycle record has no immutable broker account identity.');
+  }
+  if (isBrokerAccountQuarantined(expectedAccountId)) {
+    throw new Error('This broker account is quarantined because it was assigned to more than one user or strategy.');
+  }
+  const row = db.prepare(`SELECT api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id
+    FROM swing_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode);
+  if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id) {
+    throw new Error(`The ${mode} Swing credential needed by this trade is unavailable.`);
+  }
+  if (expectedAccountId && String(row.account_id) !== String(expectedAccountId)) {
+    throw new Error('Swing broker identity no longer matches the account pinned to this trade.');
+  }
+  return decryptStoredAlpacaCredentials(row, 'swing_alpaca_creds', 'user_id=? AND mode=?', [userId, mode]);
+}
+
+function recordSwingCycle(userId, outcome) {
+  db.prepare(`INSERT INTO swing_settings
+    (user_id,last_cycle_at,last_cycle_status,last_cycle_reason,last_cycle_scanned,last_cycle_eligible,last_cycle_source)
+    VALUES (?,datetime('now'),?,?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET last_cycle_at=datetime('now'),
+      last_cycle_status=excluded.last_cycle_status,last_cycle_reason=excluded.last_cycle_reason,
+      last_cycle_scanned=excluded.last_cycle_scanned,last_cycle_eligible=excluded.last_cycle_eligible,
+      last_cycle_source=excluded.last_cycle_source`)
+    .run(userId, String(outcome?.status || 'unknown').slice(0, 40),
+      String(outcome?.reason || '').slice(0, 300) || null,
+      Math.max(0, Number(outcome?.scanned || 0)),
+      Math.max(0, Number(outcome?.eligible || 0)),
+      String(outcome?.source || 'server-scheduler').slice(0, 40));
+}
+
+function acquireSwingExecutionLease(userId) {
+  const token = crypto.randomUUID();
+  const result = db.prepare(`INSERT INTO swing_execution_leases (user_id,token,expires_at)
+    VALUES (?, ?, datetime('now','+10 minutes'))
+    ON CONFLICT(user_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at
+    WHERE swing_execution_leases.expires_at <= datetime('now')`).run(userId, token);
+  return result.changes === 1 ? token : null;
+}
+function requireSwingExecutionLease(userId, token) {
+  if (!token || db.prepare(`UPDATE swing_execution_leases SET expires_at=datetime('now','+10 minutes')
+    WHERE user_id=? AND token=? AND expires_at > datetime('now')`).run(userId, token).changes !== 1) {
+    throw new Error('Swing execution lease expired or was replaced; no further broker action was taken.');
+  }
+}
+function releaseSwingExecutionLease(userId, token) {
+  if (token) db.prepare('DELETE FROM swing_execution_leases WHERE user_id=? AND token=?').run(userId, token);
+}
+
+function easternDateKey(value = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(value));
+}
+function isoWeekMonday(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return date.toISOString().slice(0, 10);
+}
+function completedSwingDailyBars(rawBars, now = Date.now()) {
+  const today = easternDateKey(now);
+  return (Array.isArray(rawBars) ? rawBars : []).filter(bar => {
+    const timestamp = Date.parse(bar?.t ?? bar?.timestamp ?? '');
+    return Number.isFinite(timestamp) && easternDateKey(timestamp) < today;
+  }).map(bar => ({
+    o: +bar.o, h: +bar.h, l: +bar.l, c: +bar.c, v: +bar.v,
+    t: bar.t ?? bar.timestamp, completed: true,
+  })).filter(bar => [bar.o, bar.h, bar.l, bar.c, bar.v].every(Number.isFinite));
+}
+function completedSwingWeeklyBars(dailyBars, now = Date.now()) {
+  const currentWeek = isoWeekMonday(easternDateKey(now));
+  return aggregateSwingWeeklyBars(dailyBars)
+    .filter(bar => bar.t < currentWeek)
+    .map(bar => ({ ...bar, completed: true }));
+}
+async function expectedSwingSessions(userId, now = Date.now()) {
+  const creds = getAlpacaCreds(userId, SWING_SCOPE);
+  if (!creds) return null;
+  const cacheKey = `${userId}:${creds.mode}:${creds.account_id}`;
+  const cached = _swingCalendarCache.get(cacheKey);
+  if (cached && now - cached.at < 6 * 60 * 60 * 1000) return cached.value;
+  const today = easternDateKey(now);
+  const start = easternDateKey(now - 60 * 86400000);
+  const sessions = await alpacaFetchFor(userId, SWING_SCOPE, `/v2/calendar?start=${start}&end=${today}`);
+  if (!Array.isArray(sessions) || !sessions.length) throw new Error('Alpaca trading calendar is unavailable.');
+  const prior = sessions.filter(item => String(item.date) < today);
+  const daily = prior.at(-1)?.date || null;
+  const currentWeek = isoWeekMonday(today);
+  const completedWeeks = prior.filter(item => isoWeekMonday(String(item.date)) < currentWeek);
+  const weekly = completedWeeks.at(-1)?.date || null;
+  const value = { daily, weekly };
+  _swingCalendarCache.set(cacheKey, { at: now, value });
+  return value;
+}
+async function swingBarFreshness(userId, dailyBars, weeklyBars) {
+  const expected = await expectedSwingSessions(userId);
+  const dailyDate = easternDateKey(Date.parse(dailyBars.at(-1)?.t || ''));
+  const weeklyDate = easternDateKey(Date.parse(weeklyBars.at(-1)?.completedAt || weeklyBars.at(-1)?.t || ''));
+  return {
+    daily: !!expected?.daily && dailyDate === expected.daily,
+    weekly: !!expected?.weekly && weeklyDate === expected.weekly,
+  };
+}
+
+async function swingOptionalContext(symbol, dailyBars, userId) {
+  const key = String(symbol).toUpperCase();
+  const cached = _swingContextCache.get(key);
+  if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return cached.value;
+  let quality = null;
+  let sectorName = null;
+  try {
+    const summary = await yf.quoteSummary(key, {
+      modules: ['assetProfile', 'financialData', 'defaultKeyStatistics', 'summaryDetail'],
+    }, { validateResult: false });
+    const fd = summary?.financialData || {};
+    const stats = summary?.defaultKeyStatistics || {};
+    sectorName = summary?.assetProfile?.sector || null;
+    const facts = [
+      Number(fd.revenueGrowth) > 0,
+      Number(fd.earningsGrowth) > 0,
+      Number(fd.returnOnEquity) > 0,
+      Number(fd.freeCashflow) > 0,
+      Number(fd.debtToEquity) >= 0 && Number(fd.debtToEquity) < 200,
+      Number(stats.profitMargins) > 0,
+    ];
+    const available = [
+      fd.revenueGrowth, fd.earningsGrowth, fd.returnOnEquity,
+      fd.freeCashflow, fd.debtToEquity, stats.profitMargins,
+    ].filter(value => Number.isFinite(Number(value))).length;
+    if (available >= 3) quality = Math.round(facts.filter(Boolean).length / 6 * 100);
+  } catch (_) {
+    // Fundamentals are optional context. Their absence is disclosed below and
+    // can never be replaced by generated or guessed values.
+  }
+  let relativeStrength = null;
+  let market = null;
+  try {
+    const spyKey = '__SPY_DAILY__';
+    let spy = _swingContextCache.get(spyKey);
+    if (!spy || Date.now() - spy.at >= 15 * 60 * 1000) {
+      const start = new Date(Date.now() - 120 * 86400000).toISOString();
+      const data = await alpacaDataFetch(userId, `/v2/stocks/SPY/bars?timeframe=1Day&start=${encodeURIComponent(start)}&limit=100&adjustment=all&feed=iex`, SWING_SCOPE);
+      const bars = completedSwingDailyBars(candlestickBarsFromResponse(data, 'SPY'));
+      spy = { at: Date.now(), value: bars };
+      _swingContextCache.set(spyKey, spy);
+    }
+    const stock20 = dailyBars.length >= 21 ? dailyBars.at(-1).c / dailyBars.at(-21).c - 1 : null;
+    const spyBars = spy.value;
+    const spy20 = spyBars.length >= 21 ? spyBars.at(-1).c / spyBars.at(-21).c - 1 : null;
+    if (Number.isFinite(stock20) && Number.isFinite(spy20)) relativeStrength = stock20 - spy20;
+    if (Number.isFinite(spy20)) market = spy20;
+  } catch (_) {}
+  const value = {
+    quality,
+    catalyst: null,
+    // A sector label is useful for concentration limits, but it is not
+    // sector-relative performance evidence and therefore earns no score.
+    sector: null,
+    sectorName,
+    relativeStrength,
+    market,
+    sourceState: {
+      fundamentals: quality == null ? 'UNAVAILABLE' : 'AVAILABLE',
+      catalyst: 'UNAVAILABLE',
+      sector: sectorName ? 'LABEL_ONLY; RELATIVE_EVIDENCE_UNAVAILABLE' : 'UNAVAILABLE',
+      market: market == null ? 'UNAVAILABLE' : 'AVAILABLE',
+    },
+  };
+  _swingContextCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+async function buildSwingCandidate(userId, symbol, execution = swingConfigFor(userId).execution) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9.-]{0,11}$/.test(sym)) throw new Error('A valid stock or ETF symbol is required.');
+  const start = new Date(Date.now() - 3 * 365 * 86400000).toISOString();
+  const payload = await alpacaDataFetch(userId,
+    `/v2/stocks/${encodeURIComponent(sym)}/bars?timeframe=1Day&start=${encodeURIComponent(start)}&limit=1000&adjustment=all&feed=iex`,
+    SWING_SCOPE);
+  if (!payload) throw new Error('Alpaca daily bars are unavailable.');
+  const dailyBars = completedSwingDailyBars(candlestickBarsFromResponse(payload, sym));
+  const weeklyBars = completedSwingWeeklyBars(dailyBars);
+  const optional = await swingOptionalContext(sym, dailyBars, userId);
+  const setup = evaluateSwingSetup({
+    symbol: sym,
+    dailyBars,
+    weeklyBars,
+    freshness: await swingBarFreshness(userId, dailyBars, weeklyBars),
+    quality: optional.quality,
+    catalyst: optional.catalyst,
+    sector: optional.sector,
+    relativeStrength: optional.relativeStrength,
+    market: optional.market,
+  }, {
+    ...DEFAULT_SWING_CONFIG,
+    minAverageDollarVolume: execution.minAverageDollarVolume,
+    minRewardRisk: execution.minRewardRisk,
+  });
+  return {
+    ...setup,
+    symbol: sym,
+    stop: setup.structuralStop,
+    target: setup.targets?.[0]?.price ?? null,
+    sector: optional.sectorName || 'UNKNOWN',
+    sourceState: optional.sourceState,
+    evaluatedAt: new Date().toISOString(),
+    signalBarAt: dailyBars.at(-1)?.t || null,
+  };
+}
+
+function saveSwingCandidates(userId, candidates) {
+  const statement = db.prepare(`INSERT INTO swing_candidates
+    (user_id,symbol,payload_json,signal_bar_at,evaluated_at) VALUES (?,?,?,?,datetime('now'))
+    ON CONFLICT(user_id,symbol) DO UPDATE SET payload_json=excluded.payload_json,
+      signal_bar_at=excluded.signal_bar_at,evaluated_at=datetime('now')`);
+  db.transaction(rows => rows.forEach(row =>
+    statement.run(userId, row.symbol, JSON.stringify(row), row.signalBarAt || null)))(candidates);
+  const event = db.prepare(`INSERT INTO swing_events
+    (user_id,symbol,event_type,reason_code,details_json,source_at)
+    VALUES (?,?,'SCAN_DECISION',?,?,?)`);
+  db.transaction(rows => rows.forEach(row => event.run(
+    userId, row.symbol, row.eligible ? 'ELIGIBLE' : String(row.status || 'REJECTED').slice(0, 40),
+    JSON.stringify({ score: row.score, confidence: row.confidence, reasons: row.reasons || [], sourceState: row.sourceState || null }),
+    row.signalBarAt || row.evaluatedAt || null
+  )))(candidates);
+}
+
+async function scanSwingUniverse(userId, { persistRotation = true } = {}) {
+  const settings = swingConfigFor(userId);
+  const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: SWING_SCOPE });
+  const rotation = selectCatalogRotation(catalogEntry.catalog, {
+    limit: settings.execution.maxSymbols,
+    priorityLimit: 0,
+    rotationLimit: settings.execution.maxSymbols,
+    rotationOffset: settings.rotationOffset,
+  });
+  if (persistRotation) {
+    db.prepare(`INSERT INTO swing_settings (user_id,rotation_offset) VALUES (?,?)
+      ON CONFLICT(user_id) DO UPDATE SET rotation_offset=excluded.rotation_offset`)
+      .run(userId, rotation.nextOffset);
+  }
+  const rows = await mapWithConcurrency(rotation.symbols, 6, async symbol => {
+    try { return await buildSwingCandidate(userId, symbol, settings.execution); }
+    catch (error) {
+      return {
+        symbol, direction: null, status: 'DATA UNAVAILABLE', eligible: false,
+        watchState: 'UNAVAILABLE', score: 0, confidence: 0,
+        reasons: [`Required market evidence unavailable: ${error.message}`],
+        evaluatedAt: new Date().toISOString(),
+      };
+    }
+  });
+  saveSwingCandidates(userId, rows);
+  return {
+    strategy: 'long-only-swing-v1',
+    results: rows.sort((a, b) => Number(b.score || 0) - Number(a.score || 0)),
+    evaluatedAt: new Date().toISOString(),
+    funnel: {
+      scanned: rows.length,
+      eligible: rows.filter(row => row.eligible).length,
+      rejected: rows.filter(row => !row.eligible).length,
+    },
+    coverage: {
+      catalogSize: catalogEntry.catalog.size,
+      scanned: rows.length,
+      rotationBatch: rotation.batch,
+      totalBatches: rotation.totalBatches,
+      nextOffset: rotation.nextOffset,
+      note: 'Stable persisted rotation across the active, tradable Alpaca US stock and ETF catalog.',
+    },
+  };
+}
+
+function swingOrderLookupPath(orderId, clientOrderId) {
+  return orderId && orderId !== clientOrderId
+    ? `/v2/orders/${encodeURIComponent(orderId)}?nested=true`
+    : `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}&nested=true`;
+}
+function swingLots(trade) {
+  try { return Array.isArray(JSON.parse(trade.entry_orders_json)) ? JSON.parse(trade.entry_orders_json) : []; }
+  catch (_) { return []; }
+}
+function addSwingAlert(userId, symbol, type, message) {
+  db.prepare(`INSERT INTO swing_alerts (user_id,symbol,type,message) VALUES (?,?,?,?)`)
+    .run(userId, symbol || null, String(type).slice(0, 40), String(message).slice(0, 500));
+}
+function recordSwingEvent(userId, {
+  tradeId = null, symbol = null, eventType, reasonCode = null, details = {}, sourceAt = null,
+}) {
+  db.prepare(`INSERT INTO swing_events
+    (user_id,trade_id,symbol,event_type,reason_code,details_json,source_at)
+    VALUES (?,?,?,?,?,?,?)`).run(
+      userId, tradeId, symbol, String(eventType || 'UNKNOWN').slice(0, 50),
+      reasonCode == null ? null : String(reasonCode).slice(0, 50),
+      JSON.stringify(details || {}), sourceAt || null
+    );
+}
+function recordSwingExitFill(tradeId, order, purpose) {
+  const id = String(order?.id || '');
+  const qty = Number(order?.filled_qty);
+  const price = Number(order?.filled_avg_price);
+  if (!id || !(qty > 0) || !(price > 0)) return;
+  const existed = !!db.prepare(`SELECT 1 FROM swing_exit_fills WHERE trade_id=? AND broker_order_id=?`)
+    .get(tradeId, id);
+  db.prepare(`INSERT INTO swing_exit_fills (trade_id,broker_order_id,quantity,price,purpose,updated_at)
+    VALUES (?,?,?,?,?,datetime('now')) ON CONFLICT(trade_id,broker_order_id) DO UPDATE SET
+    quantity=excluded.quantity,price=excluded.price,purpose=excluded.purpose,updated_at=datetime('now')`)
+    .run(tradeId, id, qty, price, purpose);
+  return !existed;
+}
+
+async function executeSwingEntry(userId, symbol, source = 'manual', leaseToken = null) {
+  let settings = swingConfigFor(userId);
+  let creds = getAlpacaCreds(userId, SWING_SCOPE);
+  const preflightBrokerIdentity = creds ? `${creds.mode}:${creds.account_id}` : null;
+  if (!settings.enabled) throw new Error('Swing automation is disabled in persisted settings.');
+  if (!creds) throw new Error('Connect the dedicated Swing Trading Alpaca account first.');
+  if (creds.mode === 'live' && !settings.liveArmed) throw new Error('Live Swing trading is not explicitly armed.');
+  if (!isMarketOpen()) throw new Error('Swing entries are submitted only during the regular session.');
+  await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: SWING_SCOPE });
+  let candidate = await buildSwingCandidate(userId, symbol, settings.execution);
+  saveSwingCandidates(userId, [candidate]);
+  if (!candidate.eligible || !candidate.signalBarAt) {
+    const error = new Error('Swing setup is not eligible after fresh completed-bar evaluation.');
+    error.candidate = candidate;
+    throw error;
+  }
+  const brokerState = await Promise.all([
+    alpacaFetchFor(userId, SWING_SCOPE, '/v2/positions'),
+    alpacaFetchFor(userId, SWING_SCOPE, '/v2/orders?status=open&limit=500'),
+    alpacaFetchFor(userId, SWING_SCOPE, '/v2/account'),
+  ]);
+  const [positions, openOrders, account] = brokerState;
+  if (!Array.isArray(positions) || !Array.isArray(openOrders)) throw new Error('Broker capacity is unavailable.');
+  const activeTrades = db.prepare(`SELECT * FROM swing_trades WHERE user_id=? AND status NOT IN ('closed','rejected','canceled')`).all(userId);
+  const brokerExposureSymbols = new Set(positions.map(row => String(row.symbol || '').toUpperCase()).filter(Boolean));
+  for (const order of openOrders) {
+    if (!order?.parent_order_id && String(order.side).toLowerCase() === 'buy') {
+      brokerExposureSymbols.add(String(order.symbol || '').toUpperCase());
+    }
+  }
+  for (const trade of activeTrades) brokerExposureSymbols.add(trade.symbol);
+  if (brokerExposureSymbols.size >= settings.execution.maxPositions) throw new Error('Swing portfolio position limit is reached.');
+  if (activeTrades.some(row => row.symbol === symbol) || positions.some(row => row.symbol === symbol)
+      || openOrders.some(row => row.symbol === symbol)) {
+    throw new Error(`${symbol} already has a Swing position or unresolved broker order.`);
+  }
+  const pendingExposure = openOrders.reduce((sum, order) => {
+    if (order?.parent_order_id || String(order?.side || '').toLowerCase() !== 'buy') return sum;
+    const price = Number(order.limit_price || order.notional || 0);
+    const quantity = Number(order.qty || 0);
+    return sum + (Number(order.notional) > 0 ? Number(order.notional) : Math.max(0, price * quantity));
+  }, 0);
+  const aggregateExposure = positions.reduce((sum, row) => sum + Math.abs(Number(row.market_value || 0)), 0)
+    + pendingExposure;
+  if (aggregateExposure >= settings.execution.maxAggregateExposure) throw new Error('Swing aggregate exposure ceiling is reached.');
+  const sector = candidate.sector || 'UNKNOWN';
+  const sectorCount = activeTrades.filter(row => {
+    try { return (JSON.parse(row.setup_json)?.sector || 'UNKNOWN') === sector; } catch (_) { return sector === 'UNKNOWN'; }
+  }).length;
+  const sectorCap = sector === 'UNKNOWN' ? 1 : settings.execution.maxSectorPositions;
+  if (sectorCount >= sectorCap) throw new Error(`Swing ${sector === 'UNKNOWN' ? 'unknown-sector' : sector} concentration limit is reached.`);
+  const snapshot = await alpacaSnapshotFetch(userId, symbol, SWING_SCOPE);
+  const quote = snapshot?.[symbol]?.latestQuote;
+  const ask = Number(quote?.ap), bid = Number(quote?.bp);
+  const quoteAt = Date.parse(quote?.t || '');
+  if (!(ask > 0) || !(bid > 0) || !Number.isFinite(quoteAt) || Date.now() - quoteAt > 30000) {
+    throw new Error('A fresh executable Alpaca quote is required.');
+  }
+  if ((ask - bid) / ask > 0.02) throw new Error('Current spread is too wide for an automated Swing entry.');
+  if (ask > Number(candidate.entry) * 1.03) throw new Error('Price moved more than 3% above the completed-bar setup; entry is withheld.');
+  const stop = Number(candidate.structuralStop);
+  if (!(stop > 0 && stop < ask)) throw new Error('Fresh price invalidated the structural stop.');
+  const risk = ask - stop;
+  const maxAvailable = Math.min(
+    settings.maxPositionDollars,
+    Math.max(0, Number(account?.buying_power || 0)),
+    Math.max(0, settings.execution.maxAggregateExposure - aggregateExposure)
+  );
+  const historicalResistance = Number(candidate.targets?.[2]?.price);
+  const availableRewardR = Number.isFinite(historicalResistance)
+    ? (historicalResistance - ask) / risk : 0;
+  if (availableRewardR < settings.execution.minRewardRisk) {
+    throw new Error('Fresh quote no longer provides the required reward-to-risk.');
+  }
+  const plannedRewardR = Math.min(3, availableRewardR);
+  const targets = [plannedRewardR / 3, plannedRewardR * 2 / 3, plannedRewardR]
+    .map((multiple, index) => ({
+      name: `T${index + 1}`, price: +(ask + risk * multiple).toFixed(2), r: +multiple.toFixed(2),
+    }));
+  const limitPrice = Math.ceil(ask * 100) / 100;
+  if (!(targets[0].price > limitPrice)) throw new Error('The first target is too close to place a bounded protected entry.');
+  const shares = calculateLongQuantity({
+    entry: limitPrice, stop, maxPositionDollars: maxAvailable,
+    maxRiskDollars: settings.execution.maxRiskDollars,
+  });
+  if (!(shares >= 1)) throw new Error('Risk and buying-power limits produced less than one share.');
+  settings = swingConfigFor(userId);
+  creds = getAlpacaCreds(userId, SWING_SCOPE);
+  if (!settings.enabled || !creds || (creds.mode === 'live' && !settings.liveArmed)) {
+    throw new Error('Swing authorization changed during final broker checks.');
+  }
+  if (`${creds.mode}:${creds.account_id}` !== preflightBrokerIdentity) {
+    throw new Error('The Swing broker account or mode changed during preflight; no order was submitted.');
+  }
+  const pinnedCreds = { ...creds };
+  const finalAccount = await alpacaFetchWithCredentials(pinnedCreds, '/v2/account');
+  if (String(finalAccount?.status || '').toUpperCase() !== 'ACTIVE'
+      || finalAccount?.trading_blocked === true || finalAccount?.account_blocked === true) {
+    throw new Error('Alpaca reports that the pinned Swing account is inactive or blocked.');
+  }
+  const allocation = calculateSwingAllocations(shares);
+  requireSwingExecutionLease(userId, leaseToken);
+  const createIntent = db.transaction(() => {
+    const reservation = db.prepare(`INSERT OR IGNORE INTO swing_entry_reservations
+      (user_id,symbol,signal_bar_at) VALUES (?,?,?)`).run(userId, symbol, candidate.signalBarAt);
+    if (reservation.changes !== 1) throw new Error('This completed Swing signal is already reserved.');
+    const inserted = db.prepare(`INSERT INTO swing_trades
+      (user_id,symbol,mode,account_id,status,requested_shares,stop_price,tp1_price,tp2_price,tp3_price,
+       trailing_stop,signal_bar_at,setup_json,entry_orders_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        userId, symbol, pinnedCreds.mode, pinnedCreds.account_id, 'entry_intent', shares, stop,
+        targets[0].price, targets[1].price, targets[2].price, stop,
+        candidate.signalBarAt, JSON.stringify({ ...candidate, entry: ask, targets }),
+        '[]'
+      );
+    db.prepare(`UPDATE swing_entry_reservations SET trade_id=? WHERE user_id=? AND symbol=? AND signal_bar_at=?`)
+      .run(inserted.lastInsertRowid, userId, symbol, candidate.signalBarAt);
+    return inserted.lastInsertRowid;
+  });
+  const tradeId = Number(createIntent());
+  recordSwingEvent(userId, {
+    tradeId, symbol, eventType: 'ENTRY_INTENT', reasonCode: 'FRESH_SETUP_RESERVED',
+    details: { requestedShares: shares, maxPositionDollars: settings.maxPositionDollars, limitPrice, stop, targets, source },
+    sourceAt: candidate.signalBarAt,
+  });
+  const pieces = [
+    { purpose: 'TP1', qty: allocation.target1, target: targets[0].price },
+    { purpose: 'TP2', qty: allocation.target2, target: targets[1].price },
+    { purpose: 'TP3', qty: allocation.target3, target: targets[2].price },
+    { purpose: 'RUNNER', qty: allocation.final, target: null },
+  ].filter(piece => piece.qty > 0);
+  const lots = pieces.map((piece, index) => ({
+    ...piece,
+    clientOrderId: buildSwingClientOrderId({ symbol, tradeId, purpose: piece.purpose, sequence: index }),
+    brokerOrderId: null,
+    status: 'intent',
+  }));
+  db.prepare(`UPDATE swing_trades SET entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+    .run(JSON.stringify(lots), tradeId);
+  for (let index = 0; index < lots.length; index++) {
+    const lot = lots[index];
+    requireSwingExecutionLease(userId, leaseToken);
+    const order = lot.purpose === 'RUNNER'
+      ? {
+        symbol, qty: String(lot.qty), side: 'buy', type: 'limit', limit_price: limitPrice.toFixed(2), time_in_force: 'gtc',
+        client_order_id: lot.clientOrderId, order_class: 'oto',
+        stop_loss: { stop_price: stop.toFixed(2) },
+      }
+      : buildSwingEntryOrder({
+        symbol, qty: lot.qty, clientOrderId: lot.clientOrderId, limitPrice, stop, target: lot.target,
+      });
+    beginAlpacaOrderRequest(userId);
+    try {
+      const submitted = await alpacaFetchWithCredentials(pinnedCreds, '/v2/orders', {
+        method: 'POST', body: JSON.stringify(order),
+      });
+      lot.brokerOrderId = submitted?.id || lot.clientOrderId;
+      lot.status = 'submitted';
+      db.prepare(`UPDATE swing_trades SET status='pending_entry',entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+        .run(JSON.stringify(lots), tradeId);
+      recordSwingEvent(userId, {
+        tradeId, symbol, eventType: 'ENTRY_SUBMITTED', reasonCode: lot.purpose,
+        details: { clientOrderId: lot.clientOrderId, brokerOrderId: lot.brokerOrderId, quantity: lot.qty },
+      });
+    } catch (error) {
+      lot.status = 'unknown';
+      for (let pending = index + 1; pending < lots.length; pending++) {
+        lots[pending].status = 'not_submitted';
+      }
+      db.prepare(`UPDATE swing_trades SET status='entry_unknown',entry_orders_json=?,exit_reason=?,updated_at=datetime('now') WHERE id=?`)
+        .run(JSON.stringify(lots), `Entry lot ${lot.purpose} outcome is unknown; no replacement was submitted`, tradeId);
+      addSwingAlert(userId, symbol, 'ENTRY_UNKNOWN', `Broker confirmation is unknown for ${lot.purpose}. Capacity remains reserved.`);
+      recordSwingEvent(userId, {
+        tradeId, symbol, eventType: 'ENTRY_UNKNOWN', reasonCode: lot.purpose,
+        details: { clientOrderId: lot.clientOrderId, error: error.message },
+      });
+      throw error;
+    } finally {
+      endAlpacaOrderRequest(userId);
+    }
+  }
+  return { ok: true, source, tradeId, candidate: { ...candidate, entry: ask, targets }, lots };
+}
+
+async function maybeRatchetSwingRunner(userId, trade, parents, exitPurposes, leaseToken, pinnedCreds) {
+  if (!exitPurposes.has('TP3')) return null;
+  const runnerIndex = swingLots(trade).findIndex(lot => lot.purpose === 'RUNNER');
+  if (runnerIndex < 0) return null;
+  const runnerParent = parents[runnerIndex];
+  const stopLeg = runnerParent?.legs?.find(leg =>
+    ['stop', 'stop_limit', 'trailing_stop'].includes(String(leg?.type || '').toLowerCase())
+      && ['new', 'accepted', 'held', 'open', 'partially_filled'].includes(String(leg?.status || '').toLowerCase()));
+  if (!stopLeg?.id) return null;
+  const start = new Date(Date.now() - 180 * 86400000).toISOString();
+  const payload = await alpacaDataFetch(userId,
+    `/v2/stocks/${encodeURIComponent(trade.symbol)}/bars?timeframe=1Day&start=${encodeURIComponent(start)}&limit=160&adjustment=all&feed=iex`,
+    SWING_SCOPE);
+  if (!payload) return null;
+  const bars = completedSwingDailyBars(candlestickBarsFromResponse(payload, trade.symbol));
+  if (bars.length < 25) return null;
+  const closes = bars.map(bar => bar.c);
+  const ema20 = swingEma(closes, 20);
+  const atr14 = swingAtr(bars, 14);
+  const swingLow = Math.min(...bars.slice(-10).map(bar => bar.l));
+  const proposed = Math.min(bars.at(-1).c * 0.98, Math.max(ema20 || 0, swingLow - (atr14 || 0) * 0.5));
+  const nextStop = ratchetSwingStop(Number(stopLeg.stop_price || trade.trailing_stop || trade.stop_price), proposed);
+  if (!(nextStop > Number(trade.trailing_stop || trade.stop_price) + 0.01) || !(nextStop < bars.at(-1).c)) return null;
+  requireSwingExecutionLease(userId, leaseToken);
+  await alpacaFetchWithCredentials(pinnedCreds, `/v2/orders/${encodeURIComponent(stopLeg.id)}`, {
+    method: 'PATCH', body: JSON.stringify({ stop_price: Number(nextStop).toFixed(2) }),
+  });
+  db.prepare(`UPDATE swing_trades SET trailing_stop=?,updated_at=datetime('now') WHERE id=?`).run(nextStop, trade.id);
+  recordSwingEvent(userId, {
+    tradeId: trade.id, symbol: trade.symbol, eventType: 'STOP_RATCHETED',
+    reasonCode: 'TP3_CONFIRMED', details: { previousStop: trade.trailing_stop, nextStop },
+  });
+  return nextStop;
+}
+
+async function reconcileSwingTrades(userId, leaseToken) {
+  const trades = db.prepare(`SELECT * FROM swing_trades WHERE user_id=?
+    AND status NOT IN ('closed','rejected','canceled') ORDER BY id`).all(userId);
+  const events = [];
+  for (const trade of trades) {
+    requireSwingExecutionLease(userId, leaseToken);
+    const pinnedCreds = getPinnedSwingCreds(userId, trade.mode, trade.account_id);
+    const lots = swingLots(trade);
+    const parents = [];
+    let entryQty = 0;
+    let entryValue = 0;
+    let unresolved = false;
+    for (let index = 0; index < lots.length; index++) {
+      const lot = lots[index];
+      if (lot.status === 'not_submitted' || lot.status === 'missing_terminal') continue;
+      try {
+        const parent = await alpacaFetchWithCredentials(pinnedCreds,
+          swingOrderLookupPath(lot.brokerOrderId, lot.clientOrderId));
+        assertSwingOwnedBrokerTree(parent, {
+          symbol: trade.symbol,
+          clientOrderId: lot.clientOrderId,
+          quantity: lot.qty,
+        });
+        parents[index] = parent;
+        const qty = Number(parent.filled_qty || 0);
+        const price = Number(parent.filled_avg_price || 0);
+        if (qty > 0 && price > 0) {
+          entryQty += qty;
+          entryValue += qty * price;
+        }
+        for (const leg of Array.isArray(parent.legs) ? parent.legs : []) {
+          if (Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0) {
+            const purpose = lot.purpose === 'RUNNER' ? 'TRAILING_STOP' : lot.purpose;
+            if (recordSwingExitFill(trade.id, leg, purpose)) {
+              recordSwingEvent(userId, {
+                tradeId: trade.id, symbol: trade.symbol, eventType: 'EXIT_FILL',
+                reasonCode: purpose,
+                details: { brokerOrderId: leg.id, quantity: Number(leg.filled_qty), price: Number(leg.filled_avg_price) },
+              });
+            }
+          }
+        }
+        if (lot.emergencyExitClientId) {
+          try {
+            const emergency = await alpacaFetchWithCredentials(pinnedCreds,
+              swingOrderLookupPath(lot.emergencyExitOrderId, lot.emergencyExitClientId));
+            if (!brokerOrderMatchesIntent(emergency, lot.emergencyExitClientId)) {
+              throw new Error('Broker response does not match the Swing fail-safe exit intent.');
+            }
+            lot.emergencyExitOrderId = emergency.id || lot.emergencyExitClientId;
+            lot.emergencyExitStatus = emergency.status;
+            const purpose = `PROTECTION_EXIT:${lot.purpose}`;
+            if (recordSwingExitFill(trade.id, emergency, purpose)) {
+              recordSwingEvent(userId, {
+                tradeId: trade.id, symbol: trade.symbol, eventType: 'EXIT_FILL',
+                reasonCode: purpose,
+                details: { brokerOrderId: emergency.id, quantity: Number(emergency.filled_qty), price: Number(emergency.filled_avg_price) },
+              });
+            }
+          } catch (error) {
+            if (error.alpacaStatus !== 404) throw error;
+            unresolved = true;
+          }
+        }
+      } catch (error) {
+        if (error.alpacaStatus === 404) {
+          const oldEnough = Date.now() - Date.parse(`${trade.created_at}Z`) > 15 * 60 * 1000;
+          if (lot.status === 'unknown' && oldEnough) {
+            lot.status = 'missing_terminal';
+            addSwingAlert(userId, trade.symbol, 'ENTRY_MISSING',
+              `${lot.purpose} was not found by its immutable client ID after the reconciliation window.`);
+            recordSwingEvent(userId, {
+              tradeId: trade.id, symbol: trade.symbol, eventType: 'ENTRY_MISSING',
+              reasonCode: lot.purpose, details: { clientOrderId: lot.clientOrderId },
+            });
+          } else {
+            unresolved = true;
+            events.push({ id: trade.id, event: `${lot.purpose} entry outcome remains unknown` });
+          }
+          continue;
+        }
+        throw error;
+      }
+    }
+    db.prepare(`UPDATE swing_trades SET entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+      .run(JSON.stringify(lots), trade.id);
+    const exits = db.prepare(`SELECT quantity,price,purpose FROM swing_exit_fills WHERE trade_id=?`).all(trade.id);
+    const exitedQty = exits.reduce((sum, fill) => sum + Number(fill.quantity || 0), 0);
+    const remaining = Math.max(0, entryQty - exitedQty);
+    const entryPrice = entryQty > 0 ? entryValue / entryQty : null;
+    const pnl = entryPrice == null ? null : exits.reduce((sum, fill) =>
+      sum + (Number(fill.price) - entryPrice) * Number(fill.quantity), 0);
+    const purposes = new Set(exits.map(fill => fill.purpose));
+    if (entryQty > Number(trade.filled_shares || 0)) {
+      recordSwingEvent(userId, {
+        tradeId: trade.id, symbol: trade.symbol, eventType: 'ENTRY_FILL',
+        reasonCode: entryQty < trade.requested_shares ? 'PARTIAL' : 'COMPLETE',
+        details: { previousFilled: Number(trade.filled_shares || 0), filledShares: entryQty, entryPrice },
+      });
+    }
+    let setupState = {};
+    try { setupState = JSON.parse(trade.setup_json || '{}'); } catch (_) {}
+    const thesisDate = easternDateKey();
+    if (entryQty > 0 && setupState?.runtime?.lastThesisCheckDate !== thesisDate) {
+      try {
+        const current = await buildSwingCandidate(userId, trade.symbol, swingConfigFor(userId).execution);
+        const evidence = current.evidence || {};
+        const thesisInvalidated = evidence.weeklyTrend === false
+          || (evidence.sma200Rising === false && Number(current.entry) < Number(evidence.ema20));
+        if (thesisInvalidated) {
+          for (const lot of lots) lot.forceExitReason = 'LONG_TERM_THESIS_INVALIDATED';
+          addSwingAlert(userId, trade.symbol, 'THESIS_INVALIDATED',
+            'Completed daily/weekly structure invalidated the Swing thesis. Owned exits are being canceled before a fail-safe close.');
+          recordSwingEvent(userId, {
+            tradeId: trade.id, symbol: trade.symbol, eventType: 'THESIS_INVALIDATED',
+            reasonCode: evidence.weeklyTrend === false ? 'WEEKLY_STRUCTURE_BROKEN' : 'DECLINING_200_DAY_STRUCTURE',
+            details: { signalBarAt: current.signalBarAt, evidence },
+            sourceAt: current.signalBarAt,
+          });
+        }
+        setupState.runtime = { ...(setupState.runtime || {}), lastThesisCheckDate: thesisDate };
+        db.prepare(`UPDATE swing_trades SET setup_json=?,entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+          .run(JSON.stringify(setupState), JSON.stringify(lots), trade.id);
+      } catch (error) {
+        recordSwingEvent(userId, {
+          tradeId: trade.id, symbol: trade.symbol, eventType: 'THESIS_CHECK_UNAVAILABLE',
+          reasonCode: 'DATA_UNAVAILABLE', details: { error: error.message },
+        });
+      }
+    }
+    let protectionIntervention = false;
+    for (let index = 0; index < lots.length; index++) {
+      const lot = lots[index];
+      const parent = parents[index];
+      if (!parent) continue;
+      const lotExited = exits.filter(fill =>
+        fill.purpose === lot.purpose
+        || fill.purpose === (lot.purpose === 'RUNNER' ? 'TRAILING_STOP' : '')
+        || fill.purpose === `PROTECTION_EXIT:${lot.purpose}`
+      ).reduce((sum, fill) => sum + Number(fill.quantity || 0), 0);
+      const protection = summarizeSwingLotProtection(parent, lotExited);
+      const forcedThesisExit = !!lot.forceExitReason;
+      if (!protection.requiresFailSafeExit && !forcedThesisExit) continue;
+      protectionIntervention = true;
+      unresolved = true;
+      if (protection.activeOrders.length) {
+        for (const ownedOrder of protection.activeOrders) {
+          requireSwingExecutionLease(userId, leaseToken);
+          try {
+            await alpacaFetchWithCredentials(pinnedCreds,
+              `/v2/orders/${encodeURIComponent(ownedOrder.id)}`, { method: 'DELETE' });
+          } catch (error) {
+            if (error.alpacaStatus !== 404) throw error;
+          }
+        }
+        if (lot.protectionState !== 'cancel_requested') {
+          lot.protectionState = 'cancel_requested';
+          addSwingAlert(userId, trade.symbol,
+            forcedThesisExit ? 'THESIS_EXIT_PENDING' : 'PROTECTION_MISSING',
+            forcedThesisExit
+              ? `${lot.purpose} owned exit orders were canceled after completed bars invalidated the thesis.`
+              : `${lot.purpose} has ${protection.remainingQuantity} broker-confirmed shares without adequate stop coverage. Owned orders were canceled before a fail-safe exit.`);
+          recordSwingEvent(userId, {
+            tradeId: trade.id, symbol: trade.symbol,
+            eventType: forcedThesisExit ? 'THESIS_EXIT_CANCELING' : 'PROTECTION_MISSING',
+            reasonCode: lot.purpose, details: { ...protection, forceExitReason: lot.forceExitReason || null },
+          });
+        }
+        continue;
+      }
+      if (!lot.emergencyExitClientId) {
+        lot.emergencyExitClientId = buildSwingClientOrderId({
+          symbol: trade.symbol, tradeId: trade.id, purpose: `PROTECT-${lot.purpose}`, sequence: index,
+        });
+        lot.emergencyExitStatus = 'intent';
+        db.prepare(`UPDATE swing_trades SET status='protection_exit_pending',entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+          .run(JSON.stringify(lots), trade.id);
+        requireSwingExecutionLease(userId, leaseToken);
+        beginAlpacaOrderRequest(userId);
+        try {
+          const emergency = await alpacaFetchWithCredentials(pinnedCreds, '/v2/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+              symbol: trade.symbol,
+              qty: String(Math.floor(protection.remainingQuantity)),
+              side: 'sell',
+              type: 'market',
+              time_in_force: 'day',
+              client_order_id: lot.emergencyExitClientId,
+            }),
+          });
+          lot.emergencyExitOrderId = emergency?.id || lot.emergencyExitClientId;
+          lot.emergencyExitStatus = emergency?.status || 'submitted';
+          recordSwingEvent(userId, {
+            tradeId: trade.id, symbol: trade.symbol, eventType: 'PROTECTION_EXIT_SUBMITTED',
+            reasonCode: lot.purpose,
+            details: { quantity: protection.remainingQuantity, clientOrderId: lot.emergencyExitClientId },
+          });
+        } catch (error) {
+          lot.emergencyExitStatus = 'unknown';
+          addSwingAlert(userId, trade.symbol, 'PROTECTION_EXIT_UNKNOWN',
+            `${lot.purpose} fail-safe exit outcome is unknown and must be reconciled by client ID.`);
+        } finally {
+          endAlpacaOrderRequest(userId);
+        }
+      }
+    }
+    db.prepare(`UPDATE swing_trades SET entry_orders_json=?,updated_at=datetime('now') WHERE id=?`)
+      .run(JSON.stringify(lots), trade.id);
+    let status = protectionIntervention ? 'protection_exit_pending'
+      : unresolved ? 'entry_unknown' : entryQty > 0 ? 'open' : 'pending_entry';
+    const submittedLots = lots.filter(lot => lot.status !== 'not_submitted' && lot.status !== 'missing_terminal');
+    const everyParentTerminal = submittedLots.every(lot => {
+      const index = lots.indexOf(lot);
+      return ['filled', 'canceled', 'rejected', 'expired', 'stopped']
+        .includes(String(parents[index]?.status || '').toLowerCase());
+    });
+    if (entryQty <= 0 && everyParentTerminal) status = 'canceled';
+    if (entryQty > 0 && remaining <= 0) status = 'closed';
+    db.prepare(`UPDATE swing_trades SET status=?,filled_shares=?,shares_remaining=?,entry_price=?,pnl=?,
+      closed_at=CASE WHEN ?='closed' THEN datetime('now') ELSE closed_at END,updated_at=datetime('now') WHERE id=?`)
+      .run(status, entryQty, remaining, entryPrice, pnl, status, trade.id);
+    recordSwingEvent(userId, {
+      tradeId: trade.id, symbol: trade.symbol, eventType: 'RECONCILIATION',
+      reasonCode: status, details: { entryQty, exitedQty, remaining, pnl, protectionIntervention },
+    });
+    if (status === 'closed') {
+      recordSwingEvent(userId, {
+        tradeId: trade.id, symbol: trade.symbol, eventType: 'TRADE_CLOSED',
+        reasonCode: 'BROKER_CONFIRMED_EXITS', details: { entryQty, exitedQty, pnl },
+      });
+      events.push({ id: trade.id, event: 'all broker-confirmed Swing lots closed' });
+      continue;
+    }
+    const ratcheted = await maybeRatchetSwingRunner(userId, trade, parents, purposes, leaseToken, pinnedCreds);
+    if (ratcheted) events.push({ id: trade.id, event: `runner stop ratcheted to ${ratcheted}` });
+  }
+  return events;
+}
+
+// ── Swing Trading API ─────────────────────────────────────────────────────────
+app.get('/api/swing/settings', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const settings = swingConfigFor(userId);
+    res.set('Cache-Control', 'no-store').json({
+      enabled: settings.enabled,
+      liveArmed: settings.liveArmed,
+      maxPositionDollars: settings.maxPositionDollars,
+    });
+  } catch (error) {
+    res.status(503).json({ error: 'Swing settings are temporarily unavailable.' });
+  }
+});
+
+app.put('/api/swing/settings', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const prior = swingConfigFor(userId);
+    const safe = sanitizeSwingExecutionConfig({
+      maxPositionDollars: req.body?.maxPositionDollars ?? prior.maxPositionDollars,
+    }, SWING_CEILINGS);
+    const creds = getAlpacaCreds(userId, SWING_SCOPE);
+    const liveArmed = req.body?.liveArmed === true && creds?.mode === 'live';
+    const enabled = req.body?.enabled === true;
+    db.prepare(`INSERT INTO swing_settings
+      (user_id,enabled,live_armed,max_position_dollars,updated_at) VALUES (?,?,?,?,datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,
+        max_position_dollars=excluded.max_position_dollars,updated_at=datetime('now')`)
+      .run(userId, enabled ? 1 : 0, liveArmed ? 1 : 0, safe.maxPositionDollars);
+    res.json({ ok: true, enabled, liveArmed, maxPositionDollars: safe.maxPositionDollars });
+  } catch (error) {
+    res.status(503).json({ error: 'Swing settings could not be saved.' });
+  }
+});
+
+app.get('/api/swing/readiness', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const settings = swingConfigFor(userId);
+    const creds = getAlpacaCreds(userId, SWING_SCOPE);
+    let broker = { reachable: false, active: false, tradingBlocked: false, accountBlocked: false };
+    let brokerError = null;
+    if (creds) {
+      try {
+        const account = await alpacaFetchFor(userId, SWING_SCOPE, '/v2/account');
+        broker = {
+          reachable: true,
+          active: String(account?.status || '').toUpperCase() === 'ACTIVE',
+          tradingBlocked: account?.trading_blocked === true,
+          accountBlocked: account?.account_blocked === true,
+        };
+      } catch (error) { brokerError = error.message; }
+    }
+    const brokerReady = !!creds && broker.reachable && broker.active
+      && !broker.tradingBlocked && !broker.accountBlocked;
+    const blockers = [];
+    if (!creds) blockers.push('A dedicated Swing Alpaca account is not connected.');
+    else if (!broker.reachable) blockers.push(`Broker readiness failed: ${brokerError || 'Alpaca did not respond.'}`);
+    else {
+      if (!broker.active) blockers.push('Alpaca reports that the Swing account is not active.');
+      if (broker.tradingBlocked || broker.accountBlocked) blockers.push('Alpaca reports that trading is blocked.');
+    }
+    if (!settings.enabled) blockers.push('Swing automation is paused.');
+    if (creds?.mode === 'live' && !settings.liveArmed) blockers.push('Live Swing orders are not explicitly armed.');
+    if (!isMarketOpen()) blockers.push('New entries wait for the next regular-session window.');
+    res.set('Cache-Control', 'no-store').json({
+      connected: !!creds,
+      accountId: creds?.account_id || null,
+      mode: creds?.mode || 'paper',
+      enabled: settings.enabled,
+      liveArmed: settings.liveArmed,
+      ready: brokerReady && settings.enabled && (creds?.mode !== 'live' || settings.liveArmed),
+      brokerReady,
+      reconciliationReady: brokerReady,
+      entryReadyNow: brokerReady && settings.enabled && isMarketOpen()
+        && (creds?.mode !== 'live' || settings.liveArmed),
+      broker,
+      marketOpen: isMarketOpen(),
+      blockers,
+      riskPolicy: {
+        maxPositionDollars: settings.maxPositionDollars,
+        maxRiskDollars: settings.execution.maxRiskDollars,
+        maxPositions: settings.execution.maxPositions,
+        maxAggregateExposure: settings.execution.maxAggregateExposure,
+        maxSectorPositions: settings.execution.maxSectorPositions,
+      },
+      ...settings.runtime,
+    });
+  } catch (error) {
+    res.status(503).json({ error: 'Swing readiness could not be verified.' });
+  }
+});
+
+app.get('/api/swing/scan', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    if (!getAlpacaCreds(userId, SWING_SCOPE)) {
+      return res.status(400).json({ error: 'Connect the dedicated Swing Alpaca account to scan.' });
+    }
+    const result = await scanSwingUniverse(userId);
+    db.prepare(`UPDATE swing_settings SET last_scan_at=datetime('now') WHERE user_id=?`).run(userId);
+    res.set('Cache-Control', 'no-store').json(result);
+  } catch (error) {
+    res.status(503).json({ error: `Swing scan unavailable: ${error.message}` });
+  }
+});
+
+app.get('/api/swing/candidates', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const stored = db.prepare(`SELECT payload_json,evaluated_at FROM swing_candidates
+      WHERE user_id=? ORDER BY evaluated_at DESC LIMIT 200`).all(userId);
+    const results = stored.map(row => {
+      try { return JSON.parse(row.payload_json); } catch (_) { return null; }
+    }).filter(Boolean).sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    res.set('Cache-Control', 'no-store').json({
+      strategy: 'long-only-swing-v1',
+      results,
+      evaluatedAt: stored[0]?.evaluated_at || null,
+      funnel: {
+        scanned: results.length,
+        eligible: results.filter(row => row.eligible).length,
+        rejected: results.filter(row => !row.eligible).length,
+      },
+    });
+  } catch (_) {
+    res.status(503).json({ error: 'Stored Swing candidates could not be loaded.' });
+  }
+});
+
+app.post('/api/swing/execute', requireAuth, async (req, res) => {
+  let userId;
+  try { userId = await ensureSessionUserInTradingStore(req); }
+  catch (_) { return res.status(503).json({ error: 'Swing trading identity could not be verified.' }); }
+  const symbol = String(req.body?.symbol || '').trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9.-]{0,11}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another broker order cycle is in progress.' });
+  const lease = acquireSwingExecutionLease(userId);
+  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another Swing cycle is still reconciling.' }); }
+  try { res.json(await executeSwingEntry(userId, symbol, 'manual', lease)); }
+  catch (error) {
+    res.status(error.alpacaTransient ? 503 : 400).json({
+      error: error.message, candidate: error.candidate || null, reconciliationRequired: true,
+    });
+  } finally {
+    releaseSwingExecutionLease(userId, lease);
+    releaseBotLock(userId);
+  }
+});
+
+app.get('/api/swing/trades', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const trades = db.prepare(`SELECT id,symbol,mode,status,requested_shares,filled_shares,shares_remaining,
+      entry_price,stop_price,tp1_price,tp2_price,tp3_price,trailing_stop,exit_reason,pnl,created_at,closed_at
+      FROM swing_trades WHERE user_id=? ORDER BY id DESC LIMIT 100`).all(userId);
+    res.json({ trades });
+  } catch (_) { res.status(503).json({ error: 'Swing broker journal could not be loaded.' }); }
+});
+
+app.get('/api/swing/alerts', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const alerts = db.prepare(`SELECT id,symbol,type,message,created_at FROM swing_alerts
+      WHERE user_id=? AND resolved_at IS NULL ORDER BY id DESC LIMIT 50`).all(userId);
+    res.json({ alerts });
+  } catch (_) { res.status(503).json({ error: 'Swing alerts could not be loaded.' }); }
+});
+
+app.get('/api/swing/performance', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const closed = db.prepare(`SELECT pnl FROM swing_trades WHERE user_id=? AND status='closed' AND pnl IS NOT NULL`).all(userId);
+    const values = closed.map(row => Number(row.pnl)).filter(Number.isFinite);
+    const wins = values.filter(value => value > 0);
+    res.json({ metrics: {
+      trades: values.length,
+      closedTrades: values.length,
+      winRate: values.length ? wins.length / values.length : null,
+      netPnl: values.reduce((sum, value) => sum + value, 0),
+      averagePnl: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+    } });
+  } catch (_) { res.status(503).json({ error: 'Swing performance could not be loaded.' }); }
+});
+
+app.post('/api/swing/reconcile', requireAuth, async (req, res) => {
+  let userId;
+  try { userId = await ensureSessionUserInTradingStore(req); }
+  catch (_) { return res.status(503).json({ error: 'Swing trading identity could not be verified.' }); }
+  if (!acquireBotLock(userId)) return res.status(409).json({ error: 'Another broker order cycle is in progress.' });
+  const lease = acquireSwingExecutionLease(userId);
+  if (!lease) { releaseBotLock(userId); return res.status(409).json({ error: 'Another Swing cycle is still reconciling.' }); }
+  try {
+    if (!getAlpacaCreds(userId, SWING_SCOPE)) throw new Error('Connect the dedicated Swing Alpaca account first.');
+    const reconciled = await reconcileSwingTrades(userId, lease);
+    const trades = db.prepare(`SELECT id,symbol,mode,status,requested_shares,filled_shares,shares_remaining,
+      entry_price,stop_price,tp1_price,tp2_price,tp3_price,trailing_stop,exit_reason,pnl,created_at,closed_at
+      FROM swing_trades WHERE user_id=? ORDER BY id DESC LIMIT 100`).all(userId);
+    res.json({ ok: true, reconciled, trades });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+  finally { releaseSwingExecutionLease(userId, lease); releaseBotLock(userId); }
+});
+
+app.get('/api/swing/backtest', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const symbol = String(req.query.symbol || 'SPY').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,11}$/.test(symbol)) return res.status(400).json({ error: 'A valid symbol is required.' });
+    if (!getAlpacaCreds(userId, SWING_SCOPE)) return res.status(400).json({ error: 'Connect the dedicated Swing Alpaca account to backtest.' });
+    const start = new Date(Date.now() - 5 * 365 * 86400000).toISOString();
+    const payload = await alpacaDataFetch(userId,
+      `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Day&start=${encodeURIComponent(start)}&limit=2000&adjustment=all&feed=iex`,
+      SWING_SCOPE);
+    if (!payload) throw new Error('Historical Alpaca bars are unavailable.');
+    const dailyBars = completedSwingDailyBars(candlestickBarsFromResponse(payload, symbol));
+    const weeklyBars = completedSwingWeeklyBars(dailyBars);
+    const replay = simulateSwingBacktest({
+      symbol, dailyBars, weeklyBars, freshness: { daily: true, weekly: true },
+      relativeStrength: 0, quality: null, catalyst: null, sector: null, market: null,
+    }, { ...DEFAULT_SWING_CONFIG, minAverageDollarVolume: SWING_CEILINGS.minAverageDollarVolume });
+    const closed = replay.records.filter(record => Number.isFinite(Number(record.realizedR)));
+    const rs = closed.map(record => Number(record.realizedR));
+    let balance = 0, peak = 0, maxDrawdown = 0;
+    for (const value of rs) {
+      balance += value; peak = Math.max(peak, balance); maxDrawdown = Math.max(maxDrawdown, peak - balance);
+    }
+    res.json({
+      strategy: replay.strategy,
+      symbol,
+      insufficientEvidence: closed.length < 20,
+      note: closed.length < 20
+        ? 'Insufficient completed samples to make a performance claim.'
+        : 'Chronological next-session replay with slippage and conservative same-bar stop priority. Historical results are not guarantees.',
+      metrics: {
+        trades: closed.length,
+        winRate: closed.length ? rs.filter(value => value > 0).length / closed.length : null,
+        expectancyR: rs.length ? rs.reduce((sum, value) => sum + value, 0) / rs.length : null,
+        maxDrawdownR: maxDrawdown,
+      },
+      records: replay.records.slice(-100),
+    });
+  } catch (error) {
+    res.status(503).json({ error: `Swing backtest unavailable: ${error.message}` });
+  }
+});
+
+async function runSwingCycle(userId, source = 'server-scheduler') {
+  const outcome = { bot: 'swing', source, status: 'skipped', reconciled: 0, submitted: false };
+  const finish = details => {
+    const result = { ...outcome, ...details };
+    recordSwingCycle(userId, result);
+    return result;
+  };
+  const creds = getAlpacaCreds(userId, SWING_SCOPE);
+  const settings = swingConfigFor(userId);
+  if (!creds) return finish({ reason: 'Dedicated Swing broker account is not connected.' });
+  if (!acquireBotLock(userId)) return finish({ status: 'busy', reason: 'Another broker cycle is in progress.' });
+  const lease = acquireSwingExecutionLease(userId);
+  if (!lease) {
+    releaseBotLock(userId);
+    return finish({ status: 'busy', reason: 'Swing reconciliation is already in progress.' });
+  }
+  try {
+    const events = await reconcileSwingTrades(userId, lease);
+    outcome.reconciled = events.length;
+    if (!settings.enabled) return finish({
+      status: 'reconciled_paused',
+      reason: 'Automation is paused; existing Swing lots and broker-held protection were still reconciled.',
+    });
+    if (creds.mode === 'live' && !settings.liveArmed) return finish({
+      status: 'reconciled_live_unarmed',
+      reason: 'Live entries are unarmed; existing Swing lots and protection were still reconciled.',
+    });
+    if (!isMarketOpen()) return finish({ status: 'market_closed', reason: 'New entries wait for the regular session.' });
+    const lastScan = Date.parse(settings.runtime.lastScanAt || '');
+    if (Number.isFinite(lastScan) && Date.now() - lastScan < 30 * 60 * 1000) {
+      return finish({ status: 'reconciled', reason: 'Existing positions reconciled; the next catalog rotation is not due yet.' });
+    }
+    const scan = await scanSwingUniverse(userId);
+    db.prepare(`UPDATE swing_settings SET last_scan_at=datetime('now') WHERE user_id=?`).run(userId);
+    const eligible = scan.results.filter(row => row.eligible).sort((a, b) => b.score - a.score);
+    if (!eligible.length) return finish({
+      status: 'no_entry', reason: `No qualifying setup in ${scan.results.length} rotated symbols.`,
+      scanned: scan.results.length, eligible: 0,
+    });
+    await executeSwingEntry(userId, eligible[0].symbol, source, lease);
+    return finish({
+      status: 'submitted', submitted: true, symbol: eligible[0].symbol,
+      scanned: scan.results.length, eligible: eligible.length,
+      reason: `Submitted broker-protected Swing lots for ${eligible[0].symbol}.`,
+    });
+  } catch (error) {
+    console.warn(`[Swing] user ${userId} cycle withheld: ${error.message}`);
+    addSwingAlert(userId, null, 'CYCLE_WITHHELD', String(error.message || 'Swing cycle was withheld.'));
+    return finish({ status: 'withheld', reason: String(error.message || 'Safety gates withheld the cycle.').slice(0, 300) });
+  } finally {
+    releaseSwingExecutionLease(userId, lease);
+    releaseBotLock(userId);
+  }
+}
 
 // ── Global trading settings (position size + leverage) ───────────────────────
 db.prepare(`
@@ -7507,6 +9029,7 @@ db.prepare(`
 `).run();
 // Migrate old per-bot table if present (no-op if already done)
 try { db.prepare(`INSERT OR IGNORE INTO trade_settings (user_id,position_mode,position_pct,position_amount) SELECT user_id,position_mode,position_pct,position_amount FROM swing_auto_settings`).run(); } catch(_) {}
+try { db.prepare(`ALTER TABLE swing_settings ADD COLUMN last_scan_at TEXT`).run(); } catch (_) {}
 
 // ── GET /api/trade-settings ───────────────────────────────────────────────────
 app.get('/api/trade-settings', requireAuth, (req, res) => {
@@ -7544,13 +9067,14 @@ function groupDailyToWeekly(dailyBars) {
     mon.setUTCDate(d.getUTCDate() + diff);
     const key = `${mon.getUTCFullYear()}-${String(mon.getUTCMonth()+1).padStart(2,'0')}-${String(mon.getUTCDate()).padStart(2,'0')}`;
     if (!weeks[key]) {
-      weeks[key] = { t: key, o: bar.o, h: bar.h, l: bar.l, c: bar.c, v: bar.v || 0 };
+      weeks[key] = { t: key, completedAt: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c, v: bar.v || 0 };
     } else {
       const w = weeks[key];
       w.h = Math.max(w.h, bar.h);
       w.l = Math.min(w.l, bar.l);
       w.c = bar.c;
       w.v += bar.v || 0;
+      w.completedAt = bar.t;
     }
   }
   return Object.values(weeks).sort((a, b) => a.t.localeCompare(b.t));
@@ -7988,6 +9512,23 @@ setInterval(async () => {
     momentumSchedulerRunning = false;
   }
 }, 60 * 1000);
+
+// Swing reconciliation remains frequent enough to observe partial fills and
+// broker-held exits, while expensive daily-universe scans are throttled inside
+// runSwingCycle and keep advancing a persisted catalog cursor.
+let swingSchedulerRunning = false;
+setInterval(async () => {
+  if (swingSchedulerRunning) return;
+  swingSchedulerRunning = true;
+  try {
+    const users = db.prepare(`SELECT user_id FROM swing_settings WHERE enabled=1
+      UNION SELECT DISTINCT user_id FROM swing_trades
+      WHERE status NOT IN ('closed','rejected','canceled')`).all();
+    for (const { user_id: userId } of users) await runSwingCycle(userId);
+  } finally {
+    swingSchedulerRunning = false;
+  }
+}, 2 * 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);

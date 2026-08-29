@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('assert'); const r=require('../lib/leap-options-reconciliation');
+const intent={clientOrderId:'jqf-leap-QQQ-X-entry-1',contractSymbol:'QQQX',quantity:3};
+const entry={id:'e',client_order_id:intent.clientOrderId,symbol:'QQQX',side:'buy',qty:'3',filled_qty:'3',filled_avg_price:'4'};
+assert(r.assertLeapOwnedOrder(entry,intent));
+assert.throws(()=>r.assertLeapOwnedOrder({...entry,client_order_id:'other'},intent));
+let sum=r.summarizeLeapFills(entry,[{id:'t',status:'open',qty:'3',filled_qty:'1'}]);
+assert.equal(sum.remainingQuantity,2); assert.equal(sum.targetCovered,true);
+sum=r.remediateLeapTarget({entryOrder:entry,targetOrders:[],intent:{...intent,targetClientOrderId:'jqf-leap-QQQ-X-target-1'}});
+assert.equal(sum.action,'CREATE_TARGET'); assert.equal(sum.order.limit_price,'8.00');
+assert.equal(r.leapThesisExitPolicy({invalidated:false}).exit,false);
+assert.equal(r.leapThesisExitPolicy({invalidated:true}).exit,true);
+console.log(' ✓ LEAP options reconciliation');

@@ -151,6 +151,8 @@ function goPage(page) {
   else if (window.candlestickBot) candlestickBot.pause();
   if (page==='swing') { if (window.swingBot) swingBot.open(); }
   else if (window.swingBot) swingBot.pause();
+  if (page==='options') { if (window.optionsBot) optionsBot.open(); }
+  else if (window.optionsBot) optionsBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

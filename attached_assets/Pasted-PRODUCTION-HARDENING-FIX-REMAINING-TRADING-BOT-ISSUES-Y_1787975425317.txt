@@ -1,0 +1,949 @@
+PRODUCTION HARDENING — FIX REMAINING TRADING BOT ISSUES
+
+You are working on a multi-strategy automated trading platform with Momentum, PMH, Candlestick, Swing, Options, and LEAP functionality.
+
+I have identified the following remaining issues. Do NOT simply patch symptoms. Inspect the existing architecture, scheduler logic, broker reconciliation, locks, entry gates, signal reservations, lifecycle states, and UI readiness logic.
+
+Your goal is to make the system production-safe while preserving existing functionality.
+
+CRITICAL RULE
+
+PAUSING A STRATEGY MUST NEVER STOP MANAGEMENT OF EXISTING OPEN POSITIONS.
+
+A strategy’s enabled/paused setting controls NEW ENTRIES ONLY.
+
+Existing positions must continue to receive:
+
+* broker reconciliation
+* stop-loss updates
+* take-profit updates
+* trailing-stop updates
+* runner management
+* exit evaluation
+* orphan-position detection
+* position-state synchronization
+* lifecycle monitoring
+* broker order synchronization
+
+This applies to BOTH Momentum and PMH and should be enforced architecturally rather than through individual patches.
+
+⸻
+
+1. FIX MOMENTUM + PMH RECONCILIATION WHEN PAUSED
+
+Current problem:
+
+The Momentum and PMH schedulers only select users whose strategy settings are enabled.
+
+Their cycle functions also return early when the strategy is disabled.
+
+This means pausing a strategy can stop broker reconciliation and exit management.
+
+Required architecture
+
+Separate every strategy cycle into two distinct phases:
+
+PHASE A — POSITION MANAGEMENT
+
+This must run regardless of whether NEW ENTRIES are enabled.
+
+Examples:
+
+* fetch broker positions
+* reconcile local positions
+* synchronize broker orders
+* update stop losses
+* update take profits
+* update trailing stops
+* manage runners
+* detect closed positions
+* detect orphaned positions
+* update lifecycle state
+* process fills
+* process exits
+
+PHASE B — NEW ENTRY SCANNING
+
+This phase must respect the user’s strategy-enabled setting.
+
+Pseudo-architecture:
+
+strategyCycle(user):
+    runPositionManagement(user)
+    if strategyIsPaused(user):
+        return
+    runEntryScanning(user)
+
+NOT:
+
+if strategyIsPaused(user):
+    return
+
+Also change scheduler queries so users with existing positions can still be selected for reconciliation even when the strategy is paused.
+
+Ideally determine:
+
+needsPositionManagement(user)
+OR
+strategyEnabled(user)
+
+The scheduler should run a user if either:
+
+1. They have active/open positions requiring management
+2. The strategy is enabled and needs an entry scan
+
+Do not require the strategy to be enabled merely to reconcile existing positions.
+
+Apply this consistently to Momentum and PMH.
+
+Add tests proving:
+
+* enabled + no position → entry scanning works
+* enabled + open position → management + entry scanning work
+* paused + no position → no new entry scan
+* paused + open position → position management STILL runs
+* paused + open position → stops/targets/trailing logic STILL runs
+* paused + broker position but missing local position → reconciliation STILL runs
+
+⸻
+
+2. PMH LIVE AUTOMATION SAFETY FLAG
+
+Current behavior:
+
+PMH_LIVE_AUTOMATION_PAUSED defaults to enabled unless explicitly set to false.
+
+This prevents live PMH entries.
+
+Do NOT blindly remove the safety mechanism.
+
+Instead:
+
+1. Preserve the environment variable.
+2. Make its behavior explicit and easy to understand.
+3. Surface its current state in the admin/system diagnostics UI.
+4. Log when PMH live automation is blocked because of this flag.
+5. Ensure paper trading remains functional.
+6. Ensure the setting cannot accidentally enable live trading because of a missing environment variable.
+7. Add a clear startup diagnostic such as:
+
+PMH LIVE AUTOMATION: PAUSED
+Reason: PMH_LIVE_AUTOMATION_PAUSED is not explicitly false
+
+If the intended production behavior is to enable live PMH, support:
+
+PMH_LIVE_AUTOMATION_PAUSED=false
+
+Do NOT silently change the default safety behavior.
+
+Instead, make the deployment configuration explicit and document exactly how live PMH is enabled.
+
+Add tests for:
+
+* unset variable
+* “true”
+* “false”
+* invalid values
+
+Invalid values should fail closed.
+
+⸻
+
+3. REPLACE THE SHARED CROSS-BOT LOCK
+
+Current problem:
+
+Momentum, PMH, Candlestick, Swing, and Options all use one shared per-user lock.
+
+A slow scan or broker request from one strategy can block another strategy.
+
+This can cause missed short-lived entries.
+
+The 90-second expiration also creates the possibility of overlapping cycles.
+
+Required change
+
+Replace the single shared bot lock with strategy-specific locks.
+
+Example:
+
+user:{userId}:lock:momentum
+user:{userId}:lock:pmh
+user:{userId}:lock:candlestick
+user:{userId}:lock:swing
+user:{userId}:lock:options
+
+One strategy being busy must NOT prevent another strategy from running.
+
+However, broker-level operations that genuinely must be serialized should remain protected separately.
+
+Separate:
+
+strategy execution lock
+
+from:
+
+broker/account critical-section lock
+
+Do not simply remove locking.
+
+Implement robust lock behavior with:
+
+* unique lock ownership/token
+* acquisition timestamp
+* heartbeat/lease renewal if cycles can exceed the lease
+* safe release only by the lock owner
+* bounded timeout
+* stale-lock recovery
+* logging
+* metrics
+
+Do NOT rely on a fixed 90-second timeout if a legitimate cycle can exceed 90 seconds.
+
+A lock must never expire while the original process is still actively executing unless ownership has been safely transferred.
+
+Add tests proving:
+
+* Momentum busy → PMH still runs
+* PMH busy → Swing still runs
+* Options busy → Momentum still runs
+* same strategy cannot execute concurrently
+* stale locks recover
+* a long-running cycle does not accidentally overlap itself
+
+⸻
+
+4. FIX MARKET ENTRY WINDOW
+
+Current:
+
+9:35 AM – 3:50 PM ET
+
+Official regular session:
+
+9:30 AM – 4:00 PM ET
+
+Do not hard-code this logic in multiple places.
+
+Create centralized market-session logic.
+
+Separate:
+
+market is open
+
+from:
+
+strategy is allowed to enter
+
+Example:
+
+isRegularMarketOpen()
+isStrategyEntryAllowed()
+isPositionManagementAllowed()
+
+Position management should continue according to broker/session requirements even when new-entry windows are restricted.
+
+Make the strategy entry window configurable rather than embedded in code.
+
+Support:
+
+ENTRY_START_TIME
+ENTRY_END_TIME
+
+with sensible safety defaults.
+
+Ensure all calculations use:
+
+America/New_York
+
+and correctly handle:
+
+* EST
+* EDT
+* daylight saving time
+* weekends
+* market holidays
+* early-close sessions
+
+Do NOT assume every trading day is 9:30–4:00.
+
+Use the existing market calendar/provider if available.
+
+If the application intentionally wants a strategy-specific restricted window, preserve that capability, but make it explicit and configurable.
+
+⸻
+
+5. LEAP LIQUIDITY GATE — FAIL CLOSED
+
+Current problem:
+
+LEAP quote validation rejects zero/negative volume or open interest when those fields exist.
+
+But missing fields can pass.
+
+This is unsafe.
+
+For LEAP contract selection, missing required liquidity information must fail closed.
+
+Require valid values for:
+
+* volume
+* open interest
+* bid
+* ask
+* underlying price
+* contract metadata required by the strategy
+
+Do NOT interpret missing liquidity as acceptable.
+
+Example:
+
+volume == null → reject
+openInterest == null → reject
+volume <= 0 → reject
+openInterest <= 0 → reject
+
+Also validate:
+
+bid > 0
+ask > 0
+ask >= bid
+spread is within configured threshold
+
+Use configurable liquidity thresholds.
+
+Record the rejection reason for diagnostics.
+
+Example:
+
+LEAP_REJECTED:
+symbol=XYZ
+reason=MISSING_OPEN_INTEREST
+
+Do not silently discard the contract.
+
+Add unit tests for:
+
+* valid liquidity
+* zero volume
+* negative volume
+* missing volume
+* zero OI
+* negative OI
+* missing OI
+* missing bid
+* missing ask
+* invalid spread
+
+All inadequate-liquidity cases must fail closed.
+
+⸻
+
+6. FIX LEAP SIGNAL RESERVATIONS
+
+Current problem:
+
+A reservation is inserted for a symbol + completed weekly signal but is never deleted.
+
+A canceled/rejected/no-fill entry can permanently consume that signal.
+
+We need to distinguish:
+
+Successfully consumed signal
+
+From:
+
+Failed/recoverable attempt
+
+Implement explicit reservation lifecycle states.
+
+For example:
+
+RESERVED
+ENTRY_SUBMITTED
+FILLED
+CANCELED
+REJECTED
+EXPIRED
+RELEASED
+
+A signal should remain permanently consumed only when the business logic determines that it has actually been consumed.
+
+Recoverable failures should release the reservation.
+
+Examples of potentially recoverable conditions:
+
+* quote unavailable
+* broker timeout
+* temporary data failure
+* order canceled without fill
+* transient broker rejection
+* insufficient liquidity at execution time
+
+Non-recoverable/business-rule failures may remain consumed.
+
+Do NOT simply delete every reservation after an error.
+
+Implement an explicit state machine.
+
+Also protect against duplicate concurrent reservations using an atomic database constraint/transaction.
+
+Add tests for:
+
+* reservation created
+* successful fill permanently consumes signal
+* canceled no-fill releases reservation
+* recoverable rejection releases reservation
+* transient broker failure releases/retries appropriately
+* duplicate concurrent attempts cannot create duplicate entries
+* already-consumed signal cannot be entered twice
+
+⸻
+
+7. LIFECYCLE_REVIEW RECOVERY WORKFLOW
+
+Current problem:
+
+When Alpaca stops reporting an option position because of:
+
+* expiration
+* exercise
+* assignment
+* external close
+
+the trade moves to lifecycle_review.
+
+This is appropriately conservative, but there is no recovery workflow.
+
+Implement a controlled resolution workflow.
+
+Possible states:
+
+OPEN
+CLOSED
+LIFECYCLE_REVIEW
+RESOLVED
+
+Add an admin/user-facing review screen.
+
+For each lifecycle-review record show:
+
+* underlying
+* option symbol
+* quantity
+* entry price
+* last known broker state
+* local state
+* last broker synchronization time
+* lifecycle-review reason
+* related order IDs
+* timestamps
+* estimated/known closing event if available
+
+Provide controlled actions such as:
+
+Confirm Closed
+Confirm Exercised
+Confirm Assigned
+Mark External Close
+Reconcile Again
+Dismiss / Resolve
+
+Every manual resolution must create an audit record.
+
+Never allow manual resolution to silently change financial records.
+
+After resolution:
+
+* update lifecycle state
+* release account capacity
+* remove stale active-position status
+* allow future strategy operations
+* preserve complete audit history
+
+Add protection against accidental resolution.
+
+⸻
+
+8. FIX OPTIONS DASHBOARD “READY” STATUS
+
+Current problem:
+
+The UI can show READY if an account is reachable/connected even when the server says the account lacks required options approval.
+
+The server correctly blocks orders, but the UI is misleading.
+
+Source of truth
+
+The server-side options eligibility state must be authoritative.
+
+The UI must never infer “READY” merely because:
+
+account connected == true
+
+Instead use explicit states such as:
+
+READY
+NOT_CONNECTED
+NOT_APPROVED
+BLOCKED
+REVIEW_REQUIRED
+UNKNOWN
+
+Example:
+
+READY
+→ broker connected
+→ credentials valid
+→ account active
+→ required options approval confirmed
+→ all required permissions satisfied
+
+If options approval is unknown:
+
+UNKNOWN
+
+not READY.
+
+If approval is missing:
+
+NOT_APPROVED
+
+Do not allow the frontend to override or infer readiness.
+
+Create one server-side readiness endpoint/object used by both:
+
+* execution engine
+* dashboard
+
+The UI and backend must consume the same canonical state.
+
+Add tests ensuring:
+
+* connected + approved = READY
+* connected + not approved = NOT_APPROVED
+* connected + unknown approval = UNKNOWN
+* disconnected = NOT_CONNECTED
+* blocked account = BLOCKED
+
+⸻
+
+9. LEAP SIMULATION TRANSPARENCY
+
+The existing LEAP simulation correctly explains that it uses weekly signal chronology rather than verified historical option contract returns.
+
+Preserve this behavior.
+
+Improve the report so it clearly separates:
+
+Underlying historical signal performance
+
+from:
+
+Verified historical option-contract performance
+
+Never fabricate historical option returns.
+
+If verified historical option bars are unavailable, explicitly state:
+
+Historical option contract bars unavailable.
+Results represent underlying signal chronology, not actual option-contract returns.
+
+Add metadata describing the data source and limitations.
+
+⸻
+
+10. LEAP CONTRACT DISCOVERY PERFORMANCE
+
+Contract discovery can retrieve many contract pages per underlying.
+
+Optimize without weakening selection quality.
+
+Implement:
+
+* pagination limits
+* bounded concurrency
+* caching where safe
+* deduplication
+* early filtering
+* expiration filtering before expensive processing
+* strike-range filtering
+* liquidity filtering
+* configurable maximum contracts/pages
+
+Do NOT eliminate necessary contracts simply to make scans faster.
+
+Add metrics:
+
+contracts_requested
+contracts_received
+contracts_rejected
+contracts_selected
+pages_requested
+scan_duration_ms
+
+Use these metrics to identify slow scans.
+
+⸻
+
+11. BROKER/DATA OUTAGE BEHAVIOR
+
+The current fail-closed behavior is correct for safety.
+
+Do NOT introduce unsafe fallback behavior.
+
+However, improve resilience.
+
+When broker/data services are unavailable:
+
+* do not create new entries
+* do not assume positions are closed
+* do not overwrite valid existing state with null data
+* continue retrying with bounded backoff
+* preserve last-known state
+* alert/log the outage
+* prevent duplicate order attempts
+* resume automatically when service recovers
+
+Position management must be especially conservative.
+
+Never interpret:
+
+broker API returned no data
+
+as:
+
+position does not exist
+
+unless the broker response explicitly confirms that.
+
+⸻
+
+12. GLOBAL SAFETY ARCHITECTURE
+
+Audit the entire trading system for this fundamental separation:
+
+ENTRY ENGINE
+
+Responsible for:
+
+* scanning
+* signals
+* ranking
+* entry validation
+* entry orders
+
+Can be paused.
+
+POSITION MANAGEMENT ENGINE
+
+Responsible for:
+
+* reconciliation
+* stops
+* targets
+* trailing stops
+* runners
+* exits
+* broker synchronization
+* lifecycle management
+
+Must NOT be disabled merely because entry automation is paused.
+
+The user should be able to:
+
+PAUSE NEW ENTRIES
+
+while still having:
+
+POSITION MANAGEMENT = ACTIVE
+
+This should be represented explicitly in the code and UI.
+
+⸻
+
+13. SCHEDULER REQUIREMENTS
+
+Review all schedulers.
+
+Every scheduler should clearly identify whether it is responsible for:
+
+ENTRY
+POSITION MANAGEMENT
+BOTH
+
+Do not let an entry-enabled database filter accidentally prevent position-management execution.
+
+Add structured logging:
+
+strategy
+userId
+cycleType
+entryEnabled
+openPositionCount
+lockState
+marketState
+duration
+result
+
+Avoid logging secrets, credentials, access tokens, or sensitive broker information.
+
+⸻
+
+14. DATABASE / CONCURRENCY SAFETY
+
+Review all relevant database operations.
+
+Use transactions or atomic operations where necessary for:
+
+* signal reservations
+* position state transitions
+* lifecycle resolution
+* lock acquisition
+* order state transitions
+
+Prevent race conditions such as:
+
+scanner A sees no reservation
+scanner B sees no reservation
+A inserts
+B inserts
+A submits order
+B submits order
+
+The database must enforce uniqueness where appropriate.
+
+Application-level checks alone are insufficient.
+
+⸻
+
+15. OBSERVABILITY
+
+Add/verify metrics for:
+
+Position management
+
+positions_reconciled
+positions_requiring_action
+stop_updates
+target_updates
+runner_updates
+orphan_positions
+reconciliation_failures
+
+Entries
+
+entry_scans
+signals_found
+signals_rejected
+orders_submitted
+orders_filled
+orders_canceled
+orders_rejected
+
+Locks
+
+lock_acquisitions
+lock_contentions
+lock_expirations
+lock_recoveries
+cycle_duration
+
+LEAP
+
+contracts_scanned
+liquidity_rejections
+missing_liquidity_rejections
+spread_rejections
+reservations_created
+reservations_released
+reservations_consumed
+
+Broker health
+
+API failures
+timeouts
+rate limits
+latency
+recovery events
+
+⸻
+
+16. TESTING REQUIREMENTS
+
+Do not consider this completed until automated tests cover the changes.
+
+At minimum create tests for:
+
+Momentum
+
+* paused + open position → management runs
+* paused + no position → no entry
+* enabled + open position → management + entry
+* stop/target management while paused
+
+PMH
+
+Same tests as Momentum.
+
+Locks
+
+* different strategies can run simultaneously
+* same strategy cannot overlap
+* stale locks recover
+* long cycles do not overlap due to lease expiration
+
+Market session
+
+* 9:29 → closed
+* 9:30 → open
+* 9:35 → open
+* 3:50 → open
+* 4:00 → closed
+* weekends
+* holidays
+* DST transitions
+* early-close sessions
+
+LEAP
+
+* missing volume rejected
+* missing OI rejected
+* zero volume rejected
+* zero OI rejected
+* invalid bid/ask rejected
+* excessive spread rejected
+* valid contract accepted
+
+Reservations
+
+* successful fill consumes reservation
+* recoverable failure releases reservation
+* canceled no-fill releases reservation
+* duplicate concurrent signal prevented
+
+Lifecycle review
+
+* review record created
+* broker reconciliation
+* manual resolution
+* audit record
+* capacity released
+
+Options readiness
+
+* approved = READY
+* not approved = NOT_APPROVED
+* unknown = UNKNOWN
+* disconnected = NOT_CONNECTED
+
+⸻
+
+17. DO NOT BREAK EXISTING SAFETY FEATURES
+
+Before changing anything, inspect the current implementation and preserve:
+
+* duplicate-order protection
+* duplicate-sell protection
+* delayed-cancellation protection
+* broker reconciliation
+* fail-closed execution
+* order idempotency
+* risk limits
+* position limits
+* account restrictions
+* options approval requirements
+* paper/live separation
+* audit logging
+
+The previously corrected LEAP duplicate-sell and delayed-cancellation race fixes must remain intact.
+
+Do not rewrite working order-lifecycle code unnecessarily.
+
+⸻
+
+18. IMPLEMENTATION PROCESS
+
+Follow this exact process:
+
+1. Inspect the entire relevant codebase.
+2. Map schedulers → cycles → locks → broker calls → database state → UI.
+3. Identify every place where strategy enabled/paused state affects execution.
+4. Separate entry execution from position management.
+5. Implement the scheduler/reconciliation fix first.
+6. Implement strategy-specific locks.
+7. Fix market-session architecture.
+8. Fix LEAP liquidity fail-closed behavior.
+9. Implement reservation state machine.
+10. Implement lifecycle-review recovery.
+11. Fix Options readiness.
+12. Optimize LEAP scanning.
+13. Improve outage handling.
+14. Add tests.
+15. Run the complete test suite.
+16. Run type checking/linting/build.
+17. Review database migrations.
+18. Review security implications.
+19. Review all changes for race conditions.
+20. Only then report completion.
+
+⸻
+
+19. REQUIRED FINAL REPORT
+
+When finished, provide a concise engineering report containing:
+
+Fixed
+
+List every issue actually fixed.
+
+Architecture Changes
+
+Explain the new entry-vs-position-management architecture.
+
+Lock Changes
+
+Explain how cross-strategy contention was eliminated without removing necessary synchronization.
+
+LEAP Changes
+
+Explain liquidity validation and reservation lifecycle.
+
+Options Changes
+
+Explain readiness-state correction and lifecycle-review recovery.
+
+Tests
+
+Report:
+
+Tests passed:
+Tests failed:
+Tests added:
+Build:
+Typecheck:
+Lint:
+
+Remaining Risks
+
+Explicitly identify anything that could not be safely resolved.
+
+Files Changed
+
+List the relevant files modified.
+
+Database Changes
+
+List migrations/schema changes.
+
+Environment Variables
+
+List any new or changed environment variables and their defaults.
+
+IMPORTANT:
+
+Do not claim an issue is fixed unless you actually inspected and modified/tested the relevant code.
+
+Do not fabricate test results.
+
+Do not merely tell me what should be changed. Actually implement the changes in the repository.

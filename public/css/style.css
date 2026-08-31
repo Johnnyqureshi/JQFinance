@@ -9879,11 +9879,12 @@ option { background: var(--card); }
 .mt-log-err  { color: var(--red); }
 .mt-log-info { color: var(--blue); }
 
-/* ── AI Trade Game Plan panel ─────────────────────────────────────────────── */
-.gp-panel{background:var(--card,#111827);border:1px solid rgba(255,255,255,.07);border-radius:14px;margin-top:18px;overflow:hidden}
-.gp-header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
+/* ── Unified Stock Intelligence module ───────────────────────────────────── */
+.gp-panel{background:var(--card,#111827);border:1px solid rgba(255,255,255,.08);border-top:2px solid var(--teal);border-radius:14px;margin:18px 24px 28px;overflow:hidden;box-shadow:0 10px 32px rgba(0,0,0,.22)}
+.gp-header{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.06);background:linear-gradient(90deg,rgba(29,214,163,.06),transparent 42%)}
 .gp-icon{color:#22d3a5;display:flex}
-.gp-title{font-weight:700;font-size:.9rem;letter-spacing:.02em}
+.gp-title{font-weight:800;font-size:1rem;letter-spacing:.01em}
+.gp-subtitle{font-size:.58rem;font-weight:800;letter-spacing:.11em;color:var(--t3);padding:3px 7px;border:1px solid var(--border);border-radius:5px}
 .gp-setup-badge{font-size:.68rem;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:.06em}
 .gp-setup-badge.bull{background:rgba(34,211,165,.15);color:#22d3a5}
 .gp-setup-badge.bear{background:rgba(248,113,113,.15);color:#f87171}
@@ -9904,7 +9905,7 @@ option { background: var(--card); }
 .gp-dot-bull{background:#22d3a5}.gp-dot-bear{background:#f87171}.gp-dot-neut{background:#facc15}
 .gp-ai-verdict{font-size:.9rem;line-height:1.45;background:rgba(34,211,165,.06);border-left:3px solid #22d3a5;padding:10px 12px;border-radius:0 9px 9px 0;margin-bottom:12px}
 .gp-ai-missing{font-size:.8rem;color:#94a3b8;background:rgba(250,204,21,.06);border-left:3px solid #facc15;padding:9px 12px;border-radius:0 9px 9px 0;margin-bottom:12px}
-.gp-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.gp-cols{display:grid;grid-template-columns:1fr;gap:16px}
 @media(max-width:820px){.gp-cols{grid-template-columns:1fr}}
 .gp-sec-title{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:#94a3b8;margin:12px 0 7px}
 .gp-sec-note{font-weight:500;text-transform:none;letter-spacing:0;color:#64748b;font-size:.68rem}
@@ -9991,4 +9992,26 @@ option { background: var(--card); }
 .gp-volume-metrics small{font-size:.61rem;color:#7f93b3}
 .gp-volume-reasons{margin-top:11px;background:rgba(15,23,42,.35);border-radius:8px;padding:8px 10px}
 .gp-volume-reasons ul{padding-left:15px;margin:5px 0 0}.gp-volume-reasons li{font-size:.68rem;color:#cbd5e1;line-height:1.4;margin:2px 0}
+.si-intraday{margin-top:14px;border:1px solid rgba(255,255,255,.07);border-radius:11px;background:rgba(2,8,18,.24);overflow:hidden}
+.si-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.06)}
+.si-section-head h3{margin:2px 0 0;font-size:.84rem;color:var(--t1)}
+.si-section-kicker{font-size:.58rem;font-weight:850;letter-spacing:.11em;color:var(--teal)}
+.si-refresh-note{font-size:.64rem;color:var(--t3)}
+.si-intraday .rt-results{grid-template-columns:minmax(0,1fr);min-height:0}
+.si-intraday .rt-metrics-grid{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--border)}
+.si-intraday .rt-metric{min-height:84px}
+.si-intraday .rt-vp-panel,.si-intraday .rt-patterns-panel{grid-column:1/-1}
+.si-intraday .rt-cd-col{grid-column:1/-1;border-left:0;border-top:1px solid var(--border);flex-direction:row;justify-content:flex-end;gap:6px;padding:8px 14px}
+.si-intraday .rt-cd-secs{font-size:13px}
+.si-intraday .rt-cd-unit{align-self:center}
 @media(max-width:560px){.gp-confluence-head{flex-direction:column}.gp-confluence-signal{text-align:left;max-width:none}.gp-confluence-scores{grid-template-columns:1fr}.gp-critical-levels{grid-template-columns:1fr}}
+@media(max-width:768px){
+  .gp-panel{margin:14px 12px 24px}
+  .gp-header{flex-wrap:wrap}
+  .gp-subtitle{display:none}
+  .gp-updated{order:5;width:100%;margin-left:22px}
+  .si-section-head{align-items:flex-start;flex-direction:column}
+  .si-intraday .rt-metrics-grid{grid-template-columns:1fr}
+  .si-intraday .rt-metric{border-right:0;border-bottom:1px solid var(--border);min-height:72px}
+  .si-refresh-note{display:none}
+}

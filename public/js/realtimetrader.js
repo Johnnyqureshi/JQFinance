@@ -717,9 +717,9 @@ const rtTrader = (() => {
       msEl.style.display = '';
     }
 
-    $('rtLoading').style.display = 'none';
-    $('rtError').style.display   = 'none';
-    $('rtResults').style.display = 'grid';
+    const loadingEl = $('rtLoading'); if (loadingEl) loadingEl.style.display = 'none';
+    const errorEl = $('rtError'); if (errorEl) errorEl.style.display = 'none';
+    const resultsEl = $('rtResults'); if (resultsEl) resultsEl.style.display = 'grid';
 
     // Fixed Range Volume Profile
     const vp = calcVolumeProfile(bars);
@@ -743,9 +743,9 @@ const rtTrader = (() => {
     currentSym = sym;
     const tok = ++reqToken;
 
-    $('rtLoading').style.display = 'flex';
-    $('rtError').style.display   = 'none';
-    $('rtResults').style.display = 'none';
+    const loadingEl = $('rtLoading'); if (loadingEl) loadingEl.style.display = 'flex';
+    const errorEl = $('rtError'); if (errorEl) errorEl.style.display = 'none';
+    const resultsEl = $('rtResults'); if (resultsEl) resultsEl.style.display = 'none';
     const ls = $('rtLoadSym'); if (ls) ls.textContent = sym;
     clearInterval(cdTimer);
 
@@ -768,12 +768,12 @@ const rtTrader = (() => {
       if (!price) throw new Error('Unable to fetch quote for ' + sym);
       if (bars.length < 2) throw new Error('No price data available for ' + sym + ' — try again shortly.');
 
-      $('rtInput').value = sym;
+      const input = $('rtInput'); if (input) input.value = sym;
       render(sym, bars, price, dailyBars, marketState, gamePlanRes, dailyPatterns, intradayPatterns);
 
     } catch (e) {
-      $('rtLoading').style.display = 'none';
-      $('rtError').style.display   = 'flex';
+      const loadingEl = $('rtLoading'); if (loadingEl) loadingEl.style.display = 'none';
+      const errorEl = $('rtError'); if (errorEl) errorEl.style.display = 'flex';
       const em = $('rtErrMsg'); if (em) em.textContent = e.message || 'Failed to analyze. Please try again.';
     }
   }

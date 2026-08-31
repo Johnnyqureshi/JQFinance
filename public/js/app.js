@@ -12,7 +12,6 @@ const state = {
   watchlist:   [],
   currentUser: null,
   loadId:      0,
-  forecastLoadId: 0,
 };
 
 // ── utils ──────────────────────────────────────────────────────────────────────
@@ -56,13 +55,6 @@ const api = {
   },
   async valuation(sym) {
     try { const r = await fetch(`/api/valuation/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
-  },
-  async forecast(sym, lookback=90, horizon=30, years=10) {
-    try {
-      const params = new URLSearchParams({ lookback, horizon, years });
-      const r = await fetch(`/api/forecast/${encodeURIComponent(sym)}?${params}`);
-      return r.ok ? r.json() : null;
-    } catch { return null; }
   },
   async wsb() {
     try { const r = await fetch('/api/wsb'); return r.ok ? r.json() : null; } catch { return null; }
@@ -269,14 +261,8 @@ async function openStock(sym, snap) {
   state.snap = authoritativeSnap;
   renderStockHeader(sym, authoritativeSnap);
   const up = (authoritativeSnap?.price || 0) >= (authoritativeSnap?.previousClose || 0);
-  state.stockData = { sym, snap: authoritativeSnap, bars: barsData, fmp: fmpData, news: analysis?.news || [], val: valData, forecast: null };
+  state.stockData = { sym, snap: authoritativeSnap, bars: barsData, fmp: fmpData, news: analysis?.news || [], val: valData };
   renderOverview(authoritativeSnap, barsData, up);
-  const forecastLoadId = ++state.forecastLoadId;
-  void api.forecast(sym).then(forecast => {
-    if (loadId !== state.loadId || forecastLoadId !== state.forecastLoadId || state.symbol !== sym || !state.stockData) return;
-    state.stockData.forecast = forecast;
-    renderForecastPanel(forecast, sym);
-  });
 }
 
 function updateWatchBtn(sym) {
@@ -311,7 +297,7 @@ function renderOverview(snap, bars, up) {
     '<div class="stat-cell"><label>Avg Volume</label><span id="ov-avgvol"></span></div>' +
     '</div><div class="chart-card"><h3>Intraday \u2014 Last 48 hours</h3>' +
     '<canvas id="ovCanvas" style="height:220px"></canvas></div></div>' +
-    '<div id="scorePanel"></div></div><section id="forecastPanel" class="forecast-panel"></section>';
+    '<div id="scorePanel"></div></div>';
   $('ov-open').textContent   = '$' + fmt(p.open);
   $('ov-prev').textContent   = '$' + fmt(p.previousClose);
   $('ov-high').textContent   = '$' + fmt(p.dayHigh);
@@ -322,7 +308,6 @@ function renderOverview(snap, bars, up) {
   if (canvas && bars?.bars?.length >= 2) requestAnimationFrame(() => drawChart(canvas, bars.bars, color, 220));
   // async score panel
   loadScorePanel(state.stockData?.fmp, p.price||0);
-  renderForecastPanel(state.stockData?.forecast, state.stockData?.sym);
 }
 
 function pct(value, digits=1) {
@@ -752,13 +737,17 @@ function renderNews(news) {
     return;
   }
   const cards = news.slice(0, 20).map(n => {
-    const date  = n.created_at ? timeAgo(n.created_at) : '';
+    const publishedAt = n.publishedAt || n.created_at || n.date || null;
+    const date  = publishedAt ? timeAgo(publishedAt) : '';
     const title = escapeHtml(n.headline || n.title || '');
     const rawUrl = n.url || '#';
     const safe  = /^https?:\/\//i.test(rawUrl) ? rawUrl.replace(/"/g, '%22') : '#';
     const img   = n.image ? `<div class="ni-thumb" style="background-image:url('${n.image.replace(/'/g,'%27')}')"></div>` : '';
     const sum   = n.summary ? `<div class="ni-summary">${escapeHtml(n.summary.slice(0, 120))}${n.summary.length>120?'…':''}</div>` : '';
-    return `<div class="news-item2" onclick="window.open('${safe}','_blank')">
+    const linkAttrs = safe === '#'
+      ? 'aria-disabled="true"'
+      : `onclick="window.open('${safe}','_blank','noopener')" role="link" tabindex="0"`;
+    return `<div class="news-item2${safe === '#' ? ' disabled' : ''}" ${linkAttrs}>
       ${img}
       <div class="ni-body">
         <div class="ni-headline">${title}</div>

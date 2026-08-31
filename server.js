@@ -2660,6 +2660,9 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
           .filter(n => Array.isArray(n.relatedTickers) && n.relatedTickers.includes(sym))
           .slice(0, 5).map(n => ({
           headline: n.title, source: n.publisher, provider: 'Yahoo Finance',
+          url: /^https?:\/\//i.test(String(n.link || '')) ? n.link : null,
+          summary: n.summary || '',
+          image: n.thumbnail?.resolutions?.[0]?.url || null,
           publishedAt: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
           date: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString().slice(0, 10) : null,
         }));
@@ -2686,6 +2689,9 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
               headline: n.title,
               source: n.source?.name || 'NewsAPI',
               provider: 'NewsAPI',
+              url: /^https?:\/\//i.test(String(n.url || '')) ? n.url : null,
+              summary: n.description || '',
+              image: n.urlToImage || null,
               publishedAt: n.publishedAt || null,
               date: n.publishedAt ? String(n.publishedAt).slice(0, 10) : null,
             }));

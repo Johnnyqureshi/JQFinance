@@ -168,7 +168,8 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, confidence, ai, dataGaps, news, confluence, searchSignal, levels, displayLevels } = d;
+    const { snapshot: s, indicators: ind, selloff, oversold, market, confidence, dataGaps, news, searchSignal, levels, displayLevels } = d;
+    const generatedAt = d.generatedAt;
 
     // Header badge
     const setup = searchSignal?.signal?.label || (ai?.available ? ai.setup : oversold?.label);
@@ -184,42 +185,6 @@ const gamePlan = (() => {
     });
 
     const chgCls = (s.changePct ?? 0) >= 0 ? 'up' : 'down';
-    const analogHtml = analogs
-      ? `<div class="gp-analog">
-           <span class="gp-analog-title">Past sessions closing down ${analogs.threshold}%+ (end-of-day stats)</span>
-           <span class="gp-analog-stat">Sample: <b>${analogs.sampleSize}</b>${analogs.lowConfidence ? ' · <b class="gp-warn-txt">LIMITED — LOW CONFIDENCE</b>' : ''}</span>
-           <span class="gp-analog-stat">Bounced 3%+ same day: <b>${analogs.bounced3Pct}%</b> · 5%+: <b>${analogs.bounced5Pct}%</b></span>
-           <span class="gp-analog-stat">Avg max rebound: <b>${fmt(analogs.avgMaxReboundPct, 1)}%</b> · Next day green: <b>${analogs.closedGreenNextPct}%</b> · Avg next-day: <b>${fmt(analogs.avgNextDayPct, 1)}%</b></span>
-         </div>`
-      : '';
-
-    const knife = ai?.fallingKnifeWarning || ((selloff?.chg1d ?? 0) <= -5
-      ? 'Do not assume this stock has bottomed simply because it is down sharply. Wait for evidence of stabilization (higher low, VWAP reclaim, buying volume).'
-      : null);
-
-    const scen = ai?.available && ai.scenarios ? `
-      <div class="gp-scen-grid">
-        <div class="gp-scen bull">${dot('bull')}<b>Bullish reversal</b><p>${esc(ai.scenarios.bullish?.plan)}</p>
-          ${ai.scenarios.bullish?.trigger ? `<span class="gp-scen-sub">Trigger: ${esc(ai.scenarios.bullish.trigger)}</span>` : ''}
-          ${ai.scenarios.bullish?.invalidation ? `<span class="gp-scen-sub">Invalid: ${esc(ai.scenarios.bullish.invalidation)}</span>` : ''}</div>
-        <div class="gp-scen neut">${dot('neut')}<b>Range / chop</b><p>${esc(ai.scenarios.range?.plan)}</p></div>
-        <div class="gp-scen bear">${dot('bear')}<b>Bearish continuation</b><p>${esc(ai.scenarios.bearish?.plan)}</p>
-          ${ai.scenarios.bearish?.trigger ? `<span class="gp-scen-sub">Trigger: ${esc(ai.scenarios.bearish.trigger)}</span>` : ''}
-          ${ai.scenarios.bearish?.invalidation ? `<span class="gp-scen-sub">Invalid: ${esc(ai.scenarios.bearish.invalidation)}</span>` : ''}</div>
-      </div>` : '';
-
-    const ts = ai?.available ? (ai.noTrade || !ai.tradeSetup
-      ? `<div class="gp-notrade">No validated trade setup is available.</div>`
-      : `<div class="gp-setup-grid">
-           <div><span>Entry zone</span><b>${esc(ai.tradeSetup.entryZone)}</b></div>
-           <div><span>Confirmation</span><b>${esc(ai.tradeSetup.confirmationEntry)}</b></div>
-           <div><span>Stop / invalidation</span><b>${esc(ai.tradeSetup.stop)}</b></div>
-           <div><span>Target 1</span><b>${esc(ai.tradeSetup.target1)}</b></div>
-           <div><span>Target 2</span><b>${esc(ai.tradeSetup.target2)}</b></div>
-           <div><span>Target 3</span><b>${esc(ai.tradeSetup.target3)}</b></div>
-           <div><span>Risk / reward</span><b>${esc(ai.tradeSetup.riskReward)}</b></div>
-         </div>`) : '';
-
     const confParts = confidence?.parts || {};
     const confHtml = `<div class="gp-conf">
         <div class="gp-conf-overall">DATA COVERAGE <b>${confidence?.overall ?? '--'}/100</b></div>
@@ -240,21 +205,9 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>Condition</span><b class="${setupClass(oversold?.label)}">${esc(oversold?.label || '--')}</b></div>
       </div>
 
-      <div class="gp-ai-missing">Deterministic data-only analysis. Generative commentary does not control or supplement the verdict.</div>
-
       <div class="gp-cols">
         <div class="gp-col">
-          <div class="gp-sec-title">Historical evidence <span class="gp-sec-note">observations, not forecasts</span></div>
-          ${probBar('Relief bounce', p.reliefBounce)}
-          ${probBar('Close green', p.closeGreen)}
-          ${probBar('3%+ rebound off low', p.rebound3)}
-          ${probBar('5%+ rebound off low', p.rebound5)}
-          ${probBar('Another downside leg', p.downsideLeg, true)}
-          <div class="gp-prob-basis">${esc(p.basis)}</div>
-          ${analogHtml}
-        </div>
-        <div class="gp-col">
-          <div class="gp-sec-title">Key levels</div>
+          <div class="gp-sec-title">Decision levels <span class="gp-sec-note">context, not automatic orders</span></div>
           <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
           ${selloff?.classification?.length ? `<div class="gp-tags">${selloff.classification.map(t => `<span class="gp-tag">${esc(t)}</span>`).join('')}</div>` : ''}
           <div class="gp-attrib">Move attribution: <b>${esc(market?.attribution || 'UNKNOWN')}</b>
@@ -265,8 +218,7 @@ const gamePlan = (() => {
         </div>
       </div>
 
-       ${searchSignalHtml(searchSignal)}
-       ${confluenceHtml(confluence, searchSignal)}
+      ${searchSignalHtml(searchSignal)}
       ${confHtml}
       ${dataGaps?.length ? `<div class="gp-gaps">Missing data: ${dataGaps.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-disclaimer">Sources: ${esc(d.provenance?.quote?.provider || 'market feed')} quote as of ${esc(d.provenance?.quote?.asOf || generatedAt || '--')} · Yahoo chart bars · ${esc((d.provenance?.news || []).join(' + ') || 'no verified news')} · Not financial advice</div>`;
@@ -315,7 +267,13 @@ const gamePlan = (() => {
     if (btn) btn.addEventListener('click', () => {
       setSafe('gpLoading', el => el.style.display = 'flex');
       setSafe('gpContent', el => el.style.display = 'none');
-      refresh(true);
+      const sharedRefresh = currentSym
+        ? window.searchContext.load(currentSym, { force: true })
+        : null;
+      refresh(true, sharedRefresh);
+      if (currentSym && typeof rtTrader !== 'undefined') {
+        rtTrader.load(currentSym, sharedRefresh);
+      }
     });
   });
 

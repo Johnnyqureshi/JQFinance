@@ -357,14 +357,16 @@
 
     </div><!-- .hw-layout -->
 
-    <!-- ── Market Data Game Plan ─────────────────────────────────────────────── -->
+    <!-- ── Unified Stock Intelligence ────────────────────────────────────────── -->
     <div class="gp-panel" id="gpPanel" style="display:none">
       <div class="gp-header">
         <span class="gp-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a10 10 0 1010 10"/><path d="M12 6a6 6 0 106 6"/><circle cx="12" cy="12" r="2"/><path d="M22 2l-8 8"/></svg>
         </span>
-        <span class="gp-title">Market Data Game Plan</span>
+        <span class="gp-title">Stock Intelligence</span>
+        <span class="gp-subtitle">SEARCH + INTRADAY</span>
         <span class="gp-setup-badge" id="gpSetupBadge" style="display:none">--</span>
+        <span class="rt-market-state-badge" id="rtMarketState" style="display:none"></span>
         <span class="gp-updated" id="gpUpdated"></span>
         <button class="gp-refresh-btn" id="gpRefreshBtn" title="Refresh verified data">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -373,37 +375,21 @@
       <div class="gp-body">
         <div class="gp-loading" id="gpLoading">
           <div class="t-spinner"></div>
-          <span>Building game plan for <strong id="gpLoadSym"></strong>…</span>
+          <span>Analyzing <strong id="gpLoadSym"></strong>…</span>
         </div>
         <div class="gp-error" id="gpError" style="display:none"></div>
         <div class="gp-content" id="gpContent" style="display:none"></div>
-      </div>
-    </div>
 
-    <!-- ── Realtime Trader Console ─────────────────────────────────────────── -->
-    <div class="rt-console" id="rtConsole">
-
-      <div class="rt-console-head">
-        <div class="rt-head-left">
-          <span class="rt-icon">⚡</span>
-          <span class="rt-title">Realtime Trader</span>
-          <span class="rt-intraday-badge">INTRADAY</span>
-          <span class="rt-market-state-badge" id="rtMarketState" style="display:none"></span>
-        </div>
-        <div class="rt-head-right">
-          <div class="rt-search-wrap">
-            <svg class="rt-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            <input type="text" id="rtInput" placeholder="Ticker…" autocomplete="off" spellcheck="false" maxlength="10"/>
-            <div class="rt-drop search-drop" id="rtDrop"></div>
+        <section class="si-intraday" id="rtConsole">
+          <div class="si-section-head">
+            <div>
+              <span class="si-section-kicker">INTRADAY CONTEXT</span>
+              <h3>What price and volume are doing now</h3>
+            </div>
+            <span class="si-refresh-note">Refreshes with Stock Intelligence</span>
           </div>
-          <button class="rt-refresh-btn" id="rtRefreshBtn" title="Refresh now">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          </button>
-          <span class="rt-updated" id="rtUpdated"></span>
-        </div>
-      </div>
 
-      <div class="rt-body">
+          <div class="rt-body">
 
         <div class="rt-loading" id="rtLoading" style="display:none">
           <div class="t-spinner"></div>
@@ -415,17 +401,6 @@
         </div>
 
         <div class="rt-results" id="rtResults" style="display:none">
-
-          <!-- Verdict column -->
-          <div class="rt-verdict-col">
-            <div class="rt-verdict-badge" id="rtVerdict">--</div>
-            <div class="rt-verdict-conf" id="rtConf">--%</div>
-            <div class="rt-verdict-sym" id="rtSym"></div>
-            <div class="rt-verdict-reason" id="rtReason"></div>
-          </div>
-
-          <!-- Divider -->
-          <div class="rt-divider"></div>
 
           <!-- Metrics grid — unique intraday metrics only
                (RSI, Support, Resistance shown above in Trading Signals panel) -->
@@ -512,9 +487,10 @@
 
         </div><!-- .rt-results -->
 
-      </div><!-- .rt-body -->
-
-    </div><!-- .rt-console -->
+          </div><!-- .rt-body -->
+        </section><!-- .si-intraday -->
+      </div><!-- .gp-body -->
+    </div><!-- .gp-panel -->
 
   </div><!-- .home-workspace -->
 </div>

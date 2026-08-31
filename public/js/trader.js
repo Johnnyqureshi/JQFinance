@@ -256,15 +256,13 @@ const trader = (() => {
         const bias = Number(biasLevel?.price);
         const resistance = Number(resistanceLevel?.price);
         const support = Number(supportLevel?.price);
-        const zoneText = level => Number.isFinite(Number(level?.zoneLow)) && Number.isFinite(Number(level?.zoneHigh))
-          ? `$${fmt(level.zoneLow)}–$${fmt(level.zoneHigh)}`
-          : `$${fmt(level?.price)}`;
+       const levelText = level => `$${fmt(level?.price)}`;
        const nearbyRows = [
           Number.isFinite(resistance)
-            ? makeSRRow('res', 'Resistance zone', 'Nearest completed-session level', ((resistance-price)/price*100).toFixed(2), 'above', zoneText(resistanceLevel), '')
+            ? makeSRRow('res', 'Immediate resistance', 'Nearest level', ((resistance-price)/price*100).toFixed(2), 'above', levelText(resistanceLevel), '')
            : null,
           Number.isFinite(support)
-            ? makeSRRow('sup', 'Support zone', 'Nearest completed-session level', ((price-support)/price*100).toFixed(2), 'below', zoneText(supportLevel), '')
+            ? makeSRRow('sup', 'Immediate support', 'Nearest level', ((price-support)/price*100).toFixed(2), 'below', levelText(supportLevel), '')
            : null,
        ].filter(Boolean);
       srTbl.replaceChildren();
@@ -276,10 +274,10 @@ const trader = (() => {
          biasTitle.textContent = 'KEY BIAS LEVEL';
          const biasPrice = document.createElement('div');
          biasPrice.className = 'sr-bias-price';
-          biasPrice.textContent = zoneText(biasLevel);
+          biasPrice.textContent = levelText(biasLevel);
          const biasDesc = document.createElement('div');
          biasDesc.className = 'sr-bias-desc';
-          biasDesc.textContent = 'Hold above this zone = BULLISH bias  ·  Hold below = BEARISH bias';
+          biasDesc.textContent = `Above ${levelText(biasLevel)} = BULLISH  ·  Below = BEARISH`;
          const biasState = document.createElement('div');
           const zoneLow = Number.isFinite(Number(biasLevel?.zoneLow)) ? Number(biasLevel.zoneLow) : bias;
           const zoneHigh = Number.isFinite(Number(biasLevel?.zoneHigh)) ? Number(biasLevel.zoneHigh) : bias;
@@ -293,7 +291,7 @@ const trader = (() => {
        if (nearbyRows.length) {
          const nearbyTitle = document.createElement('div');
          nearbyTitle.className = 'sr-nearby-title';
-          nearbyTitle.textContent = 'NEARBY SUPPORT & RESISTANCE · ATR BUFFERED';
+          nearbyTitle.textContent = 'IMMEDIATE SUPPORT & RESISTANCE';
          srTbl.append(nearbyTitle, ...nearbyRows);
          const note = document.createElement('p');
          note.className = 'sr-level-note';

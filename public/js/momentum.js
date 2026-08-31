@@ -912,6 +912,9 @@
     // ── Automation state ─────────────────────────────────────────────────────
     botEnabled:    false,          // true when auto-trading is running
     liveArmed:     false,
+    marketDirection: null,
+    _lastInverseMode: false,
+    _lastInverseCycleAt: null,
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
     sessionPnl:    { points: [0], total: 0, trades: 0, wins: 0 },
     _activeTrades: new Set(),      // symbols with pending/live bot orders (prevents double-entry)
@@ -953,8 +956,43 @@
         this.liveArmed = settings?.liveArmed === true;
         this._renderConfigPanel();
         this._renderBotStatus();
+        this._refreshMarketDirection();
       } catch (error) {
         console.warn('[Momentum] Could not load server settings:', error.message);
+      }
+    },
+
+    async _refreshMarketDirection() {
+      try {
+        const response = await fetch('/api/momentum/market-direction', {
+          credentials: 'include', cache: 'no-store',
+        });
+        const market = await response.json();
+        this.marketDirection = market;
+        if (market?.inverseMode && !this._lastInverseMode) {
+          this.addLog(
+            market.inverseSymbol || 'MARKET',
+            'MARKET DOWN — inverse mode',
+            `${market.reason} Scheduler may BUY ${market.inverseSymbol}; shorts remain blocked.`,
+            'warn'
+          );
+        }
+        const inverseCycle = market?.inverseCycle;
+        if (inverseCycle?.at && inverseCycle.at !== this._lastInverseCycleAt) {
+          this._lastInverseCycleAt = inverseCycle.at;
+          this.addLog(
+            inverseCycle.symbol || 'MARKET',
+            inverseCycle.status === 'submitted' ? 'INVERSE BUY SUBMITTED' : 'INVERSE ENTRY WITHHELD',
+            inverseCycle.reason || 'Server scheduler reported an inverse-mode outcome.',
+            inverseCycle.status === 'submitted' ? 'ok' : 'warn'
+          );
+        }
+        this._lastInverseMode = market?.inverseMode === true;
+        this._renderBotStatus();
+      } catch (_) {
+        this.marketDirection = null;
+        this._lastInverseMode = false;
+        this._renderBotStatus();
       }
     },
 
@@ -1049,6 +1087,9 @@
     async run() {
       this.running = true;
       this._setScanStatus('scanning');
+      // Keep the visible regime indicator aligned with the server scheduler's
+      // fresh completed-bar decision on every scanner refresh.
+      this._refreshMarketDirection();
       try {
         const results = await MomentumScanner.scan(this.config, (done, total) => {
           this._setScanStatus('scanning', 0, '', done, total);
@@ -2913,7 +2954,9 @@
         btn.textContent = '⏹ STOP BOT';
         btn.className   = 'mt-bot-toggle mt-bot-toggle--on';
         if (status) status.textContent =
-          AlpacaClient.mode === 'live' && !this.liveArmed
+          this.marketDirection?.inverseMode
+            ? `MARKET DOWN — inverse mode · ${this.marketDirection.inverseSymbol} fallback if no safe long passes · no shorts`
+            : AlpacaClient.mode === 'live' && !this.liveArmed
             ? 'AUTOMATION ACTIVE · Live entries blocked until explicitly armed'
             : `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
         if (bar) bar.className = 'mt-bot-bar mt-bot-bar--on';

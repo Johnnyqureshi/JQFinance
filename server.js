@@ -35,6 +35,12 @@ const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const { regularSessionWindow } = require('./lib/intraday-vwap');
 const { evaluateMomentumOrderVwapGate } = require('./lib/momentum-vwap-gate');
 const {
+  evaluateMarketDirection,
+  canUseInverseFallback,
+  hasCompleteMomentumQuote,
+} = require('./lib/market-direction');
+const { createMomentumInverseCycleStore } = require('./lib/momentum-inverse-cycle');
+const {
   sanitizeCandlestickExecutionConfig,
   calculateCandlestickEntryCapacity,
   buildCandlestickBracketOrder,
@@ -878,12 +884,22 @@ db.prepare(`
     enabled     INTEGER NOT NULL DEFAULT 0,
     live_armed  INTEGER NOT NULL DEFAULT 0,
     config_json TEXT    NOT NULL DEFAULT '{}',
+    last_inverse_at TEXT,
+    last_inverse_status TEXT,
+    last_inverse_reason TEXT,
+    last_inverse_symbol TEXT,
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
 `).run();
 try { db.prepare(`ALTER TABLE pmh_settings ADD COLUMN live_armed INTEGER NOT NULL DEFAULT 0`).run(); } catch (_) {}
 try { db.prepare(`ALTER TABLE momentum_settings ADD COLUMN live_armed INTEGER NOT NULL DEFAULT 0`).run(); } catch (_) {}
+[
+  `ALTER TABLE momentum_settings ADD COLUMN last_inverse_at TEXT`,
+  `ALTER TABLE momentum_settings ADD COLUMN last_inverse_status TEXT`,
+  `ALTER TABLE momentum_settings ADD COLUMN last_inverse_reason TEXT`,
+  `ALTER TABLE momentum_settings ADD COLUMN last_inverse_symbol TEXT`,
+].forEach(sql => { try { db.prepare(sql).run(); } catch (_) {} });
 
 // ── Security migration: retire a source-disclosed bootstrap account ──────────
 // This is deliberately one-way. It runs after every automation table exists,
@@ -4689,6 +4705,26 @@ function momentumConfigFor(userId) {
   };
 }
 
+const momentumInverseCycleStore = createMomentumInverseCycleStore(db);
+
+async function getMomentumMarketDirection(userId, now = new Date()) {
+  const { start, end } = regularSessionWindow(now);
+  if (now < start || now >= end) {
+    return evaluateMarketDirection({}, now);
+  }
+  const rows = await Promise.all(['SPY', 'QQQ'].map(async symbol => {
+    const data = await alpacaDataFetch(
+      userId,
+      `/v2/stocks/${symbol}/bars?timeframe=5Min&start=${encodeURIComponent(start.toISOString())}&limit=1000&adjustment=all&feed=iex`,
+      'momentum'
+    );
+    return [symbol, (data?.bars || []).map(bar => ({
+      t: bar.t, o: Number(bar.o), h: Number(bar.h), l: Number(bar.l), c: Number(bar.c), v: Number(bar.v),
+    }))];
+  }));
+  return evaluateMarketDirection(Object.fromEntries(rows), now);
+}
+
 function pmhConfigFor(userId) {
   const row = db.prepare('SELECT enabled,live_armed,config_json FROM pmh_settings WHERE user_id=?').get(userId);
   let saved = {};
@@ -6214,6 +6250,24 @@ app.get('/api/momentum/settings', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store').json(settings);
 });
 
+app.get('/api/momentum/market-direction', requireAuth, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store').json({
+      ...await getMomentumMarketDirection(req.session.userId),
+      inverseCycle: momentumInverseCycleStore.get(req.session.userId),
+    });
+  } catch (error) {
+    res.status(503).json({
+      available: false,
+      direction: 'UNAVAILABLE',
+      dropping: false,
+      inverseMode: false,
+      inverseSymbol: null,
+      reason: `Market direction unavailable: ${error.message}`,
+    });
+  }
+});
+
 app.put('/api/momentum/settings', requireAuth, (req, res) => {
   const prior = momentumConfigFor(req.session.userId);
   const requestedPositionDollars = req.body?.maxPositionDollars
@@ -6270,6 +6324,9 @@ function momentumRowFromQuote(symbol, quote, config) {
 async function buildMomentumCandidate(userId, symbol, config) {
   const sym = String(symbol || '').toUpperCase();
   const quote = await yf.quote(sym, {}, { validateResult: false });
+  if (!hasCompleteMomentumQuote(quote)) {
+    throw new Error('Fresh candidate quote lacks required finite price, change, or volume evidence.');
+  }
   const basic = momentumRowFromQuote(sym, quote, config);
   if (!basic.eligible) return { symbol: sym, eligible: false, stage: 'SCANNER', reason: basic.reason, ...basic.row };
   // The scheduler does not trade on a scanner score alone.  It must obtain a
@@ -6421,6 +6478,76 @@ async function executeMomentumEntry(userId, candidate) {
     if (!error.alpacaTransient) {
       db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
         .run(`Broker entry was not accepted: ${error.message}`.slice(0, 200), trade.id);
+    }
+    throw error;
+  }
+}
+
+async function executeMomentumInverseEntry(userId, marketDirection) {
+  const { enabled, liveArmed, config } = momentumConfigFor(userId);
+  if (!enabled) throw new Error('Momentum automation is disabled in persisted settings.');
+  const creds = getAlpacaCreds(userId, 'momentum');
+  if (!creds) throw new Error('Connect the dedicated Momentum Alpaca account first.');
+  if (creds.mode === 'live' && !liveArmed) throw new Error('Momentum Live orders are not explicitly armed.');
+  if (!isMarketOpen()) throw new Error('Market is closed for Momentum automation.');
+
+  const freshMarket = await getMomentumMarketDirection(userId);
+  if (!freshMarket.dropping || freshMarket.inverseSymbol !== marketDirection.inverseSymbol) {
+    throw new Error('Fresh market-direction recheck no longer permits inverse mode.');
+  }
+  const symbol = freshMarket.inverseSymbol;
+  await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'momentum' });
+  const inverseVwap = await evaluateMomentumOrderVwap(userId, symbol);
+  if (!inverseVwap.eligible) throw new Error(`Inverse ETF VWAP gate blocked entry: ${inverseVwap.reason}`);
+  const slots = await getOpenSlots(userId, 'Momentum inverse', 'momentum');
+  if (!canReserveEntryUnits(slots)) throw new Error('Position limit reached or account data is unavailable.');
+  if (slots.positions.some(position => position.symbol === symbol) ||
+      slots.openOrders.some(order => order.symbol === symbol)) {
+    throw new Error(`${symbol} already has a position or pending broker order.`);
+  }
+  const daily = db.prepare(`
+    SELECT COUNT(*) AS entries,
+      COALESCE(SUM(CASE WHEN status='closed' AND pnl < 0 THEN -pnl ELSE 0 END),0) AS losses
+    FROM bot_trade_log
+    WHERE user_id=? AND (strategy IS NULL OR strategy='momentum')
+      AND date(timestamp,'localtime')=date('now','localtime') AND status<>'void'
+  `).get(userId);
+  if (Number(daily.entries) >= config.maxTradesPerDay) throw new Error('Momentum daily trade limit reached.');
+  if (Number(daily.losses) >= config.maxDailyLoss) throw new Error('Momentum daily loss limit reached.');
+  const account = await alpacaFetchFor(userId, 'momentum', '/v2/account');
+  const entryPrice = Number(inverseVwap.price);
+  const equity = Number(account?.equity);
+  if (!(entryPrice > 0 && equity > 0)) throw new Error('Fresh executable price or account equity is unavailable.');
+  const slPct = config.stopPercent;
+  const tpPct = config.takeProfitPercent;
+  const amount = config.positionValue;
+  const riskPctOfEquity = amount * slPct / 100 / equity * 100;
+  if (!(amount > 0) || riskPctOfEquity > 5) throw new Error('Momentum inverse position would exceed the 5% equity risk cap.');
+  if (!(tpPct / slPct >= config.minRR)) throw new Error('Inverse target does not meet the required protected risk/reward ratio.');
+  const shares = Math.floor(amount / entryPrice);
+  if (shares < 1) throw new Error('Configured position size is below one inverse ETF share at the current price.');
+  const clientOrderId = `mt-inv-${userId}-${symbol}-${Date.now().toString(36)}`.slice(0, 48);
+  const stopPrice = +(entryPrice * (1 - slPct / 100)).toFixed(2);
+  const targetPrice = +(entryPrice * (1 + tpPct / 100)).toFixed(2);
+  const candidate = { symbol };
+  const trade = recordMomentumEntryIntent(userId, candidate, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
+  try {
+    const order = await alpacaFetchFor(userId, 'momentum', '/v2/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day',
+        order_class: 'bracket',
+        take_profit: { limit_price: targetPrice.toFixed(2) },
+        stop_loss: { stop_price: stopPrice.toFixed(2) },
+        client_order_id: clientOrderId,
+      }),
+    });
+    console.log(`[Momentum] MARKET DOWN — inverse mode BUY ${symbol}: ${freshMarket.reason}`);
+    return { trade, order, candidate, marketDirection: freshMarket };
+  } catch (error) {
+    if (!error.alpacaTransient) {
+      db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
+        .run(`Broker inverse entry was not accepted: ${error.message}`.slice(0, 200), trade.id);
     }
     throw error;
   }
@@ -10932,6 +11059,7 @@ async function runMomentumCycle(userId, source = 'server-scheduler') {
     return { ...outcome, status: 'live_unarmed', reason: 'Momentum Live orders are not explicitly armed.' };
   }
   if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
+  let inverseAttempt = null;
   try {
     // Exact client-order-ID reconciliation runs even outside market hours and
     // under the same lock as submission, so a trigger cannot race a scheduler
@@ -10942,25 +11070,99 @@ async function runMomentumCycle(userId, source = 'server-scheduler') {
     const rotation = nextAlpacaCatalogRotation(catalogEntry, MASTER_UNIVERSE, {
       strategy: 'momentum-scheduler', limit: 80, priorityLimit: 20, rotationLimit: 60,
     });
-    const raw = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
+    let quoteResults = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
       try {
         const quote = await yf.quote(symbol, {}, { validateResult: false });
+        if (!hasCompleteMomentumQuote(quote)) throw new Error('Quote payload lacks required price, change, or volume evidence.');
         const basic = momentumRowFromQuote(symbol, quote, config);
-        return basic.eligible ? basic.row : null;
-      } catch (_) { return null; }
+        return { ok: true, row: basic.eligible ? basic.row : null };
+      } catch (error) {
+        return { ok: false, symbol, error: error.message };
+      }
     });
+    // One bounded retry prevents a transient provider hiccup from needlessly
+    // disabling the fallback, but unresolved coverage always fails closed.
+    const failedQuoteIndexes = quoteResults
+      .map((result, index) => result.ok ? -1 : index)
+      .filter(index => index >= 0);
+    if (failedQuoteIndexes.length) {
+      const retries = await mapWithConcurrency(failedQuoteIndexes, 4, async index => {
+        const symbol = rotation.symbols[index];
+        try {
+          const quote = await yf.quote(symbol, {}, { validateResult: false });
+          if (!hasCompleteMomentumQuote(quote)) throw new Error('Quote payload lacks required price, change, or volume evidence.');
+          const basic = momentumRowFromQuote(symbol, quote, config);
+          return { index, result: { ok: true, row: basic.eligible ? basic.row : null } };
+        } catch (error) {
+          return { index, result: { ok: false, symbol, error: error.message } };
+        }
+      });
+      quoteResults = quoteResults.slice();
+      retries.forEach(({ index, result }) => { quoteResults[index] = result; });
+    }
+    const raw = quoteResults.filter(result => result.ok && result.row).map(result => result.row);
     const shortlist = raw.filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 12);
-    const candidates = (await Promise.all(shortlist
-      .map(row => buildMomentumCandidate(userId, row.symbol, config).catch(error => {
+    const candidateResults = await Promise.all(shortlist
+      .map(row => buildMomentumCandidate(userId, row.symbol, config)
+        .then(candidate => ({ ok: true, candidate }))
+        .catch(error => {
         console.warn(`[Momentum] ${row.symbol} evidence unavailable: ${error.message}`);
-        return null;
-      })))).filter(Boolean);
+        return { ok: false, symbol: row.symbol, error: error.message };
+      })));
+    const candidates = candidateResults.filter(result => result.ok).map(result => result.candidate);
     const candidate = candidates.filter(row => row.eligible).sort((a, b) => b.score - a.score)[0];
-    if (!candidate) return { ...outcome, status: 'no_entry' };
+    if (!candidate) {
+      const fallbackCoverage = canUseInverseFallback({
+        scannedSymbols: rotation.symbols.length,
+        completedQuotes: quoteResults.filter(result => result.ok).length,
+        quoteFailures: quoteResults.filter(result => !result.ok).length,
+        shortlisted: shortlist.length,
+        completedCandidates: candidateResults.filter(result => result.ok).length,
+        candidateFailures: candidateResults.filter(result => !result.ok).length,
+        eligibleLongs: 0,
+      });
+      if (!fallbackCoverage.allowed) {
+        momentumInverseCycleStore.update(
+          userId,
+          'withheld',
+          `Inverse fallback blocked: ${fallbackCoverage.reason}`,
+          null
+        );
+        return {
+          ...outcome,
+          status: 'withheld',
+          reason: `Inverse fallback blocked: ${fallbackCoverage.reason}`,
+        };
+      }
+      const marketDirection = await getMomentumMarketDirection(userId);
+      if (!marketDirection.dropping) {
+        return { ...outcome, status: 'no_entry', marketDirection };
+      }
+      inverseAttempt = marketDirection;
+      await executeMomentumInverseEntry(userId, marketDirection);
+      momentumInverseCycleStore.update(
+        userId,
+        'submitted',
+        `BUY ${marketDirection.inverseSymbol} submitted because no safe long passed and ${marketDirection.reason}`,
+        marketDirection.inverseSymbol
+      );
+      return {
+        ...outcome, status: 'submitted', submitted: true, inverseMode: true,
+        symbol: marketDirection.inverseSymbol, marketDirection, source,
+      };
+    }
     await executeMomentumEntry(userId, candidate);
     return { ...outcome, status: 'submitted', submitted: true, symbol: candidate.symbol, source };
   } catch (error) {
     console.warn(`[Momentum] user ${userId} cycle withheld: ${error.message}`);
+    if (inverseAttempt) {
+      momentumInverseCycleStore.update(
+        userId,
+        'withheld',
+        `Inverse entry withheld: ${error.message}`,
+        inverseAttempt.inverseSymbol
+      );
+    }
     return { ...outcome, status: 'withheld', reason: 'Broker or market evidence did not permit a safe cycle.' };
   } finally {
     releaseBotLock(userId);

@@ -311,7 +311,7 @@ const trader = (() => {
     // Price versus open remains a factual sub-metric, not a second verdict.
     const dArrow=$('dirArrow'), dLabel=$('dirLabel'), dPct=$('dirPct');
     if(dArrow){ dArrow.className='dir-arrow '+(signalBullish?'up':'down'); dArrow.textContent=signalBullish?'▲':'▼'; }
-    if(dLabel){ dLabel.className='dir-label '+(signalBullish?'up':'down'); dLabel.textContent=signalBullish?'Buying':'Selling'; }
+    if(dLabel){ dLabel.className='dir-label '+(signalBullish?'up':'down'); dLabel.textContent=signalBullish?'Bullish':'Bearish'; }
     if(dPct) {
       const cleanFromOpen = Math.abs(fromOpen) < 0.005 ? 0 : fromOpen;
       dPct.textContent=(cleanFromOpen>0?'+':'')+fmt(cleanFromOpen)+'% from open ($'+fmt(open)+')';
@@ -334,13 +334,17 @@ const trader = (() => {
           ? gamePlan.levels.support.map(level => Number(level.price)).filter(Number.isFinite)
           : sr.support),
       ].filter((value, index, list) => list.findIndex(item => Math.abs(item - value) / price < 0.001) === index);
-      const rows = [
-        ...verifiedResistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'BUY TRIGGER')),
-        ...verifiedSupport.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'SELL TRIGGER')),
+       const rows = [
+         ...verifiedResistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'BULLISH ABOVE')),
+         ...verifiedSupport.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'BEARISH BELOW')),
       ];
       srTbl.replaceChildren();
       if (rows.length) {
         srTbl.append(...rows);
+         const note = document.createElement('p');
+         note.className = 'sr-level-note';
+         note.textContent = 'Levels are conditional thresholds, not automatic orders: resistance is bullish only after a confirmed break and hold; support is bearish only after a confirmed break and hold.';
+         srTbl.appendChild(note);
       } else {
         const p = document.createElement('p');
         p.style.cssText = 'font-size:13px;color:var(--t3);padding:12px 0';

@@ -669,9 +669,9 @@ const rtTrader = (() => {
     setCls ('rtVolSub', 'rt-m-sub ' + (volSurge ? 'up' : ''));
 
     // Sentiment (momentum-based)
-    const sentLabel = signal === 'BUY' ? 'Buying evidence' : 'Selling evidence';
+    const sentLabel = signal === 'BUY' ? 'Bullish' : 'Bearish';
     const sentCls   = signal === 'BUY' ? 'up' : 'down';
-    const momDesc   = 'Verified Search snapshot';
+    const momDesc   = 'Verified Search direction';
     setSafe('rtSent',    sentLabel);
     setSafe('rtSentSub', 'Last 5 · ' + momDesc);
     setCls ('rtSentSub', 'rt-m-sub ' + sentCls);

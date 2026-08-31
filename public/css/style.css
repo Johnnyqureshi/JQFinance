@@ -59,6 +59,13 @@ html[data-theme="light"] .mt-panel,
 html[data-theme="light"] .at-bot-card,
 html[data-theme="light"] .at-sim-panel,
 html[data-theme="light"] .at-bt-results,
+html[data-theme="light"] .nsc-filter-bar,
+html[data-theme="light"] .nsc-table-wrap,
+html[data-theme="light"] .nsc-table .nsc-th,
+html[data-theme="light"] .nsc-finp,
+html[data-theme="light"] .nsc-add-input,
+html[data-theme="light"] .nsc-rf-btn,
+html[data-theme="light"] .nsc-chip,
 html[data-theme="light"] .ct-stat-box,
 html[data-theme="light"] .ct-rules-card,
 html[data-theme="light"] .ct-auto-card,
@@ -81,6 +88,7 @@ html[data-theme="light"] .ct-chips-wrap,
 html[data-theme="light"] .ct-filter-btn,
 html[data-theme="light"] .ct-filter-btn.active,
 html[data-theme="light"] .ct-auto-save,
+html[data-theme="light"] .nsc-reset-btn,
 html[data-theme="light"] .bci-refresh,
 html[data-theme="light"] .bci-tabs {
   background: var(--card2) !important;
@@ -97,6 +105,12 @@ html[data-theme="light"] .ct-table,
 html[data-theme="light"] .ct-table td,
 html[data-theme="light"] .ct-sym,
 html[data-theme="light"] .ct-auto-save,
+html[data-theme="light"] .nsc-title,
+html[data-theme="light"] .nsc-table,
+html[data-theme="light"] .nsc-table td,
+html[data-theme="light"] .nsc-sym,
+html[data-theme="light"] .nsc-add-input,
+html[data-theme="light"] .nsc-finp,
 html[data-theme="light"] .bci-symbol,
 html[data-theme="light"] .bci-title,
 html[data-theme="light"] .bci-metric strong,
@@ -123,6 +137,12 @@ html[data-theme="light"] .ct-summary,
 html[data-theme="light"] .ct-empty,
 html[data-theme="light"] .ct-log-table th,
 html[data-theme="light"] .ct-log-table td,
+html[data-theme="light"] .nsc-flbl,
+html[data-theme="light"] .nsc-rf-lbl,
+html[data-theme="light"] .nsc-legend,
+html[data-theme="light"] .nsc-name-small,
+html[data-theme="light"] .nsc-empty-row,
+html[data-theme="light"] .nsc-status-txt,
 html[data-theme="light"] .bci-company,
 html[data-theme="light"] .bci-subtitle,
 html[data-theme="light"] .bci-state,
@@ -156,6 +176,7 @@ html[data-theme="light"] .at-bot-badge,
 html[data-theme="light"] .at-bt-stat,
 html[data-theme="light"] .ct-auto-badge,
 html[data-theme="light"] .ct-log-row,
+html[data-theme="light"] .nsc-count-badge,
 html[data-theme="light"] .bci-card,
 html[data-theme="light"] .gp-states,
 html[data-theme="light"] .gp-timeframes {
@@ -164,6 +185,44 @@ html[data-theme="light"] .gp-timeframes {
 html[data-theme="light"] .bci-card:hover,
 html[data-theme="light"] .at-bot-card:hover {
   background: var(--card2) !important;
+}
+html[data-theme="light"] .nsc-table .nsc-th {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+}
+html[data-theme="light"] .nsc-table td {
+  border-color: var(--border) !important;
+}
+html[data-theme="light"] .nsc-filter-bar,
+html[data-theme="light"] .nsc-table-wrap {
+  background: #fff !important;
+}
+html[data-theme="light"] .nsc-finp,
+html[data-theme="light"] .nsc-add-input {
+  background: #fff !important;
+  color: #111827 !important;
+}
+html[data-theme="light"] .nsc-table tbody tr:hover td {
+  background: var(--bg2) !important;
+}
+html[data-theme="light"] .nsc-reset-btn {
+  color: var(--t2) !important;
+}
+html[data-theme="light"] .nsc-scan-btn,
+html[data-theme="light"] .nsc-apply-btn {
+  color: #fff !important;
+}
+html[data-theme="light"] .rt-vp-canvas-wrap {
+  background: #fff !important;
+  border: 1px solid var(--border);
+}
+html[data-theme="light"] .gp-evidence-reasons li,
+html[data-theme="light"] .gp-evidence-item > span,
+html[data-theme="light"] .gp-evidence-item > small,
+html[data-theme="light"] .gp-critical-levels span,
+html[data-theme="light"] .gp-audit li,
+html[data-theme="light"] .gp-volume-reasons li {
+  color: var(--t1) !important;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────────────────── */

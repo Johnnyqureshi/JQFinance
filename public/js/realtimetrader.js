@@ -6,6 +6,8 @@ const rtTrader = (() => {
   let countdown  = 0;
   let currentSym = null;
   let reqToken   = 0;
+  let lastVolumeProfile = null;
+  let lastVolumePrice = null;
 
   const $ = id => document.getElementById(id);
   const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -264,6 +266,25 @@ const rtTrader = (() => {
     ctx.scale(DPR, DPR);
     ctx.clearRect(0, 0, W, H);
 
+    const isLight = document.documentElement.dataset.theme === 'light';
+    const chartColors = isLight
+      ? {
+          row: 'rgba(23,37,58,0.035)',
+          pocBar: 'rgba(180,119,0,0.68)',
+          valueBar: 'rgba(7,138,112,0.38)',
+          outsideBar: 'rgba(82,101,126,0.22)',
+          label: '#17253a',
+          currentLine: 'rgba(23,37,58,0.70)',
+        }
+      : {
+          row: 'rgba(255,255,255,0.015)',
+          pocBar: 'rgba(245,200,66,0.75)',
+          valueBar: 'rgba(29,214,163,0.28)',
+          outsideBar: 'rgba(255,255,255,0.10)',
+          label: 'rgba(255,255,255,0.28)',
+          currentLine: 'rgba(255,255,255,0.80)',
+        };
+
     const PAD_L  = 46; // space for side labels
     const PAD_R  = 36; // space for price labels on right
     const PAD_T  = 6;
@@ -283,17 +304,17 @@ const rtTrader = (() => {
 
       // Row background
       if (i % 2 === 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.015)';
+        ctx.fillStyle = chartColors.row;
         ctx.fillRect(PAD_L, y, chartW, rowH);
       }
 
       // Volume bar
       if (isPOC) {
-        ctx.fillStyle = 'rgba(245,200,66,0.75)';
+        ctx.fillStyle = chartColors.pocBar;
       } else if (isVA) {
-        ctx.fillStyle = 'rgba(29,214,163,0.28)';
+        ctx.fillStyle = chartColors.valueBar;
       } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        ctx.fillStyle = chartColors.outsideBar;
       }
       if (barW > 0.5) ctx.fillRect(PAD_L, y + 1, barW, Math.max(1.5, rowH - 1.5));
 
@@ -302,15 +323,15 @@ const rtTrader = (() => {
       ctx.textBaseline = 'middle';
       const midY = y + rowH / 2;
       if (isPOC) {
-        ctx.fillStyle = 'rgba(245,200,66,0.95)';
+        ctx.fillStyle = isLight ? chartColors.label : 'rgba(245,200,66,0.95)';
         ctx.font      = 'bold 8.5px DM Mono, monospace';
         ctx.fillText('$' + fmt(bkt.center), PAD_L + chartW + 4, midY);
       } else if (i === vp.vaHi) {
-        ctx.fillStyle = 'rgba(29,214,163,0.80)';
+        ctx.fillStyle = isLight ? chartColors.label : 'rgba(29,214,163,0.80)';
         ctx.font      = '8px DM Mono, monospace';
         ctx.fillText('$' + fmt(bkt.high), PAD_L + chartW + 4, midY);
       } else if (i === vp.vaLo) {
-        ctx.fillStyle = 'rgba(29,214,163,0.80)';
+        ctx.fillStyle = isLight ? chartColors.label : 'rgba(29,214,163,0.80)';
         ctx.font      = '8px DM Mono, monospace';
         ctx.fillText('$' + fmt(bkt.low), PAD_L + chartW + 4, midY);
       }
@@ -324,7 +345,7 @@ const rtTrader = (() => {
     for (const t of labelSteps) {
       const p = vp.globalLow + t * (vp.globalHigh - vp.globalLow);
       const y = PAD_T + (1 - t) * chartH;
-      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.fillStyle = chartColors.label;
       ctx.fillText('$' + fmt(p), PAD_L - 3, y);
     }
 
@@ -343,7 +364,7 @@ const rtTrader = (() => {
     ctx.textAlign    = 'right';
     ctx.textBaseline = 'middle';
     ctx.font         = 'bold 8px DM Mono, monospace';
-    ctx.fillStyle    = 'rgba(245,200,66,0.90)';
+    ctx.fillStyle    = isLight ? chartColors.label : 'rgba(245,200,66,0.90)';
     ctx.fillText('POC', PAD_L - 3, pocY);
 
     const vahY = priceToY(vp.vah);
@@ -352,7 +373,7 @@ const rtTrader = (() => {
     ctx.setLineDash([2, 4]);
     ctx.beginPath(); ctx.moveTo(PAD_L, vahY); ctx.lineTo(PAD_L + chartW, vahY); ctx.stroke();
     ctx.font      = '7.5px DM Mono, monospace';
-    ctx.fillStyle = 'rgba(29,214,163,0.75)';
+    ctx.fillStyle = isLight ? chartColors.label : 'rgba(29,214,163,0.75)';
     ctx.fillText('VAH', PAD_L - 3, vahY);
 
     const valY = priceToY(vp.val);
@@ -363,7 +384,7 @@ const rtTrader = (() => {
     // Current price line
     if (price >= vp.globalLow && price <= vp.globalHigh) {
       const curY = priceToY(price);
-      ctx.strokeStyle = 'rgba(255,255,255,0.80)';
+      ctx.strokeStyle = chartColors.currentLine;
       ctx.lineWidth   = 1.5;
       ctx.setLineDash([5, 3]);
       ctx.beginPath(); ctx.moveTo(PAD_L, curY); ctx.lineTo(PAD_L + chartW, curY); ctx.stroke();
@@ -373,7 +394,7 @@ const rtTrader = (() => {
       ctx.textAlign    = 'right';
       ctx.textBaseline = 'middle';
       ctx.font         = 'bold 8px DM Mono, monospace';
-      ctx.fillStyle    = 'rgba(255,255,255,0.85)';
+      ctx.fillStyle    = isLight ? chartColors.label : 'rgba(255,255,255,0.85)';
       ctx.fillText('NOW', PAD_L - 3, curY);
     }
   }
@@ -383,6 +404,8 @@ const rtTrader = (() => {
     const panel = $('rtVPPanel');
     if (!panel) return;
 
+    lastVolumeProfile = vp;
+    lastVolumePrice = price;
     if (!vp) {
       panel.style.display = 'none';
       return;
@@ -722,6 +745,12 @@ const rtTrader = (() => {
 
   // ── Init ─────────────────────────────────────────────────────────────────────
   function init() {
+    document.addEventListener('themeChanged', () => {
+      if (lastVolumeProfile) {
+        requestAnimationFrame(() => drawVolumeProfile(lastVolumeProfile, lastVolumePrice));
+      }
+    });
+
     $('rtRefreshBtn')?.addEventListener('click', () => {
       if (currentSym) analyze(currentSym);
     });

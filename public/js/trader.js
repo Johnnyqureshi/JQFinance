@@ -39,79 +39,6 @@ const trader = (() => {
     return 100 - 100/(1+avgG/avgL);
   }
 
-  // ── Support / Resistance (pivot clusters in 14-day data) ───────────────────
-  function calcSR(bars) {
-    const price = bars[0]?.c;
-    if (!bars.length || !price) return { support:[], resistance:[] };
-    const pivots = [];
-    for (let i=1; i<bars.length-1; i++) {
-      const h = bars[i].h, l = bars[i].l;
-      if (h > bars[i-1].h && h > bars[i+1].h) pivots.push({ type:'r', val:h });
-      if (l < bars[i-1].l && l < bars[i+1].l) pivots.push({ type:'s', val:l });
-    }
-    // In a trending market the interior pivots can all sit far from price,
-    // leaving "Level 1" several % away. Add near-term real levels as candidates:
-    // yesterday's high/low and the 5-day high/low (bars are newest-first).
-    if (bars[1]?.l && bars[1]?.h) {
-      pivots.push({ type:'s', val:bars[1].l }, { type:'r', val:bars[1].h });
-    }
-    const recent = bars.slice(0, 5).filter(b => b.l && b.h);
-    if (recent.length >= 2) {
-      pivots.push({ type:'s', val:Math.min(...recent.map(b=>b.l)) },
-                  { type:'r', val:Math.max(...recent.map(b=>b.h)) });
-    }
-    const cluster=(arr,tol=0.005)=>{
-      const merged=[]; arr.sort((a,b)=>a-b);
-      for(const v of arr){
-        const g=merged.find(g=>Math.abs(g.center-v)/g.center<tol);
-        g ? (g.sum+=v,g.n++,g.center=g.sum/g.n) : merged.push({center:v,sum:v,n:1});
-      }
-      return merged.sort((a,b)=>b.n-a.n).map(g=>g.center);
-    };
-    // Nearest-first: Level 1 must be the closest actionable level to the current
-    // price, not the most-touched cluster (which can sit several % away).
-    // Split candidates by side of price BEFORE clustering, so a near support is
-    // never averaged into a cluster that lands above the price (or vice versa).
-    const rs=cluster(pivots.filter(p=>p.type==='r'&&p.val>price).map(p=>p.val)).sort((a,b)=>a-b);
-    const ss=cluster(pivots.filter(p=>p.type==='s'&&p.val<price).map(p=>p.val)).sort((a,b)=>b-a);
-    return { resistance: rs.slice(0,2), support: ss.slice(0,2) };
-  }
-
-  // ── Daily Pivot Points (Floor Pivots from prior session OHLC) ──────────────
-  function calcDailyPivots(hist, price, marketState) {
-    if (!hist || !hist.length) return null;
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(new Date());
-    const part = type => parts.find(entry => entry.type === type)?.value;
-    const todayEt = `${part('year')}-${part('month')}-${part('day')}`;
-    const latestIsForming = ['PRE', 'PREPRE', 'REGULAR'].includes(String(marketState || '').toUpperCase())
-      && hist[0]?.date === todayEt;
-    const yest = latestIsForming ? hist[1] : hist[0];
-    if (!yest) return null;
-    const H = yest.high, L = yest.low, C = yest.close;
-    if (!H || !L || !C) return null;
-
-    const pp = (H + L + C) / 3;
-    const r1 = 2 * pp - L;
-    const r2 = pp + (H - L);
-    const s1 = 2 * pp - H;
-    const s2 = pp - (H - L);
-
-    const impliedMove    = r1 - s1;
-    const impliedMovePct = price ? (impliedMove / price) * 100 : 0;
-
-    let zone, zoneClass;
-    if      (price >= r2) { zone = 'Above R2';   zoneClass = 'bull'; }
-    else if (price >= r1) { zone = 'R1–R2 Zone'; zoneClass = 'bull'; }
-    else if (price >= pp) { zone = 'PP–R1 Zone'; zoneClass = 'bull'; }
-    else if (price >= s1) { zone = 'S1–PP Zone'; zoneClass = 'bear'; }
-    else if (price >= s2) { zone = 'S2–S1 Zone'; zoneClass = 'bear'; }
-    else                  { zone = 'Below S2';   zoneClass = 'bear'; }
-
-    return { pp, r1, r2, s1, s2, impliedMove, impliedMovePct, zone, zoneClass };
-  }
-
   // ── Render pivot panel into home page card ──────────────────────────────────
   function renderPivots(container, pivots, price) {
     const levels = [
@@ -223,7 +150,7 @@ const trader = (() => {
   }
 
   // ── S/R row builder (safe DOM, no innerHTML) ────────────────────────────────
-  function makeSRRow(type, title, description, pct, pctDir, formattedPrice, tag) {
+  function makeSRRow(type, title, description, pct, pctDir, displayPrice, tag) {
     const row = document.createElement('div');
     row.className = 'sr-row ' + type;
 
@@ -242,7 +169,7 @@ const trader = (() => {
 
     const priceSpan = document.createElement('span');
     priceSpan.className = 'sr-price';
-    priceSpan.textContent = '$' + formattedPrice;
+    priceSpan.textContent = displayPrice;
 
     if (tag) {
       const tagSpan = document.createElement('span');
@@ -261,7 +188,6 @@ const trader = (() => {
     const closes  = hist.map(h=>h.close);
     const rsi     = calcRSI([...closes].reverse());
     const tenDayV = hist.slice(0,10).reduce((s,h)=>s+h.volume,0)/Math.min(hist.length,10);
-    const sr      = calcSR(hist.map(h=>({c:h.close,h:h.high,l:h.low})));
     const vwap    = Number(gamePlan?.indicators?.vwap);
     const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal);
 
@@ -324,19 +250,25 @@ const trader = (() => {
      const srTbl = $('srTable');
     if (srTbl) {
        const display = gamePlan?.displayLevels || {};
-       const bias = display.bias?.price;
-       const resistance = display.resistance?.[0]?.price;
-       const support = display.support?.[0]?.price;
+        const biasLevel = display.bias;
+        const resistanceLevel = display.resistance?.[0];
+        const supportLevel = display.support?.[0];
+        const bias = Number(biasLevel?.price);
+        const resistance = Number(resistanceLevel?.price);
+        const support = Number(supportLevel?.price);
+        const zoneText = level => Number.isFinite(Number(level?.zoneLow)) && Number.isFinite(Number(level?.zoneHigh))
+          ? `$${fmt(level.zoneLow)}–$${fmt(level.zoneHigh)}`
+          : `$${fmt(level?.price)}`;
        const nearbyRows = [
-         Number.isFinite(Number(resistance))
-           ? makeSRRow('res', 'Resistance above', 'Nearest overhead level', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), '')
+          Number.isFinite(resistance)
+            ? makeSRRow('res', 'Resistance zone', 'Nearest completed-session level', ((resistance-price)/price*100).toFixed(2), 'above', zoneText(resistanceLevel), '')
            : null,
-         Number.isFinite(Number(support))
-           ? makeSRRow('sup', 'Support below', 'Nearest underlying level', ((price-support)/price*100).toFixed(2), 'below', fmt(support), '')
+          Number.isFinite(support)
+            ? makeSRRow('sup', 'Support zone', 'Nearest completed-session level', ((price-support)/price*100).toFixed(2), 'below', zoneText(supportLevel), '')
            : null,
        ].filter(Boolean);
       srTbl.replaceChildren();
-       if (Number.isFinite(Number(bias))) {
+        if (Number.isFinite(bias)) {
          const biasPanel = document.createElement('section');
          biasPanel.className = 'sr-bias';
          const biasTitle = document.createElement('div');
@@ -344,25 +276,28 @@ const trader = (() => {
          biasTitle.textContent = 'KEY BIAS LEVEL';
          const biasPrice = document.createElement('div');
          biasPrice.className = 'sr-bias-price';
-         biasPrice.textContent = '$' + fmt(bias);
+          biasPrice.textContent = zoneText(biasLevel);
          const biasDesc = document.createElement('div');
          biasDesc.className = 'sr-bias-desc';
-         biasDesc.textContent = 'Break and hold above = BULLISH bias  ·  Break and hold below = BEARISH bias';
+          biasDesc.textContent = 'Hold above this zone = BULLISH bias  ·  Hold below = BEARISH bias';
          const biasState = document.createElement('div');
-         const above = price > bias;
-         biasState.className = 'sr-bias-state ' + (above ? 'up' : 'down');
-         biasState.textContent = above ? 'CURRENTLY ABOVE' : 'CURRENTLY BELOW';
+          const zoneLow = Number.isFinite(Number(biasLevel?.zoneLow)) ? Number(biasLevel.zoneLow) : bias;
+          const zoneHigh = Number.isFinite(Number(biasLevel?.zoneHigh)) ? Number(biasLevel.zoneHigh) : bias;
+          const above = price > zoneHigh;
+          const below = price < zoneLow;
+          biasState.className = 'sr-bias-state ' + (above ? 'up' : below ? 'down' : 'testing');
+          biasState.textContent = above ? 'CURRENTLY ABOVE' : below ? 'CURRENTLY BELOW' : 'TESTING ZONE';
          biasPanel.append(biasTitle, biasPrice, biasDesc, biasState);
          srTbl.appendChild(biasPanel);
        }
        if (nearbyRows.length) {
          const nearbyTitle = document.createElement('div');
          nearbyTitle.className = 'sr-nearby-title';
-         nearbyTitle.textContent = 'NEARBY SUPPORT & RESISTANCE';
+          nearbyTitle.textContent = 'NEARBY SUPPORT & RESISTANCE · ATR BUFFERED';
          srTbl.append(nearbyTitle, ...nearbyRows);
          const note = document.createElement('p');
          note.className = 'sr-level-note';
-         note.textContent = 'Support and resistance show nearby price structure. They are not automatic orders.';
+          note.textContent = `Built from ${display.lookback || 14} completed sessions only${display.anchorDate ? ` · anchored to ${display.anchorDate}` : ''}.`;
          srTbl.appendChild(note);
       } else {
         const p = document.createElement('p');
@@ -373,7 +308,7 @@ const trader = (() => {
     }
 
     // Daily Pivots
-    const pivots = calcDailyPivots(hist, price, data.marketState);
+    const pivots = gamePlan?.dailyPivots;
     const pivotCard  = $('pivotCard');
     const pivotPanel = $('pivotPanel');
     const pivotImp   = $('pivotImpliedInline');
@@ -382,7 +317,8 @@ const trader = (() => {
       pivotCard.style.display = '';
       renderPivots(pivotPanel, pivots, price);
       if (pivotImp) {
-        pivotImp.textContent = '· $' + fmt(pivots.impliedMove) + ' (' + pivots.impliedMovePct.toFixed(2) + '%) implied';
+        pivotImp.textContent = '· prior range $' + fmt(pivots.priorRange)
+          + (pivots.anchorDate ? ' · anchored ' + pivots.anchorDate : '');
       }
       if (pivotZBar) {
         pivotZBar.textContent  = pivots.zone;

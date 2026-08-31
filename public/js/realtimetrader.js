@@ -44,27 +44,6 @@ const rtTrader = (() => {
     return 100 - 100 / (1 + avgG / avgL);
   }
 
-  // ── Intraday Support & Resistance (pivot highs/lows from today's 5-min bars) ─
-  function calcSR(bars, price) {
-    if (bars.length < 3 || !price) return { support: null, resistance: null };
-    const suppArr = [], resArr = [];
-    for (let i = 1; i < bars.length - 1; i++) {
-      if (bars[i].h > bars[i-1].h && bars[i].h > bars[i+1].h) resArr.push(bars[i].h);
-      if (bars[i].l < bars[i-1].l && bars[i].l < bars[i+1].l) suppArr.push(bars[i].l);
-    }
-    const nearest = (arr, above) => {
-      const filtered = above ? arr.filter(v => v > price) : arr.filter(v => v < price);
-      if (!filtered.length) return null;
-      return above
-        ? Math.min(...filtered)
-        : Math.max(...filtered);
-    };
-    return {
-      support:    nearest(suppArr, false),
-      resistance: nearest(resArr,  true),
-    };
-  }
-
   // ── Volume momentum ─────────────────────────────────────────────────────────
   function calcVolData(bars) {
     const vols   = bars.map(b => b.v || 0).filter(v => v > 0);
@@ -73,17 +52,8 @@ const rtTrader = (() => {
     return { avgVol, lastVol, surge: avgVol > 0 && lastVol / avgVol > 1.5 };
   }
 
-  // ── Price momentum: net bullish bars in last 5 candles ──────────────────────
-  function calcMomentum(bars) {
-    if (bars.length < 3) return 0;
-    const last = bars.slice(-Math.min(5, bars.length));
-    const up   = last.filter(b => b.c > b.o).length;
-    const down = last.filter(b => b.c < b.o).length;
-    return up - down;
-  }
-
   // ── Signal engine ───────────────────────────────────────────────────────────
-  function computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, isFresh, searchSignal) {
+  function computeSignal(searchSignal) {
     const searchLabel = String(searchSignal?.signal?.label || '').toUpperCase();
     if (searchLabel === 'BUY' || searchLabel === 'SELL') {
       return {
@@ -458,35 +428,6 @@ const rtTrader = (() => {
     panel.style.display = '';
   }
 
-  // ── Daily Pivot Points (Floor Pivots from prior session OHLC) ───────────────
-  function calcDailyPivots(dailyBars, price) {
-    // dailyBars are newest-first; [0] = today (partial), [1] = yesterday (complete)
-    if (!dailyBars || dailyBars.length < 2) return null;
-    const yest = dailyBars[1];
-    if (!yest) return null;
-    const H = yest.high, L = yest.low, C = yest.close;
-    if (!H || !L || !C) return null;
-
-    const pp = (H + L + C) / 3;
-    const r1 = 2 * pp - L;
-    const r2 = pp + (H - L);
-    const s1 = 2 * pp - H;
-    const s2 = pp - (H - L);
-
-    const impliedMove    = r1 - s1;
-    const impliedMovePct = price ? (impliedMove / price) * 100 : 0;
-
-    let zone, zoneClass;
-    if      (price >= r2) { zone = 'Above R2';   zoneClass = 'zone-bull'; }
-    else if (price >= r1) { zone = 'R1–R2 Zone'; zoneClass = 'zone-bull'; }
-    else if (price >= pp) { zone = 'PP–R1 Zone'; zoneClass = 'zone-bull'; }
-    else if (price >= s1) { zone = 'S1–PP Zone'; zoneClass = 'zone-bear'; }
-    else if (price >= s2) { zone = 'S2–S1 Zone'; zoneClass = 'zone-bear'; }
-    else                  { zone = 'Below S2';   zoneClass = 'zone-bear'; }
-
-    return { pp, r1, r2, s1, s2, impliedMove, impliedMovePct, zone, zoneClass };
-  }
-
   // ── Render Daily Pivots Panel (RT console) ───────────────────────────────────
   function renderDailyPivots(pivots, price) {
     const panel = $('rtPivotPanel');
@@ -498,11 +439,12 @@ const rtTrader = (() => {
     if (!pivots) { panel.style.display = 'none'; return; }
 
     if (imp) {
-      imp.textContent = '$' + fmt(pivots.impliedMove) + ' · ' + pivots.impliedMovePct.toFixed(2) + '% implied range';
+      imp.textContent = 'Prior range $' + fmt(pivots.priorRange)
+        + (pivots.anchorDate ? ' · anchored ' + pivots.anchorDate : '');
     }
     if (zoneEl) {
       zoneEl.textContent = pivots.zone;
-      zoneEl.className   = 'rt-pivot-zone ' + pivots.zoneClass;
+      zoneEl.className   = 'rt-pivot-zone zone-' + pivots.zoneClass;
     }
 
     // Build level ladder (high to low), insert price marker between levels
@@ -617,13 +559,8 @@ const rtTrader = (() => {
       ? Number(gamePlan.indicators.vwap)
       : null;
     const rsi     = calcRSI(closes);
-    const sr      = calcSR(bars, price);
     const volData = calcVolData(bars);
-    const momentum = calcMomentum(bars);
-    const confluence = gamePlan?.confluence || null;
-    const generated = Date.parse(gamePlan?.generatedAt || '');
-    const fresh = Number.isFinite(generated) && Date.now() - generated <= 90_000;
-    const { signal, confidence, reasons } = computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, fresh, gamePlan?.searchSignal);
+    const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal);
 
     // Verdict
     const vb = $('rtVerdict');
@@ -726,7 +663,7 @@ const rtTrader = (() => {
     renderVolumeProfile(vp, price);
 
     // Daily pivot levels + implied move
-    const pivots = calcDailyPivots(dailyBars || [], price);
+    const pivots = gamePlan?.dailyPivots || null;
     renderDailyPivots(pivots, price);
 
     // Keep the slower daily context separate from the actionable 5-minute read.

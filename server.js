@@ -24,7 +24,8 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
-const { buildSearchVolumeSignal, selectCompletedDailyBar } = require('./lib/search-volume-signal');
+const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
+const { buildSearchLevels } = require('./lib/search-levels');
 const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
@@ -2390,18 +2391,6 @@ function gpSourceFreshness({ quote, daily, oneMinute, fiveMinute, fifteenMinute,
   return sources;
 }
 
-function gpATR(bars, period = 14) {
-  if (!bars || bars.length < period + 1) return null;
-  const trs = [];
-  for (let i = 1; i < bars.length; i++) {
-    const b = bars[i], p = bars[i - 1];
-    trs.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
-  }
-  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
-  return atr;
-}
-
 function gpVWAP(intraBars) {
   const reg = (intraBars || []).filter(b => b.session === 'reg' && b.v > 0);
   if (!reg.length) return null;
@@ -2467,18 +2456,6 @@ function gpAnalogs(daily, thresholdPct) {
   };
 }
 
-// Swing highs/lows (5-bar pivots) from recent daily bars
-function gpSwings(daily, lookback = 90) {
-  const bars = daily.slice(-lookback);
-  const highs = [], lows = [];
-  for (let i = 2; i < bars.length - 2; i++) {
-    const w = bars.slice(i - 2, i + 3);
-    if (bars[i].h === Math.max(...w.map(b => b.h))) highs.push(bars[i].h);
-    if (bars[i].l === Math.min(...w.map(b => b.l))) lows.push(bars[i].l);
-  }
-  return { highs, lows };
-}
-
 app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
   if (!sym) return res.status(400).json({ ok: false, error: 'Symbol required' });
@@ -2527,7 +2504,12 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const dataGaps = [];
     const price  = quote.price;
     const closes = daily.map(b => b.c);
-    const atr    = gpATR(daily);
+    const searchLevelAnalysis = buildSearchLevels({
+      dailyBars: daily,
+      currentPrice: price,
+      marketState: quote.marketState,
+    });
+    const atr    = searchLevelAnalysis.atr;
     const vwap   = gpVWAP(intra);
     if (!intra?.length) dataGaps.push('Intraday 5-min data unavailable');
     if (vwap == null)   dataGaps.push('VWAP unavailable (no regular-session volume yet)');
@@ -2710,49 +2692,13 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     }
     if (!news.length) dataGaps.push('No recent news retrieved');
 
-    // Key levels
-    const prevDay = selectCompletedDailyBar(daily, { marketState: quote.marketState });
-    const swings = gpSwings(daily);
-    const candidates = [];
-    const push = (p, label) => { if (p != null && isFinite(p) && p > 0) candidates.push({ price: +(+p).toFixed(2), label }); };
-    if (prevDay) { push(prevDay.h, "Prev day high"); push(prevDay.l, "Prev day low"); }
-    push(quote.dayHigh, 'Today high'); push(quote.dayLow, 'Today low');
-    push(vwap, 'VWAP');
-    if (premarket) { push(premarket.high, 'Premarket high'); push(premarket.low, 'Premarket low'); }
-    push(indicators.sma20, 'SMA 20'); push(indicators.sma50, 'SMA 50'); push(indicators.sma200, 'SMA 200');
-    swings.highs.slice(-3).forEach(h => push(h, 'Swing high'));
-    swings.lows.slice(-3).forEach(l => push(l, 'Swing low'));
-    const inRange = candidates.filter(c => Math.abs(c.price - price) / price <= 0.15);
-    const dedupe = arr => {
-      const out = [];
-      arr.forEach(c => {
-        const near = out.find(o => Math.abs(o.price - c.price) / price < 0.004);
-        if (near) {
-          near.label += ' + ' + c.label;
-          near.confirmations = (near.confirmations || 1) + 1;
-        } else {
-          out.push({ ...c, confirmations: 1 });
-        }
-      });
-      return out;
+    // Search-only levels use completed daily sessions exclusively. The live
+    // candle, VWAP, premarket, and today's changing high/low cannot repaint them.
+    const levels = searchLevelAnalysis.levels || {
+      support: [], resistance: [], breakdown: null, currentPrice: +price.toFixed(2),
     };
-    const support = dedupe(inRange.filter(c => c.price < price).sort((a, b) => b.price - a.price)).slice(0, 3);
-    const resistance = dedupe(inRange.filter(c => c.price > price).sort((a, b) => a.price - b.price)).slice(0, 3);
-    const breakdown = support.length ? +(support.at(-1).price - (atr ?? price * 0.02) * 0.5).toFixed(2) : null;
-    const levels = { support, resistance, breakdown, currentPrice: +price.toFixed(2) };
-    const biasLevel = prevDay
-      ? { price: +((prevDay.h + prevDay.l + prevDay.c) / 3).toFixed(2), label: 'Key bias level · daily pivot' }
-      : null;
-    // Keep the full level set for the deterministic engine, but expose a
-    // deliberately simpler presentation to Search users: one bias reference,
-    // one nearby resistance, and one nearby support. These are observations,
-    // not order instructions.
-    const displayLevels = {
-      bias: biasLevel,
-      resistance: resistance.slice(0, 1),
-      support: support.slice(0, 1),
-      currentPrice: +price.toFixed(2),
-    };
+    const displayLevels = searchLevelAnalysis.displayLevels;
+    const dailyPivots = searchLevelAnalysis.dailyPivots;
     const sourceFreshness = gpSourceFreshness({
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
@@ -2913,7 +2859,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, displayLevels, probabilities, confluence, searchSignal,
+      market, news, levels, displayLevels, dailyPivots, probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,
     };

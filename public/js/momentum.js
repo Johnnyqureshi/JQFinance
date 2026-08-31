@@ -913,6 +913,7 @@
     botEnabled:    false,          // true when auto-trading is running
     liveArmed:     false,
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
+    sessionPnl:    { points: [0], total: 0, trades: 0, wins: 0 },
     _activeTrades: new Set(),      // symbols with pending/live bot orders (prevents double-entry)
     posMonitorId:  null,           // setInterval handle for position polling
     _flattenInProgress: false,     // blocks new automated orders while the kill switch settles
@@ -946,7 +947,9 @@
           this.config = { ...MomentumConfig.defaults, ...settings.config };
           MomentumConfig.save(this.config);
         }
+        const wasEnabled = this.botEnabled;
         this.botEnabled = settings?.enabled === true;
+        if (this.botEnabled && !wasEnabled) this._resetSessionPnl();
         this.liveArmed = settings?.liveArmed === true;
         this._renderConfigPanel();
         this._renderBotStatus();
@@ -1894,6 +1897,86 @@
       renderPeriod('All', performance?.allTime);
     },
 
+    _resetSessionPnl() {
+      // Session performance is intentionally ephemeral: it starts when the
+      // bot is enabled and must not be confused with the persisted journal.
+      this.sessionPnl = { points: [0], total: 0, trades: 0, wins: 0 };
+      this._renderSessionPnl();
+    },
+
+    _recordSessionPnl(value) {
+      const pnl = Number(value);
+      if (!Number.isFinite(pnl)) return;
+      const session = this.sessionPnl || { points: [0], total: 0, trades: 0, wins: 0 };
+      session.total += pnl;
+      session.trades += 1;
+      if (pnl > 0) session.wins += 1;
+      session.points.push(session.total);
+      this.sessionPnl = session;
+      this._renderSessionPnl();
+    },
+
+    _renderSessionPnl() {
+      const session = this.sessionPnl || { points: [0], total: 0, trades: 0, wins: 0 };
+      const summary = $('mtSessionPnlSummary');
+      const current = $('mtSessionPnlCurrent');
+      const chart = $('mtSessionPnlChart');
+      const line = $('mtSessionPnlLine');
+      const area = $('mtSessionPnlArea');
+      const zero = $('mtSessionPnlZero');
+      const dot = $('mtSessionPnlDot');
+      if (!summary || !chart || !line || !area || !zero || !dot) return;
+
+      const points = Array.isArray(session.points) && session.points.length
+        ? session.points
+        : [0];
+      const total = Number(session.total) || 0;
+      const trades = Number(session.trades) || 0;
+      const winRate = trades ? Math.round((Number(session.wins) || 0) / trades * 100) : 0;
+      summary.textContent = `Session: ${this._formatPnl(total)} across ${trades} trade${trades === 1 ? '' : 's'} (${winRate}% win rate)`;
+      if (current) current.textContent = `Current ${this._formatPnl(total)}`;
+
+      const width = 600;
+      const height = 120;
+      const padX = 10;
+      const padY = 12;
+      const values = points.map(point => Number(point)).filter(Number.isFinite);
+      const minValue = Math.min(0, ...values);
+      const maxValue = Math.max(0, ...values);
+      const span = Math.max(maxValue - minValue, 1);
+      const chartMin = minValue - span * 0.12;
+      const chartMax = maxValue + span * 0.12;
+      const toX = index => points.length === 1
+        ? width - padX
+        : padX + index / (points.length - 1) * (width - padX * 2);
+      const toY = value => padY + (chartMax - value) / (chartMax - chartMin) * (height - padY * 2);
+      const coords = points.map((point, index) => {
+        const value = Number.isFinite(Number(point)) ? Number(point) : 0;
+        return [toX(index), toY(value)];
+      });
+      const linePoints = coords.length === 1
+        ? `${padX},${coords[0][1]} ${width - padX},${coords[0][1]}`
+        : coords.map(([x, y]) => `${x},${y}`).join(' ');
+      const areaPoints = `${padX},${toY(0)} ${linePoints} ${width - padX},${toY(0)}`;
+      line.setAttribute('points', linePoints);
+      area.setAttribute('points', areaPoints);
+      zero.setAttribute('y1', toY(0));
+      zero.setAttribute('y2', toY(0));
+      dot.setAttribute('cx', coords[coords.length - 1][0]);
+      dot.setAttribute('cy', coords[coords.length - 1][1]);
+
+      const tone = total > 0 ? 'positive' : total < 0 ? 'negative' : 'neutral';
+      const toneColor = tone === 'positive' ? '#1dd6a3' : tone === 'negative' ? '#e84545' : '#7a90b8';
+      chart.classList.remove('mt-session-pnl--positive', 'mt-session-pnl--negative', 'mt-session-pnl--neutral');
+      chart.classList.add(`mt-session-pnl--${tone}`);
+      summary.className = `mt-session-pnl-summary mt-session-pnl--${tone}`;
+      if (current) current.className = `mt-session-pnl-current mt-session-pnl--${tone}`;
+      line.setAttribute('stroke', toneColor);
+      dot.setAttribute('fill', toneColor);
+      area.setAttribute('fill', toneColor);
+      chart.setAttribute('aria-label', `Session P&L ${this._formatPnl(total)} across ${trades} trades`);
+    },
+
     _hydrateOpenBotPositions(trades) {
       (Array.isArray(trades) ? trades : []).filter(trade => trade.status === 'open').forEach(trade => {
         const entry = Number(trade.entry_price);
@@ -2115,6 +2198,7 @@
       if (!trade) return false;
 
       const pnl = Number(trade.pnl);
+      if (this.botEnabled) this._recordSessionPnl(pnl);
       this.addLog(sym, '✓ AUTO-EXIT',
         `${fmt(trade.shares, 4)} sh @ ${fmtDollar(trade.exit_price)} · P&L ${this._formatPnl(pnl)} · ${trade.exit_reason || 'Broker exit order filled'}`,
         pnl < 0 ? 'err' : 'ok');
@@ -2743,6 +2827,7 @@
       const botWasRunning = this.botEnabled;
       this._flattenInProgress = true;
       this.botEnabled = false;
+      if (botWasRunning) this._resetSessionPnl();
       this._renderBotStatus();
       this._stopPositionMonitor();
       this._setFlattenButtonState(count);
@@ -2806,11 +2891,13 @@
       }
       this._renderBotStatus();
       if (this.botEnabled) {
+        this._resetSessionPnl();
         this.addLog('BOT', '▶ Auto-trading ON',
           `Server-owned ${AlpacaClient.mode.toUpperCase()} cycle · broker-held bracket exits · continues when this page closes`, 'ok');
         this._startPositionMonitor();
         this.run(); // trigger an immediate scan + trade cycle
       } else {
+        this._resetSessionPnl();
         this.addLog('BOT', '⏹ Auto-trading OFF', 'Manual mode — open positions remain, Alpaca brackets still active', 'info');
         if (!this.botPositions.size) this._stopPositionMonitor();
       }

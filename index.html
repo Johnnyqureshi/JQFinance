@@ -1233,6 +1233,28 @@
       </div>
     </div>
 
+    <!-- ── Ephemeral session P&L ───────────────────────────────────────── -->
+    <section class="mt-session-pnl" aria-labelledby="mtSessionPnlTitle">
+      <div class="mt-session-pnl-header">
+        <span class="mt-session-pnl-title" id="mtSessionPnlTitle">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><polyline points="6 16 10 12 13 14 19 7"/></svg>
+          Session P&amp;L
+          <span class="mt-session-pnl-sub">realized trades since bot start</span>
+        </span>
+        <span class="mt-session-pnl-current" id="mtSessionPnlCurrent">Current +$0.00</span>
+      </div>
+      <div class="mt-session-pnl-body">
+        <div class="mt-session-pnl-summary mt-session-pnl--neutral" id="mtSessionPnlSummary" aria-live="polite">Session: +$0.00 across 0 trades (0% win rate)</div>
+        <svg id="mtSessionPnlChart" class="mt-session-pnl-chart mt-session-pnl--neutral" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Session P&amp;L +$0.00 across 0 trades">
+          <line id="mtSessionPnlZero" x1="10" x2="590" y1="60" y2="60" class="mt-session-pnl-zero"/>
+          <polygon id="mtSessionPnlArea" points="10,60 10,60 590,60 590,60" class="mt-session-pnl-area"/>
+          <polyline id="mtSessionPnlLine" points="10,60 590,60" class="mt-session-pnl-line" fill="none" stroke="#7a90b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle id="mtSessionPnlDot" cx="590" cy="60" r="4" class="mt-session-pnl-dot" fill="#7a90b8"/>
+        </svg>
+        <div class="mt-session-pnl-axis"><span>$0 start</span><span>Each confirmed close</span></div>
+      </div>
+    </section>
+
   </div><!-- /.mt-page -->
 </div><!-- /#page-momentum -->
 

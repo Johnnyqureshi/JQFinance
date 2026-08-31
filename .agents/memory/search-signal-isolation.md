@@ -3,8 +3,8 @@ name: Search signal isolation
 description: Durable boundary and fail-safe rules for search-page volume analysis.
 ---
 
-Search-page volume and price signals are read-only analysis. They must remain separate from bot confluence contracts, schedulers, entry gates, broker operations, and strategy settings. Directional search signals require fresh, completed 1-minute, 5-minute, and 15-minute acceleration windows plus a valid same-time historical volume baseline. Missing or stale required evidence must produce an explicit no-trade result.
+Search-page volume and price signals are read-only analysis. They must remain separate from bot confluence contracts, schedulers, entry gates, broker operations, and strategy settings. Search verdicts are binary BUY/SELL. Missing or stale evidence keeps the verdict provisional, caps confidence at 35%, and states the data gap instead of implying confirmation.
 
-**Why:** The search page is intended to help a trader interpret live participation without silently changing any automated strategy. Forming candles and partial timeframe coverage can otherwise create false breakout confirmations.
+**Why:** Binary presentation must not hide weak evidence, and news alone must not substitute for mechanical price and volume confirmation.
 
-**How to apply:** Extend search analysis through its dedicated response object and UI only. Keep bot-facing outputs unchanged, use completed bars for structure and follow-through, and treat high volume as participation until price direction confirms control.
+**How to apply:** Keep bot-facing outputs unchanged. Use completed bars, same-time RVOL, acceleration, and verified pivots. Apply fresh news only when price and volume corroborate it; ignore stale, future-dated, or unassociated headlines.

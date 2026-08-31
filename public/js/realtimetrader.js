@@ -82,14 +82,24 @@ const rtTrader = (() => {
   }
 
   // ── Signal engine ───────────────────────────────────────────────────────────
-  function computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, isFresh) {
+  function computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, isFresh, searchSignal) {
+    const searchLabel = String(searchSignal?.signal?.label || '').toUpperCase();
+    if (searchLabel === 'BUY' || searchLabel === 'SELL') {
+      return {
+        signal: searchLabel,
+        confidence: Number.isFinite(Number(searchSignal.confidence)) ? Math.round(Number(searchSignal.confidence)) : 30,
+        reasons: Array.isArray(searchSignal.reasons) && searchSignal.reasons.length
+          ? searchSignal.reasons.slice(0, 4)
+          : ['Binary search signal derived from price, volume, pivots, and recent catalysts'],
+      };
+    }
     // The server-side technical engine is the authoritative path whenever it is
     // available. It evaluates higher timeframes and critical support/resistance,
     // avoiding a one-bar SELL call into a confirmed support response.
     if (confluence?.available && !isFresh) {
       return {
-        signal: 'HOLD', confidence: 30,
-        reasons: ['DATA STALE — SIGNAL CONFIDENCE REDUCED', 'No directional call is issued from stale technical evidence'],
+        signal: price >= (vwap ?? price) ? 'BUY' : 'SELL', confidence: 30,
+        reasons: ['DATA STALE — SIGNAL CONFIDENCE REDUCED', 'Fallback direction uses price versus VWAP'],
       };
     }
     if (confluence?.available) {
@@ -97,8 +107,8 @@ const rtTrader = (() => {
       const signal = confluence.signal || {};
       if (confluence.dataQuality?.fresh !== true) {
         return {
-          signal: 'HOLD', confidence: 30,
-          reasons: ['STALE OR UNVERIFIED MARKET DATA', 'No directional call is issued until each required source is current'],
+          signal: price >= (vwap ?? price) ? 'BUY' : 'SELL', confidence: 30,
+          reasons: ['STALE OR UNVERIFIED MARKET DATA', 'Fallback direction uses price versus VWAP'],
         };
       }
       const support = confluence.levels?.criticalSupport;
@@ -113,7 +123,7 @@ const rtTrader = (() => {
       }
       if (signal.stage === 'ENTRY CONFIRMATION' && scores.bullish >= 58 && scores.drawdown < scores.bullish) {
         return {
-          signal: 'HOLD', confidence: scores.setupQuality || scores.bullish,
+          signal: 'BUY', confidence: scores.setupQuality || scores.bullish,
           reasons: [signal.label, `Wait for confirmation level`, supportNote, `Bullish ${scores.bullish}% vs drawdown ${scores.drawdown}%`],
         };
       }
@@ -123,7 +133,7 @@ const rtTrader = (() => {
         // support has failed.
         if (support?.distancePct != null && support.distancePct <= 1 && signal.stage !== 'INVALIDATED') {
           return {
-            signal: 'HOLD', confidence: scores.setupQuality || scores.bearish,
+            signal: 'SELL', confidence: scores.setupQuality || scores.bearish,
             reasons: ['Elevated drawdown risk, but price remains at critical support', supportNote, 'Wait for a support break before treating it as bearish confirmation'],
           };
         }
@@ -133,7 +143,7 @@ const rtTrader = (() => {
         };
       }
       return {
-        signal: 'HOLD', confidence: scores.setupQuality || 50,
+        signal: scores.bullish >= scores.bearish ? 'BUY' : 'SELL', confidence: scores.setupQuality || 50,
         reasons: [signal.label || 'NO CLEAR EDGE', supportNote, resistanceNote, 'Signals conflict — wait for confirmation'],
       };
     }
@@ -142,7 +152,7 @@ const rtTrader = (() => {
     // simplified one-bar BUY/SELL rule. It would be inconsistent with the bot.
     if (!confluence?.available) {
       return {
-        signal: 'HOLD', confidence: 30,
+        signal: price >= (vwap ?? price) ? 'BUY' : 'SELL', confidence: 30,
         reasons: ['Technical confluence unavailable', 'No directional call without support/resistance and multi-timeframe confirmation'],
       };
     }
@@ -150,7 +160,7 @@ const rtTrader = (() => {
     const aboveVwap  = vwap != null && price > vwap;
     const belowVwap  = vwap != null && price < vwap;
 
-    let signal = 'HOLD', confidence = 50, reasons = [];
+    let signal = price >= (vwap ?? price) ? 'BUY' : 'SELL', confidence = 50, reasons = [];
 
     if (rsi !== null && rsi < 40 && aboveVwap && momentum >= 2) {
       signal = 'BUY'; confidence = 78;
@@ -163,7 +173,7 @@ const rtTrader = (() => {
       reasons = ['Price bouncing off intraday support', 'Price above VWAP', 'Bullish momentum at demand zone'];
     } else if (sr.support && price <= sr.support * 1.006) {
       // A nearby support test needs confirmation, not a forced directional call.
-      signal = 'HOLD'; confidence = 54;
+      signal = price >= (vwap ?? price) ? 'BUY' : 'SELL'; confidence = 54;
       reasons = ['Price is testing intraday support', 'Wait for a break or a confirmed bounce', 'Fallback signal has limited context'];
     } else if (rsi !== null && rsi > 70 && belowVwap) {
       signal = 'SELL'; confidence = 76;
@@ -607,12 +617,12 @@ const rtTrader = (() => {
     const confluence = gamePlan?.confluence || null;
     const generated = Date.parse(gamePlan?.generatedAt || '');
     const fresh = Number.isFinite(generated) && Date.now() - generated <= 90_000;
-    const { signal, confidence, reasons } = computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, fresh);
+    const { signal, confidence, reasons } = computeSignal(rsi, price, vwap, volData, momentum, sr, confluence, fresh, gamePlan?.searchSignal);
 
     // Verdict
     const vb = $('rtVerdict');
     if (vb) {
-      ['buy', 'hold', 'sell'].forEach(c => vb.classList.remove(c));
+      ['buy', 'hold', 'wait', 'sell'].forEach(c => vb.classList.remove(c));
       vb.classList.add(signal.toLowerCase());
       vb.textContent = signal;
     }

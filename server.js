@@ -24,7 +24,7 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
-const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
+const { buildSearchVolumeSignal, selectCompletedDailyBar } = require('./lib/search-volume-signal');
 const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
@@ -2658,14 +2658,51 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
         const nd = await nr.json();
         news = (nd.news || []).slice(0, 5).map(n => ({
           headline: n.title, source: n.publisher,
+          publishedAt: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
           date: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString().slice(0, 10) : null,
         }));
       }
     } catch { /* news optional */ }
+    if (NEWS_KEY) {
+      try {
+        const from = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+        const nr = await fetch(`https://newsapi.org/v2/everything?q=${encodeURIComponent(`${sym} stock`)}&from=${encodeURIComponent(from)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_KEY}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (nr.ok) {
+          const nd = await nr.json();
+          const explicitSymbol = new RegExp(
+            sym.length <= 3
+              ? `(?:\\$${sym}\\b|\\(${sym}\\)|(?:NASDAQ|NYSE|AMEX)\\s*:\\s*${sym}\\b)`
+              : `\\b${sym}\\b`,
+            'i',
+          );
+          const newsApiRows = (nd.articles || [])
+            .filter(n => n?.title && n.title !== '[Removed]')
+            .filter(n => explicitSymbol.test(`${n.title} ${n.description || ''}`))
+            .map(n => ({
+              headline: n.title,
+              source: n.source?.name || 'NewsAPI',
+              publishedAt: n.publishedAt || null,
+              date: n.publishedAt ? String(n.publishedAt).slice(0, 10) : null,
+            }));
+          const seen = new Set();
+          news = [...newsApiRows, ...news]
+            .filter(item => {
+              const key = String(item.headline || '').toLowerCase().replace(/\s+/g, ' ').trim();
+              if (!key || seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .sort((a, b) => Date.parse(b.publishedAt || b.date || 0) - Date.parse(a.publishedAt || a.date || 0))
+            .slice(0, 8);
+        }
+      } catch { /* secondary late-news source is optional */ }
+    }
     if (!news.length) dataGaps.push('No recent news retrieved');
 
     // Key levels
-    const prevDay = daily.at(-2) || null;
+    const prevDay = selectCompletedDailyBar(daily, { marketState: quote.marketState });
     const swings = gpSwings(daily);
     const candidates = [];
     const push = (p, label) => { if (p != null && isFinite(p) && p > 0) candidates.push({ price: +(+p).toFixed(2), label }); };
@@ -2753,6 +2790,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       indicators,
       market,
       dayChangePct: chg1d,
+      news,
       freshness: sourceFreshness,
     });
 
@@ -2808,7 +2846,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const apiKey = process.env.AIML_API_KEY;
     if (apiKey) {
       const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence, searchSignal };
-      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic searchSignal is authoritative for the search page; do not upgrade HOLD, WATCH, SELL, or DATA INCOMPLETE into a trade. Oversold alone is NOT a buy signal. A resistance test with rising price and expanding volume is not automatically bearish. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
+      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic binary searchSignal is authoritative for the search page. Do not describe a BUY as confirmed unless its stage is CONFIRMED; keep tradeSetup null for provisional evidence. Use scored recent headlines only as a catalyst, never as a substitute for price and volume confirmation. Oversold alone is NOT a buy signal. A resistance test with rising price and expanding volume is not automatically bearish. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
       try {
         const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
           method: 'POST',

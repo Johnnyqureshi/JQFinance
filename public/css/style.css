@@ -922,10 +922,10 @@ input  { font-family:inherit; }
 }
 .verdict-card::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity var(--tr); }
 .verdict-card.buy  { border-color:rgba(29,214,163,.4); }
-.verdict-card.hold { border-color:rgba(245,200,66,.4); }
+.verdict-card.hold,.verdict-card.wait { border-color:rgba(245,200,66,.4); }
 .verdict-card.sell { border-color:rgba(232,69,69,.4); }
 .verdict-card.buy::before  { background:radial-gradient(ellipse at 15% 50%, rgba(29,214,163,.07), transparent 70%); opacity:1; }
-.verdict-card.hold::before { background:radial-gradient(ellipse at 15% 50%, rgba(245,200,66,.07), transparent 70%); opacity:1; }
+.verdict-card.hold::before,.verdict-card.wait::before { background:radial-gradient(ellipse at 15% 50%, rgba(245,200,66,.07), transparent 70%); opacity:1; }
 .verdict-card.sell::before { background:radial-gradient(ellipse at 15% 50%, rgba(232,69,69,.07), transparent 70%); opacity:1; }
 
 .v-badge {
@@ -934,7 +934,7 @@ input  { font-family:inherit; }
   flex-shrink:0;
 }
 .v-badge.buy  { color:var(--green); border-color:var(--green); background:var(--green-dim); animation:glow-g 2s ease-in-out infinite; }
-.v-badge.hold { color:var(--gold);  border-color:var(--gold);  background:var(--gold-dim);  animation:glow-y 2s ease-in-out infinite; }
+.v-badge.hold,.v-badge.wait { color:var(--gold);  border-color:var(--gold);  background:var(--gold-dim);  animation:glow-y 2s ease-in-out infinite; }
 .v-badge.sell { color:var(--red);   border-color:var(--red);   background:var(--red-dim);   animation:glow-r 2s ease-in-out infinite; }
 @keyframes glow-g { 0%,100%{box-shadow:0 0 20px rgba(29,214,163,.15)} 50%{box-shadow:0 0 40px rgba(29,214,163,.35)} }
 @keyframes glow-y { 0%,100%{box-shadow:0 0 20px rgba(245,200,66,.15)} 50%{box-shadow:0 0 40px rgba(245,200,66,.35)} }
@@ -1462,7 +1462,7 @@ input  { font-family:inherit; }
 }
 .rt-verdict-badge.buy  { color: var(--teal); text-shadow: 0 0 20px rgba(29,214,163,.35); }
 .rt-verdict-badge.sell { color: var(--red);  text-shadow: 0 0 20px rgba(232,69,69,.35); }
-.rt-verdict-badge.hold { color: var(--gold); text-shadow: 0 0 20px rgba(245,200,66,.25); }
+.rt-verdict-badge.hold,.rt-verdict-badge.wait { color: var(--gold); text-shadow: 0 0 20px rgba(245,200,66,.25); }
 
 .rt-verdict-conf {
   font-size: 11px; color: var(--t2);

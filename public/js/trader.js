@@ -77,10 +77,16 @@ const trader = (() => {
   }
 
   // ── Daily Pivot Points (Floor Pivots from prior session OHLC) ──────────────
-  function calcDailyPivots(hist, price) {
-    // hist is newest-first (hist[0]=today partial, hist[1]=yesterday complete)
-    if (!hist || hist.length < 2) return null;
-    const yest = hist[1];
+  function calcDailyPivots(hist, price, marketState) {
+    if (!hist || !hist.length) return null;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const part = type => parts.find(entry => entry.type === type)?.value;
+    const todayEt = `${part('year')}-${part('month')}-${part('day')}`;
+    const latestIsForming = ['PRE', 'PREPRE', 'REGULAR'].includes(String(marketState || '').toUpperCase())
+      && hist[0]?.date === todayEt;
+    const yest = latestIsForming ? hist[1] : hist[0];
     if (!yest) return null;
     const H = yest.high, L = yest.low, C = yest.close;
     if (!H || !L || !C) return null;
@@ -145,28 +151,31 @@ const trader = (() => {
   }
 
   // ── Signal logic ────────────────────────────────────────────────────────────
-  function computeSignal(rsi, price, open, volume, avgVol, sr) {
-    const bearishDay  = price < open;
-    const bullishDay  = price >= open;
-    const volumeSurge = avgVol>0 && volume/avgVol > 1.5;
-    const nearRes     = sr.resistance.length>0 && Math.abs(price-sr.resistance[0])/price < 0.015;
+  function computeSignal(searchSignal, fallback) {
+    const label = String(searchSignal?.signal?.label || '').toUpperCase();
+    const confidence = Number.isFinite(Number(searchSignal?.confidence))
+      ? Math.max(0, Math.min(100, Math.round(Number(searchSignal.confidence))))
+      : 0;
+    const reasons = Array.isArray(searchSignal?.reasons) && searchSignal.reasons.length
+      ? searchSignal.reasons.slice(0, 4)
+      : ['Verified multi-timeframe evidence is unavailable', 'Directional side selected from the latest price and VWAP relationship'];
 
-    let signal='HOLD', confidence=50, reasons=[];
-
-    if (rsi<45 && bullishDay && volumeSurge) {
-      signal='BUY'; confidence=75;
-      reasons=['RSI below 45 (oversold momentum)','Bullish day — price above open','Volume surge (+50% above average)'];
-    } else if (rsi>70 || (nearRes && bearishDay)) {
-      signal='SELL'; confidence=rsi>70?72:60;
-      if (rsi>70)        reasons.push('RSI overbought (above 70)');
-      if (nearRes)       reasons.push('Price near resistance level');
-      if (bearishDay)    reasons.push('Bearish day — price below open');
-    } else {
-      reasons=['RSI in neutral range','No extreme volume signal','No strong directional bias'];
-      confidence = rsi<55 ? 60 : 52;
+    if (label === 'BUY') {
+      return { signal: 'BUY', confidence, reasons };
     }
-
-    return { signal, confidence, reasons };
+    if (label === 'SELL') {
+      return { signal: 'SELL', confidence, reasons };
+    }
+    const price = Number(fallback?.price);
+    const open = Number(fallback?.open);
+    const vwap = Number(fallback?.vwap);
+    const buy = Number.isFinite(price)
+      && ((Number.isFinite(vwap) && price >= vwap) || (Number.isFinite(open) && price >= open));
+    return {
+      signal: buy ? 'BUY' : 'SELL',
+      confidence: confidence || 30,
+      reasons: ['Search signal unavailable — binary fallback uses price versus VWAP/open', ...reasons].slice(0, 4),
+    };
   }
 
   // ── RSI gauge SVG ──────────────────────────────────────────────────────────
@@ -252,13 +261,14 @@ const trader = (() => {
   }
 
   // ── Render results ─────────────────────────────────────────────────────────
-  function render(sym, data, hist) {
+  function render(sym, data, hist, gamePlan) {
     const { price, open, dayHigh, dayLow, volume, avgVolume } = data;
     const closes  = hist.map(h=>h.close);
     const rsi     = calcRSI([...closes].reverse());
     const tenDayV = hist.slice(0,10).reduce((s,h)=>s+h.volume,0)/Math.min(hist.length,10);
     const sr      = calcSR(hist.map(h=>({c:h.close,h:h.high,l:h.low})));
-    const { signal, confidence, reasons } = computeSignal(rsi, price, open, volume, tenDayV, sr);
+    const vwap    = Number(gamePlan?.indicators?.vwap);
+    const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal, { price, open, vwap });
 
     const bullish = price >= open;
     const dayRngPct = dayHigh>dayLow ? ((price-dayLow)/(dayHigh-dayLow)*100) : 50;
@@ -270,7 +280,7 @@ const trader = (() => {
     const vc = $('verdictCard');
     const vb = $('verdictBadge');
     const cls= signal.toLowerCase();
-    ['buy','hold','sell'].forEach(c=>{ vc.classList.remove(c); vb.classList.remove(c); });
+    ['buy','hold','wait','sell'].forEach(c=>{ vc.classList.remove(c); vb.classList.remove(c); });
     vc.classList.add(cls); vb.classList.add(cls);
     $('verdictBadge').textContent  = signal;
     $('verdictSym').textContent    = sym;
@@ -314,9 +324,23 @@ const trader = (() => {
     // S/R
     const srTbl = $('srTable');
     if (srTbl) {
+      const signalResistance = Number(gamePlan?.searchSignal?.levels?.resistance?.price);
+      const signalSupport = Number(gamePlan?.searchSignal?.levels?.support?.price);
+      const verifiedResistance = [
+        ...(Number.isFinite(signalResistance) ? [signalResistance] : []),
+        ...(Array.isArray(gamePlan?.levels?.resistance)
+          ? gamePlan.levels.resistance.map(level => Number(level.price)).filter(Number.isFinite)
+          : sr.resistance),
+      ].filter((value, index, list) => list.findIndex(item => Math.abs(item - value) / price < 0.001) === index);
+      const verifiedSupport = [
+        ...(Number.isFinite(signalSupport) ? [signalSupport] : []),
+        ...(Array.isArray(gamePlan?.levels?.support)
+          ? gamePlan.levels.support.map(level => Number(level.price)).filter(Number.isFinite)
+          : sr.support),
+      ].filter((value, index, list) => list.findIndex(item => Math.abs(item - value) / price < 0.001) === index);
       const rows = [
-        ...sr.resistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'SELL ZONE')),
-        ...sr.support.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'BUY ZONE')),
+        ...verifiedResistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'BUY TRIGGER')),
+        ...verifiedSupport.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'SELL TRIGGER')),
       ];
       srTbl.replaceChildren();
       if (rows.length) {
@@ -330,7 +354,7 @@ const trader = (() => {
     }
 
     // Daily Pivots
-    const pivots = calcDailyPivots(hist, price);
+    const pivots = calcDailyPivots(hist, price, data.marketState);
     const pivotCard  = $('pivotCard');
     const pivotPanel = $('pivotPanel');
     const pivotImp   = $('pivotImpliedInline');
@@ -368,9 +392,10 @@ const trader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, histRes] = await Promise.all([
+      const [quoteRes, histRes, gamePlanRes] = await Promise.all([
         fetch(`/api/quote/${sym}`).then(r=>r.ok?r.json():null),
         fetch(`/api/historical/${sym}?timeseries=30`).then(r=>r.ok?r.json():null),
+        fetch(`/api/gameplan/${sym}`, { credentials: 'same-origin' }).then(r=>r.ok?r.json():null).catch(() => null),
       ]);
 
       if (!quoteRes?.price) throw new Error('Unable to fetch quote data for '+sym);
@@ -378,7 +403,7 @@ const trader = (() => {
       if (hist.length<5) throw new Error('Insufficient historical data for '+sym);
 
       ui.loading().style.display='none';
-      render(sym, quoteRes, hist);
+      render(sym, quoteRes, hist, gamePlanRes);
     } catch(e) {
       ui.loading().style.display='none';
       ui.error().style.display='flex';

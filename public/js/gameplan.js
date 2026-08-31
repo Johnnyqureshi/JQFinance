@@ -64,6 +64,9 @@ const gamePlan = (() => {
       ? signal.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')
       : '<li>No additional volume/price explanation available.</li>';
     const resistance = levels.resistance;
+    const newsImpact = signal.newsImpact || {};
+    const newsDirection = Number(newsImpact.netScore) > 0 ? 'BULLISH'
+      : Number(newsImpact.netScore) < 0 ? 'BEARISH' : 'NEUTRAL';
     const signalClass = setupClass(signal.signal?.label);
     return `<section class="gp-volume-signal">
       <div class="gp-confluence-head">
@@ -81,6 +84,7 @@ const gamePlan = (() => {
         <div><span>Volume acceleration</span><b>${acceleration.percent == null ? 'Unavailable' : (acceleration.percent >= 0 ? '+' : '') + fmt(acceleration.percent, 1) + '%'}</b><small>${acceleration.ratio == null ? 'Short-term rate unavailable' : '1m / 5m / 15m average'}</small></div>
         <div><span>Resistance</span><b>${resistance?.price == null ? 'Unavailable' : '$' + fmt(resistance.price)}</b><small>${resistance?.distancePct == null ? 'No active level' : (resistance.distancePct >= 0 ? fmt(resistance.distancePct, 2) + '% away' : fmt(Math.abs(resistance.distancePct), 2) + '% above')}</small></div>
         <div><span>Volume direction</span><b>${esc(signal.structure?.volumeDirection || 'UNAVAILABLE')}</b><small>${signal.structure?.higherLows ? 'Higher lows' : signal.structure?.lowerHighs ? 'Lower highs' : 'Structure mixed'}</small></div>
+        <div><span>Recent news catalyst</span><b>${esc(newsDirection)}</b><small>${newsImpact.freshCatalystCount || 0} scored in last 24h · net ${newsImpact.netScore ?? 0}</small></div>
       </div>
       ${quality.missing?.length ? `<div class="gp-engine-notrade">NO TRADE — ${quality.missing.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-volume-reasons"><span class="gp-audit-title bull">Why this signal</span><ul>${reasons}</ul></div>

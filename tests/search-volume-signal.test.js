@@ -3,6 +3,8 @@
 const assert = require('assert');
 const {
   buildSearchVolumeSignal,
+  newsCatalystScore,
+  selectCompletedDailyBar,
   timeOfDayRelativeVolume,
   volumeAcceleration,
 } = require('../lib/search-volume-signal');
@@ -64,6 +66,8 @@ function build({
   market = { trend: 'BULLISH' },
   price = current.at(-1)?.c,
   freshness = null,
+  news = [],
+  dayChangePct = null,
 } = {}) {
   return buildSearchVolumeSignal({
     price,
@@ -73,6 +77,8 @@ function build({
     levels,
     indicators,
     market,
+    news,
+    dayChangePct,
     nowMs,
     timezone: 'UTC',
     freshness,
@@ -111,9 +117,11 @@ test('calculates acceleration independently for 1m, 5m, and 15m evidence', () =>
   assert.strictEqual(result.byTimeframe.fifteenMinute.state, 'ACCELERATING');
 });
 
-test('classifies bullish pressure near resistance as breakout watch', () => {
+test('classifies bullish pressure near resistance as a provisional BUY', () => {
   const result = build({});
-  assert.strictEqual(result.signal.label, 'BREAKOUT WATCH');
+  assert.strictEqual(result.signal.label, 'BUY');
+  assert.strictEqual(result.signal.setup, 'BREAKOUT WATCH');
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
   assert.strictEqual(result.signal.direction, 'BULLISH');
   assert(result.relativeVolume.value >= 1.5);
   assert(result.volumeAcceleration.ratio > 1.1);
@@ -128,7 +136,8 @@ test('requires a level break, volume expansion, and follow-through for confirmat
       resistance: [{ price: 101.5 }],
     },
   });
-  assert.strictEqual(result.signal.label, 'BREAKOUT CONFIRMED');
+  assert.strictEqual(result.signal.label, 'BUY');
+  assert.strictEqual(result.signal.setup, 'BREAKOUT CONFIRMED');
   assert.strictEqual(result.signal.stage, 'CONFIRMED');
   assert.strictEqual(result.levels.resistance.broken, true);
   assert.strictEqual(result.levels.resistance.followThrough, true);
@@ -172,9 +181,9 @@ test('does not SELL from elevated RSI, resistance, or high volume alone', () => 
     indicators: { rsi14: 88, vwap: 100, macd: { value: 0, signal: 0 } },
     market: { trend: 'NEUTRAL' },
   });
-  assert.notStrictEqual(result.signal.label, 'SELL');
-  assert.strictEqual(result.signal.label, 'HOLD / NO CLEAR EDGE');
-  assert.strictEqual(result.signal.direction, 'NEUTRAL');
+  assert.strictEqual(result.signal.label, 'BUY');
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
+  assert.strictEqual(result.signal.direction, 'BULLISH');
 });
 
 test('uses the documented weighted confidence and keeps it bounded', () => {
@@ -196,7 +205,9 @@ test('fails safely when historical volume is missing or malformed', () => {
     ...session('2026-01-03', { malformedIndex: 3 }),
   ];
   const result = build({ historical: malformed });
-  assert.strictEqual(result.signal.label, 'DATA INCOMPLETE — NO TRADE');
+  assert(['BUY', 'SELL'].includes(result.signal.label));
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
+  assert(result.confidence <= 35);
   assert.strictEqual(result.dataQuality.volumeBaselineAvailable, false);
   assert(result.dataQuality.missing.includes('Time-of-day volume baseline'));
 });
@@ -209,13 +220,15 @@ test('fails safely when current intraday volume is stale', () => {
       fifteenMinute: { fresh: false },
     },
   });
-  assert.strictEqual(result.signal.label, 'DATA INCOMPLETE — NO TRADE');
+  assert(['BUY', 'SELL'].includes(result.signal.label));
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
+  assert(result.confidence <= 35);
   assert.strictEqual(result.dataQuality.currentVolumeFresh, false);
   assert.strictEqual(result.dataQuality.accelerationAvailable, false);
   assert(result.dataQuality.missing.includes('Current 5-minute volume is stale'));
 });
 
-test('does not emit a directional signal when one acceleration timeframe is missing', () => {
+test('still emits a low-quality binary signal when one acceleration timeframe is missing', () => {
   const current = session('2026-01-05', { volumes: acceleratingVolumes });
   const result = buildSearchVolumeSignal({
     price: current.at(-1).c,
@@ -228,7 +241,9 @@ test('does not emit a directional signal when one acceleration timeframe is miss
     nowMs,
     timezone: 'UTC',
   });
-  assert.strictEqual(result.signal.label, 'DATA INCOMPLETE — NO TRADE');
+  assert(['BUY', 'SELL'].includes(result.signal.label));
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
+  assert(result.confidence <= 35);
   assert.strictEqual(result.dataQuality.accelerationAvailable, false);
   assert(result.volumeAcceleration.missingTimeframes.includes('fifteenMinute'));
 });
@@ -269,8 +284,145 @@ test('does not confirm a breakout from a forming 5-minute candle', () => {
     nowMs: partialNow,
     timezone: 'UTC',
   });
-  assert.notStrictEqual(result.signal.label, 'BREAKOUT CONFIRMED');
+  assert.notStrictEqual(result.signal.setup, 'BREAKOUT CONFIRMED');
   assert.strictEqual(result.levels.resistance.broken, false);
+});
+
+test('weights late-breaking positive news only when price and volume corroborate it', () => {
+  const current = session('2026-01-05', {
+    start: 100,
+    step: 0.2,
+    volumes: acceleratingVolumes,
+  });
+  const result = build({
+    current,
+    price: 100,
+    market: { trend: 'NEUTRAL' },
+    indicators: { rsi14: 50, vwap: 100, macd: { value: 0, signal: 0 } },
+    news: [{
+      headline: 'Company beats estimates and raises guidance after record revenue',
+      publishedAt: '2026-01-05T09:45:00.000Z',
+    }],
+  });
+  assert.strictEqual(result.signal.label, 'BUY');
+  assert(result.newsImpact.bullishScore > result.newsImpact.bearishScore);
+  assert.strictEqual(result.newsImpact.freshCatalystCount, 1);
+  assert.strictEqual(result.newsImpact.appliedDirection, 'BULLISH');
+});
+
+test('weights late-breaking negative news only when price and volume corroborate it', () => {
+  const current = session('2026-01-05', {
+    start: 102.2,
+    step: -0.2,
+    volumes: acceleratingVolumes,
+  });
+  const result = build({
+    current,
+    price: current.at(-1).c,
+    market: { trend: 'NEUTRAL' },
+    indicators: { rsi14: 50, vwap: 100, macd: { value: 0, signal: 0 } },
+    news: [{
+      headline: 'Company downgraded after weak outlook and cuts guidance',
+      publishedAt: '2026-01-05T09:45:00.000Z',
+    }],
+  });
+  assert.strictEqual(result.signal.label, 'SELL');
+  assert(result.newsImpact.bearishScore > result.newsImpact.bullishScore);
+  assert.strictEqual(result.newsImpact.appliedDirection, 'BEARISH');
+});
+
+test('does not let news choose the side without matching price and volume', () => {
+  const current = session('2026-01-05', {
+    start: 100,
+    step: 0,
+    volumes: acceleratingVolumes,
+  });
+  const base = build({
+    current,
+    price: 100,
+    market: { trend: 'NEUTRAL' },
+    indicators: { rsi14: 50, vwap: 100, macd: { value: 0, signal: 0 } },
+  });
+  const withNews = build({
+    current,
+    price: 100,
+    market: { trend: 'NEUTRAL' },
+    indicators: { rsi14: 50, vwap: 100, macd: { value: 0, signal: 0 } },
+    news: [{
+      headline: 'Company downgraded after weak outlook and cuts guidance',
+      publishedAt: '2026-01-05T09:45:00.000Z',
+    }],
+  });
+  assert.strictEqual(withNews.signal.label, base.signal.label);
+  assert.strictEqual(withNews.newsImpact.appliedDirection, null);
+});
+
+test('ignores stale directional headlines older than seven days', () => {
+  const result = newsCatalystScore([{
+    headline: 'Company downgraded and cuts guidance',
+    publishedAt: '2025-12-20T09:45:00.000Z',
+  }], nowMs);
+  assert.strictEqual(result.bullishScore, 0);
+  assert.strictEqual(result.bearishScore, 0);
+  assert.strictEqual(result.freshCatalystCount, 0);
+});
+
+test('rejects future-dated news and does not double-count overlapping words', () => {
+  const future = newsCatalystScore([{
+    headline: 'Company beats estimates',
+    publishedAt: '2026-01-06T09:45:00.000Z',
+  }], nowMs);
+  assert.strictEqual(future.bullishScore, 0);
+
+  const exact = newsCatalystScore([{
+    headline: 'Company beats estimates',
+    publishedAt: '2026-01-05T09:45:00.000Z',
+  }], nowMs);
+  assert.strictEqual(exact.bullishScore, 12);
+});
+
+test('does not confirm a stale support break and caps its confidence', () => {
+  const current = session('2026-01-05', {
+    start: 102.2,
+    step: -0.2,
+    volumes: acceleratingVolumes,
+  });
+  const result = build({
+    current,
+    price: current.at(-1).c,
+    levels: { support: [{ price: 100.5 }], resistance: [{ price: 103 }] },
+    indicators: { rsi14: 42, vwap: 101.5, macd: { value: -1.1, signal: -0.7 } },
+    market: { trend: 'BEARISH' },
+    freshness: {
+      oneMinute: { fresh: false },
+      fiveMinute: { fresh: false },
+      fifteenMinute: { fresh: false },
+    },
+  });
+  assert.strictEqual(result.signal.label, 'SELL');
+  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
+  assert.notStrictEqual(result.signal.setup, 'SUPPORT BREAKDOWN');
+  assert(result.confidence <= 35);
+});
+
+test('uses the latest completed daily bar for pivots without skipping closed sessions', () => {
+  const bars = [
+    { t: '2026-01-02', o: 100, h: 102, l: 99, c: 101 },
+    { t: '2026-01-05', o: 101, h: 104, l: 100, c: 103 },
+  ];
+  const closed = selectCompletedDailyBar(bars, {
+    nowMs: Date.parse('2026-01-06T02:00:00Z'),
+    marketState: 'CLOSED',
+    timezone: 'UTC',
+  });
+  assert.strictEqual(closed.t, '2026-01-05');
+
+  const forming = selectCompletedDailyBar(bars, {
+    nowMs: Date.parse('2026-01-05T15:00:00Z'),
+    marketState: 'REGULAR',
+    timezone: 'UTC',
+  });
+  assert.strictEqual(forming.t, '2026-01-02');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

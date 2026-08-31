@@ -1,7 +1,6 @@
-/* ── Market Data Game Plan panel ─────────────────────────────────────────────
-   Probability-based intraday game plan for the currently-open symbol.
-   All numbers come from the server (deterministic math on real data);
-   the AI narrative is rendered only when the server marks it available. */
+/* ── Stock Intelligence ──────────────────────────────────────────────────────
+   One server-owned stock verdict with concise supporting evidence.
+   Broad-market context never appears as a competing stock direction. */
 const gamePlan = (() => {
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -57,36 +56,77 @@ const gamePlan = (() => {
     const acceleration = signal.volumeAcceleration || {};
     const levels = signal.levels || {};
     const quality = signal.dataQuality || {};
-    const score = (label, value, inverse = false) => probBar(label, value, inverse);
     const display = value => value == null ? 'Unavailable' : value;
     const reasons = Array.isArray(signal.reasons) && signal.reasons.length
       ? signal.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')
       : '<li>No additional volume/price explanation available.</li>';
-    const resistance = levels.resistance;
     const newsImpact = signal.newsImpact || {};
-    const newsDirection = Number(newsImpact.netScore) > 0 ? 'BULLISH'
-      : Number(newsImpact.netScore) < 0 ? 'BEARISH' : 'NEUTRAL';
-    const signalClass = setupClass(signal.signal?.label);
-    return `<section class="gp-volume-signal">
-      <div class="gp-confluence-head">
-        <div><span class="gp-sec-title">Live volume &amp; price signal</span><span class="gp-sec-note">search-page analysis only · participation is not direction</span></div>
-        <div class="gp-confluence-signal ${signalClass}">${esc(signal.signal?.label || 'UNAVAILABLE')}<small>${esc(signal.signal?.stage || 'WATCH')} · confidence ${display(signal.confidence)}/100</small></div>
+    const newsDirection = newsImpact.appliedDirection === 'BULLISH' || newsImpact.appliedDirection === 'BEARISH'
+      ? newsImpact.appliedDirection
+      : 'NEUTRAL';
+    const newsDetail = newsImpact.appliedDirection
+      ? 'Directional headline evidence was corroborated by price and volume'
+      : newsImpact.freshCatalystCount
+        ? 'Recent headlines were not confirmed by matching price and volume'
+        : 'No directional catalyst found in the last 24h';
+    const direction = signal.signal?.direction === 'BEARISH' ? 'BEARISH' : 'BULLISH';
+    const signalClass = direction === 'BEARISH' ? 'bear' : 'bull';
+    const structureText = direction === 'BULLISH'
+      ? (signal.structure?.higherLows ? 'Higher lows are developing' : 'Price and volume favor buyers')
+      : (signal.structure?.lowerHighs ? 'Lower highs are developing' : 'Price and volume favor sellers');
+    const directionalVolume = direction === 'BULLISH'
+      ? signal.bullishVolumeScore
+      : signal.bearishVolumeScore;
+    const opposingVolume = direction === 'BULLISH'
+      ? signal.bearishVolumeScore
+      : signal.bullishVolumeScore;
+    const activeLevel = direction === 'BULLISH' ? levels.resistance : levels.support;
+    const levelText = activeLevel?.price == null
+      ? 'No nearby decision level is available'
+      : direction === 'BULLISH'
+        ? `${activeLevel.broken ? 'Holding above' : 'Testing'} resistance at $${fmt(activeLevel.price)}`
+        : `${activeLevel.broken ? 'Trading below' : 'Testing'} support at $${fmt(activeLevel.price)}`;
+    return `<section class="gp-evidence ${signalClass}">
+      <div class="gp-evidence-head">
+        <div>
+          <span class="gp-sec-title">Evidence for ${direction}</span>
+          <span class="gp-sec-note">One stock direction based on price, structure, and volume</span>
+        </div>
+        <div class="gp-signal-strength">
+          <span>Signal strength</span>
+          <b>${display(signal.confidence)}/100</b>
+          <small>${esc(signal.signal?.stage || 'WATCH')}</small>
+        </div>
       </div>
-      <div class="gp-confluence-scores">
-        ${score('Pump pressure', signal.pumpPressure)}
-        ${score('Breakout probability', signal.breakoutProbability)}
-        ${score('Bullish volume', signal.bullishVolumeScore)}
-        ${score('Bearish volume', signal.bearishVolumeScore, true)}
-      </div>
-      <div class="gp-volume-metrics">
-        <div><span>Time-of-day RVOL</span><b>${volume.value == null ? 'Unavailable' : fmt(volume.value, 2) + '×'}</b><small>${volume.sampleSize || 0} historical sessions</small></div>
-        <div><span>Volume acceleration</span><b>${acceleration.percent == null ? 'Unavailable' : (acceleration.percent >= 0 ? '+' : '') + fmt(acceleration.percent, 1) + '%'}</b><small>${acceleration.ratio == null ? 'Short-term rate unavailable' : '1m / 5m / 15m average'}</small></div>
-        <div><span>Resistance</span><b>${resistance?.price == null ? 'Unavailable' : '$' + fmt(resistance.price)}</b><small>${resistance?.distancePct == null ? 'No active level' : (resistance.distancePct >= 0 ? fmt(resistance.distancePct, 2) + '% away' : fmt(Math.abs(resistance.distancePct), 2) + '% above')}</small></div>
-        <div><span>Volume direction</span><b>${esc(signal.structure?.volumeDirection || 'UNAVAILABLE')}</b><small>${signal.structure?.higherLows ? 'Higher lows' : signal.structure?.lowerHighs ? 'Lower highs' : 'Structure mixed'}</small></div>
-        <div><span>Recent news catalyst</span><b>${esc(newsDirection)}</b><small>${newsImpact.freshCatalystCount || 0} scored in last 24h · net ${newsImpact.netScore ?? 0}</small></div>
+      <div class="gp-evidence-grid">
+        <div class="gp-evidence-item">
+          <span>Price structure</span>
+          <b class="${signalClass}">${direction}</b>
+          <small>${esc(structureText)}</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>Volume evidence</span>
+          <b class="${signalClass}">${display(directionalVolume)}/100 ${direction}</b>
+          <small>Opposing volume ${display(opposingVolume)}/100</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>Participation</span>
+          <b>${volume.value == null ? 'Unavailable' : fmt(volume.value, 2) + '× RVOL'}</b>
+          <small>${acceleration.percent == null ? 'Acceleration unavailable' : (acceleration.percent >= 0 ? '+' : '') + fmt(acceleration.percent, 1) + '% volume acceleration'}</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>Key level</span>
+          <b>${activeLevel?.price == null ? 'Unavailable' : '$' + fmt(activeLevel.price)}</b>
+          <small>${esc(levelText)}</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>News catalyst</span>
+          <b class="${setupClass(newsDirection)}">${esc(newsDirection)}</b>
+          <small>${esc(newsDetail)}</small>
+        </div>
       </div>
       ${quality.missing?.length ? `<div class="gp-engine-notrade">PROVISIONAL — confidence capped: ${quality.missing.map(esc).join(' · ')}</div>` : ''}
-      <div class="gp-volume-reasons"><span class="gp-audit-title bull">Why this signal</span><ul>${reasons}</ul></div>
+      <div class="gp-evidence-reasons"><span>Evidence details</span><ul>${reasons}</ul></div>
     </section>`;
   }
 
@@ -168,11 +208,13 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, selloff, oversold, market, confidence, dataGaps, news, searchSignal, levels, displayLevels } = d;
+    const { snapshot: s, indicators: ind, confidence, dataGaps, searchSignal, levels, displayLevels } = d;
     const generatedAt = d.generatedAt;
 
     // Header badge
-    const setup = searchSignal?.signal?.label || (ai?.available ? ai.setup : oversold?.label);
+    const verdict = searchSignal?.signal?.label || 'UNAVAILABLE';
+    const direction = searchSignal?.signal?.direction || (verdict === 'SELL' ? 'BEARISH' : 'BULLISH');
+    const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     setSafe('gpSetupBadge', el => {
       el.style.display = '';
       el.textContent = setup || '--';
@@ -200,25 +242,17 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>RSI 14</span><b>${fmt(ind.rsi14, 0)}</b></div>
         <div class="gp-vcell"><span>Rel Vol</span><b>${s.relVol != null ? fmt(s.relVol, 1) + 'x' : '--'}</b></div>
         <div class="gp-vcell"><span>vs VWAP</span><b>${ind.distVwapPct != null ? (ind.distVwapPct >= 0 ? '+' : '') + fmt(ind.distVwapPct, 1) + '%' : '--'}</b></div>
-        <div class="gp-vcell"><span>Market</span><b>${trendDot(market?.trend)}${esc(market?.trend || '--')}</b></div>
-        <div class="gp-vcell"><span>Sector</span><b>${trendDot(market?.sectorTrend)}${market?.sectorEtf ? esc(market.sectorEtf) + ' ' : ''}${esc(market?.sectorTrend || 'N/A')}</b></div>
-        <div class="gp-vcell"><span>Condition</span><b class="${setupClass(oversold?.label)}">${esc(oversold?.label || '--')}</b></div>
-      </div>
-
-      <div class="gp-cols">
-        <div class="gp-col">
-          <div class="gp-sec-title">Decision levels <span class="gp-sec-note">context, not automatic orders</span></div>
-          <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
-          ${selloff?.classification?.length ? `<div class="gp-tags">${selloff.classification.map(t => `<span class="gp-tag">${esc(t)}</span>`).join('')}</div>` : ''}
-          <div class="gp-attrib">Move attribution: <b>${esc(market?.attribution || 'UNKNOWN')}</b>
-            ${market?.spy != null ? ` · SPY ${market.spy >= 0 ? '+' : ''}${fmt(market.spy, 1)}%` : ''}
-            ${market?.sectorChangePct != null ? ` · ${esc(market.sectorEtf)} ${market.sectorChangePct >= 0 ? '+' : ''}${fmt(market.sectorChangePct, 1)}%` : ''}</div>
-          ${news?.length ? `<div class="gp-news">${news.slice(0, 3).map(n => `<div class="gp-news-row"><span>${esc(n.headline)}</span><i>${esc(n.source || '')}</i></div>`).join('')}</div>`
-            : '<div class="gp-news-none">No major catalyst identified from available data.</div>'}
-        </div>
       </div>
 
       ${searchSignalHtml(searchSignal)}
+
+      <div class="gp-cols">
+        <div class="gp-col">
+          <div class="gp-sec-title">Decision levels <span class="gp-sec-note">where the direction can strengthen or fail</span></div>
+          <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
+        </div>
+      </div>
+
       ${confHtml}
       ${dataGaps?.length ? `<div class="gp-gaps">Missing data: ${dataGaps.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-disclaimer">Sources: ${esc(d.provenance?.quote?.provider || 'market feed')} quote as of ${esc(d.provenance?.quote?.asOf || generatedAt || '--')} · Yahoo chart bars · ${esc((d.provenance?.news || []).join(' + ') || 'no verified news')} · Not financial advice</div>`;

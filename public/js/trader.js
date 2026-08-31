@@ -244,28 +244,15 @@ const trader = (() => {
     priceSpan.className = 'sr-price';
     priceSpan.textContent = '$' + formattedPrice;
 
-    const tagSpan = document.createElement('span');
-    tagSpan.className = 'sr-tag';
-    tagSpan.textContent = tag;
-
-    row.append(left, priceSpan, tagSpan);
+    if (tag) {
+      const tagSpan = document.createElement('span');
+      tagSpan.className = 'sr-tag';
+      tagSpan.textContent = tag;
+      row.append(left, priceSpan, tagSpan);
+    } else {
+      row.append(left, priceSpan);
+    }
     return row;
-  }
-
-  function makeSRGroup(kind, title, subtitle, rows) {
-    const group = document.createElement('section');
-    group.className = 'sr-group ' + kind;
-    const heading = document.createElement('div');
-    heading.className = 'sr-group-head';
-    const headingTitle = document.createElement('span');
-    headingTitle.className = 'sr-group-title';
-    headingTitle.textContent = title;
-    const headingSub = document.createElement('span');
-    headingSub.className = 'sr-group-sub';
-    headingSub.textContent = subtitle;
-    heading.append(headingTitle, headingSub);
-    group.append(heading, ...rows);
-    return group;
   }
 
   // ── Render results ─────────────────────────────────────────────────────────
@@ -337,37 +324,45 @@ const trader = (() => {
      const srTbl = $('srTable');
     if (srTbl) {
        const display = gamePlan?.displayLevels || {};
+       const bias = display.bias?.price;
        const resistance = display.resistance?.[0]?.price;
        const support = display.support?.[0]?.price;
-       const breakout = display.breakout?.price;
-       const breakdown = display.breakdown?.price;
-       const upsideRows = [
+       const nearbyRows = [
          Number.isFinite(Number(resistance))
-           ? makeSRRow('res', 'Resistance', 'Nearest overhead level', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), 'NEAREST LEVEL')
+           ? makeSRRow('res', 'Resistance above', 'Nearest overhead level', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), '')
            : null,
-         Number.isFinite(Number(breakout))
-           ? makeSRRow('breakout', 'Breakout confirmation', 'Next level above resistance', ((breakout-price)/price*100).toFixed(2), 'above', fmt(breakout), 'BULLISH ABOVE')
-           : null,
-       ].filter(Boolean);
-       const downsideRows = [
          Number.isFinite(Number(support))
-           ? makeSRRow('sup', 'Support', 'Nearest underlying level', ((price-support)/price*100).toFixed(2), 'below', fmt(support), 'NEAREST LEVEL')
-           : null,
-         Number.isFinite(Number(breakdown))
-           ? makeSRRow('breakdown', 'Breakdown confirmation', 'Next level below support', ((price-breakdown)/price*100).toFixed(2), 'below', fmt(breakdown), 'BEARISH BELOW')
+           ? makeSRRow('sup', 'Support below', 'Nearest underlying level', ((price-support)/price*100).toFixed(2), 'below', fmt(support), '')
            : null,
        ].filter(Boolean);
       srTbl.replaceChildren();
-       if (upsideRows.length || downsideRows.length) {
-         if (upsideRows.length) {
-           srTbl.appendChild(makeSRGroup('upside', 'If price moves up', 'Resistance first, then breakout confirmation', upsideRows));
-         }
-         if (downsideRows.length) {
-           srTbl.appendChild(makeSRGroup('downside', 'If price moves down', 'Support first, then breakdown confirmation', downsideRows));
-         }
+       if (Number.isFinite(Number(bias))) {
+         const biasPanel = document.createElement('section');
+         biasPanel.className = 'sr-bias';
+         const biasTitle = document.createElement('div');
+         biasTitle.className = 'sr-bias-title';
+         biasTitle.textContent = 'KEY BIAS LEVEL';
+         const biasPrice = document.createElement('div');
+         biasPrice.className = 'sr-bias-price';
+         biasPrice.textContent = '$' + fmt(bias);
+         const biasDesc = document.createElement('div');
+         biasDesc.className = 'sr-bias-desc';
+         biasDesc.textContent = 'Break and hold above = BULLISH bias  ·  Break and hold below = BEARISH bias';
+         const biasState = document.createElement('div');
+         const above = price > bias;
+         biasState.className = 'sr-bias-state ' + (above ? 'up' : 'down');
+         biasState.textContent = above ? 'CURRENTLY ABOVE' : 'CURRENTLY BELOW';
+         biasPanel.append(biasTitle, biasPrice, biasDesc, biasState);
+         srTbl.appendChild(biasPanel);
+       }
+       if (nearbyRows.length) {
+         const nearbyTitle = document.createElement('div');
+         nearbyTitle.className = 'sr-nearby-title';
+         nearbyTitle.textContent = 'NEARBY SUPPORT & RESISTANCE';
+         srTbl.append(nearbyTitle, ...nearbyRows);
          const note = document.createElement('p');
          note.className = 'sr-level-note';
-         note.textContent = 'The current price is between these levels. A breakout or breakdown requires a confirmed break and hold with volume; these levels are not automatic orders.';
+         note.textContent = 'Support and resistance show nearby price structure. They are not automatic orders.';
          srTbl.appendChild(note);
       } else {
         const p = document.createElement('p');

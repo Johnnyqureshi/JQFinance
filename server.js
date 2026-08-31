@@ -2734,15 +2734,17 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const resistance = dedupe(inRange.filter(c => c.price > price).sort((a, b) => a.price - b.price)).slice(0, 3);
     const breakdown = support.length ? +(support.at(-1).price - (atr ?? price * 0.02) * 0.5).toFixed(2) : null;
     const levels = { support, resistance, breakdown, currentPrice: +price.toFixed(2) };
+    const biasLevel = prevDay
+      ? { price: +((prevDay.h + prevDay.l + prevDay.c) / 3).toFixed(2), label: 'Key bias level · daily pivot' }
+      : null;
     // Keep the full level set for the deterministic engine, but expose a
-    // deliberately simpler four-level presentation to Search users:
-    // nearest resistance/support, then the next level as breakout/breakdown
-    // confirmation. These are observations, not order instructions.
+    // deliberately simpler presentation to Search users: one bias reference,
+    // one nearby resistance, and one nearby support. These are observations,
+    // not order instructions.
     const displayLevels = {
+      bias: biasLevel,
       resistance: resistance.slice(0, 1),
       support: support.slice(0, 1),
-      breakout: resistance[1] ? { ...resistance[1], label: 'Breakout confirmation above resistance' } : null,
-      breakdown: support[1] ? { ...support[1], label: 'Breakdown confirmation below support' } : null,
       currentPrice: +price.toFixed(2),
     };
     const sourceFreshness = gpSourceFreshness({

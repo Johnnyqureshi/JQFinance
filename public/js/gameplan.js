@@ -40,11 +40,10 @@ const gamePlan = (() => {
     if (!levels) return '';
     const row = (l, type) => `<div class="gp-lvl-row ${type}">
       <span class="gp-lvl-price">$${fmt(l.price)}</span><span class="gp-lvl-label">${esc(l.label)}</span></div>`;
+    const bias = levels.bias ? row({ ...levels.bias, label: 'Key bias level · break/hold above = bullish · below = bearish' }, 'bias') : '';
     const res = (levels.resistance || []).slice(0, 1).map(l => row({ ...l, label: 'Resistance' }, 'res')).join('');
-    const breakout = levels.breakout ? row(levels.breakout, 'breakout') : '';
     const sup = (levels.support || []).slice(0, 1).map(l => row({ ...l, label: 'Support' }, 'sup')).join('');
-    const breakdown = levels.breakdown ? row(levels.breakdown, 'breakdown') : '';
-    return res + breakout + sup + breakdown;
+    return bias + res + sup;
   }
 
   function list(items, cls) {

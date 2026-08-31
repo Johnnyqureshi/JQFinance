@@ -2434,44 +2434,7 @@ function gpMACD(closes) {
   return { value: m, signal: s, histogram: m - s };
 }
 
-// Historical analogs: past days with a 1-day drop >= threshold%.
-// Measures what actually happened the SAME day (low→close rebound) and the NEXT day.
-function gpAnalogs(daily, thresholdPct) {
-  const events = [];
-  for (let i = 1; i < daily.length - 1; i++) {
-    const chg = ((daily[i].c - daily[i - 1].c) / daily[i - 1].c) * 100;
-    if (chg > -thresholdPct) continue;
-    const day = daily[i], next = daily[i + 1];
-    const reboundClose = day.l > 0 ? ((day.c - day.l) / day.l) * 100 : 0;   // low → close
-    const reboundHigh  = day.l > 0 ? ((Math.max(day.h, next.h) - day.l) / day.l) * 100 : 0;
-    const nextRet      = ((next.c - day.c) / day.c) * 100;
-    // max further downside over following 3 days
-    let minLow = day.l;
-    for (let j = i + 1; j <= Math.min(i + 3, daily.length - 1); j++) minLow = Math.min(minLow, daily[j].l);
-    events.push({
-      reboundClose, reboundHigh, nextRet,
-      nextGreen: next.c > next.o,
-      bounced3: reboundClose >= 3,
-      bounced5: reboundClose >= 5,
-      furtherDown: ((minLow - day.l) / day.l) * 100,
-    });
-  }
-  if (!events.length) return null;
-  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-  const med = arr => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
-  const pct = f => Math.round((events.filter(f).length / events.length) * 100);
-  return {
-    sampleSize: events.length,
-    lowConfidence: events.length < 10,
-    bounced3Pct: pct(e => e.bounced3),
-    bounced5Pct: pct(e => e.bounced5),
-    closedGreenNextPct: pct(e => e.nextGreen),
-    avgMaxReboundPct: +avg(events.map(e => e.reboundHigh)).toFixed(1),
-    medMaxReboundPct: +med(events.map(e => e.reboundHigh)).toFixed(1),
-    avgNextDayPct: +avg(events.map(e => e.nextRet)).toFixed(1),
-    maxFurtherDownsidePct: +Math.min(...events.map(e => e.furtherDown)).toFixed(1),
-  };
-}
+const { buildIntradayAnalogs, selectCurrentRegularSnapshot } = require('./lib/gameplan-analogs');
 
 app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
@@ -2502,11 +2465,12 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   }
 
   const job = (async () => {
-    const [quote, daily, intra, volumeHistory5m, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
+    const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
       fetchLiveQuote(sym, req.session.userId).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
       gpFetchIntraday(sym, '5m', '5d'),
+      gpFetchIntraday(sym, '5m', '60d'),
       gpFetchIntraday(sym, '1m', '1d'),
       gpFetchIntraday(sym, '15m', '5d'),
       gpFetchIntraday(sym, '1h', '1mo'),
@@ -2613,9 +2577,20 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     };
 
     // Historical analogs — threshold picked from current move size
-    const dropMag = chg1d != null && chg1d < 0 ? Math.abs(chg1d) : null;
+    // The time anchor and drop magnitude must come from the same latest
+    // regular-session snapshot. Never reuse a stale close during extended hours.
+    const currentAnalog = selectCurrentRegularSnapshot(intra, quote.previousClose, {
+      marketState: quote.marketState,
+    });
+    const dropMag = currentAnalog?.dropMagnitudePct ?? null;
     const threshold = dropMag == null ? null : dropMag >= 10 ? 10 : dropMag >= 8 ? 8 : dropMag >= 5 ? 5 : null;
-    const analogs = threshold ? gpAnalogs(daily, threshold) : null;
+    const analogs = threshold ? buildIntradayAnalogs({
+      daily,
+      intraday: analogHistory5m,
+      thresholdPct: threshold,
+      currentDropPct: dropMag,
+      currentBar: currentAnalog.bar,
+    }) : null;
 
     // Market + sector context
     const mktArr = Array.isArray(mktRaw) ? mktRaw : mktRaw ? [mktRaw] : [];
@@ -2801,8 +2776,8 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       bounce:       confluence.scores.bounce,
       drawdown:     confluence.scores.drawdown,
       basis: analogs
-        ? `Exact sample statistics from ${analogs.sampleSize} past session(s) that closed down ${threshold}%+ are shown below; they are not adjusted forecasts.`
-        : 'No directly comparable historical selloff sample exists for the current move. No probability percentage is shown.',
+        ? `Exact sample statistics from ${analogs.sampleSize} past regular session(s) down ${analogs.minDropPct}–${analogs.maxDropPct}% near ${analogs.comparableTime} (within ${analogs.matchWindowMinutes} minutes) are shown below; they are not adjusted forecasts.`
+        : 'No historical regular-session snapshot had a comparable drop magnitude at this time of day. No probability percentage is shown.',
     };
 
     // Confidence breakdown

@@ -238,7 +238,10 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, confidence, dataGaps, searchSignal, levels, displayLevels, gapAnalysis } = d;
+    const {
+      snapshot: s, indicators: ind, confidence, dataGaps, searchSignal,
+      levels, displayLevels, gapAnalysis, analogs, probabilities,
+    } = d;
     const generatedAt = d.generatedAt;
 
     // Header badge
@@ -263,6 +266,15 @@ const gamePlan = (() => {
         <div class="gp-conf-parts">${Object.entries(confParts).map(([k, v]) =>
           `<span class="gp-conf-part"><i>${esc(k)}</i>${v}</span>`).join('')}</div>
       </div>`;
+    const analogHtml = analogs ? `<div class="gp-analog">
+        <div class="gp-analog-title">Time-matched historical outcomes ${analogs.lowConfidence ? '· LOW CONFIDENCE' : ''}</div>
+        <div class="gp-analog-stat">${esc(probabilities?.basis || '')}</div>
+        <div class="gp-analog-stat">Closed +3% from that-time price: <b>${fmt(analogs.bounced3Pct, 0)}%</b> · Closed +5%: <b>${fmt(analogs.bounced5Pct, 0)}%</b> · Next session green: <b>${fmt(analogs.closedGreenNextPct, 0)}%</b></div>
+        <div class="gp-analog-stat">Median max rebound through next session: <b>${fmt(analogs.medMaxReboundPct, 1)}%</b> · Worst further same-day downside: <b>${fmt(analogs.maxFurtherDownsidePct, 1)}%</b></div>
+      </div>` : `<div class="gp-analog">
+        <div class="gp-analog-title">Time-matched historical outcomes unavailable</div>
+        <div class="gp-analog-stat">${esc(probabilities?.basis || '')}</div>
+      </div>`;
 
     c.innerHTML = `
       <!-- Verdict strip -->
@@ -286,6 +298,7 @@ const gamePlan = (() => {
       </div>
 
       ${confHtml}
+      ${analogHtml}
       ${dataGaps?.length ? `<div class="gp-gaps">Missing data: ${dataGaps.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-disclaimer">Sources: ${esc(d.provenance?.quote?.provider || 'market feed')} quote as of ${esc(d.provenance?.quote?.asOf || generatedAt || '--')} · Yahoo chart bars · ${esc((d.provenance?.news || []).join(' + ') || 'no verified news')} · Not financial advice</div>`;
 

@@ -24,6 +24,7 @@ const {
   dedupeEvents,
 } = require('./lib/catalyst-intel');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
+const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
@@ -2507,10 +2508,11 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   }
 
   const job = (async () => {
-    const [quote, daily, intra, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
+    const [quote, daily, intra, volumeHistory5m, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
       fetchLiveQuote(sym, req.session.userId).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
+      gpFetchIntraday(sym, '5m', '5d'),
       gpFetchIntraday(sym, '1m', '1d'),
       gpFetchIntraday(sym, '15m', '5d'),
       gpFetchIntraday(sym, '1h', '1mo'),
@@ -2739,6 +2741,21 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     if (!intra15m?.length) dataGaps.push('15-minute timeframe unavailable');
     if (!intra1h?.length) dataGaps.push('1-hour timeframe unavailable');
 
+    // Search-page-only volume signal. Keep the existing confluence object
+    // untouched because automated bots and their execution contracts must not
+    // inherit search-page signal semantics.
+    const searchSignal = buildSearchVolumeSignal({
+      price,
+      intradayBars: intra,
+      volumeHistory5m,
+      barsByInterval: { oneMinute: intra1m, fiveMinute: intra, fifteenMinute: intra15m },
+      levels,
+      indicators,
+      market,
+      dayChangePct: chg1d,
+      freshness: sourceFreshness,
+    });
+
     // Probabilities — analog base rates adjusted by live context, rounded to 5s
     const clamp5 = v => Math.max(5, Math.min(95, Math.round(v / 5) * 5));
     let pBounce, pGreen, p3, p5;
@@ -2790,8 +2807,8 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     let ai = { available: false, reason: 'AI narrative unavailable' };
     const apiKey = process.env.AIML_API_KEY;
     if (apiKey) {
-      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence };
-      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic confluence signal is authoritative; do not upgrade a WATCH or NO CLEAR EDGE into a trade. Oversold alone is NOT a buy signal. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
+      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence, searchSignal };
+      const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic searchSignal is authoritative for the search page; do not upgrade HOLD, WATCH, SELL, or DATA INCOMPLETE into a trade. Oversold alone is NOT a buy signal. A resistance test with rising price and expanding volume is not automatically bearish. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
       try {
         const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
           method: 'POST',
@@ -2811,7 +2828,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
           const raw = data.choices?.[0]?.message?.content?.trim() || '';
           try {
             const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, ''));
-            const deterministicTradeAllowed = confluence.dataQuality?.entryEligible
+            const deterministicTradeAllowed = searchSignal.dataQuality?.volumeBaselineAvailable
+              && searchSignal.signal?.stage === 'CONFIRMED'
+              && searchSignal.signal?.direction === 'BULLISH'
+              && confluence.dataQuality?.entryEligible
               && confluence.signal?.stage === 'CONFIRMED'
               && confluence.signal?.confluence === 'HIGH CONFLUENCE';
             // Narrative text is never permitted to manufacture a trade. A trade
@@ -2822,7 +2842,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
               ...parsed,
               noTrade: deterministicTradeAllowed ? !!parsed.noTrade : true,
               tradeSetup: deterministicTradeAllowed ? (parsed.tradeSetup || null) : null,
-              setup: confluence.signal?.label || parsed.setup,
+              setup: searchSignal.signal?.label || confluence.signal?.label || parsed.setup,
             };
           } catch { ai = { available: false, reason: 'AI returned unparseable output' }; }
         } else {
@@ -2839,7 +2859,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, probabilities, confluence,
+      market, news, levels, probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,
     };

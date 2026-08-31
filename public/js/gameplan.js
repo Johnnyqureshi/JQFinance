@@ -21,8 +21,8 @@ const gamePlan = (() => {
   function trendDot(t) { return dot(t === 'BULLISH' ? 'bull' : t === 'BEARISH' ? 'bear' : 'neut'); }
   function setupClass(setup) {
     const s = String(setup || '').toUpperCase();
-    if (s.includes('BULL')) return 'bull';
-    if (s.includes('BEAR')) return 'bear';
+    if (s.includes('BULL') || s.includes('BREAKOUT')) return 'bull';
+    if (s.includes('BEAR') || s === 'SELL' || s.includes('BREAKDOWN')) return 'bear';
     return 'neut';
   }
 
@@ -52,7 +52,42 @@ const gamePlan = (() => {
     return `<ul class="gp-list ${cls || ''}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`;
   }
 
-  function confluenceHtml(confluence) {
+  function searchSignalHtml(signal) {
+    if (!signal) return '';
+    const volume = signal.relativeVolume || {};
+    const acceleration = signal.volumeAcceleration || {};
+    const levels = signal.levels || {};
+    const quality = signal.dataQuality || {};
+    const score = (label, value, inverse = false) => probBar(label, value, inverse);
+    const display = value => value == null ? 'Unavailable' : value;
+    const reasons = Array.isArray(signal.reasons) && signal.reasons.length
+      ? signal.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')
+      : '<li>No additional volume/price explanation available.</li>';
+    const resistance = levels.resistance;
+    const signalClass = setupClass(signal.signal?.label);
+    return `<section class="gp-volume-signal">
+      <div class="gp-confluence-head">
+        <div><span class="gp-sec-title">Live volume &amp; price signal</span><span class="gp-sec-note">search-page analysis only · participation is not direction</span></div>
+        <div class="gp-confluence-signal ${signalClass}">${esc(signal.signal?.label || 'UNAVAILABLE')}<small>${esc(signal.signal?.stage || 'WATCH')} · confidence ${display(signal.confidence)}/100</small></div>
+      </div>
+      <div class="gp-confluence-scores">
+        ${score('Pump pressure', signal.pumpPressure)}
+        ${score('Breakout probability', signal.breakoutProbability)}
+        ${score('Bullish volume', signal.bullishVolumeScore)}
+        ${score('Bearish volume', signal.bearishVolumeScore, true)}
+      </div>
+      <div class="gp-volume-metrics">
+        <div><span>Time-of-day RVOL</span><b>${volume.value == null ? 'Unavailable' : fmt(volume.value, 2) + '×'}</b><small>${volume.sampleSize || 0} historical sessions</small></div>
+        <div><span>Volume acceleration</span><b>${acceleration.percent == null ? 'Unavailable' : (acceleration.percent >= 0 ? '+' : '') + fmt(acceleration.percent, 1) + '%'}</b><small>${acceleration.ratio == null ? 'Short-term rate unavailable' : '1m / 5m / 15m average'}</small></div>
+        <div><span>Resistance</span><b>${resistance?.price == null ? 'Unavailable' : '$' + fmt(resistance.price)}</b><small>${resistance?.distancePct == null ? 'No active level' : (resistance.distancePct >= 0 ? fmt(resistance.distancePct, 2) + '% away' : fmt(Math.abs(resistance.distancePct), 2) + '% above')}</small></div>
+        <div><span>Volume direction</span><b>${esc(signal.structure?.volumeDirection || 'UNAVAILABLE')}</b><small>${signal.structure?.higherLows ? 'Higher lows' : signal.structure?.lowerHighs ? 'Lower highs' : 'Structure mixed'}</small></div>
+      </div>
+      ${quality.missing?.length ? `<div class="gp-engine-notrade">NO TRADE — ${quality.missing.map(esc).join(' · ')}</div>` : ''}
+      <div class="gp-volume-reasons"><span class="gp-audit-title bull">Why this signal</span><ul>${reasons}</ul></div>
+    </section>`;
+  }
+
+  function confluenceHtml(confluence, searchSignal) {
     if (!confluence?.available) return '';
     const scores = confluence.scores || {};
     const states = confluence.states || {};
@@ -61,6 +96,7 @@ const gamePlan = (() => {
     const cLevels = confluence.levels || {};
     const plan = confluence.tradePlan || {};
     const tf = confluence.timeframes || {};
+    const displaySignal = searchSignal?.signal || confluence.signal || {};
     const fmtLevel = level => level?.price != null
       ? `$${fmt(level.price)} · ${esc(level.label || 'technical level')} (${fmt(level.distancePct, 1)}% away)`
       : 'Unavailable';
@@ -79,7 +115,7 @@ const gamePlan = (() => {
     return `<section class="gp-confluence">
       <div class="gp-confluence-head">
         <div><span class="gp-sec-title">Technical confluence</span><span class="gp-sec-note">probability estimates, not guarantees</span></div>
-        <div class="gp-confluence-signal">${esc(confluence.signal?.label || 'NO CLEAR EDGE')}<small>${esc(confluence.signal?.stage || 'WATCH')} · ${esc(confluence.signal?.confluence || 'MIXED')}</small></div>
+        <div class="gp-confluence-signal">${esc(displaySignal.label || 'NO CLEAR EDGE')}<small>${esc(displaySignal.stage || 'WATCH')} · ${esc(displaySignal.direction || confluence.signal?.confluence || 'MIXED')}</small></div>
       </div>
       <div class="gp-confluence-scores">
         ${score('Bullish setup', scores.bullish)}
@@ -129,10 +165,10 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, levels, confidence, ai, dataGaps, news, confluence } = d;
+    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, confidence, ai, dataGaps, news, confluence, searchSignal } = d;
 
     // Header badge
-    const setup = ai?.available ? ai.setup : oversold?.label;
+    const setup = searchSignal?.signal?.label || (ai?.available ? ai.setup : oversold?.label);
     setSafe('gpSetupBadge', el => {
       el.style.display = '';
       el.textContent = setup || '--';
@@ -227,7 +263,8 @@ const gamePlan = (() => {
         </div>
       </div>
 
-      ${confluenceHtml(confluence)}
+       ${searchSignalHtml(searchSignal)}
+       ${confluenceHtml(confluence, searchSignal)}
       ${ai?.available && ai.why?.length ? `<div class="gp-sec-title">Why</div>${list(ai.why)}` : ''}
       ${scen}
       ${knife ? `<div class="gp-knife">⚠ ${esc(knife)}</div>` : ''}

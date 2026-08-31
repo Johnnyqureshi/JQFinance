@@ -13,3 +13,4 @@
 - [Broker credential vault](broker-credential-vault.md) — broker keys are encrypted at rest, migrated lazily, and never used as cache keys or response data.
 - [Paused bot reconciliation](paused-bot-reconciliation.md) — disabling new entries must never stop reconciliation or protection of existing broker positions.
 - [Central brain architecture](central-brain-architecture.md) — shared market context coordinates independent strategies; multiple Paper bots may compare, but only one Live bot may run
+- [Search signal isolation](search-signal-isolation.md) — search-page volume signals are read-only, require completed fresh multi-timeframe bars, and must never alter bot strategy or execution

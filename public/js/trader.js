@@ -182,6 +182,40 @@ const trader = (() => {
     return row;
   }
 
+  function makeGapRow(position, gap) {
+    const row = document.createElement('div');
+    row.className = `sr-row gap-${position}`;
+
+    const left = document.createElement('div');
+    left.className = 'sr-left';
+    const title = document.createElement('span');
+    title.className = 'sr-type';
+    title.textContent = `GAP ${position.toUpperCase()}`;
+    const detail = document.createElement('span');
+    detail.className = 'sr-desc';
+
+    const price = document.createElement('span');
+    price.className = 'sr-price';
+    if (!gap) {
+      detail.textContent = 'No unfilled daily range gap found in available history';
+      price.textContent = 'NONE';
+      row.classList.add('empty');
+    } else {
+      const stats = gap.historicalFill || {};
+      const fillText = stats.fillRatePct == null
+        ? 'Fill estimate unavailable — insufficient completed examples'
+        : `${stats.fillRatePct}% historical fill rate within ${stats.horizonSessions} sessions (n=${stats.sampleSize})`;
+      detail.textContent = position === 'current'
+        ? `Trading inside gap · ${gap.remainingFillPct}% to full traversal · ${fillText}`
+        : `${gap.distancePct}% away · ${fillText}`;
+      price.textContent = `$${fmt(gap.zoneLow)}–$${fmt(gap.zoneHigh)}`;
+    }
+
+    left.append(title, detail);
+    row.append(left, price);
+    return row;
+  }
+
   // ── Render results ─────────────────────────────────────────────────────────
   function render(sym, data, hist, gamePlan) {
     const { price, open, dayHigh, dayLow, volume, avgVolume } = data;
@@ -265,6 +299,7 @@ const trader = (() => {
             ? makeSRRow('sup', 'Immediate support', 'Nearest level', ((price-support)/price*100).toFixed(2), 'below', levelText(supportLevel), '')
            : null,
        ].filter(Boolean);
+       const gaps = gamePlan?.gapAnalysis || {};
       srTbl.replaceChildren();
         if (Number.isFinite(bias)) {
          const biasPanel = document.createElement('section');
@@ -303,6 +338,20 @@ const trader = (() => {
         p.textContent = 'Insufficient price history for S/R levels.';
         srTbl.appendChild(p);
       }
+       const gapTitle = document.createElement('div');
+       gapTitle.className = 'sr-nearby-title';
+       gapTitle.textContent = 'OPEN DAILY PRICE GAPS';
+       srTbl.append(
+         gapTitle,
+         makeGapRow('above', gaps.above),
+         makeGapRow('current', gaps.current),
+         makeGapRow('below', gaps.below),
+       );
+       const gapNote = document.createElement('p');
+       gapNote.className = 'sr-level-note';
+       gapNote.textContent = gaps.methodology
+         || 'Gap fill percentages are historical rates, not guarantees.';
+       srTbl.appendChild(gapNote);
     }
 
     // Daily Pivots

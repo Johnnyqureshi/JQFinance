@@ -15,3 +15,4 @@
 - [Central brain architecture](central-brain-architecture.md) — shared market context coordinates independent strategies; multiple Paper bots may compare, but only one Live bot may run
 - [Search signal isolation](search-signal-isolation.md) — search-page volume signals are read-only, require completed fresh multi-timeframe bars, and must never alter bot strategy or execution
 - [Momentum inverse fallback](momentum-inverse-fallback.md) — broad downside needs fresh SPY/QQQ consensus; inverse ETFs are BUY-only fallback entries when no safe long passes.
+- [Search gaps and patterns](search-gaps-patterns.md) — Search gap rates use completed-session history; chart patterns may influence direction but never confirm a trade alone.

@@ -36,6 +36,16 @@ test('excludes the current forming daily candle during regular hours', () => {
   assert.equal(completed.at(-1).t, '2026-08-14');
 });
 
+test('excludes today before the close even when provider market state is missing', () => {
+  const nowMs = Date.parse('2026-01-05T18:00:00.000Z');
+  const bars = [
+    { t: '2026-01-02', o: 100, h: 102, l: 99, c: 101 },
+    { t: '2026-01-05', o: 101, h: 110, l: 95, c: 108 },
+  ];
+  const completed = completedDailyBars(bars, { nowMs, marketState: null });
+  assert.deepStrictEqual(completed.map(bar => bar.t), ['2026-01-02']);
+});
+
 test('includes the just-completed session after the regular close', () => {
   const input = bars(15);
   const completed = completedDailyBars(input, {

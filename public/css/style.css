@@ -1305,6 +1305,13 @@ html[data-theme="light"] .theme-toggle-thumb { transform:translateX(18px); backg
 .sr-row { display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-radius:var(--radius-sm); border:1px solid; }
 .sr-row.res { background:rgba(232,69,69,.04);  border-color:rgba(232,69,69,.18); }
 .sr-row.sup { background:rgba(29,214,163,.04); border-color:rgba(29,214,163,.18); }
+.sr-row.gap-above { background:rgba(245,200,66,.05); border-color:rgba(245,200,66,.24); }
+.sr-row.gap-current { background:rgba(168,85,247,.05); border-color:rgba(168,85,247,.22); }
+.sr-row.gap-below { background:rgba(82,145,255,.05); border-color:rgba(82,145,255,.22); }
+.sr-row.gap-above .sr-type, .sr-row.gap-above .sr-price { color:#c89200; }
+.sr-row.gap-current .sr-type, .sr-row.gap-current .sr-price { color:#a855f7; }
+.sr-row.gap-below .sr-type, .sr-row.gap-below .sr-price { color:#5291ff; }
+.sr-row.gap-above.empty .sr-price, .sr-row.gap-current.empty .sr-price, .sr-row.gap-below.empty .sr-price { color:var(--t3); font-size:13px; }
 .sr-left { display:flex; flex-direction:column; gap:2px; }
 .sr-type { font-size:10px; text-transform:uppercase; letter-spacing:.1em; font-weight:600; }
 .sr-row.res .sr-type { color:var(--red); }
@@ -10375,6 +10382,10 @@ option { background: var(--card); }
 .gp-lvl-row.sup{background:rgba(34,211,165,.07)}.gp-lvl-row.sup .gp-lvl-price{color:#22d3a5}
 .gp-lvl-row.cur{background:rgba(255,255,255,.09);font-weight:800}
 .gp-lvl-row.brk{background:rgba(248,113,113,.14)}.gp-lvl-row.brk .gp-lvl-price{color:#f87171;font-weight:800}
+.gp-lvl-row.gap.above{background:rgba(250,204,21,.07);border:1px solid rgba(250,204,21,.16)}
+.gp-lvl-row.gap.current{background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.16)}
+.gp-lvl-row.gap.below{background:rgba(82,145,255,.07);border:1px solid rgba(82,145,255,.16)}
+.gp-lvl-row.gap .gp-lvl-price{flex-basis:155px}
 .gp-lvl-price{flex:0 0 78px;font-weight:700}
 .gp-lvl-label{color:#94a3b8;font-size:.72rem}
 .gp-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}

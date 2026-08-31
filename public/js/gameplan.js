@@ -45,6 +45,26 @@ const gamePlan = (() => {
     return bias + res + sup;
   }
 
+  function gapRows(gaps) {
+    const row = (position, gap) => {
+      if (!gap) {
+        return `<div class="gp-lvl-row gap ${position}"><span class="gp-lvl-price">NONE</span><span class="gp-lvl-label">No open gap ${position}</span></div>`;
+      }
+      const stats = gap.historicalFill || {};
+      const fill = stats.fillRatePct == null
+        ? 'fill estimate unavailable'
+        : `${stats.fillRatePct}% historical ${stats.horizonSessions}-session fill rate · n=${stats.sampleSize}`;
+      const location = position === 'current'
+        ? `trading inside · ${fmt(gap.remainingFillPct)}% to full traversal`
+        : `${fmt(gap.distancePct)}% away`;
+      return `<div class="gp-lvl-row gap ${position}">
+        <span class="gp-lvl-price">$${fmt(gap.zoneLow)}–$${fmt(gap.zoneHigh)}</span>
+        <span class="gp-lvl-label">Gap ${position} · ${location} · ${fill}</span>
+      </div>`;
+    };
+    return row('above', gaps?.above) + row('current', gaps?.current) + row('below', gaps?.below);
+  }
+
   function list(items, cls) {
     if (!Array.isArray(items) || !items.length) return '';
     return `<ul class="gp-list ${cls || ''}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`;
@@ -61,6 +81,11 @@ const gamePlan = (() => {
       ? signal.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')
       : '<li>No additional volume/price explanation available.</li>';
     const newsImpact = signal.newsImpact || {};
+    const patternAnalysis = signal.patternAnalysis || {};
+    const patterns = Array.isArray(patternAnalysis.patterns) ? patternAnalysis.patterns : [];
+    const patternSummary = patterns.length
+      ? patterns.slice(0, 3).map(pattern => `${pattern.name} (${pattern.timeframe})`).join(' · ')
+      : 'No current bullish or bearish chart pattern detected';
     const newsDirection = newsImpact.appliedDirection === 'BULLISH' || newsImpact.appliedDirection === 'BEARISH'
       ? newsImpact.appliedDirection
       : 'NEUTRAL';
@@ -123,6 +148,11 @@ const gamePlan = (() => {
           <span>News catalyst</span>
           <b class="${setupClass(newsDirection)}">${esc(newsDirection)}</b>
           <small>${esc(newsDetail)}</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>Chart patterns</span>
+          <b class="${setupClass(patternAnalysis.direction)}">${esc(patternAnalysis.direction || 'MIXED')}</b>
+          <small>${esc(patternSummary)}</small>
         </div>
       </div>
       ${quality.missing?.length ? `<div class="gp-engine-notrade">PROVISIONAL — confidence capped: ${quality.missing.map(esc).join(' · ')}</div>` : ''}
@@ -208,7 +238,7 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, confidence, dataGaps, searchSignal, levels, displayLevels } = d;
+    const { snapshot: s, indicators: ind, confidence, dataGaps, searchSignal, levels, displayLevels, gapAnalysis } = d;
     const generatedAt = d.generatedAt;
 
     // Header badge
@@ -250,6 +280,8 @@ const gamePlan = (() => {
         <div class="gp-col">
           <div class="gp-sec-title">Decision levels <span class="gp-sec-note">where the direction can strengthen or fail</span></div>
           <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
+          <div class="gp-sec-title">Open daily price gaps <span class="gp-sec-note">historical fill rates, not guarantees</span></div>
+          <div class="gp-levels">${gapRows(gapAnalysis)}</div>
         </div>
       </div>
 

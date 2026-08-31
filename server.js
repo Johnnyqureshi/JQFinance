@@ -26,6 +26,7 @@ const {
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
 const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
+const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
@@ -2715,6 +2716,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     };
     const displayLevels = searchLevelAnalysis.displayLevels;
     const dailyPivots = searchLevelAnalysis.dailyPivots;
+    const gapAnalysis = buildSearchGapAnalysis({
+      dailyBars: searchLevelAnalysis.completedBars,
+      currentPrice: price,
+    });
     const sourceFreshness = gpSourceFreshness({
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
@@ -2747,6 +2752,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     // existing confluence engine remains authoritative for its own score and
     // data-quality contract; this does not replace it or use score alone.
     const completedIntra5m = completedFiveMinuteBars(intra);
+    const patternAnalysis = summarizePatternAnalysis({
+      daily: detectCandlePatterns(searchLevelAnalysis.completedBars.slice(-60)).all,
+      intraday: detectCandlePatterns(completedIntra5m.slice(-60)).all,
+    });
     confluence.priceAction = evaluatePriceActionSetup({
       symbol: sym,
       bars: completedIntra5m,
@@ -2776,6 +2785,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       dayChangePct: chg1d,
       news,
       freshness: sourceFreshness,
+      patternAnalysis,
     });
 
     // Do not manufacture probability percentages when no directly comparable
@@ -2875,7 +2885,8 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, displayLevels, dailyPivots, probabilities, confluence, searchSignal,
+      market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis,
+      probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,
     };

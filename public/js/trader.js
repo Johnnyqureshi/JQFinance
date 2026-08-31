@@ -223,7 +223,7 @@ const trader = (() => {
   }
 
   // ── S/R row builder (safe DOM, no innerHTML) ────────────────────────────────
-  function makeSRRow(type, level, pct, pctDir, formattedPrice, tag) {
+  function makeSRRow(type, title, description, pct, pctDir, formattedPrice, tag) {
     const row = document.createElement('div');
     row.className = 'sr-row ' + type;
 
@@ -232,14 +232,11 @@ const trader = (() => {
 
     const typeSpan = document.createElement('span');
     typeSpan.className = 'sr-type';
-    typeSpan.textContent = type === 'res' ? 'Resistance'
-      : type === 'sup' ? 'Support'
-      : type === 'breakout' ? 'Breakout above'
-      : 'Breakdown below';
+    typeSpan.textContent = title;
 
     const descSpan = document.createElement('span');
     descSpan.className = 'sr-desc';
-    descSpan.textContent = 'Level ' + level + ' \u2014 ' + pct + '% ' + pctDir;
+    descSpan.textContent = description + ' \u00b7 ' + pct + '% ' + pctDir;
 
     left.append(typeSpan, descSpan);
 
@@ -253,6 +250,22 @@ const trader = (() => {
 
     row.append(left, priceSpan, tagSpan);
     return row;
+  }
+
+  function makeSRGroup(kind, title, subtitle, rows) {
+    const group = document.createElement('section');
+    group.className = 'sr-group ' + kind;
+    const heading = document.createElement('div');
+    heading.className = 'sr-group-head';
+    const headingTitle = document.createElement('span');
+    headingTitle.className = 'sr-group-title';
+    headingTitle.textContent = title;
+    const headingSub = document.createElement('span');
+    headingSub.className = 'sr-group-sub';
+    headingSub.textContent = subtitle;
+    heading.append(headingTitle, headingSub);
+    group.append(heading, ...rows);
+    return group;
   }
 
   // ── Render results ─────────────────────────────────────────────────────────
@@ -328,26 +341,33 @@ const trader = (() => {
        const support = display.support?.[0]?.price;
        const breakout = display.breakout?.price;
        const breakdown = display.breakdown?.price;
-       const rows = [
+       const upsideRows = [
          Number.isFinite(Number(resistance))
-           ? makeSRRow('res', 'Resistance', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), 'PRIMARY LEVEL')
+           ? makeSRRow('res', 'Resistance', 'Nearest overhead level', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), 'NEAREST LEVEL')
            : null,
          Number.isFinite(Number(breakout))
-           ? makeSRRow('breakout', 'Breakout confirmation', ((breakout-price)/price*100).toFixed(2), 'above', fmt(breakout), 'BULLISH ABOVE')
+           ? makeSRRow('breakout', 'Breakout confirmation', 'Next level above resistance', ((breakout-price)/price*100).toFixed(2), 'above', fmt(breakout), 'BULLISH ABOVE')
            : null,
+       ].filter(Boolean);
+       const downsideRows = [
          Number.isFinite(Number(support))
-           ? makeSRRow('sup', 'Support', ((price-support)/price*100).toFixed(2), 'below', fmt(support), 'PRIMARY LEVEL')
+           ? makeSRRow('sup', 'Support', 'Nearest underlying level', ((price-support)/price*100).toFixed(2), 'below', fmt(support), 'NEAREST LEVEL')
            : null,
          Number.isFinite(Number(breakdown))
-           ? makeSRRow('breakdown', 'Breakdown confirmation', ((price-breakdown)/price*100).toFixed(2), 'below', fmt(breakdown), 'BEARISH BELOW')
+           ? makeSRRow('breakdown', 'Breakdown confirmation', 'Next level below support', ((price-breakdown)/price*100).toFixed(2), 'below', fmt(breakdown), 'BEARISH BELOW')
            : null,
        ].filter(Boolean);
       srTbl.replaceChildren();
-      if (rows.length) {
-        srTbl.append(...rows);
+       if (upsideRows.length || downsideRows.length) {
+         if (upsideRows.length) {
+           srTbl.appendChild(makeSRGroup('upside', 'If price moves up', 'Resistance first, then breakout confirmation', upsideRows));
+         }
+         if (downsideRows.length) {
+           srTbl.appendChild(makeSRGroup('downside', 'If price moves down', 'Support first, then breakdown confirmation', downsideRows));
+         }
          const note = document.createElement('p');
          note.className = 'sr-level-note';
-         note.textContent = 'Levels are conditional thresholds, not automatic orders: resistance is bullish only after a confirmed break and hold; support is bearish only after a confirmed break and hold.';
+         note.textContent = 'The current price is between these levels. A breakout or breakdown requires a confirmed break and hold with volume; these levels are not automatic orders.';
          srTbl.appendChild(note);
       } else {
         const p = document.createElement('p');

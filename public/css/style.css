@@ -1004,7 +1004,11 @@ input  { font-family:inherit; }
 .dir-pct { font-family:'DM Mono',monospace; font-size:13px; color:var(--t2); }
 
 /* S/R */
-.sr-table { display:flex; flex-direction:column; gap:8px; }
+.sr-table { display:flex; flex-direction:column; gap:14px; }
+.sr-group { display:flex; flex-direction:column; gap:7px; padding:10px; border:1px solid var(--border); border-radius:var(--radius); background:rgba(255,255,255,.018); }
+.sr-group-head { display:flex; flex-direction:column; gap:3px; padding:2px 4px 4px; }
+.sr-group-title { font-size:11px; text-transform:uppercase; letter-spacing:.12em; font-weight:700; color:var(--t1); }
+.sr-group-sub { font-size:11px; color:var(--t3); line-height:1.4; }
 .sr-row { display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-radius:var(--radius-sm); border:1px solid; }
 .sr-row.res { background:rgba(232,69,69,.04);  border-color:rgba(232,69,69,.18); }
 .sr-row.sup { background:rgba(29,214,163,.04); border-color:rgba(29,214,163,.18); }

@@ -184,7 +184,7 @@
     </div>
     <div class="nav-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-      <input type="text" id="navInput" placeholder="Search any stock…" autocomplete="off" spellcheck="false"/>
+      <input type="text" id="navInput" placeholder="Search stocks, crypto, Fed, inflation…" autocomplete="off" spellcheck="false"/>
       <div class="search-drop" id="navDrop"></div>
     </div>
   </div>
@@ -200,7 +200,7 @@
     <div class="home-search-wrap">
       <div class="home-search-pill">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input type="text" id="heroInput" placeholder="Search ticker or company name…" autocomplete="off" spellcheck="false"/>
+        <input type="text" id="heroInput" placeholder="Search NVDA, BTC, Fed rates, inflation, oil, geopolitical risk…" autocomplete="off" spellcheck="false"/>
       </div>
       <div id="homeDrop" class="home-drop search-drop"></div>
     </div>
@@ -209,8 +209,8 @@
   <!-- Empty state -->
   <div id="homeEmpty" class="home-empty">
     <div class="home-empty-glyph">⚡</div>
-    <h2 class="home-empty-title">Real-time stock analysis</h2>
-    <p class="home-empty-sub">Search a ticker above to see live trading signals, charts, analyst ratings and news — all in one view.</p>
+    <h2 class="home-empty-title">Search Markets</h2>
+    <p class="home-empty-sub">Search stocks, ETFs, indices, crypto, Fed policy, inflation, recession, oil, tariffs, or geopolitical risk.</p>
   </div>
 
   <!-- Analysis workspace (shown when stock loaded) -->
@@ -247,119 +247,24 @@
       </div>
     </div>
 
-    <!-- Two-column layout: trader signals (left) + analysis tabs (right) -->
+    <!-- Canonical Search verdict: kept at the top and driven by the full
+         server-side Search evidence set below. -->
+    <section class="search-verdict-top" id="searchVerdictTop" style="display:none" aria-live="polite">
+      <div class="search-verdict-main">
+        <span class="search-verdict-kicker">SEARCH SIGNAL</span>
+        <strong id="searchVerdictLabel">--</strong>
+        <span id="searchVerdictStage">Awaiting verified data</span>
+      </div>
+      <div class="search-verdict-copy">
+        <div><b id="searchVerdictSymbol">--</b><span id="searchVerdictDirection">--</span><span id="searchVerdictConfidence">--/100</span></div>
+        <p id="searchVerdictReason">Using price, volume, structure, levels, news, market context, freshness, patterns, and Fibonacci confluence.</p>
+      </div>
+    </section>
+
+    <!-- Stock research tabs -->
     <div class="hw-layout">
 
-      <!-- Left: Trading Signals panel -->
-      <div class="hw-trader">
-        <div class="hw-trader-head">⚡ Trading Signals</div>
-
-        <div class="trader-loading" id="traderLoading" style="display:none">
-          <div class="t-spinner"></div>
-          <p>Analyzing <strong id="traderLoadingTicker"></strong>…</p>
-        </div>
-        <div class="trader-error" id="traderError" style="display:none">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg>
-          <p id="traderErrorMsg">Unable to analyze this symbol.</p>
-        </div>
-
-        <div class="trader-results" id="traderResults" style="display:none">
-          <div class="verdict-card" id="verdictCard">
-            <div class="v-badge" id="verdictBadge">--</div>
-            <div class="v-info">
-              <div class="v-sym" id="verdictSym">--</div>
-              <div class="v-price" id="verdictPrice">--</div>
-              <div class="v-conf-row">
-                <span class="v-conf-label">Confidence</span>
-                <span class="v-conf-val" id="verdictConf">--%</span>
-              </div>
-              <div class="v-reason" id="verdictReason"></div>
-            </div>
-          </div>
-
-          <div class="hw-metrics">
-            <div class="m-card">
-              <div class="m-card-title">RSI (14-Period)</div>
-              <div class="rsi-wrap">
-                <svg class="rsi-svg" id="rsiSvg" viewBox="0 0 180 110" preserveAspectRatio="xMidYMid meet"></svg>
-                <div class="rsi-read">
-                  <span class="rsi-num" id="rsiNum">--</span>
-                  <span class="rsi-zone" id="rsiZone">--</span>
-                </div>
-              </div>
-            </div>
-            <div class="m-card">
-              <div class="m-card-title">Volume vs 10-Day Avg</div>
-              <div class="vol-wrap">
-                <div class="vol-row">
-                  <span class="vol-lbl">Today</span>
-                  <div class="vol-track"><div class="vol-bar vol-today" id="volBarT" style="width:0%"></div></div>
-                  <span class="vol-val" id="volToday">--</span>
-                </div>
-                <div class="vol-row">
-                  <span class="vol-lbl">10d Avg</span>
-                  <div class="vol-track"><div class="vol-bar vol-avg" id="volBarA" style="width:100%"></div></div>
-                  <span class="vol-val" id="volAvg">--</span>
-                </div>
-                <div class="vol-badge" id="volBadge"></div>
-              </div>
-            </div>
-            <div class="m-card">
-              <div class="m-card-title">Day Range Position</div>
-              <div class="range-wrap">
-                <div class="range-top">
-                  <span id="rLow">--</span>
-                  <span class="range-cur-lbl" id="rCur">--</span>
-                  <span id="rHigh">--</span>
-                </div>
-                <div class="range-outer">
-                  <div class="range-inner">
-                    <div class="range-fill" id="rangeFill" style="width:50%"></div>
-                    <div class="range-dot" id="rangeDot" style="left:50%"></div>
-                  </div>
-                </div>
-                <div class="range-pct" id="rangePct">-- in today's range</div>
-              </div>
-            </div>
-            <div class="m-card">
-              <div class="m-card-title">Signal Direction</div>
-              <div class="dir-inner" id="dirInner">
-                <div class="dir-arrow" id="dirArrow">▲</div>
-                 <div class="dir-label" id="dirLabel">Bullish</div>
-                <div class="dir-pct" id="dirPct">+0.00% from open</div>
-              </div>
-            </div>
-            <div class="m-card">
-              <div class="m-card-title">Key Bias, Support &amp; Resistance — 14-Day</div>
-              <div class="sr-table" id="srTable"></div>
-            </div>
-
-            <div class="m-card" id="pivotCard" style="display:none">
-              <div class="m-card-title">
-                Daily Pivots
-                <span class="pivot-implied-inline" id="pivotImpliedInline"></span>
-              </div>
-              <div class="pivot-zone-bar" id="pivotZoneBar"></div>
-              <div id="pivotPanel"></div>
-            </div>
-
-          </div>
-
-          <div class="cd-row">
-            <div class="cd-ring-wrap">
-              <svg class="cd-ring-svg" viewBox="0 0 44 44">
-                <circle class="cd-track" cx="22" cy="22" r="18"/>
-                <circle class="cd-arc" cx="22" cy="22" r="18" id="cdArc"/>
-              </svg>
-              <span class="cd-num" id="cdNum">60</span>
-            </div>
-            <span class="cd-label">Auto-refresh in <strong id="cdSecs">60</strong>s</span>
-            <button class="cd-now" id="cdNow">Refresh Now</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right: Stock analysis tabs -->
+      <!-- Stock research tabs; directional analysis lives in Stock Intelligence below -->
       <div class="hw-analysis">
         <div class="stock-subnav">
           <button class="stock-tab active" data-tab="overview">Overview</button>
@@ -513,6 +418,18 @@
     </div><!-- .gp-panel -->
 
   </div><!-- .home-workspace -->
+
+  <!-- Search-only macro, event, and prediction-market intelligence -->
+  <section class="mi-panel" id="searchIntelPanel" style="display:none" aria-live="polite">
+    <div class="mi-shell">
+      <div class="mi-loading" id="searchIntelLoading" style="display:none">
+        <div class="t-spinner"></div>
+        <div><strong>Building market intelligence</strong><span>Loading prediction markets, macro indicators, news, and interpretation independently…</span></div>
+      </div>
+      <div class="mi-error" id="searchIntelError" style="display:none"></div>
+      <div id="searchIntelContent"></div>
+    </div>
+  </section>
 </div>
 
 <!-- MARKETS PAGE (merged with WSB) -->
@@ -1441,7 +1358,7 @@
 </main>
 
 <script src="/js/app.js"></script>
-<script src="/js/trader.js"></script>
+<script src="/js/search-intelligence.js"></script>
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/gameplan.js"></script>
 <script src="/js/scanner.js"></script>

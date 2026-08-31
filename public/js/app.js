@@ -257,7 +257,7 @@ function goPage(page) {
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────
-async function openStock(sym, snap) {
+async function openStock(sym, snap, { intelligenceQuery = null } = {}) {
   const loadId = ++state.loadId;
   state.prevPage  = state.page;
   state.page      = 'home';
@@ -272,6 +272,8 @@ async function openStock(sym, snap) {
 
   $('homeEmpty').style.display = 'none';
   $('homeWorkspace').style.display = '';
+  const topVerdict = $('searchVerdictTop');
+  if (topVerdict) topVerdict.style.display = 'none';
 
   const backBtn = $('backBtn');
   if (backBtn) backBtn.style.display = (state.prevPage && state.prevPage !== 'home') ? '' : 'none';
@@ -283,9 +285,11 @@ async function openStock(sym, snap) {
   document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
   const analysisPromise = window.searchContext.load(sym);
-  trader.analyze(sym, analysisPromise);
   if (typeof rtTrader !== 'undefined') rtTrader.load(sym, analysisPromise);
   if (typeof gamePlan !== 'undefined') gamePlan.load(sym, analysisPromise);
+  if (window.searchIntelligence) {
+    searchIntelligence.load(intelligenceQuery || sym, { symbol: sym });
+  }
 
   const [barsData, fmpData, analysis, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),
@@ -311,6 +315,25 @@ async function openStock(sym, snap) {
   const up = (authoritativeSnap?.price || 0) >= (authoritativeSnap?.previousClose || 0);
   state.stockData = { sym, snap: authoritativeSnap, bars: barsData, fmp: fmpData, news: analysis?.news || [], val: valData };
   renderOverview(authoritativeSnap, barsData, up);
+}
+
+function openMacroSearch(query) {
+  const clean = String(query || '').trim();
+  if (!clean) return;
+  ++state.loadId;
+  state.prevPage = state.page;
+  state.page = 'home';
+  state.symbol = null;
+  state.snap = null;
+  state.stockData = null;
+  document.querySelectorAll('.nav-link').forEach(link =>
+    link.classList.toggle('active', link.dataset.page === 'home'));
+  revealMobileNavPage('home');
+  document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+  $('page-home').classList.add('active');
+  $('homeEmpty').style.display = 'none';
+  $('homeWorkspace').style.display = 'none';
+  if (window.searchIntelligence) searchIntelligence.load(clean);
 }
 
 function updateWatchBtn(sym) {
@@ -1463,14 +1486,20 @@ async function loadSectorHeatmap() {
 function buildDropItems(results) {
   return results.slice(0, 8).map(r => {
     const item = document.createElement('div');
-    item.className = 'drop-item';
-    item.dataset.sym = r.symbol;
+    item.className = `drop-item${r.kind === 'macro' ? ' drop-macro' : ''}`;
+    if (r.kind === 'macro') {
+      item.dataset.query = r.query;
+      if (r.symbol) item.dataset.contextSymbol = r.symbol;
+    }
+    else item.dataset.sym = r.symbol;
     const sym = document.createElement('span');
     sym.className = 'drop-sym';
-    sym.textContent = r.symbol;
+    sym.textContent = r.kind === 'macro' ? 'MACRO' : r.symbol;
     const name = document.createElement('span');
     name.className = 'drop-name';
-    name.textContent = r.name || '';
+    name.textContent = r.kind === 'macro'
+      ? `${r.label || r.query} · ${r.name || ''}`
+      : r.name || '';
     item.appendChild(sym);
     item.appendChild(name);
     return item;
@@ -1487,13 +1516,30 @@ async function _selectDropSym(sym, input, drop) {
   openStock(sym, s[sym] || { symbol: sym });
 }
 
+async function _selectDropQuery(query, input, drop, contextSymbol = '') {
+  drop.classList.remove('open');
+  input.value = '';
+  if (contextSymbol) {
+    const snapshots = await api.snapshots([contextSymbol]);
+    openStock(
+      contextSymbol,
+      snapshots[contextSymbol] || { symbol: contextSymbol },
+      { intelligenceQuery: query },
+    );
+  } else {
+    openMacroSearch(query);
+  }
+}
+
 function _bindDropSearch(input, drop, getTimer, setTimer) {
   let reqId = 0; // race-condition guard — only render the latest response
 
   function _attachItemListeners() {
-    drop.querySelectorAll('.drop-item[data-sym]').forEach(item => {
+    drop.querySelectorAll('.drop-item[data-sym],.drop-item[data-query]').forEach(item => {
       item.addEventListener('mousedown', e => { e.preventDefault(); }); // keep focus on input
-      item.addEventListener('click', () => _selectDropSym(item.dataset.sym, input, drop));
+      item.addEventListener('click', () => item.dataset.query
+        ? _selectDropQuery(item.dataset.query, input, drop, item.dataset.contextSymbol)
+        : _selectDropSym(item.dataset.sym, input, drop));
     });
   }
 
@@ -1538,7 +1584,7 @@ function _bindDropSearch(input, drop, getTimer, setTimer) {
     if (e.key === 'Escape') { drop.classList.remove('open'); input.blur(); return; }
     if (!drop.classList.contains('open')) return;
 
-    const items = [...drop.querySelectorAll('.drop-item[data-sym]')];
+    const items = [...drop.querySelectorAll('.drop-item[data-sym],.drop-item[data-query]')];
     if (!items.length) return;
 
     if (e.key === 'ArrowDown') {
@@ -1555,11 +1601,25 @@ function _bindDropSearch(input, drop, getTimer, setTimer) {
       e.preventDefault();
       const cur = _getHighlighted();
       if (cur) {
-        _selectDropSym(cur.dataset.sym, input, drop);
+        if (cur.dataset.query) {
+          _selectDropQuery(cur.dataset.query, input, drop, cur.dataset.contextSymbol);
+        }
+        else _selectDropSym(cur.dataset.sym, input, drop);
       } else {
-        // No item highlighted — load exact ticker the user typed
-        const sym = input.value.trim().toUpperCase();
-        if (sym) _selectDropSym(sym, input, drop);
+        // If the API offered a macro result, use it; otherwise load the exact ticker.
+        const macroItem = items.find(item => item.dataset.query);
+        if (macroItem) {
+          _selectDropQuery(
+            input.value.trim(),
+            input,
+            drop,
+            macroItem.dataset.contextSymbol,
+          );
+        }
+        else {
+          const sym = input.value.trim().toUpperCase();
+          if (sym) _selectDropSym(sym, input, drop);
+        }
       }
     }
   });
@@ -1632,6 +1692,8 @@ function showAuthOverlay() {
   // Clear any open stock workspace
   const ws = $('homeWorkspace'); if (ws) ws.style.display = 'none';
   const he = $('homeEmpty');    if (he) he.style.display = '';
+  const topVerdict = $('searchVerdictTop'); if (topVerdict) topVerdict.style.display = 'none';
+  if (window.searchIntelligence) searchIntelligence.hide();
   state.symbol = null;
 }
 

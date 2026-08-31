@@ -68,6 +68,7 @@ function build({
   freshness = null,
   news = [],
   dayChangePct = null,
+  fibonacci = null,
 } = {}) {
   return buildSearchVolumeSignal({
     price,
@@ -82,6 +83,7 @@ function build({
     nowMs,
     timezone: 'UTC',
     freshness,
+    fibonacci,
   });
 }
 
@@ -197,6 +199,23 @@ test('uses the documented weighted confidence and keeps it bounded', () => {
   assert.strictEqual(result.weights.trend, 0.15);
   assert.strictEqual(result.weights.rsi, 0.10);
   assert.strictEqual(result.weights.other, 0.05);
+});
+
+test('lets Fibonacci add bounded confluence without confirming a trade', () => {
+  const baseline = build();
+  const withFibonacci = build({
+    fibonacci: {
+      available: true,
+      direction: 'BULLISH',
+      confluenceScore: 10,
+      setup: 'BULLISH SWING HOLDING 61.8%',
+    },
+  });
+  assert.strictEqual(withFibonacci.fibonacci.available, true);
+  assert.strictEqual(withFibonacci.signal.stage, baseline.signal.stage);
+  assert(withFibonacci.dataQuality.directionalEvidence.bullish
+    > baseline.dataQuality.directionalEvidence.bullish);
+  assert(withFibonacci.reasons.some(reason => reason.includes('volume confirmation is still required')));
 });
 
 test('fails safely when historical volume is missing or malformed', () => {

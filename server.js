@@ -27,6 +27,15 @@ const { buildTechnicalConfluence } = require('./lib/technical-probability-engine
 const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
+const { buildSearchFibonacci } = require('./lib/search-fibonacci');
+const {
+  TOPICS: SEARCH_INTELLIGENCE_TOPICS,
+  buildMacroPressure,
+  classifySearchQuery,
+  detectPredictionPriceDivergence,
+  marketRelevanceScore,
+  selectRelevantKalshiMarkets,
+} = require('./lib/search-intelligence');
 const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
@@ -141,6 +150,7 @@ const MAX_CONCURRENT_POSITIONS = 2;  // Hard cap — all 6 bots combined never h
 const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter any trade (raised for quality)
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
+const SEARCH_AI_KEY = process.env.AIML_API_KEY;
 
 // ── SQLite Database ────────────────────────────────────────────────────────────
 const db = new Database('jqf.db');
@@ -1054,6 +1064,249 @@ function _searchCacheSet(key, data) {
   _searchCache.set(key, { data, ts: Date.now() });
 }
 
+const KALSHI_API_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
+const KALSHI_CATALOG_TTL = 2 * 60 * 1000;
+const SEARCH_INTELLIGENCE_TTL = 60 * 1000;
+const _kalshiSeriesCache = new Map();
+const _kalshiQueryCache = new Map();
+const _kalshiQueryInflight = new Map();
+const _searchIntelligenceCache = new Map();
+
+function searchMacroSuggestions(query) {
+  const lower = String(query || '').trim().toLowerCase();
+  if (!lower) return [];
+  const classification = classifySearchQuery(query);
+  return SEARCH_INTELLIGENCE_TOPICS
+    .filter(topic => topic.label.toLowerCase().includes(lower)
+      || topic.terms.some(term => term.includes(lower) || lower.includes(term)))
+    .slice(0, 4)
+    .map(topic => ({
+      kind: 'macro',
+      query: String(query).trim(),
+      label: topic.label,
+      topic: topic.id,
+      symbol: classification.symbol,
+      name: 'Macro intelligence · prediction markets, rates, news, and risk indicators',
+    }));
+}
+
+function kalshiCategories(classification) {
+  const topics = new Set((classification.topics || []).map(topic => topic.id));
+  if (topics.has('geopolitical')) return ['World', 'Politics', 'Economics'];
+  if (topics.has('tariffs')) return ['Politics', 'Economics', 'World'];
+  if (topics.has('crypto')) return ['Financials', 'Politics', 'Economics'];
+  if (topics.size) return ['Economics', 'Financials', 'Politics'];
+  return ['Financials'];
+}
+
+async function fetchKalshiSeriesCategory(category) {
+  const cached = _kalshiSeriesCache.get(category);
+  if (cached && Date.now() - cached.at < 30 * 60 * 1000) return cached.series;
+  const query = new URLSearchParams({ category, limit: '1000' });
+  const response = await fetch(`${KALSHI_API_BASE}/series?${query}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'Qureshi-Finance-Search/1.0' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Kalshi series returned ${response.status}`);
+  const data = await response.json();
+  if (!Array.isArray(data?.series)) throw new Error('Kalshi returned invalid series metadata');
+  _kalshiSeriesCache.set(category, { at: Date.now(), series: data.series });
+  return data.series;
+}
+
+async function fetchKalshiSeriesMarkets(seriesTicker) {
+  const query = new URLSearchParams({
+    status: 'open',
+    series_ticker: seriesTicker,
+    limit: '1000',
+    mve_filter: 'exclude',
+  });
+  const response = await fetch(`${KALSHI_API_BASE}/markets?${query}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'Qureshi-Finance-Search/1.0' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`Kalshi markets returned ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data?.markets) ? data.markets : [];
+}
+
+async function fetchKalshiCatalog(value) {
+  const key = String(value || '').trim().toLowerCase();
+  const cached = _kalshiQueryCache.get(key);
+  if (cached && Date.now() - cached.at < KALSHI_CATALOG_TTL) return cached;
+  if (_kalshiQueryInflight.has(key)) return _kalshiQueryInflight.get(key);
+  const job = (async () => {
+    try {
+      const classification = classifySearchQuery(value);
+      const categories = kalshiCategories(classification);
+      const categoryResults = await Promise.allSettled(categories.map(fetchKalshiSeriesCategory));
+      const series = categoryResults.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+      const relevantSeries = series
+        .map(item => ({ item, score: marketRelevanceScore(item, value, classification) }))
+        .filter(item => item.score >= 3)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8)
+        .map(item => item.item);
+      const marketResults = await Promise.allSettled(
+        relevantSeries.map(item => fetchKalshiSeriesMarkets(item.ticker)),
+      );
+      const markets = marketResults.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+      const result = {
+        at: Date.now(),
+        markets,
+        status: 'live',
+        error: null,
+        matchedSeries: relevantSeries.map(item => ({ ticker: item.ticker, title: item.title })),
+      };
+      _kalshiQueryCache.set(key, result);
+      return result;
+    } catch (error) {
+      const result = {
+        at: Date.now(),
+        markets: [],
+        status: 'unavailable',
+        error: error.message,
+        matchedSeries: [],
+      };
+      _kalshiQueryCache.set(key, result);
+      return result;
+    } finally {
+      _kalshiQueryInflight.delete(key);
+    }
+  })();
+  _kalshiQueryInflight.set(key, job);
+  return job;
+}
+
+const SEARCH_MACRO_SYMBOLS = {
+  spy: 'SPY',
+  qqq: 'QQQ',
+  vix: '^VIX',
+  tenYear: '^TNX',
+  oil: 'CL=F',
+  brent: 'BZ=F',
+  gold: 'GC=F',
+  usd: 'DX-Y.NYB',
+  bitcoin: 'BTC-USD',
+};
+
+function normalizeIntelligenceQuote(key, quote, generatedAt) {
+  if (!quote || !Number.isFinite(Number(quote.regularMarketPrice))) return null;
+  return {
+    key,
+    symbol: quote.symbol || SEARCH_MACRO_SYMBOLS[key],
+    name: quote.shortName || quote.longName || quote.symbol || key,
+    price: +Number(quote.regularMarketPrice).toFixed(quote.regularMarketPrice >= 1000 ? 0 : 2),
+    changePct: Number.isFinite(Number(quote.regularMarketChangePercent))
+      ? +Number(quote.regularMarketChangePercent).toFixed(2)
+      : null,
+    marketState: quote.marketState || null,
+    source: 'Yahoo Finance',
+    updatedAt: quote.regularMarketTime
+      ? new Date(Number(quote.regularMarketTime) * 1000).toISOString()
+      : generatedAt,
+    status: 'live',
+  };
+}
+
+async function fetchSearchMacroIndicators() {
+  const generatedAt = new Date().toISOString();
+  try {
+    const symbols = Object.values(SEARCH_MACRO_SYMBOLS);
+    const raw = await yf.quote(symbols, {}, { validateResult: false });
+    const quotes = Array.isArray(raw) ? raw : [raw];
+    const bySymbol = new Map(quotes.filter(Boolean).map(quote => [quote.symbol, quote]));
+    const indicators = {};
+    for (const [key, symbol] of Object.entries(SEARCH_MACRO_SYMBOLS)) {
+      indicators[key] = normalizeIntelligenceQuote(key, bySymbol.get(symbol), generatedAt);
+    }
+    return { indicators, status: 'live', updatedAt: generatedAt, source: 'Yahoo Finance' };
+  } catch (error) {
+    return {
+      indicators: {},
+      status: 'unavailable',
+      updatedAt: generatedAt,
+      source: 'Yahoo Finance',
+      error: error.message,
+    };
+  }
+}
+
+async function fetchSearchTopicNews(query) {
+  try {
+    const response = await fetch(
+      `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=0&newsCount=8`,
+      { headers: YH, signal: AbortSignal.timeout(6000) },
+    );
+    if (!response.ok) throw new Error(`Yahoo news returned ${response.status}`);
+    const data = await response.json();
+    return {
+      status: 'live',
+      source: 'Yahoo Finance',
+      updatedAt: new Date().toISOString(),
+      items: (data.news || []).slice(0, 6).map(item => ({
+        headline: item.title,
+        source: item.publisher || 'Yahoo Finance',
+        url: /^https?:\/\//i.test(String(item.link || '')) ? item.link : null,
+        publishedAt: item.providerPublishTime
+          ? new Date(item.providerPublishTime * 1000).toISOString()
+          : null,
+      })).filter(item => item.headline),
+    };
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      source: 'Yahoo Finance',
+      updatedAt: new Date().toISOString(),
+      items: [],
+      error: error.message,
+    };
+  }
+}
+
+async function buildSearchAiInterpretation(facts) {
+  if (!SEARCH_AI_KEY) return { available: false, reason: 'AI interpretation is not configured' };
+  try {
+    const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${SEARCH_AI_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        max_tokens: 450,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You explain market data for research. Use only supplied facts. Prediction markets are market-implied probabilities, never guarantees. Do not invent values, price targets, or financial advice. Return strict JSON: {"summary":"2-3 sentences","potentialBeneficiaries":["up to 3"],"potentialPressure":["up to 3"],"riskFactors":["up to 4"],"caveat":"one sentence"}.',
+          },
+          { role: 'user', content: JSON.stringify(facts) },
+        ],
+      }),
+    });
+    if (!response.ok) return { available: false, reason: `AI service returned ${response.status}` };
+    const data = await response.json();
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (!parsed.summary) return { available: false, reason: 'AI interpretation was empty' };
+    return {
+      available: true,
+      summary: String(parsed.summary).slice(0, 1200),
+      potentialBeneficiaries: (parsed.potentialBeneficiaries || []).slice(0, 3).map(String),
+      potentialPressure: (parsed.potentialPressure || []).slice(0, 3).map(String),
+      riskFactors: (parsed.riskFactors || []).slice(0, 4).map(String),
+      caveat: String(parsed.caveat || 'This is analysis, not financial advice.').slice(0, 300),
+      source: 'AI interpretation of listed source data',
+      updatedAt: new Date().toISOString(),
+    };
+  } catch {
+    return { available: false, reason: 'AI interpretation temporarily unavailable' };
+  }
+}
+
 // ── Float/share-count cache (15-min TTL) ─────────────────────────────────────
 // Yahoo's quote response sometimes omits floatShares. Keep the fundamentals
 // lookup separate from the short-lived quote cache so scanner refreshes do not
@@ -1507,6 +1760,7 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
 app.get('/api/search', requireAuth, async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
+  const macroSuggestions = searchMacroSuggestions(q);
 
   const cacheKey = q.toLowerCase();
   const cached = _searchCacheGet(cacheKey);
@@ -1522,7 +1776,11 @@ app.get('/api/search', requireAuth, async (req, res) => {
         .filter(x => ['EQUITY','ETF','MUTUALFUND','INDEX','CRYPTOCURRENCY'].includes(x.quoteType) && x.symbol)
         .slice(0, 8)
         .map(x => ({ symbol: x.symbol, name: x.shortname || x.longname || x.symbol, exchange: x.exchange || '', quoteType: x.quoteType || '' }));
-      if (out.length) { _searchCacheSet(cacheKey, out); return res.json(out); }
+      if (out.length) {
+        const combined = [...macroSuggestions, ...out];
+        _searchCacheSet(cacheKey, combined);
+        return res.json(combined);
+      }
     }
   } catch { /* fall through to Alpaca */ }
 
@@ -1534,7 +1792,7 @@ app.get('/api/search', requireAuth, async (req, res) => {
       // Try exact symbol match first
       const exact = await alpacaDataFetch(uid, `/v2/assets/${upper}`).catch(() => null);
       if (exact?.symbol) {
-        const out = [{ symbol: exact.symbol, name: exact.name || exact.symbol, exchange: exact.exchange || '', quoteType: exact.class === 'crypto' ? 'CRYPTOCURRENCY' : 'EQUITY' }];
+        const out = [...macroSuggestions, { symbol: exact.symbol, name: exact.name || exact.symbol, exchange: exact.exchange || '', quoteType: exact.class === 'crypto' ? 'CRYPTOCURRENCY' : 'EQUITY' }];
         _searchCacheSet(cacheKey, out); return res.json(out);
       }
       // Broader search across active assets
@@ -1553,12 +1811,163 @@ app.get('/api/search', requireAuth, async (req, res) => {
           })
           .slice(0, 8)
           .map(a => ({ symbol: a.symbol, name: a.name || a.symbol, exchange: a.exchange || '', quoteType: 'EQUITY' }));
-        if (matched.length) { _searchCacheSet(cacheKey, matched); return res.json(matched); }
+        if (matched.length) {
+          const combined = [...macroSuggestions, ...matched];
+          _searchCacheSet(cacheKey, combined);
+          return res.json(combined);
+        }
       }
     }
   } catch { /* fall through */ }
 
-  res.json([]);
+  if (macroSuggestions.length) _searchCacheSet(cacheKey, macroSuggestions);
+  res.json(macroSuggestions);
+});
+
+// ── GET /api/search-intelligence?q=&symbol= ──────────────────────────────────
+// Search-page-only macro and prediction-market context. This endpoint is loaded
+// independently so a slow external source never blocks the primary asset view.
+app.get('/api/search-intelligence', requireAuth, async (req, res) => {
+  const query = String(req.query.q || '').trim().slice(0, 160);
+  if (!query) return res.status(400).json({ ok: false, error: 'Search query is required' });
+  const classification = classifySearchQuery(query);
+  const requestedSymbol = String(req.query.symbol || classification.symbol || '').trim().toUpperCase();
+  const symbol = requestedSymbol === 'BTC' ? 'BTC-USD' : requestedSymbol;
+  const cacheKey = `${query.toLowerCase()}|${symbol}`;
+  const cached = _searchIntelligenceCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SEARCH_INTELLIGENCE_TTL) return res.json(cached.data);
+
+  const generatedAt = new Date().toISOString();
+  const [kalshiCatalog, macroFeed, topicNews, assetQuoteResult] = await Promise.all([
+    fetchKalshiCatalog(query),
+    fetchSearchMacroIndicators(),
+    fetchSearchTopicNews(query),
+    symbol
+      ? Promise.all([
+        yf.quote(symbol, {}, { validateResult: false }).catch(() => null),
+        yf.quoteSummary(symbol, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
+      ])
+      : Promise.resolve([null, null]),
+  ]);
+
+  const [assetQuote, assetSummary] = assetQuoteResult;
+  const asset = assetQuote ? {
+    symbol: assetQuote.symbol || symbol,
+    name: assetQuote.shortName || assetQuote.longName || symbol,
+    price: Number.isFinite(Number(assetQuote.regularMarketPrice))
+      ? +Number(assetQuote.regularMarketPrice).toFixed(2)
+      : null,
+    changePct: Number.isFinite(Number(assetQuote.regularMarketChangePercent))
+      ? +Number(assetQuote.regularMarketChangePercent).toFixed(2)
+      : null,
+    sector: assetSummary?.assetProfile?.sector || null,
+    source: 'Yahoo Finance',
+    updatedAt: assetQuote.regularMarketTime
+      ? new Date(Number(assetQuote.regularMarketTime) * 1000).toISOString()
+      : generatedAt,
+  } : symbol ? {
+    symbol,
+    name: symbol,
+    price: null,
+    changePct: null,
+    sector: null,
+    source: 'Yahoo Finance',
+    updatedAt: generatedAt,
+    status: 'unavailable',
+  } : null;
+
+  const predictionMarkets = kalshiCatalog.status === 'live'
+    ? selectRelevantKalshiMarkets(kalshiCatalog.markets, query, 6)
+    : [];
+  const macroPressure = buildMacroPressure(macroFeed.indicators, asset || {});
+  const divergence = detectPredictionPriceDivergence(predictionMarkets, asset?.changePct);
+  const relevantFedMarkets = predictionMarkets.filter(market =>
+    /(fed|fomc|interest rate|rate cut|rate hike)/i.test(`${market.title} ${market.yesLabel}`));
+  const sourceStatus = {
+    kalshi: {
+      source: 'Kalshi official public API',
+      status: kalshiCatalog.status,
+      updatedAt: kalshiCatalog.at ? new Date(kalshiCatalog.at).toISOString() : generatedAt,
+      error: kalshiCatalog.status === 'unavailable' ? 'Data temporarily unavailable' : null,
+    },
+    macro: {
+      source: macroFeed.source,
+      status: macroFeed.status,
+      updatedAt: macroFeed.updatedAt,
+      error: macroFeed.status === 'unavailable' ? 'Data temporarily unavailable' : null,
+    },
+    news: {
+      source: topicNews.source,
+      status: topicNews.status,
+      updatedAt: topicNews.updatedAt,
+      error: topicNews.status === 'unavailable' ? 'Data temporarily unavailable' : null,
+    },
+  };
+  const aiFacts = {
+    query,
+    classification,
+    asset,
+    predictionMarkets: predictionMarkets.map(market => ({
+      title: market.title,
+      yesLabel: market.yesLabel,
+      yesProbability: market.yesProbability,
+      probabilityChange: market.probabilityChange,
+      updatedAt: market.updatedAt,
+    })),
+    macroIndicators: macroFeed.indicators,
+    macroPressure,
+    divergence,
+    recentHeadlines: topicNews.items.slice(0, 5).map(item => item.headline),
+  };
+  const interpretation = await buildSearchAiInterpretation(aiFacts);
+
+  const data = {
+    ok: true,
+    query,
+    generatedAt,
+    classification,
+    asset,
+    predictionMarkets,
+    predictionMarketStatus: predictionMarkets.length
+      ? 'live'
+      : kalshiCatalog.status === 'unavailable' ? 'unavailable' : 'no_relevant_markets',
+    predictionMarketMessage: predictionMarkets.length
+      ? null
+      : kalshiCatalog.status === 'unavailable'
+        ? 'Prediction-market data temporarily unavailable'
+        : 'No directly relevant Kalshi market available',
+    fedOutlook: {
+      available: relevantFedMarkets.length > 0,
+      markets: relevantFedMarkets,
+      currentRate: null,
+      nextMeeting: null,
+      note: relevantFedMarkets.length
+        ? 'Market-implied probabilities from relevant Kalshi contracts.'
+        : 'No directly relevant Fed contract was found in the current Kalshi catalog.',
+    },
+    macroIndicators: macroFeed.indicators,
+    macroPressure,
+    divergence,
+    geopoliticalRisk: classification.primaryTopic === 'geopolitical'
+      ? {
+        available: macroFeed.status === 'live' || topicNews.status === 'live',
+        label: 'Analytical inference — not a prediction-market probability',
+        indicators: ['oil', 'brent', 'gold', 'usd', 'vix', 'tenYear']
+          .map(key => macroFeed.indicators[key]).filter(Boolean),
+      }
+      : null,
+    news: topicNews,
+    interpretation,
+    sources: sourceStatus,
+    disclaimer: 'Prediction-market probabilities are not guarantees and should be considered alongside price action, technicals, news, and macro data. This is analysis, not financial advice.',
+  };
+  _searchIntelligenceCache.set(cacheKey, { at: Date.now(), data });
+  if (_searchIntelligenceCache.size > 100) {
+    const oldest = [..._searchIntelligenceCache.entries()]
+      .sort((a, b) => a[1].at - b[1].at)[0];
+    if (oldest) _searchIntelligenceCache.delete(oldest[0]);
+  }
+  res.json(data);
 });
 
 // ── GET /api/bars/:symbol?timeframe=&limit= ───────────────────────────────────
@@ -2695,6 +3104,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       dailyBars: searchLevelAnalysis.completedBars,
       currentPrice: price,
     });
+    const fibonacci = buildSearchFibonacci({
+      dailyBars: searchLevelAnalysis.completedBars,
+      currentPrice: price,
+    });
     const sourceFreshness = gpSourceFreshness({
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
@@ -2758,9 +3171,14 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       indicators,
       market,
       dayChangePct: chg1d,
+      relativeDailyVolume: relVol,
+      dayRangePosition: quote.dayHigh > quote.dayLow
+        ? (price - quote.dayLow) / (quote.dayHigh - quote.dayLow)
+        : null,
       news,
       freshness: sourceFreshness,
       patternAnalysis,
+      fibonacci,
     });
 
     // Do not manufacture probability percentages when no directly comparable
@@ -2802,7 +3220,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     let ai = { available: false, reason: 'AI narrative unavailable' };
     const apiKey = null; // Search verdicts remain deterministic; generative narrative is intentionally disabled.
     if (apiKey) {
-      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence, searchSignal };
+      const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, fibonacci, probabilities, confluence, searchSignal };
       const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic binary searchSignal is authoritative for the search page. Do not describe a BUY as confirmed unless its stage is CONFIRMED; keep tradeSetup null for provisional evidence. Use scored recent headlines only as a catalyst, never as a substitute for price and volume confirmation. Oversold alone is NOT a buy signal. A resistance test with rising price and expanding volume is not automatically bearish. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
       try {
         const r = await fetch('https://api.aimlapi.com/v1/chat/completions', {
@@ -2860,7 +3278,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis,
+      market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,

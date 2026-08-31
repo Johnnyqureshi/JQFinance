@@ -16,3 +16,5 @@
 - [Search signal isolation](search-signal-isolation.md) — search-page volume signals are read-only, require completed fresh multi-timeframe bars, and must never alter bot strategy or execution
 - [Momentum inverse fallback](momentum-inverse-fallback.md) — broad downside needs fresh SPY/QQQ consensus; inverse ETFs are BUY-only fallback entries when no safe long passes.
 - [Search gaps and patterns](search-gaps-patterns.md) — Search gap rates use completed-session history; chart patterns may influence direction but never confirm a trade alone.
+- [Search Fibonacci confluence](search-fibonacci-confluence.md) — Fibonacci uses confirmed completed-session swings and may assist direction, but never confirms a trade without volume.
+- [Search prediction-market integrity](search-prediction-market-integrity.md) — discover Kalshi through official series metadata; show only relevant measured probabilities and fail closed when unavailable.

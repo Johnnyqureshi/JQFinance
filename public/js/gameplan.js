@@ -65,6 +65,44 @@ const gamePlan = (() => {
     return row('above', gaps?.above) + row('current', gaps?.current) + row('below', gaps?.below);
   }
 
+  function fibonacciHtml(fibonacci) {
+    if (!fibonacci?.available) {
+      return `<section class="gp-fibonacci unavailable">
+        <div class="gp-fib-head"><div><span class="gp-sec-title">Fibonacci confluence</span><span class="gp-sec-note">No completed swing is available yet</span></div></div>
+      </section>`;
+    }
+    const directionClass = setupClass(fibonacci.direction);
+    const levels = (fibonacci.levels || []).map(level => `
+      <div class="gp-fib-level ${Number(level.ratio) === Number(fibonacci.nearestLevel?.ratio) ? 'nearest' : ''}">
+        <span>${fmt(level.ratio, 1)}%</span>
+        <b>$${fmt(level.price)}</b>
+        <small>${fmt(level.distancePct)}% away</small>
+      </div>`).join('');
+    const extensions = (fibonacci.extensions || []).map(level =>
+      `<span><i>${fmt(level.ratio, 1)}%</i>$${fmt(level.price)}</span>`).join('');
+    return `<section class="gp-fibonacci">
+      <div class="gp-fib-head">
+        <div>
+          <span class="gp-sec-title">Fibonacci confluence</span>
+          <span class="gp-sec-note">mathematical price map · never a standalone trade trigger</span>
+        </div>
+        <div class="gp-fib-bias ${directionClass}">${esc(fibonacci.direction)}<small>${esc(fibonacci.setup)}</small></div>
+      </div>
+      <div class="gp-fib-swing">
+        <span><i>Swing low</i><b>$${fmt(fibonacci.swing?.low)}</b><small>${esc(fibonacci.swing?.lowDate || '')}</small></span>
+        <span class="gp-fib-arrow">${fibonacci.swing?.direction === 'BULLISH' ? '↗' : '↘'}</span>
+        <span><i>Swing high</i><b>$${fmt(fibonacci.swing?.high)}</b><small>${esc(fibonacci.swing?.highDate || '')}</small></span>
+      </div>
+      <div class="gp-fib-levels">${levels}</div>
+      <div class="gp-fib-summary">
+        <span><i>Nearest support</i><b>${fibonacci.nearestSupport ? '$' + fmt(fibonacci.nearestSupport.price) + ' · ' + fmt(fibonacci.nearestSupport.ratio, 1) + '%' : 'None inside swing'}</b></span>
+        <span><i>Nearest resistance</i><b>${fibonacci.nearestResistance ? '$' + fmt(fibonacci.nearestResistance.price) + ' · ' + fmt(fibonacci.nearestResistance.ratio, 1) + '%' : 'None inside swing'}</b></span>
+      </div>
+      <div class="gp-fib-extensions"><strong>Extensions</strong>${extensions}</div>
+      <p>${esc(fibonacci.methodology)}</p>
+    </section>`;
+  }
+
   function list(items, cls) {
     if (!Array.isArray(items) || !items.length) return '';
     return `<ul class="gp-list ${cls || ''}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`;
@@ -82,6 +120,7 @@ const gamePlan = (() => {
       : '<li>No additional volume/price explanation available.</li>';
     const newsImpact = signal.newsImpact || {};
     const patternAnalysis = signal.patternAnalysis || {};
+    const fibonacci = signal.fibonacci || {};
     const patterns = Array.isArray(patternAnalysis.patterns) ? patternAnalysis.patterns : [];
     const patternSummary = patterns.length
       ? patterns.slice(0, 3).map(pattern => `${pattern.name} (${pattern.timeframe})`).join(' · ')
@@ -153,6 +192,11 @@ const gamePlan = (() => {
           <span>Chart patterns</span>
           <b class="${setupClass(patternAnalysis.direction)}">${esc(patternAnalysis.direction || 'MIXED')}</b>
           <small>${esc(patternSummary)}</small>
+        </div>
+        <div class="gp-evidence-item">
+          <span>Fibonacci confluence</span>
+          <b class="${setupClass(fibonacci.direction)}">${esc(fibonacci.available ? fibonacci.direction : 'UNAVAILABLE')}</b>
+          <small>${esc(fibonacci.available ? fibonacci.setup : fibonacci.reason || 'No completed swing available')}</small>
         </div>
       </div>
       ${quality.missing?.length ? `<div class="gp-engine-notrade">PROVISIONAL — confidence capped: ${quality.missing.map(esc).join(' · ')}</div>` : ''}
@@ -228,6 +272,7 @@ const gamePlan = (() => {
     if (!c) return;
 
     if (!d?.ok) {
+      setSafe('searchVerdictTop', el => el.style.display = 'none');
       setSafe('gpLoading', el => el.style.display = 'none');
       setSafe('gpError', el => {
         el.style.display = '';
@@ -246,8 +291,27 @@ const gamePlan = (() => {
 
     // Header badge
     const verdict = searchSignal?.signal?.label || 'UNAVAILABLE';
-    const direction = searchSignal?.signal?.direction || (verdict === 'SELL' ? 'BEARISH' : 'BULLISH');
+    const direction = searchSignal?.signal?.direction
+      || (verdict === 'SELL' ? 'BEARISH' : verdict === 'BUY' ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
+    const verdictClass = setupClass(setup);
+    const signalReasons = Array.isArray(searchSignal?.reasons)
+      ? searchSignal.reasons.filter(Boolean).slice(0, 2)
+      : [];
+    setSafe('searchVerdictTop', el => {
+      el.style.display = '';
+      el.className = `search-verdict-top ${verdictClass}`;
+    });
+    setSafe('searchVerdictLabel', el => el.textContent = verdict);
+    setSafe('searchVerdictStage', el => el.textContent = searchSignal?.signal?.stage || 'PROVISIONAL');
+    setSafe('searchVerdictSymbol', el => el.textContent = d.symbol || '--');
+    setSafe('searchVerdictDirection', el => el.textContent = direction);
+    setSafe('searchVerdictConfidence', el => el.textContent = `${searchSignal?.confidence ?? '--'}/100`);
+    setSafe('searchVerdictReason', el => {
+      el.textContent = signalReasons.length
+        ? signalReasons.join(' · ')
+        : 'Using all available verified Search evidence; missing inputs remain provisional.';
+    });
     setSafe('gpSetupBadge', el => {
       el.style.display = '';
       el.textContent = setup || '--';
@@ -260,6 +324,9 @@ const gamePlan = (() => {
     });
 
     const chgCls = (s.changePct ?? 0) >= 0 ? 'up' : 'down';
+    const dayRangePct = Number(s.high) > Number(s.low)
+      ? Math.max(0, Math.min(100, ((Number(s.price) - Number(s.low)) / (Number(s.high) - Number(s.low))) * 100))
+      : null;
     const confParts = confidence?.parts || {};
     const confHtml = `<div class="gp-conf">
         <div class="gp-conf-overall">DATA COVERAGE <b>${confidence?.overall ?? '--'}/100</b></div>
@@ -284,6 +351,7 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>RSI 14</span><b>${fmt(ind.rsi14, 0)}</b></div>
         <div class="gp-vcell"><span>Rel Vol</span><b>${s.relVol != null ? fmt(s.relVol, 1) + 'x' : '--'}</b></div>
         <div class="gp-vcell"><span>vs VWAP</span><b>${ind.distVwapPct != null ? (ind.distVwapPct >= 0 ? '+' : '') + fmt(ind.distVwapPct, 1) + '%' : '--'}</b></div>
+        <div class="gp-vcell"><span>Day range</span><b>${dayRangePct == null ? '--' : fmt(dayRangePct, 0) + '%'}</b><small>${s.low != null && s.high != null ? '$' + fmt(s.low) + '–$' + fmt(s.high) : 'Unavailable'}</small></div>
       </div>
 
       ${searchSignalHtml(searchSignal)}
@@ -296,6 +364,8 @@ const gamePlan = (() => {
           <div class="gp-levels">${gapRows(gapAnalysis)}</div>
         </div>
       </div>
+
+      ${fibonacciHtml(d.fibonacci)}
 
       ${confHtml}
       ${analogHtml}

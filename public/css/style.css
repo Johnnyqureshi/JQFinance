@@ -89,6 +89,40 @@ input  { font-family:inherit; }
 .market-dot.closed { background:var(--red); }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
 
+/* Compact light/dark mode control */
+.theme-toggle {
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:space-between;
+  width:42px;
+  height:24px;
+  padding:2px 4px;
+  flex:0 0 auto;
+  border:1px solid var(--border2);
+  border-radius:999px;
+  background:var(--card);
+  color:var(--t3);
+  transition:background var(--tr), border-color var(--tr), color var(--tr);
+}
+.theme-toggle:hover { border-color:var(--teal-bdr); color:var(--teal); }
+.theme-toggle:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.theme-toggle-icon { position:relative; z-index:1; width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.8; }
+.theme-toggle-sun { color:var(--gold); }
+.theme-toggle-moon { color:var(--t2); }
+.theme-toggle-thumb {
+  position:absolute;
+  top:2px;
+  left:3px;
+  width:18px;
+  height:18px;
+  border-radius:50%;
+  background:var(--teal);
+  box-shadow:0 1px 3px rgba(0,0,0,.25);
+  transition:transform var(--tr), background var(--tr);
+}
+html[data-theme="light"] .theme-toggle-thumb { transform:translateX(18px); background:var(--gold); }
+
 .nav-search {
   position:relative;
   display:flex; align-items:center; gap:8px;
@@ -1573,6 +1607,75 @@ input  { font-family:inherit; }
 .rt-cd-label { font-size: 9px; color: var(--t3); text-transform: uppercase; letter-spacing: .08em; }
 .rt-cd-secs  { font-size: 22px; font-weight: 700; font-family: 'DM Mono', monospace; color: var(--teal); line-height: 1; }
 .rt-cd-unit  { font-size: 9px; color: var(--t3); }
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+html[data-theme="light"] {
+  color-scheme:light;
+  --bg:        #f4f7fb;
+  --bg2:       #eaf0f7;
+  --card:      #ffffff;
+  --card2:     #f7f9fc;
+  --border:    #d7e0eb;
+  --border2:   #bdcadb;
+
+  --teal:      #078a70;
+  --teal-dim:  rgba(7,138,112,.10);
+  --teal-bdr:  rgba(7,138,112,.30);
+  --gold:      #b47700;
+  --gold-dim:  rgba(180,119,0,.10);
+  --gold-bdr:  rgba(180,119,0,.30);
+  --blue:      #2169ad;
+  --blue-dim:  rgba(33,105,173,.10);
+  --green:     #078a70;
+  --green-dim: rgba(7,138,112,.10);
+  --red:       #c9343f;
+  --red-dim:   rgba(201,52,63,.10);
+  --t1:        #17253a;
+  --t2:        #52657e;
+  --t3:        #8493a7;
+}
+
+html[data-theme="light"] body { background:var(--bg); }
+html[data-theme="light"] .nav,
+html[data-theme="light"] .mobile-nav { background:rgba(255,255,255,.94); }
+html[data-theme="light"] .search-drop {
+  box-shadow:0 24px 60px rgba(37,57,82,.16);
+}
+html[data-theme="light"] .nav-icon-btn:hover { background:var(--bg2); }
+html[data-theme="light"] .cpw-overlay { background:rgba(25,42,64,.35); }
+html[data-theme="light"] .cpw-modal { background:var(--card); border-color:var(--border); box-shadow:0 20px 60px rgba(37,57,82,.22); }
+html[data-theme="light"] .cpw-header { border-color:var(--border); }
+html[data-theme="light"] .cpw-title { color:var(--t1); }
+html[data-theme="light"] .cpw-close { color:var(--t2); }
+html[data-theme="light"] .cpw-close:hover { color:var(--t1); }
+html[data-theme="light"] .cpw-label { color:var(--t2); }
+html[data-theme="light"] .cpw-input { background:var(--bg2); border-color:var(--border2); color:var(--t1); }
+html[data-theme="light"] .auth-overlay { background:rgba(244,247,251,.94); }
+html[data-theme="light"] .auth-card { box-shadow:0 24px 70px rgba(37,57,82,.16); }
+
+/* Keep the denser trading panels readable when their legacy rules use fixed
+   dark colors instead of the shared theme tokens. */
+html[data-theme="light"] .gp-panel,
+html[data-theme="light"] .gp-vcell,
+html[data-theme="light"] .gp-analog,
+html[data-theme="light"] .gp-volume-signal,
+html[data-theme="light"] .gp-volume-metrics>div,
+html[data-theme="light"] .gp-volume-reasons,
+html[data-theme="light"] .gp-evidence,
+html[data-theme="light"] .si-intraday {
+  background:var(--card);
+  border-color:var(--border);
+}
+html[data-theme="light"] .gp-panel [style],
+html[data-theme="light"] .gp-panel { color:var(--t1); }
+html[data-theme="light"] .gp-vcell span,
+html[data-theme="light"] .gp-sec-note,
+html[data-theme="light"] .gp-prob-basis,
+html[data-theme="light"] .gp-analog-stat,
+html[data-theme="light"] .gp-volume-metrics span,
+html[data-theme="light"] .gp-volume-metrics small,
+html[data-theme="light"] .gp-volume-reasons li,
+html[data-theme="light"] .gp-evidence-item>small { color:var(--t2); }
 
 /* ── RESPONSIVE ────────────────────────────────────────────────────────────── */
 @media (max-width:1100px) {

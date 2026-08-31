@@ -21,6 +21,43 @@ const cls  = v => v >= 0 ? 'up' : 'down';
 const escapeHtml = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const $    = id => document.getElementById(id);
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const THEME_KEY = 'jqf-theme';
+
+function applyTheme(theme, persist = true) {
+  const nextTheme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = nextTheme;
+
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, nextTheme); } catch {}
+  }
+
+  const toggle = $('themeToggle');
+  if (toggle) {
+    const light = nextTheme === 'light';
+    toggle.setAttribute('aria-pressed', String(light));
+    toggle.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    toggle.setAttribute('title', light ? 'Switch to dark mode' : 'Switch to light mode');
+  }
+}
+
+function setupThemeToggle() {
+  const toggle = $('themeToggle');
+  if (!toggle) return;
+
+  let savedTheme = document.documentElement.dataset.theme || 'dark';
+  try {
+    const storedTheme = localStorage.getItem(THEME_KEY);
+    if (storedTheme === 'light' || storedTheme === 'dark') savedTheme = storedTheme;
+  } catch {}
+
+  applyTheme(savedTheme, false);
+  toggle.addEventListener('click', () => {
+    const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    applyTheme(current === 'light' ? 'dark' : 'light');
+  });
+}
+
 // ── Auth API ────────────────────────────────────────────────────────────────────
 const authAPI = {
   async me()          { try { const r=await fetch('/api/auth/me'); return r.ok ? r.json() : null; } catch { return null; } },
@@ -1650,6 +1687,7 @@ function setupAuthUI() {
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  setupThemeToggle();
   setupAuthUI();
 
   // Check if already logged in

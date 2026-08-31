@@ -30,6 +30,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <script>
+    (() => {
+      try {
+        if (localStorage.getItem('jqf-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light';
+        }
+      } catch {}
+    })();
+  </script>
   <link rel="stylesheet" href="/public/css/style.css"/>
   <link rel="stylesheet" href="/public/css/swing.css"/>
   <link rel="stylesheet" href="/public/css/options.css"/>
@@ -133,6 +142,17 @@
       <span class="market-dot" id="mktDot"></span>
       <span id="mktText">Checking…</span>
     </div>
+    <button class="theme-toggle" id="themeToggle" type="button"
+      aria-label="Switch to light mode" title="Switch to light mode">
+      <svg class="theme-toggle-icon theme-toggle-sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+      </svg>
+      <svg class="theme-toggle-icon theme-toggle-moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20.5 14.7A8.5 8.5 0 0 1 9.3 3.5 8.5 8.5 0 1 0 20.5 14.7Z"></path>
+      </svg>
+      <span class="theme-toggle-thumb" aria-hidden="true"></span>
+    </button>
     <div class="nav-user" id="navUser" style="display:none">
       <span class="nav-username" id="navUsername"></span>
       <button class="nav-icon-btn" id="navChangePw" title="Change password">

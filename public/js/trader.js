@@ -232,7 +232,10 @@ const trader = (() => {
 
     const typeSpan = document.createElement('span');
     typeSpan.className = 'sr-type';
-    typeSpan.textContent = type === 'res' ? 'Resistance' : 'Support';
+    typeSpan.textContent = type === 'res' ? 'Resistance'
+      : type === 'sup' ? 'Support'
+      : type === 'breakout' ? 'Breakout above'
+      : 'Breakdown below';
 
     const descSpan = document.createElement('span');
     descSpan.className = 'sr-desc';
@@ -318,26 +321,27 @@ const trader = (() => {
     }
 
     // S/R
-    const srTbl = $('srTable');
+     const srTbl = $('srTable');
     if (srTbl) {
-      const signalResistance = Number(gamePlan?.searchSignal?.levels?.resistance?.price);
-      const signalSupport = Number(gamePlan?.searchSignal?.levels?.support?.price);
-      const verifiedResistance = [
-        ...(Number.isFinite(signalResistance) ? [signalResistance] : []),
-        ...(Array.isArray(gamePlan?.levels?.resistance)
-          ? gamePlan.levels.resistance.map(level => Number(level.price)).filter(Number.isFinite)
-          : sr.resistance),
-      ].filter((value, index, list) => list.findIndex(item => Math.abs(item - value) / price < 0.001) === index);
-      const verifiedSupport = [
-        ...(Number.isFinite(signalSupport) ? [signalSupport] : []),
-        ...(Array.isArray(gamePlan?.levels?.support)
-          ? gamePlan.levels.support.map(level => Number(level.price)).filter(Number.isFinite)
-          : sr.support),
-      ].filter((value, index, list) => list.findIndex(item => Math.abs(item - value) / price < 0.001) === index);
+       const display = gamePlan?.displayLevels || {};
+       const resistance = display.resistance?.[0]?.price;
+       const support = display.support?.[0]?.price;
+       const breakout = display.breakout?.price;
+       const breakdown = display.breakdown?.price;
        const rows = [
-         ...verifiedResistance.slice(0,2).map((v,i) => makeSRRow('res', i+1, ((v-price)/price*100).toFixed(2), 'above', fmt(v), 'BULLISH ABOVE')),
-         ...verifiedSupport.slice(0,2).map((v,i)    => makeSRRow('sup', i+1, ((price-v)/price*100).toFixed(2), 'below', fmt(v), 'BEARISH BELOW')),
-      ];
+         Number.isFinite(Number(resistance))
+           ? makeSRRow('res', 'Resistance', ((resistance-price)/price*100).toFixed(2), 'above', fmt(resistance), 'PRIMARY LEVEL')
+           : null,
+         Number.isFinite(Number(breakout))
+           ? makeSRRow('breakout', 'Breakout confirmation', ((breakout-price)/price*100).toFixed(2), 'above', fmt(breakout), 'BULLISH ABOVE')
+           : null,
+         Number.isFinite(Number(support))
+           ? makeSRRow('sup', 'Support', ((price-support)/price*100).toFixed(2), 'below', fmt(support), 'PRIMARY LEVEL')
+           : null,
+         Number.isFinite(Number(breakdown))
+           ? makeSRRow('breakdown', 'Breakdown confirmation', ((price-breakdown)/price*100).toFixed(2), 'below', fmt(breakdown), 'BEARISH BELOW')
+           : null,
+       ].filter(Boolean);
       srTbl.replaceChildren();
       if (rows.length) {
         srTbl.append(...rows);

@@ -2734,6 +2734,17 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const resistance = dedupe(inRange.filter(c => c.price > price).sort((a, b) => a.price - b.price)).slice(0, 3);
     const breakdown = support.length ? +(support.at(-1).price - (atr ?? price * 0.02) * 0.5).toFixed(2) : null;
     const levels = { support, resistance, breakdown, currentPrice: +price.toFixed(2) };
+    // Keep the full level set for the deterministic engine, but expose a
+    // deliberately simpler four-level presentation to Search users:
+    // nearest resistance/support, then the next level as breakout/breakdown
+    // confirmation. These are observations, not order instructions.
+    const displayLevels = {
+      resistance: resistance.slice(0, 1),
+      support: support.slice(0, 1),
+      breakout: resistance[1] ? { ...resistance[1], label: 'Breakout confirmation above resistance' } : null,
+      breakdown: support[1] ? { ...support[1], label: 'Breakdown confirmation below support' } : null,
+      currentPrice: +price.toFixed(2),
+    };
     const sourceFreshness = gpSourceFreshness({
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
@@ -2894,7 +2905,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
-      market, news, levels, probabilities, confluence, searchSignal,
+      market, news, levels, displayLevels, probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,
     };

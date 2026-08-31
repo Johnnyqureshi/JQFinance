@@ -1019,6 +1019,12 @@ input  { font-family:inherit; }
 .sr-tag { font-size:10px; text-transform:uppercase; letter-spacing:.1em; padding:3px 9px; border-radius:4px; font-weight:600; }
 .sr-row.res .sr-tag { background:rgba(29,214,163,.1); color:var(--green); border:1px solid rgba(29,214,163,.2); }
 .sr-row.sup .sr-tag { background:rgba(232,69,69,.1); color:var(--red); border:1px solid rgba(232,69,69,.2); }
+.sr-row.breakout { background:rgba(29,214,163,.04); border-color:rgba(29,214,163,.18); }
+.sr-row.breakdown { background:rgba(232,69,69,.04); border-color:rgba(232,69,69,.18); }
+.sr-row.breakout .sr-type, .sr-row.breakout .sr-price { color:var(--green); }
+.sr-row.breakdown .sr-type, .sr-row.breakdown .sr-price { color:var(--red); }
+.sr-row.breakout .sr-tag { background:rgba(29,214,163,.1); color:var(--green); border:1px solid rgba(29,214,163,.2); }
+.sr-row.breakdown .sr-tag { background:rgba(232,69,69,.1); color:var(--red); border:1px solid rgba(232,69,69,.2); }
 .sr-level-note { margin:4px 2px 0; color:var(--t3); font-size:11px; line-height:1.55; }
 
 /* countdown */

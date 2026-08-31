@@ -40,11 +40,11 @@ const gamePlan = (() => {
     if (!levels) return '';
     const row = (l, type) => `<div class="gp-lvl-row ${type}">
       <span class="gp-lvl-price">$${fmt(l.price)}</span><span class="gp-lvl-label">${esc(l.label)}</span></div>`;
-    const res = [...(levels.resistance || [])].reverse().map(l => row(l, 'res')).join('');
-    const sup = (levels.support || []).map(l => row(l, 'sup')).join('');
-    const cur = `<div class="gp-lvl-row cur"><span class="gp-lvl-price">$${fmt(levels.currentPrice)}</span><span class="gp-lvl-label">CURRENT PRICE</span></div>`;
-    const brk = levels.breakdown != null ? `<div class="gp-lvl-row brk"><span class="gp-lvl-price">$${fmt(levels.breakdown)}</span><span class="gp-lvl-label">Breakdown level</span></div>` : '';
-    return res + cur + sup + brk;
+    const res = (levels.resistance || []).slice(0, 1).map(l => row({ ...l, label: 'Resistance' }, 'res')).join('');
+    const breakout = levels.breakout ? row(levels.breakout, 'breakout') : '';
+    const sup = (levels.support || []).slice(0, 1).map(l => row({ ...l, label: 'Support' }, 'sup')).join('');
+    const breakdown = levels.breakdown ? row(levels.breakdown, 'breakdown') : '';
+    return res + breakout + sup + breakdown;
   }
 
   function list(items, cls) {
@@ -169,7 +169,7 @@ const gamePlan = (() => {
       return;
     }
 
-    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, confidence, ai, dataGaps, news, confluence, searchSignal } = d;
+    const { snapshot: s, indicators: ind, selloff, oversold, analogs, market, probabilities: p, confidence, ai, dataGaps, news, confluence, searchSignal, levels, displayLevels } = d;
 
     // Header badge
     const setup = searchSignal?.signal?.label || (ai?.available ? ai.setup : oversold?.label);
@@ -256,7 +256,7 @@ const gamePlan = (() => {
         </div>
         <div class="gp-col">
           <div class="gp-sec-title">Key levels</div>
-          <div class="gp-levels">${levelRows(levels)}</div>
+          <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
           ${selloff?.classification?.length ? `<div class="gp-tags">${selloff.classification.map(t => `<span class="gp-tag">${esc(t)}</span>`).join('')}</div>` : ''}
           <div class="gp-attrib">Move attribution: <b>${esc(market?.attribution || 'UNKNOWN')}</b>
             ${market?.spy != null ? ` · SPY ${market.spy >= 0 ? '+' : ''}${fmt(market.spy, 1)}%` : ''}

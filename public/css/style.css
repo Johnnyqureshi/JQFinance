@@ -108,6 +108,7 @@ html[data-theme="light"] .ct-auto-save,
 html[data-theme="light"] .nsc-title,
 html[data-theme="light"] .nsc-table,
 html[data-theme="light"] .nsc-table td,
+html[data-theme="light"] .nsc-table .nsc-th,
 html[data-theme="light"] .nsc-sym,
 html[data-theme="light"] .nsc-add-input,
 html[data-theme="light"] .nsc-finp,
@@ -223,6 +224,68 @@ html[data-theme="light"] .gp-critical-levels span,
 html[data-theme="light"] .gp-audit li,
 html[data-theme="light"] .gp-volume-reasons li {
   color: var(--t1) !important;
+}
+html[data-theme="light"] .nsc-flbl,
+html[data-theme="light"] .nsc-rf-lbl,
+html[data-theme="light"] .nsc-table .nsc-th {
+  color: #111827 !important;
+}
+html[data-theme="light"] .nsc-fsel option {
+  background: #fff !important;
+  color: #111827 !important;
+}
+html[data-theme="light"] .gp-updated,
+html[data-theme="light"] .gp-loading,
+html[data-theme="light"] .gp-vcell span,
+html[data-theme="light"] .gp-ai-missing,
+html[data-theme="light"] .gp-sec-title,
+html[data-theme="light"] .gp-sec-note,
+html[data-theme="light"] .gp-prob-lbl,
+html[data-theme="light"] .gp-prob-basis,
+html[data-theme="light"] .gp-analog-title,
+html[data-theme="light"] .gp-analog-stat,
+html[data-theme="light"] .gp-lvl-label,
+html[data-theme="light"] .gp-attrib,
+html[data-theme="light"] .gp-news-row,
+html[data-theme="light"] .gp-news-row i,
+html[data-theme="light"] .gp-news-none,
+html[data-theme="light"] .gp-list li,
+html[data-theme="light"] .gp-scen p,
+html[data-theme="light"] .gp-scen-sub,
+html[data-theme="light"] .gp-setup-grid span,
+html[data-theme="light"] .gp-conf-overall,
+html[data-theme="light"] .gp-conf-overall b,
+html[data-theme="light"] .gp-conf-part,
+html[data-theme="light"] .gp-conf-part i,
+html[data-theme="light"] .gp-disclaimer,
+html[data-theme="light"] .gp-confluence-signal,
+html[data-theme="light"] .gp-confluence-signal small,
+html[data-theme="light"] .gp-state,
+html[data-theme="light"] .gp-state i,
+html[data-theme="light"] .gp-timeframe,
+html[data-theme="light"] .gp-timeframe i,
+html[data-theme="light"] .gp-timeframes > span:first-child,
+html[data-theme="light"] .gp-engine-notes {
+  color: #111827 !important;
+}
+html[data-theme="light"] .gp-vcell,
+html[data-theme="light"] .gp-analog,
+html[data-theme="light"] .gp-news-row,
+html[data-theme="light"] .gp-scen,
+html[data-theme="light"] .gp-setup-grid > div,
+html[data-theme="light"] .gp-conf,
+html[data-theme="light"] .gp-confluence,
+html[data-theme="light"] .gp-critical-levels > div,
+html[data-theme="light"] .gp-audit > div,
+html[data-theme="light"] .gp-evidence-item,
+html[data-theme="light"] .gp-volume-metrics > div,
+html[data-theme="light"] .gp-volume-reasons {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+}
+html[data-theme="light"] .gp-gaps,
+html[data-theme="light"] .gp-warn-txt {
+  color: #815800 !important;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────────────────── */

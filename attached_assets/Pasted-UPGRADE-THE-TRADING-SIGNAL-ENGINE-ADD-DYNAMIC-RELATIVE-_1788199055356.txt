@@ -1,0 +1,185 @@
+UPGRADE THE TRADING SIGNAL ENGINE — ADD DYNAMIC RELATIVE VOLUME / PUMP DETECTION
+
+The current analyzer must NOT issue a SELL simply because:
+- RSI is elevated
+- Price is near resistance
+- The current candle/day is red
+- Price is above/below a moving average
+
+Those signals must be evaluated together with REAL-TIME RELATIVE VOLUME and volume acceleration.
+
+PRIMARY NEW VARIABLE: RELATIVE VOLUME (RVOL)
+
+Calculate:
+
+RVOL = Current Volume / Average Volume for the same time period
+
+For intraday trading, DO NOT compare current volume to the full-day average. Use time-of-day normalized volume.
+
+Calculate Expected Volume At This Time:
+ExpectedVolume = historical average cumulative volume at the current minute of the trading session.
+
+RVOL = Current Cumulative Volume / ExpectedVolume
+
+Also calculate:
+
+VolumeAcceleration =
+Current short-term volume rate / Previous short-term volume rate
+
+Use 1-minute, 5-minute and 15-minute volume where available.
+
+PUMP / BREAKOUT DETECTION
+
+Create a dynamic PUMP PRESSURE SCORE from 0–100.
+
+Increase the score when:
+
+1. RVOL > 1.5
+2. RVOL > 2.0 = strong volume confirmation
+3. RVOL > 3.0 = extreme volume
+4. VolumeAcceleration > 1.25
+5. Price is making higher lows
+6. Price is breaking previous intraday highs
+7. Price is approaching resistance while volume is increasing
+8. Price breaks resistance with expanding volume
+9. Bid/ask or trade-flow data indicates aggressive buying, if available
+10. Price is rising while volume is increasing
+
+IMPORTANT:
+A resistance test accompanied by increasing RVOL should NOT automatically produce SELL.
+
+Instead classify it as:
+
+"BREAKOUT WATCH"
+
+when:
+- Price is within approximately 1% of resistance
+- RVOL > 1.5
+- VolumeAcceleration > 1.10
+- Price structure is bullish
+
+Classify as:
+
+"BREAKOUT CONFIRMED"
+
+when:
+- Price breaks resistance
+- Breakout candle volume is at least 1.5x expected volume
+- RVOL is increasing rather than decreasing
+- Price remains above the breakout level
+- Follow-through occurs on subsequent candles
+
+BEARISH VOLUME DETECTION
+
+Increase SELL pressure when:
+
+- Price is falling AND RVOL is increasing
+- Price breaks support AND volume expands
+- Volume expands on red candles and contracts on green candles
+- Lower highs/lower lows are developing
+- Resistance rejection occurs with heavy selling volume
+
+Do NOT interpret high volume by itself as bearish.
+High volume means PARTICIPATION.
+The direction of price movement determines whether the volume is bullish or bearish.
+
+CREATE A VOLUME/PRICE CONFIRMATION SCORE
+
+Calculate:
+
+BullishVolumeScore 0–100
+BearishVolumeScore 0–100
+
+BullishVolumeScore increases when:
+- Price ↑ + Volume ↑
+- Breakout + high RVOL
+- Higher low + increasing volume
+- Buying acceleration
+- Resistance approaching + volume expansion
+
+BearishVolumeScore increases when:
+- Price ↓ + Volume ↑
+- Support breakdown + high RVOL
+- Lower high + increasing selling volume
+- Rejection from resistance + heavy volume
+
+SIGNAL PRIORITY
+
+The final signal must combine:
+
+RSI
+Trend
+Support/Resistance
+Price Structure
+Relative Volume
+Volume Acceleration
+Breakout/Breakdown Confirmation
+Momentum
+
+Do NOT allow RSI or resistance alone to generate SELL.
+
+Example:
+
+RSI = 60.8
+Price = near resistance
+Current day = red
+BUT:
+RVOL = 2.4
+VolumeAcceleration = 1.45
+Price = making higher lows
+Price = moving toward resistance
+
+The system should NOT simply say SELL.
+
+It should say something similar to:
+
+"BREAKOUT WATCH — HIGH VOLUME"
+Confidence: 72%
+RVOL: 2.4x
+Volume acceleration: +45%
+Resistance: $XXX
+Reason: Significant volume is entering while price is pressing resistance. A breakout is possible if resistance is reclaimed with continued volume.
+
+If resistance breaks with volume confirmation:
+Upgrade to BUY / BREAKOUT CONFIRMED.
+
+If price rejects resistance AND selling volume expands:
+Downgrade to SELL.
+
+DYNAMIC CONFIDENCE
+
+The confidence score must continuously recalculate whenever new market data arrives.
+
+Do NOT use hardcoded confidence such as:
+"SELL 60%"
+
+Instead calculate confidence from the weighted evidence.
+
+Suggested weighting:
+
+Relative Volume / Volume Flow: 25%
+Price Structure / Momentum: 25%
+Support & Resistance: 20%
+Trend: 15%
+RSI: 10%
+Other indicators: 5%
+
+Most importantly, allow volume and price action to OVERRIDE weaker conflicting indicators.
+
+The analyzer's objective is NOT to predict the future with certainty.
+
+Its objective is to detect when real-time volume and price behavior are creating an abnormal probability of a breakout, continuation, reversal, or breakdown.
+
+DISPLAY THESE LIVE:
+
+RVOL: 2.4x
+Volume Acceleration: +45%
+Bullish Volume Score: 78/100
+Bearish Volume Score: 31/100
+Pump Pressure: 81/100
+Breakout Probability: 74%
+Resistance: $XXX
+Distance to Resistance: X.XX%
+Signal: BREAKOUT WATCH
+
+Make all values update dynamically from live market data.

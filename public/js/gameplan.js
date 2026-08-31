@@ -7,9 +7,11 @@ const gamePlan = (() => {
   const fmt = (n, d = 2) => n == null || !isFinite(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
   const REFRESH_MS = 60 * 1000;
+  const SIGNIFICANT_MOVE_PCT = 1.5;
   let currentSym = null;
   let timer = null;
   let reqToken = 0;   // monotonic token — stale responses are discarded
+  let planWatch = null;
 
   function setSafe(id, fn) { const el = $(id); if (el) fn(el); }
 
@@ -288,6 +290,21 @@ const gamePlan = (() => {
       levels, displayLevels, gapAnalysis, analogs, probabilities,
     } = d;
     const generatedAt = d.generatedAt;
+    const snapshotPrice = Number(s?.price);
+    const watchedLevels = [
+      displayLevels?.bias,
+      ...(displayLevels?.support || []),
+      ...(displayLevels?.resistance || []),
+      levels?.breakdown,
+      d.confluence?.levels?.criticalSupport,
+      d.confluence?.levels?.criticalResistance,
+    ].map(level => Number(level?.price ?? level)).filter(price => Number.isFinite(price) && price > 0);
+    planWatch = {
+      symbol: currentSym,
+      snapshotPrice,
+      levels: [...new Set(watchedLevels)],
+      refreshTriggered: false,
+    };
 
     // Header badge
     const verdict = searchSignal?.signal?.label || 'UNAVAILABLE';
@@ -400,6 +417,7 @@ const gamePlan = (() => {
   function load(sym, suppliedAnalysis = null) {
     sym = String(sym || '').toUpperCase();
     if (!sym) return;
+    if (sym !== currentSym) planWatch = null;
     currentSym = sym;
     setSafe('gpPanel', el => el.style.display = '');
     setSafe('gpLoadSym', el => el.textContent = sym);
@@ -426,5 +444,25 @@ const gamePlan = (() => {
     });
   });
 
-  return { load };
+  function onQuote(sym, latestPrice) {
+    const symbol = String(sym || '').toUpperCase().trim();
+    const price = Number(latestPrice);
+    const watch = planWatch;
+    if (!watch || watch.refreshTriggered || symbol !== currentSym || symbol !== watch.symbol
+        || !(price > 0) || !(watch.snapshotPrice > 0)) return;
+
+    const movePct = Math.abs(price - watch.snapshotPrice) / watch.snapshotPrice * 100;
+    const crossedLevel = watch.levels.some(level =>
+      (watch.snapshotPrice < level && price >= level)
+      || (watch.snapshotPrice > level && price <= level)
+    );
+    if (movePct < SIGNIFICANT_MOVE_PCT && !crossedLevel) return;
+
+    // One early regeneration per rendered plan. The server independently
+    // enforces its per-user/symbol force cooldown.
+    watch.refreshTriggered = true;
+    refresh(true);
+  }
+
+  return { load, onQuote };
 })();

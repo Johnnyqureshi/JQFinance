@@ -718,7 +718,9 @@ const rtTrader = (() => {
       ]);
       if (tok !== reqToken || sym !== currentSym) return;
 
-      const price       = gamePlanRes?.snapshot?.price ?? null;
+      // /api/intraday is polled every minute and carries the latest quote.
+      // The shared game-plan response may still be within its cache window.
+      const price       = intradayRes?.price ?? gamePlanRes?.snapshot?.price ?? null;
       const bars        = intradayRes?.bars || [];
       const dailyBars   = histRes?.historical || [];
       const dailyPatterns = dailyPatternRes?.patterns || [];
@@ -730,6 +732,9 @@ const rtTrader = (() => {
 
       const input = $('rtInput'); if (input) input.value = sym;
       render(sym, bars, price, dailyBars, marketState, gamePlanRes, dailyPatterns, intradayPatterns);
+      if (typeof gamePlan !== 'undefined' && typeof gamePlan.onQuote === 'function') {
+        gamePlan.onQuote(sym, price);
+      }
 
     } catch (e) {
       const loadingEl = $('rtLoading'); if (loadingEl) loadingEl.style.display = 'none';

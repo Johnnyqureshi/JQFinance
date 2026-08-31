@@ -270,7 +270,7 @@ const trader = (() => {
     const vwap    = Number(gamePlan?.indicators?.vwap);
     const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal, { price, open, vwap });
 
-    const bullish = price >= open;
+    const signalBullish = signal === 'BUY';
     const dayRngPct = dayHigh>dayLow ? ((price-dayLow)/(dayHigh-dayLow)*100) : 50;
     const fromOpen  = open ? ((price-open)/open*100) : 0;
     const rsiZone   = rsi===null?'--':rsi<30?'Oversold':rsi>70?'Overbought':'Neutral';
@@ -315,11 +315,15 @@ const trader = (() => {
     if(rd) rd.style.left=dp.toFixed(1)+'%';
     $('rangePct').textContent = dp.toFixed(0)+'% position in today\'s range';
 
-    // direction
+    // Signal direction must use the same binary verdict as the cards above.
+    // Price versus open remains a factual sub-metric, not a second verdict.
     const dArrow=$('dirArrow'), dLabel=$('dirLabel'), dPct=$('dirPct');
-    if(dArrow){ dArrow.className='dir-arrow '+(bullish?'up':'down'); dArrow.textContent=bullish?'▲':'▼'; }
-    if(dLabel){ dLabel.className='dir-label '+(bullish?'up':'down'); dLabel.textContent=bullish?'Bullish':'Bearish'; }
-    if(dPct)  dPct.textContent=(fromOpen>=0?'+':'')+fmt(fromOpen)+'% from open ($'+fmt(open)+')';
+    if(dArrow){ dArrow.className='dir-arrow '+(signalBullish?'up':'down'); dArrow.textContent=signalBullish?'▲':'▼'; }
+    if(dLabel){ dLabel.className='dir-label '+(signalBullish?'up':'down'); dLabel.textContent=signalBullish?'Buying':'Selling'; }
+    if(dPct) {
+      const cleanFromOpen = Math.abs(fromOpen) < 0.005 ? 0 : fromOpen;
+      dPct.textContent=(cleanFromOpen>0?'+':'')+fmt(cleanFromOpen)+'% from open ($'+fmt(open)+')';
+    }
 
     // S/R
     const srTbl = $('srTable');

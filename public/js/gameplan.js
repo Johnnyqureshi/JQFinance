@@ -1,4 +1,4 @@
-/* ── AI Trade Game Plan panel ────────────────────────────────────────────────
+/* ── Market Data Game Plan panel ─────────────────────────────────────────────
    Probability-based intraday game plan for the currently-open symbol.
    All numbers come from the server (deterministic math on real data);
    the AI narrative is rendered only when the server marks it available. */
@@ -7,7 +7,7 @@ const gamePlan = (() => {
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n, d = 2) => n == null || !isFinite(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-  const REFRESH_MS = 3 * 60 * 1000;   // matches server cache window
+  const REFRESH_MS = 60 * 1000;
   let currentSym = null;
   let timer = null;
   let reqToken = 0;   // monotonic token — stale responses are discarded
@@ -86,7 +86,7 @@ const gamePlan = (() => {
         <div><span>Volume direction</span><b>${esc(signal.structure?.volumeDirection || 'UNAVAILABLE')}</b><small>${signal.structure?.higherLows ? 'Higher lows' : signal.structure?.lowerHighs ? 'Lower highs' : 'Structure mixed'}</small></div>
         <div><span>Recent news catalyst</span><b>${esc(newsDirection)}</b><small>${newsImpact.freshCatalystCount || 0} scored in last 24h · net ${newsImpact.netScore ?? 0}</small></div>
       </div>
-      ${quality.missing?.length ? `<div class="gp-engine-notrade">NO TRADE — ${quality.missing.map(esc).join(' · ')}</div>` : ''}
+      ${quality.missing?.length ? `<div class="gp-engine-notrade">PROVISIONAL — confidence capped: ${quality.missing.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-volume-reasons"><span class="gp-audit-title bull">Why this signal</span><ul>${reasons}</ul></div>
     </section>`;
   }
@@ -148,7 +148,7 @@ const gamePlan = (() => {
       </div>
       ${quality.entryEligible
         ? '<div class="gp-engine-ready">Complete multi-timeframe evidence available — this remains decision support, not a guarantee.</div>'
-        : `<div class="gp-engine-notrade">NO TRADE — incomplete evidence: ${esc((quality.missingCriticalInputs || []).join(' · ') || 'required confirmation unavailable')}</div>`}
+        : `<div class="gp-engine-notrade">AUTOMATED SETUP NOT ELIGIBLE — incomplete evidence: ${esc((quality.missingCriticalInputs || []).join(' · ') || 'required confirmation unavailable')}</div>`}
       ${(audit.notes || []).length ? `<div class="gp-engine-notes">${audit.notes.map(esc).join(' · ')}</div>` : ''}
       ${(audit.missingInputs || []).length ? `<div class="gp-engine-notes gp-warn-txt">Confidence reduced: missing ${audit.missingInputs.map(esc).join(' · ')}</div>` : ''}
     </section>`;
@@ -210,7 +210,7 @@ const gamePlan = (() => {
       </div>` : '';
 
     const ts = ai?.available ? (ai.noTrade || !ai.tradeSetup
-      ? `<div class="gp-notrade">NO TRADE — WAIT FOR CONFIRMATION.</div>`
+      ? `<div class="gp-notrade">No validated trade setup is available.</div>`
       : `<div class="gp-setup-grid">
            <div><span>Entry zone</span><b>${esc(ai.tradeSetup.entryZone)}</b></div>
            <div><span>Confirmation</span><b>${esc(ai.tradeSetup.confirmationEntry)}</b></div>
@@ -223,7 +223,7 @@ const gamePlan = (() => {
 
     const confParts = confidence?.parts || {};
     const confHtml = `<div class="gp-conf">
-        <div class="gp-conf-overall">SETUP CONFIDENCE <b>${confidence?.overall ?? '--'}/100</b></div>
+        <div class="gp-conf-overall">DATA COVERAGE <b>${confidence?.overall ?? '--'}/100</b></div>
         <div class="gp-conf-parts">${Object.entries(confParts).map(([k, v]) =>
           `<span class="gp-conf-part"><i>${esc(k)}</i>${v}</span>`).join('')}</div>
       </div>`;
@@ -241,12 +241,11 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>Condition</span><b class="${setupClass(oversold?.label)}">${esc(oversold?.label || '--')}</b></div>
       </div>
 
-      ${ai?.available ? `<div class="gp-ai-verdict">${esc(ai.verdict)}</div>`
-        : `<div class="gp-ai-missing">AI narrative unavailable — ${esc(ai?.reason || 'not configured')}. Quantitative analysis below is live.</div>`}
+      <div class="gp-ai-missing">Deterministic data-only analysis. Generative commentary does not control or supplement the verdict.</div>
 
       <div class="gp-cols">
         <div class="gp-col">
-          <div class="gp-sec-title">Probabilities <span class="gp-sec-note">estimates, not guarantees</span></div>
+          <div class="gp-sec-title">Historical evidence <span class="gp-sec-note">observations, not forecasts</span></div>
           ${probBar('Relief bounce', p.reliefBounce)}
           ${probBar('Close green', p.closeGreen)}
           ${probBar('3%+ rebound off low', p.rebound3)}
@@ -269,35 +268,23 @@ const gamePlan = (() => {
 
        ${searchSignalHtml(searchSignal)}
        ${confluenceHtml(confluence, searchSignal)}
-      ${ai?.available && ai.why?.length ? `<div class="gp-sec-title">Why</div>${list(ai.why)}` : ''}
-      ${scen}
-      ${knife ? `<div class="gp-knife">⚠ ${esc(knife)}</div>` : ''}
-      ${ai?.available ? `<div class="gp-sec-title">Trade setup</div>${ts}` : ''}
-      <div class="gp-cols">
-        ${ai?.available && ai.changeMind?.length ? `<div class="gp-col"><div class="gp-sec-title">What would change my mind?</div>${list(ai.changeMind)}</div>` : ''}
-        ${ai?.available && ai.whyFail?.length ? `<div class="gp-col"><div class="gp-sec-title">Why this setup may fail</div>${list(ai.whyFail, 'gp-fail')}</div>` : ''}
-      </div>
       ${confHtml}
       ${dataGaps?.length ? `<div class="gp-gaps">Missing data: ${dataGaps.map(esc).join(' · ')}</div>` : ''}
-      <div class="gp-disclaimer">Decision-support analysis from live market data · Probabilities are estimates · Not financial advice</div>`;
+      <div class="gp-disclaimer">Sources: ${esc(d.provenance?.quote?.provider || 'market feed')} quote as of ${esc(d.provenance?.quote?.asOf || generatedAt || '--')} · Yahoo chart bars · ${esc((d.provenance?.news || []).join(' + ') || 'no verified news')} · Not financial advice</div>`;
 
     setSafe('gpLoading', el => el.style.display = 'none');
     setSafe('gpError', el => el.style.display = 'none');
     c.style.display = '';
   }
 
-  async function refresh(force) {
+  async function refresh(force, suppliedAnalysis = null) {
     const sym = currentSym;
     if (!sym) return;
     const tok = ++reqToken;
     try {
-      const r = await fetch(`/api/gameplan/${sym}${force ? '?force=1' : ''}`, { credentials: 'same-origin' });
+      const payload = suppliedAnalysis || window.searchContext.load(sym, { force });
       if (tok !== reqToken || sym !== currentSym) return;  // superseded by a newer request/symbol
-      if (r.status === 401) {
-        render({ ok: false, error: 'Sign in to generate the AI game plan.' });
-        return;
-      }
-      render(await r.json());
+      render(await payload);
     } catch {
       if (tok === reqToken && sym === currentSym) {
         render({ ok: false, error: 'Game plan request failed — will retry on next refresh.' });
@@ -310,7 +297,7 @@ const gamePlan = (() => {
     timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(false); }, REFRESH_MS);
   }
 
-  function load(sym) {
+  function load(sym, suppliedAnalysis = null) {
     sym = String(sym || '').toUpperCase();
     if (!sym) return;
     currentSym = sym;
@@ -320,7 +307,7 @@ const gamePlan = (() => {
     setSafe('gpError', el => el.style.display = 'none');
     setSafe('gpContent', el => el.style.display = 'none');
     setSafe('gpSetupBadge', el => el.style.display = 'none');
-    refresh(false);
+    refresh(false, suppliedAnalysis);
     schedule();
   }
 

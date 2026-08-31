@@ -69,6 +69,67 @@ const api = {
   },
 };
 
+// One authoritative Search-page analysis request shared by every panel.
+// This prevents quote/signal/news panels from rendering different generations.
+window.searchContext = (() => {
+  const cache = new Map();
+  const inflight = new Map();
+  async function load(symbol, { force = false } = {}) {
+    const sym = String(symbol || '').toUpperCase().trim();
+    if (!sym) throw new Error('Symbol required');
+    if (force) cache.delete(sym);
+    const cached = cache.get(sym);
+    const maxAge = Number(cached?.data?.freshness?.maxAgeMs) || 60_000;
+    if (!force && cached && Date.now() - cached.at < maxAge) return cached.data;
+    if (inflight.has(sym)) return inflight.get(sym);
+    const request = fetch(`/api/gameplan/${encodeURIComponent(sym)}${force ? '?force=1' : ''}`, {
+      credentials: 'same-origin',
+    }).then(async response => {
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) throw new Error(data?.error || 'Verified Search data unavailable');
+      cache.set(sym, { at: Date.now(), data });
+      return data;
+    }).finally(() => inflight.delete(sym));
+    inflight.set(sym, request);
+    return request;
+  }
+  return { load, invalidate: symbol => cache.delete(String(symbol || '').toUpperCase()) };
+})();
+
+function renderStockHeader(sym, snap) {
+  const price = snap?.price || 0;
+  const prev = snap?.previousClose || 0;
+  $('sTicker').textContent = sym;
+  $('sName').textContent = snap?.name || '';
+  const displayPrice = snap?.regularClose ?? price;
+  const displayChg = displayPrice - prev;
+  const displayPct = prev ? (displayChg / prev) * 100 : 0;
+  const displayUp = displayChg >= 0;
+  $('sPrice').textContent = displayPrice ? '$' + fmt(displayPrice) : '--';
+  const sc = $('sChange');
+  sc.textContent = displayPrice && prev
+    ? `${displayUp ? '+' : ''}${fmt(displayChg)} (${displayUp ? '+' : ''}${fmt(displayPct)}%)`
+    : '';
+  sc.className = 's-change ' + (displayUp ? 'up' : 'down');
+
+  const extRow = $('sExtRow');
+  if (extRow && snap?.extendedPrice) {
+    const ep = snap.extendedPrice;
+    const base = snap.regularClose ?? price;
+    const ec = base ? ep - base : 0;
+    const epct = base ? (ec / base) * 100 : 0;
+    const eup = ec >= 0;
+    $('sExtBadge').textContent = snap.extendedType || 'EXT';
+    $('sExtBadge').className = 's-ext-badge ' + (snap.extendedType === 'PRE' ? 'pre' : 'post');
+    $('sExtPrice').textContent = '$' + fmt(ep);
+    $('sExtChange').textContent = `${eup ? '+' : ''}${fmt(ec)} (${eup ? '+' : ''}${fmt(epct)}%)`;
+    $('sExtChange').className = 's-ext-change ' + (eup ? 'up' : 'down');
+    extRow.style.display = '';
+  } else if (extRow) {
+    extRow.style.display = 'none';
+  }
+}
+
 // ── Market status ──────────────────────────────────────────────────────────────
 function updateMarketStatus() {
   const et   = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -175,67 +236,41 @@ async function openStock(sym, snap) {
   const backBtn = $('backBtn');
   if (backBtn) backBtn.style.display = (state.prevPage && state.prevPage !== 'home') ? '' : 'none';
 
-  const price = snap?.price || 0;
-  const prev  = snap?.previousClose || 0;
-  const chg   = price - prev;
-  const pct   = prev ? (chg/prev)*100 : 0;
-  const up    = chg >= 0;
-
-  $('sTicker').textContent = sym;
-  $('sName').textContent   = snap?.name || '';
-
-  // Use regular close for the main price display during extended hours
-  const displayPrice = snap?.regularClose ?? price;
-  const displayPrev  = snap?.previousClose || 0;
-  const displayChg   = displayPrice - displayPrev;
-  const displayPct   = displayPrev ? (displayChg / displayPrev) * 100 : 0;
-  const displayUp    = displayChg >= 0;
-
-  $('sPrice').textContent  = displayPrice ? '$'+fmt(displayPrice) : '--';
-  const sc = $('sChange');
-  sc.textContent = displayPrice && displayPrev
-    ? `${displayUp?'+':''}${fmt(displayChg)} (${displayUp?'+':''}${fmt(displayPct)}%)`
-    : '';
-  sc.className   = 's-change ' + (displayUp ? 'up' : 'down');
-
-  // Extended hours price row
-  const extRow    = $('sExtRow');
-  const extBadge  = $('sExtBadge');
-  const extPriceEl = $('sExtPrice');
-  const extChgEl  = $('sExtChange');
-  if (extRow && snap?.extendedPrice) {
-    const ep   = snap.extendedPrice;
-    const base = snap.regularClose ?? price;
-    const ec   = base ? ep - base : 0;
-    const epct = base ? (ec / base) * 100 : 0;
-    const eup  = ec >= 0;
-    extBadge.textContent  = snap.extendedType || 'EXT';
-    extBadge.className    = 's-ext-badge ' + (snap.extendedType === 'PRE' ? 'pre' : 'post');
-    extPriceEl.textContent = '$' + fmt(ep);
-    extChgEl.textContent  = `${eup?'+':''}${fmt(ec)} (${eup?'+':''}${fmt(epct)}%)`;
-    extChgEl.className    = 's-ext-change ' + (eup ? 'up' : 'down');
-    extRow.style.display  = '';
-  } else if (extRow) {
-    extRow.style.display = 'none';
-  }
+  renderStockHeader(sym, snap);
   updateWatchBtn(sym);
 
   document.querySelectorAll('.stock-tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='overview'));
   document.querySelectorAll('.tab-pane').forEach(p => { p.classList.toggle('active', p.id==='tab-overview'); p.innerHTML='<div class="tab-spin"><div class="spinner"></div></div>'; });
 
-  trader.analyze(sym);
-  if (typeof rtTrader !== 'undefined') rtTrader.load(sym);
-  if (typeof gamePlan !== 'undefined') gamePlan.load(sym);
+  const analysisPromise = window.searchContext.load(sym);
+  trader.analyze(sym, analysisPromise);
+  if (typeof rtTrader !== 'undefined') rtTrader.load(sym, analysisPromise);
+  if (typeof gamePlan !== 'undefined') gamePlan.load(sym, analysisPromise);
 
-  const [barsData, fmpData, newsData, valData] = await Promise.all([
+  const [barsData, fmpData, analysis, valData] = await Promise.all([
     api.bars(sym, '1Hour', 48),
     api.stock(sym),
-    api.news(sym),
+    analysisPromise.catch(() => null),
     api.valuation(sym),
   ]);
   if (loadId !== state.loadId || state.symbol !== sym) return;
-  state.stockData = { sym, snap, bars: barsData, fmp: fmpData, news: newsData, val: valData, forecast: null };
-  renderOverview(snap, barsData, up);
+  const authoritativeSnap = analysis?.snapshot ? {
+    ...snap,
+    price: analysis.snapshot.price,
+    regularClose: analysis.snapshot.price,
+    previousClose: analysis.snapshot.prevClose,
+    open: analysis.snapshot.open,
+    dayHigh: analysis.snapshot.high,
+    dayLow: analysis.snapshot.low,
+    volume: analysis.snapshot.volume,
+    avgVolume: analysis.snapshot.avgVolume,
+    marketState: analysis.snapshot.marketState,
+  } : snap;
+  state.snap = authoritativeSnap;
+  renderStockHeader(sym, authoritativeSnap);
+  const up = (authoritativeSnap?.price || 0) >= (authoritativeSnap?.previousClose || 0);
+  state.stockData = { sym, snap: authoritativeSnap, bars: barsData, fmp: fmpData, news: analysis?.news || [], val: valData, forecast: null };
+  renderOverview(authoritativeSnap, barsData, up);
   const forecastLoadId = ++state.forecastLoadId;
   void api.forecast(sym).then(forecast => {
     if (loadId !== state.loadId || forecastLoadId !== state.forecastLoadId || state.symbol !== sym || !state.stockData) return;

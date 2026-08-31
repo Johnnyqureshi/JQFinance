@@ -5,6 +5,7 @@ const trader = (() => {
   let   countdown    = 0;
   let   cdTimer      = null;
   let   currentSym   = null;
+  let   reqToken     = 0;
 
   // ── DOM refs ────────────────────────────────────────────────────────────────
   const $  = id => document.getElementById(id);
@@ -151,14 +152,14 @@ const trader = (() => {
   }
 
   // ── Signal logic ────────────────────────────────────────────────────────────
-  function computeSignal(searchSignal, fallback) {
+  function computeSignal(searchSignal) {
     const label = String(searchSignal?.signal?.label || '').toUpperCase();
     const confidence = Number.isFinite(Number(searchSignal?.confidence))
       ? Math.max(0, Math.min(100, Math.round(Number(searchSignal.confidence))))
       : 0;
     const reasons = Array.isArray(searchSignal?.reasons) && searchSignal.reasons.length
       ? searchSignal.reasons.slice(0, 4)
-      : ['Verified multi-timeframe evidence is unavailable', 'Directional side selected from the latest price and VWAP relationship'];
+      : ['Verified multi-timeframe price and volume evidence'];
 
     if (label === 'BUY') {
       return { signal: 'BUY', confidence, reasons };
@@ -166,16 +167,7 @@ const trader = (() => {
     if (label === 'SELL') {
       return { signal: 'SELL', confidence, reasons };
     }
-    const price = Number(fallback?.price);
-    const open = Number(fallback?.open);
-    const vwap = Number(fallback?.vwap);
-    const buy = Number.isFinite(price)
-      && ((Number.isFinite(vwap) && price >= vwap) || (Number.isFinite(open) && price >= open));
-    return {
-      signal: buy ? 'BUY' : 'SELL',
-      confidence: confidence || 30,
-      reasons: ['Search signal unavailable — binary fallback uses price versus VWAP/open', ...reasons].slice(0, 4),
-    };
+    throw new Error('Verified Search signal unavailable');
   }
 
   // ── RSI gauge SVG ──────────────────────────────────────────────────────────
@@ -268,7 +260,7 @@ const trader = (() => {
     const tenDayV = hist.slice(0,10).reduce((s,h)=>s+h.volume,0)/Math.min(hist.length,10);
     const sr      = calcSR(hist.map(h=>({c:h.close,h:h.high,l:h.low})));
     const vwap    = Number(gamePlan?.indicators?.vwap);
-    const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal, { price, open, vwap });
+    const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal);
 
     const signalBullish = signal === 'BUY';
     const dayRngPct = dayHigh>dayLow ? ((price-dayLow)/(dayHigh-dayLow)*100) : 50;
@@ -383,10 +375,11 @@ const trader = (() => {
   }
 
   // ── Analyze ────────────────────────────────────────────────────────────────
-  async function analyze(sym) {
+  async function analyze(sym, suppliedAnalysis = null) {
     sym = sym.toUpperCase().trim();
     if (!sym) return;
     currentSym = sym;
+    const tok = ++reqToken;
 
     ui.loading().style.display='flex';
     ui.error().style.display='none';
@@ -396,13 +389,21 @@ const trader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, histRes, gamePlanRes] = await Promise.all([
-        fetch(`/api/quote/${sym}`).then(r=>r.ok?r.json():null),
+      const [histRes, gamePlanRes] = await Promise.all([
         fetch(`/api/historical/${sym}?timeseries=30`).then(r=>r.ok?r.json():null),
-        fetch(`/api/gameplan/${sym}`, { credentials: 'same-origin' }).then(r=>r.ok?r.json():null).catch(() => null),
+        suppliedAnalysis || window.searchContext.load(sym),
       ]);
-
-      if (!quoteRes?.price) throw new Error('Unable to fetch quote data for '+sym);
+      if (tok !== reqToken || sym !== currentSym) return;
+      if (!gamePlanRes?.snapshot?.price) throw new Error('Verified Search analysis unavailable for '+sym);
+      const quoteRes = {
+        price: gamePlanRes.snapshot.price,
+        previousClose: gamePlanRes.snapshot.prevClose,
+        open: gamePlanRes.snapshot.open,
+        dayHigh: gamePlanRes.snapshot.high,
+        dayLow: gamePlanRes.snapshot.low,
+        volume: gamePlanRes.snapshot.volume,
+        avgVolume: gamePlanRes.snapshot.avgVolume,
+      };
       const hist = histRes?.historical||[];
       if (hist.length<5) throw new Error('Insufficient historical data for '+sym);
 

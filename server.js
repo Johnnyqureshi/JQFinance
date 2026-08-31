@@ -2294,7 +2294,7 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
 const _gpCache = new Map();    // sym → { at, data }
 const _gpInflight = new Map(); // sym → Promise (coalesces concurrent generations)
 const _gpForceAt = new Map();  // userId:sym → last forced-regeneration time
-const GP_CACHE_MS = 3 * 60 * 1000;
+const GP_CACHE_MS = 60 * 1000;
 const GP_FORCE_COOLDOWN_MS = 30 * 1000;
 
 const SECTOR_ETF = {
@@ -2656,8 +2656,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       const nr = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${sym}&newsCount=6&quotesCount=0`, { headers: YH });
       if (nr.ok) {
         const nd = await nr.json();
-        news = (nd.news || []).slice(0, 5).map(n => ({
-          headline: n.title, source: n.publisher,
+        news = (nd.news || [])
+          .filter(n => Array.isArray(n.relatedTickers) && n.relatedTickers.includes(sym))
+          .slice(0, 5).map(n => ({
+          headline: n.title, source: n.publisher, provider: 'Yahoo Finance',
           publishedAt: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
           date: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString().slice(0, 10) : null,
         }));
@@ -2683,6 +2685,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
             .map(n => ({
               headline: n.title,
               source: n.source?.name || 'NewsAPI',
+              provider: 'NewsAPI',
               publishedAt: n.publishedAt || null,
               date: n.publishedAt ? String(n.publishedAt).slice(0, 10) : null,
             }));
@@ -2794,33 +2797,21 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       freshness: sourceFreshness,
     });
 
-    // Probabilities — analog base rates adjusted by live context, rounded to 5s
-    const clamp5 = v => Math.max(5, Math.min(95, Math.round(v / 5) * 5));
-    let pBounce, pGreen, p3, p5;
-    if (analogs && !analogs.lowConfidence) {
-      pBounce = analogs.bounced3Pct * 0.6 + 40 * 0.4;
-      p3 = analogs.bounced3Pct; p5 = analogs.bounced5Pct;
-      pGreen = analogs.closedGreenNextPct;
-    } else {
-      pBounce = 50; p3 = 40; p5 = 25; pGreen = 45;
-    }
-    const adj = (indicators.distVwapPct != null && indicators.distVwapPct > 0 ? 8 : indicators.distVwapPct != null ? -8 : 0)
-      + (market.trend === 'BULLISH' ? 6 : market.trend === 'BEARISH' ? -6 : 0)
-      + (market.sectorTrend === 'BULLISH' ? 4 : market.sectorTrend === 'BEARISH' ? -4 : 0)
-      + (oversold.label.includes('OVERSOLD') && relVol != null && relVol >= 2 ? 5 : 0);
+    // Do not manufacture probability percentages when no directly comparable
+    // historical sample exists. Exact analog statistics are rendered separately.
     const probabilities = {
-      reliefBounce: clamp5(pBounce + adj),
-      closeGreen:   clamp5(pGreen + adj),
-      rebound3:     clamp5(p3 + adj * 0.5),
-      rebound5:     clamp5(p5 + adj * 0.5),
-      downsideLeg:  clamp5(100 - (pBounce + adj)),
+      reliefBounce: null,
+      closeGreen: null,
+      rebound3: null,
+      rebound5: null,
+      downsideLeg: null,
       bullish:      confluence.scores.bullish,
       bearish:      confluence.scores.bearish,
       bounce:       confluence.scores.bounce,
       drawdown:     confluence.scores.drawdown,
       basis: analogs
-        ? `Base rates from ${analogs.sampleSize} past session(s) that closed down ${threshold}%+ (end-of-day statistics — intraday timing not modeled)${analogs.lowConfidence ? '. LIMITED SAMPLE, LOW CONFIDENCE' : ''}. Adjusted for VWAP position, market and sector trend.`
-        : 'No comparable historical selloff for the current move — probabilities are neutral heuristics adjusted for live context. LOW CONFIDENCE.',
+        ? `Exact sample statistics from ${analogs.sampleSize} past session(s) that closed down ${threshold}%+ are shown below; they are not adjusted forecasts.`
+        : 'No directly comparable historical selloff sample exists for the current move. No probability percentage is shown.',
     };
 
     // Confidence breakdown
@@ -2843,7 +2834,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 
     // ── AI narrative (facts in → narrative out; numbers stay deterministic) ──
     let ai = { available: false, reason: 'AI narrative unavailable' };
-    const apiKey = process.env.AIML_API_KEY;
+    const apiKey = null; // Search verdicts remain deterministic; generative narrative is intentionally disabled.
     if (apiKey) {
       const facts = { symbol: sym, snapshot, indicators: { ...indicators, macd: indicators.macd ? { histogram: +indicators.macd.histogram.toFixed(3) } : null }, selloff, oversold, analogs: analogs ? { threshold, ...analogs } : null, market, news, levels, probabilities, confluence, searchSignal };
       const gpPrompt = 'You are an experienced intraday trader writing a concise AI TRADE GAME PLAN. You are given VERIFIED market facts as JSON. RULES: Use ONLY the numbers provided — never invent prices, statistics or news. Never claim certainty; prefer "evidence favors" language. The deterministic binary searchSignal is authoritative for the search page. Do not describe a BUY as confirmed unless its stage is CONFIRMED; keep tradeSetup null for provisional evidence. Use scored recent headlines only as a catalyst, never as a substitute for price and volume confirmation. Oversold alone is NOT a buy signal. A resistance test with rising price and expanding volume is not automatically bearish. Warn against catching a falling knife when the stock is down sharply. If no attractive setup exists respond with tradeSetup null and noTrade true. Respond with STRICT JSON only (no markdown): {"setup":"BULLISH|LEAN BULLISH|NEUTRAL|LEAN BEARISH|BEARISH","verdict":"1-2 sentence summary","why":["3-5 short reasons"],"scenarios":{"bullish":{"plan":"...","trigger":"...","invalidation":"..."},"range":{"plan":"..."},"bearish":{"plan":"...","trigger":"...","invalidation":"..."}},"changeMind":["2-3 specific price/volume conditions that would invalidate the thesis"],"whyFail":["2-4 specific risks"],"tradeSetup":{"entryZone":"...","confirmationEntry":"...","stop":"...","target1":"...","target2":"...","target3":"...","riskReward":"..."}|null,"noTrade":false,"fallingKnifeWarning":"one sentence or null"}';
@@ -2888,12 +2879,18 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
         }
       } catch { ai = { available: false, reason: 'AI service unreachable' }; }
     } else {
-      ai = { available: false, reason: 'AI key not configured' };
+      ai = { available: false, reason: 'Disabled for deterministic data-only analysis' };
     }
 
     const generatedAt = new Date().toISOString();
     const out = {
       ok: true, symbol: sym, generatedAt, freshness: { generatedAt, maxAgeMs: GP_CACHE_MS }, dataGaps,
+      provenance: {
+        quote: { provider: quote.source || 'Yahoo Finance', asOf: quote.asOf || generatedAt },
+        intraday: { provider: 'Yahoo Finance chart API', intervals: ['1m', '5m', '15m', '1h'] },
+        daily: { provider: 'Yahoo Finance chart API' },
+        news: [...new Set(news.map(item => item.provider).filter(Boolean))],
+      },
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,

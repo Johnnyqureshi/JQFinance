@@ -5,6 +5,7 @@ const rtTrader = (() => {
   let cdTimer    = null;
   let countdown  = 0;
   let currentSym = null;
+  let reqToken   = 0;
 
   const $ = id => document.getElementById(id);
   const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -93,6 +94,8 @@ const rtTrader = (() => {
           : ['Binary search signal derived from price, volume, pivots, and recent catalysts'],
       };
     }
+    throw new Error('Verified Search signal unavailable');
+    /*
     // The server-side technical engine is the authoritative path whenever it is
     // available. It evaluates higher timeframes and critical support/resistance,
     // avoiding a one-bar SELL call into a confirmed support response.
@@ -198,6 +201,7 @@ const rtTrader = (() => {
     }
 
     return { signal, confidence, reasons };
+    */
   }
 
   // ── Fixed Range Volume Profile (FRVP) ───────────────────────────────────────
@@ -609,7 +613,9 @@ const rtTrader = (() => {
   // ── Render results ──────────────────────────────────────────────────────────
   function render(sym, bars, price, dailyBars, marketState, gamePlan, dailyPatterns, intradayPatterns) {
     const closes  = bars.map(b => b.c);
-    const vwap    = calcVWAP(bars);
+    const vwap    = Number.isFinite(Number(gamePlan?.indicators?.vwap))
+      ? Number(gamePlan.indicators.vwap)
+      : null;
     const rsi     = calcRSI(closes);
     const sr      = calcSR(bars, price);
     const volData = calcVolData(bars);
@@ -663,13 +669,9 @@ const rtTrader = (() => {
     setCls ('rtVolSub', 'rt-m-sub ' + (volSurge ? 'up' : ''));
 
     // Sentiment (momentum-based)
-    const sentLabel = momentum >= 3 ? 'Strong Bull'
-      : momentum === 2 ? 'Bullish' : momentum === 1 ? 'Mild Bull'
-      : momentum === -1 ? 'Mild Bear' : momentum === -2 ? 'Bearish'
-      : momentum <= -3 ? 'Strong Bear' : 'Neutral';
-    const sentCls   = momentum > 0 ? 'up' : momentum < 0 ? 'down' : 'neut';
-    const momDesc   = momentum > 0 ? momentum + ' bull bars'
-      : momentum < 0 ? Math.abs(momentum) + ' bear bars' : 'Mixed';
+    const sentLabel = signal === 'BUY' ? 'Buying evidence' : 'Selling evidence';
+    const sentCls   = signal === 'BUY' ? 'up' : 'down';
+    const momDesc   = 'Verified Search snapshot';
     setSafe('rtSent',    sentLabel);
     setSafe('rtSentSub', 'Last 5 · ' + momDesc);
     setCls ('rtSentSub', 'rt-m-sub ' + sentCls);
@@ -735,10 +737,11 @@ const rtTrader = (() => {
   }
 
   // ── Analyze ─────────────────────────────────────────────────────────────────
-  async function analyze(sym) {
+  async function analyze(sym, suppliedAnalysis = null) {
     sym = sym.toUpperCase().trim();
     if (!sym) return;
     currentSym = sym;
+    const tok = ++reqToken;
 
     $('rtLoading').style.display = 'flex';
     $('rtError').style.display   = 'none';
@@ -747,20 +750,20 @@ const rtTrader = (() => {
     clearInterval(cdTimer);
 
     try {
-      const [quoteRes, intradayRes, histRes, gamePlanRes, dailyPatternRes] = await Promise.all([
-        fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      const [intradayRes, histRes, gamePlanRes, dailyPatternRes] = await Promise.all([
         fetch(`/api/intraday/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/api/historical/${sym}?timeseries=20`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`/api/gameplan/${sym}?force=1`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        suppliedAnalysis || window.searchContext.load(sym),
         fetch(`/api/patterns/${sym}`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
+      if (tok !== reqToken || sym !== currentSym) return;
 
-      const price       = quoteRes?.price ?? intradayRes?.price ?? null;
+      const price       = gamePlanRes?.snapshot?.price ?? null;
       const bars        = intradayRes?.bars || [];
       const dailyBars   = histRes?.historical || [];
       const dailyPatterns = dailyPatternRes?.patterns || [];
       const intradayPatterns = intradayRes?.intradayPatterns || [];
-      const marketState = intradayRes?.marketState ?? quoteRes?.marketState ?? 'REGULAR';
+      const marketState = gamePlanRes?.snapshot?.marketState ?? intradayRes?.marketState ?? 'REGULAR';
 
       if (!price) throw new Error('Unable to fetch quote for ' + sym);
       if (bars.length < 2) throw new Error('No price data available for ' + sym + ' — try again shortly.');
@@ -776,8 +779,8 @@ const rtTrader = (() => {
   }
 
   // ── Public: load from main search ───────────────────────────────────────────
-  function load(sym) {
-    analyze(sym);
+  function load(sym, suppliedAnalysis = null) {
+    analyze(sym, suppliedAnalysis);
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────────

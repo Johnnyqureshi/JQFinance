@@ -27,11 +27,143 @@
   --t2: #7a90b8;
   --t3: #3d5070;
 
+  /* Compatibility aliases used by the newer trading modules. Keeping these
+     tied to the core palette makes every module follow the same theme. */
+  --surface: var(--card);
+  --surface-2: var(--card2);
+  --surface-alt: var(--bg2);
+  --surface-hover: var(--card2);
+  --text: var(--t1);
+  --text-primary: var(--t1);
+  --text-secondary: var(--t2);
+  --text-dim: var(--t3);
+  --accent: var(--teal);
+  --font-mono: 'DM Mono', monospace;
+
   --nav-h:  60px;
   --radius: 10px;
   --radius-sm: 6px;
   --tr: 0.15s ease;
   --max: 1380px;
+}
+
+/* Theme bridge for modules that still use their older palette names. */
+html[data-theme="light"] .nav {
+  background: rgba(255,255,255,.96);
+}
+html[data-theme="light"] .trd-header,
+html[data-theme="light"] .trd-panel,
+html[data-theme="light"] .trd-card,
+html[data-theme="light"] .rt-console,
+html[data-theme="light"] .mt-panel,
+html[data-theme="light"] .at-bot-card,
+html[data-theme="light"] .at-sim-panel,
+html[data-theme="light"] .at-bt-results,
+html[data-theme="light"] .ct-stat-box,
+html[data-theme="light"] .ct-rules-card,
+html[data-theme="light"] .ct-auto-card,
+html[data-theme="light"] .ct-log-card,
+html[data-theme="light"] .bci-module,
+html[data-theme="light"] .bci-head,
+html[data-theme="light"] .trd-analysis-panel,
+html[data-theme="light"] .trd-setup-panel {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--t1) !important;
+}
+html[data-theme="light"] .trd-sym-search input,
+html[data-theme="light"] .trd-input,
+html[data-theme="light"] .at-input,
+html[data-theme="light"] .ts-input,
+html[data-theme="light"] .ct-auto-input,
+html[data-theme="light"] .ct-chips-wrap,
+html[data-theme="light"] .ct-chips-wrap,
+html[data-theme="light"] .ct-filter-btn,
+html[data-theme="light"] .ct-filter-btn.active,
+html[data-theme="light"] .ct-auto-save,
+html[data-theme="light"] .bci-refresh,
+html[data-theme="light"] .bci-tabs {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+  color: var(--t1) !important;
+}
+html[data-theme="light"] .at-bot-name,
+html[data-theme="light"] .at-bt-title,
+html[data-theme="light"] .ct-auto-title,
+html[data-theme="light"] .ct-title,
+html[data-theme="light"] .ct-stat-val,
+html[data-theme="light"] .ct-rule strong,
+html[data-theme="light"] .ct-table,
+html[data-theme="light"] .ct-table td,
+html[data-theme="light"] .ct-sym,
+html[data-theme="light"] .ct-auto-save,
+html[data-theme="light"] .bci-symbol,
+html[data-theme="light"] .bci-title,
+html[data-theme="light"] .bci-metric strong,
+html[data-theme="light"] .bci-price,
+html[data-theme="light"] .bci-headline,
+html[data-theme="light"] .bci-metric strong,
+html[data-theme="light"] .trd-setup-title,
+html[data-theme="light"] .gp-state,
+html[data-theme="light"] .gp-timeframe,
+html[data-theme="light"] .gp-critical-levels b,
+html[data-theme="light"] .gp-volume-metrics b {
+  color: var(--t1) !important;
+}
+html[data-theme="light"] .at-bot-desc,
+html[data-theme="light"] .at-bots-title,
+html[data-theme="light"] .at-bots-sub,
+html[data-theme="light"] .ts-label,
+html[data-theme="light"] .ct-auto-label,
+html[data-theme="light"] .ct-subtitle,
+html[data-theme="light"] .ct-rules-title,
+html[data-theme="light"] .ct-rule,
+html[data-theme="light"] .ct-auto-note,
+html[data-theme="light"] .ct-summary,
+html[data-theme="light"] .ct-empty,
+html[data-theme="light"] .ct-log-table th,
+html[data-theme="light"] .ct-log-table td,
+html[data-theme="light"] .bci-company,
+html[data-theme="light"] .bci-subtitle,
+html[data-theme="light"] .bci-state,
+html[data-theme="light"] .bci-metrics,
+html[data-theme="light"] .bci-detail,
+html[data-theme="light"] .bci-foot,
+html[data-theme="light"] .gp-engine-notes,
+html[data-theme="light"] .gp-audit li,
+html[data-theme="light"] .gp-volume-reasons li {
+  color: var(--t2) !important;
+}
+html[data-theme="light"] .ct-table th,
+html[data-theme="light"] .ct-table td,
+html[data-theme="light"] .ct-log-table th,
+html[data-theme="light"] .ct-log-table td,
+html[data-theme="light"] .bci-tabs,
+html[data-theme="light"] .bci-context,
+html[data-theme="light"] .bci-pill,
+html[data-theme="light"] .bci-card,
+html[data-theme="light"] .bci-context,
+html[data-theme="light"] .trd-stat,
+html[data-theme="light"] .trd-sr-item,
+html[data-theme="light"] .gp-critical-levels > div,
+html[data-theme="light"] .gp-audit > div,
+html[data-theme="light"] .gp-volume-metrics > div,
+html[data-theme="light"] .gp-volume-reasons {
+  border-color: var(--border) !important;
+}
+html[data-theme="light"] .at-badge,
+html[data-theme="light"] .at-bot-badge,
+html[data-theme="light"] .at-bt-stat,
+html[data-theme="light"] .ct-auto-badge,
+html[data-theme="light"] .ct-log-row,
+html[data-theme="light"] .bci-card,
+html[data-theme="light"] .gp-states,
+html[data-theme="light"] .gp-timeframes {
+  background: var(--bg2) !important;
+}
+html[data-theme="light"] .bci-card:hover,
+html[data-theme="light"] .at-bot-card:hover {
+  background: var(--card2) !important;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
@@ -1704,7 +1836,12 @@ html[data-theme="light"] .gp-evidence-item>small { color:var(--t2); }
   .rt-results { grid-template-columns: 180px 1px 1fr auto; }
 }
 @media (max-width:768px) {
-  .nav { padding:0 16px; }
+  .nav { padding:0 10px; }
+  .nav-logo { margin-right:8px; }
+  .nav-logo-text { font-size:16px; }
+  .nav-right { min-width:0; gap:6px; }
+  .nav-user { padding:4px 6px 4px 8px; }
+  .nav-username { max-width:64px; }
   .nav-links { display:none; }
   .home-bar { padding:14px 16px 0; }
   .inner, .stock-body, .markets-body, .watchlist-body { padding-left:16px; padding-right:16px; }
@@ -2565,10 +2702,20 @@ option { background: var(--card); }
     -webkit-backdrop-filter: blur(16px);
     z-index: 290;
     align-items: stretch;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  .mobile-nav::-webkit-scrollbar { display: none; }
 
   .mobile-nav-btn {
-    flex: 1;
+    flex: 0 0 clamp(64px, 18vw, 88px);
+    min-width: 64px;
+    min-height: 58px;
+    white-space: nowrap;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -3581,7 +3728,7 @@ option { background: var(--card); }
   :root { --nav-h: 52px; }
   .nav-logo-text { font-size: 15px; }
   .nav-user { padding: 4px 8px 4px 10px; }
-  .nav-username { max-width: 72px; font-size: 0.75rem; }
+  .nav-username { max-width: 60px; font-size: 0.75rem; }
 
   .auth-card { padding: 22px 16px 20px; margin: 0 8px; }
   .auth-title { font-size: 1.2rem; }

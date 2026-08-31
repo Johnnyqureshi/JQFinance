@@ -1,4 +1,50 @@
 /* Swing Bot / institutional midnight research desk */
+html[data-theme="light"] #page-swing {
+  background: var(--bg) !important;
+  color: var(--t1) !important;
+}
+html[data-theme="light"] .swing-shell {
+  --sw-ink: var(--t1);
+  --sw-muted: var(--t2);
+  --sw-dim: var(--t3);
+  --sw-line: var(--border);
+  --sw-panel: var(--card);
+  --sw-panel2: var(--card2);
+  --sw-teal: var(--teal);
+  --sw-amber: var(--gold);
+  --sw-red: var(--red);
+}
+html[data-theme="light"] .swing-btn:not(.swing-btn-quiet) {
+  background: var(--teal) !important;
+  border-color: var(--teal) !important;
+  color: #fff !important;
+}
+html[data-theme="light"] .swing-btn:not(.swing-btn-quiet):hover {
+  background: #066f5b !important;
+}
+html[data-theme="light"] .swing-command {
+  background: linear-gradient(105deg, var(--teal-dim), var(--card2)) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .swing-switch span {
+  background: var(--bg2) !important;
+}
+html[data-theme="light"] .swing-switch input:checked + span {
+  background: var(--teal-dim) !important;
+  border-color: var(--teal) !important;
+}
+html[data-theme="light"] .swing-candidate:hover,
+html[data-theme="light"] .swing-candidate.is-selected {
+  background: var(--card2) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .swing-field input {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+}
+html[data-theme="light"] .swing-skeleton {
+  background: linear-gradient(90deg, var(--bg2), var(--card2), var(--bg2)) !important;
+}
 #page-swing { background:#080d16; color:#d9e4ef; }
 .swing-shell { --sw-ink:#d9e4ef; --sw-muted:#7890a8; --sw-dim:#536a82; --sw-line:#1c2b3a; --sw-panel:#0e1722; --sw-panel2:#111e2b; --sw-teal:#58d0b0; --sw-amber:#d9ad62; --sw-red:#e47777; max-width:1480px; margin:0 auto; padding:34px clamp(18px,4vw,56px) 80px; font-family:'Inter',sans-serif; }
 .swing-hero { display:flex; justify-content:space-between; align-items:flex-end; gap:28px; padding:20px 0 30px; border-bottom:1px solid var(--sw-line); }

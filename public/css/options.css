@@ -1,4 +1,55 @@
 /* LEAP Options — deep navy / oxidized copper research workstation */
+html[data-theme="light"] #page-options {
+  background: var(--bg) !important;
+  color: var(--t1) !important;
+}
+html[data-theme="light"] .options-shell {
+  --op-ink: var(--t1);
+  --op-muted: var(--t2);
+  --op-dim: var(--t3);
+  --op-line: var(--border);
+  --op-panel: var(--card);
+  --op-panel2: var(--card2);
+  --op-copper: var(--gold);
+  --op-teal: var(--teal);
+  --op-red: var(--red);
+}
+html[data-theme="light"] .op-btn:not(.op-btn-quiet) {
+  background: var(--teal) !important;
+  border-color: var(--teal) !important;
+  color: #fff !important;
+}
+html[data-theme="light"] .op-btn:not(.op-btn-quiet):hover {
+  background: #066f5b !important;
+}
+html[data-theme="light"] .op-command {
+  background: linear-gradient(105deg, var(--teal-dim), var(--card2)) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .op-switch i {
+  background: var(--bg2) !important;
+}
+html[data-theme="light"] .op-switch input:checked + i {
+  background: var(--teal-dim) !important;
+  border-color: var(--teal) !important;
+}
+html[data-theme="light"] .op-candidate:hover,
+html[data-theme="light"] .op-candidate.is-selected {
+  background: var(--card2) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .op-badge.good {
+  background: var(--teal-dim) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .op-contract {
+  background: var(--teal-dim) !important;
+  border-color: var(--teal-bdr) !important;
+}
+html[data-theme="light"] .op-field input {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+}
 #page-options{background:#0a1119;color:#dce7e8}
 .options-shell{--op-ink:#dce7e8;--op-muted:#8ca2a4;--op-dim:#5c7377;--op-line:#22343a;--op-panel:#101c22;--op-panel2:#14242a;--op-copper:#d59b68;--op-teal:#66c7b2;--op-red:#df7e7e;max-width:1500px;margin:auto;padding:34px clamp(16px,4vw,58px) 80px;font-family:'Inter',sans-serif}
 .op-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;padding:18px 0 28px;border-bottom:1px solid var(--op-line)}

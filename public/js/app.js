@@ -223,10 +223,18 @@ function drawChart(canvas, bars, color, h=300) {
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
+function revealMobileNavPage(page) {
+  const mobileButton = document.querySelector(`#mobileNav .mobile-nav-btn[data-page="${page}"]`);
+  if (mobileButton && window.matchMedia('(max-width: 768px)').matches) {
+    mobileButton.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+}
+
 function goPage(page) {
   state.prevPage = state.page;
   state.page     = page;
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page===page));
+  revealMobileNavPage(page);
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
@@ -256,6 +264,7 @@ async function openStock(sym, snap) {
   state.stockData = null;
 
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page==='home'));
+  revealMobileNavPage('home');
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $('page-home').classList.add('active');
 

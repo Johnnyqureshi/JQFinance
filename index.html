@@ -251,6 +251,7 @@
          server-side Search evidence set below. -->
     <section class="search-verdict-top" id="searchVerdictTop" style="display:none" aria-live="polite">
       <div class="search-verdict-main">
+        <span class="search-verdict-icon" id="searchVerdictIcon" aria-hidden="true">↗</span>
         <span class="search-verdict-kicker">SEARCH SIGNAL</span>
         <strong id="searchVerdictLabel">--</strong>
         <span id="searchVerdictStage">Awaiting verified data</span>
@@ -258,6 +259,9 @@
       <div class="search-verdict-copy">
         <div><b id="searchVerdictSymbol">--</b><span id="searchVerdictDirection">--</span><span id="searchVerdictConfidence">--/100</span></div>
         <p id="searchVerdictReason">Using price, volume, structure, levels, news, market context, freshness, patterns, and Fibonacci confluence.</p>
+        <div class="search-verdict-meter" aria-label="Signal confidence">
+          <span>CONFIDENCE</span><i><b id="searchVerdictMeter"></b></i>
+        </div>
       </div>
     </section>
 

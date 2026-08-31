@@ -312,18 +312,24 @@ const gamePlan = (() => {
       || (verdict === 'SELL' ? 'BEARISH' : verdict === 'BUY' ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);
+    const verdictStage = searchSignal?.signal?.stage || 'PROVISIONAL';
+    const verdictConfidence = Number(searchSignal?.confidence);
     const signalReasons = Array.isArray(searchSignal?.reasons)
       ? searchSignal.reasons.filter(Boolean).slice(0, 2)
       : [];
     setSafe('searchVerdictTop', el => {
       el.style.display = '';
-      el.className = `search-verdict-top ${verdictClass}`;
+      el.className = `search-verdict-top ${verdictClass} ${verdictStage === 'CONFIRMED' ? 'confirmed' : 'provisional'}`;
     });
+    setSafe('searchVerdictIcon', el => el.textContent = verdict === 'SELL' ? '↘' : verdict === 'BUY' ? '↗' : '•');
     setSafe('searchVerdictLabel', el => el.textContent = verdict);
-    setSafe('searchVerdictStage', el => el.textContent = searchSignal?.signal?.stage || 'PROVISIONAL');
+    setSafe('searchVerdictStage', el => el.textContent = verdictStage);
     setSafe('searchVerdictSymbol', el => el.textContent = d.symbol || '--');
     setSafe('searchVerdictDirection', el => el.textContent = direction);
     setSafe('searchVerdictConfidence', el => el.textContent = `${searchSignal?.confidence ?? '--'}/100`);
+    setSafe('searchVerdictMeter', el => {
+      el.style.width = `${Number.isFinite(verdictConfidence) ? Math.max(0, Math.min(100, verdictConfidence)) : 0}%`;
+    });
     setSafe('searchVerdictReason', el => {
       el.textContent = signalReasons.length
         ? signalReasons.join(' · ')

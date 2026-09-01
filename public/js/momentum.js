@@ -913,6 +913,7 @@
     botEnabled:    false,          // true when auto-trading is running
     liveArmed:     false,
     marketDirection: null,
+    workerRuntime: null,
     _lastInverseMode: false,
     _lastInverseCycleAt: null,
     botPositions:  new Map(),      // sym → { entry, slPct, tpPct, shares, ts }
@@ -954,6 +955,7 @@
         this.botEnabled = settings?.enabled === true;
         if (this.botEnabled && !wasEnabled) this._resetSessionPnl();
         this.liveArmed = settings?.liveArmed === true;
+        this.workerRuntime = settings?.runtime || null;
         this._renderConfigPanel();
         this._renderBotStatus();
         this._refreshMarketDirection();
@@ -2954,20 +2956,25 @@
         btn.textContent = '⏹ STOP BOT';
         btn.className   = 'mt-bot-toggle mt-bot-toggle--on';
         if (status) status.textContent =
-          this.marketDirection?.inverseMode
+          this.workerRuntime?.status === 'broker_outage'
+            ? `BROKER/API OUTAGE · ${this.workerRuntime.reason || 'server worker cannot reach the active account'}`
+          : this.marketDirection?.inverseMode
             ? `MARKET DOWN — inverse mode · ${this.marketDirection.inverseSymbol} fallback if no safe long passes · no shorts`
             : AlpacaClient.mode === 'live' && !this.liveArmed
             ? 'AUTOMATION ACTIVE · Live entries blocked until explicitly armed'
-            : `AUTO-TRADING · ${AlpacaClient.mode.toUpperCase()} account · position monitor every 20s`;
+            : this.workerRuntime?.status === 'running'
+                ? `SERVER WORKER RUNNING · ${String(this.workerRuntime.mode || AlpacaClient.mode).toUpperCase()} account · survives logout`
+                : `SERVER WORKER STARTING · ${String(this.workerRuntime?.mode || AlpacaClient.mode).toUpperCase()} account`;
         if (bar) bar.className = 'mt-bot-bar mt-bot-bar--on';
         if (dot) { dot.style.background = '#22c55e'; dot.title = 'Bot active'; }
       } else {
         btn.textContent = '▶ START BOT';
         btn.className   = 'mt-bot-toggle mt-bot-toggle--off';
-        if (status) status.textContent =
-          AlpacaClient.connected
-            ? 'Connected · click START BOT to enable automated trading'
-            : 'Connect Alpaca account to enable automated trading';
+        if (status) status.textContent = this.workerRuntime?.monitoringOpenPositions
+          ? 'BOT DISABLED · server worker still protects and reconciles existing positions'
+          : AlpacaClient.connected
+            ? 'BOT DISABLED · connected; click START BOT to enable new automated entries'
+            : 'BOT DISABLED · connect Alpaca account to enable automated trading';
         if (bar) bar.className = 'mt-bot-bar';
         if (dot) { dot.style.background = ''; dot.title = 'Bot inactive'; }
       }

@@ -635,9 +635,12 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 }
 .chart-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
 .chart-card h3 { font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--t3); font-weight:600; margin:0; }
+.chart-card-sub { display:block; margin-top:4px; color:var(--t2); font-size:10px; line-height:1.35; }
 .chart-card canvas { width:100%; display:block; }
 .chart-smart-legend { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; color:var(--t2); font-size:9px; }
 .chart-smart-legend span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.chart-legend-candle { width:7px; height:11px; display:inline-block; border:1px solid #35e6b4; background:rgba(29,214,163,.55); position:relative; }
+.chart-legend-candle::before { content:''; position:absolute; width:1px; height:15px; background:#35e6b4; left:2px; top:-3px; }
 .chart-legend-dot { width:8px; height:8px; border-radius:3px; display:inline-block; }
 .chart-legend-dot.buy { background:#00f5ad; box-shadow:0 0 11px rgba(0,245,173,.95); }
 .chart-legend-dot.sell { background:#ff3f5f; box-shadow:0 0 11px rgba(255,63,95,.95); }
@@ -813,7 +816,8 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 .up-date  { font-size:11px; color:var(--t3); font-family:'DM Mono',monospace; text-align:right; }
 
 /* chart tab */
-.tf-row { display:flex; gap:6px; margin-bottom:16px; }
+.tf-row { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+.tf-group-label { color:var(--t3); font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin-right:2px; }
 .tf-btn {
   background:var(--card); border:1px solid var(--border);
   color:var(--t2); border-radius:var(--radius-sm);

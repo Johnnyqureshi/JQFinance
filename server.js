@@ -3155,10 +3155,16 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 
     const dataGaps = [];
     const price  = quote.price;
+    // Completed-session levels must be anchored to the last regular-session
+    // close outside regular hours. Comparing them with a pre/post-market quote
+    // can place every real support level on the wrong side of the price.
+    const levelPrice = quote.marketState === 'REGULAR'
+      ? price
+      : (Number.isFinite(Number(quote.regularClose)) ? Number(quote.regularClose) : price);
     const closes = daily.map(b => b.c);
     const searchLevelAnalysis = buildSearchLevels({
       dailyBars: daily,
-      currentPrice: price,
+      currentPrice: levelPrice,
       marketState: quote.marketState,
     });
     const atr    = searchLevelAnalysis.atr;
@@ -3478,7 +3484,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       sensitivity: marketContext.sensitivity,
     });
     const tradeLevels = buildSearchTradeLevels({
-      currentPrice: price,
+      currentPrice: levelPrice,
       levels,
       confluence,
       fibonacci,

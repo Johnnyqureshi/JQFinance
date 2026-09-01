@@ -49,19 +49,19 @@ const gamePlan = (() => {
       <span class="gp-lvl-price">${l?.price == null ? 'UNAVAILABLE' : '$' + fmt(l.price)}</span><span class="gp-lvl-label">${esc(label || l?.label || 'Level unavailable')}</span></div>`;
     const unavailable = (type, label) => row(null, `${type} unavailable`, label);
     const bias = source.bias
-      ? row(source.bias, 'bias', 'Key bias level · break/hold above = bullish · below = bearish')
+      ? row(source.bias, 'bias', 'Key bias level · bullish above · bearish below')
       : unavailable('bias', 'Key bias level unavailable · completed-session history required');
     const resistanceLevels = (source.resistance || []).slice(0, 2);
     const supportLevels = (source.support || []).slice(0, 2);
     const res = resistanceLevels.map((l, index) => row(
       l,
       `res${index === 1 ? ' next' : ''}`,
-      index === 0 ? 'Resistance' : 'Next resistance if price breaks up',
+      index === 0 ? 'Resistance' : 'Next resistance after a break above',
     )).join('');
     const sup = supportLevels.map((l, index) => row(
       l,
       `sup${index === 1 ? ' next' : ''}`,
-      index === 0 ? 'Support' : 'Next support if price breaks down',
+      index === 0 ? 'Support' : 'Next support after a break below',
     )).join('');
     return bias
       + (res || unavailable('res', 'Resistance unavailable · completed-session history required'))
@@ -385,40 +385,37 @@ const gamePlan = (() => {
   function tradeReferenceHtml(data) {
     const buy = data?.buy || null;
     const sell = data?.sell || null;
-    const status = data?.status || 'WAITING';
-    const statusClass = status === 'VERIFIED' ? 'ready' : status === 'PROVISIONAL' ? 'provisional' : 'waiting';
     const evidence = level => Array.isArray(level?.evidence) && level.evidence.length
       ? level.evidence.join(' + ')
-      : level?.source || 'Verified level unavailable';
+      : level?.source || 'Calculated level';
     const considered = Array.isArray(data?.considered) ? data.considered : [];
     return `
-      <section class="trade-reference" aria-label="Verified buy and sell levels">
+      <section class="trade-reference" aria-label="Calculated buy and sell levels">
         <div class="trade-reference-head">
           <div>
             <span class="trade-reference-kicker">SEARCH TRADE PLAN</span>
             <strong>Calculated buy &amp; sell levels</strong>
           </div>
-          <span class="trade-reference-status ${statusClass}">${esc(status)}</span>
         </div>
         <div class="trade-reference-grid">
           <div class="trade-reference-level buy">
             <span class="trade-reference-label"><i></i>BUY AT</span>
             <strong>${buy?.price == null ? '—' : '$' + fmt(buy.price)}</strong>
-            <small>${buy?.price == null ? 'Verified buy level unavailable' : esc(evidence(buy))}</small>
+            <small>${buy?.price == null ? 'Immediate support' : esc(evidence(buy))}</small>
             ${buy?.alignment ? `<em>${esc(buy.alignment)} LEVEL ALIGNMENT</em>` : ''}
           </div>
           <div class="trade-reference-level sell">
             <span class="trade-reference-label"><i></i>SELL AT</span>
             <strong>${sell?.price == null ? '—' : '$' + fmt(sell.price)}</strong>
-            <small>${sell?.price == null ? 'Verified sell level unavailable' : esc(evidence(sell))}</small>
+            <small>${sell?.price == null ? 'Immediate resistance' : esc(evidence(sell))}</small>
             ${sell?.alignment ? `<em>${esc(sell.alignment)} LEVEL ALIGNMENT</em>` : ''}
           </div>
         </div>
         <div class="trade-reference-science">
           <span>CALCULATION INPUTS</span>
-          <div>${considered.map(item => `<i>${esc(item)}</i>`).join('') || '<i>Waiting for complete verified inputs</i>'}</div>
+          <div>${considered.map(item => `<i>${esc(item)}</i>`).join('') || '<i>Completed-session support and resistance</i>'}</div>
         </div>
-        <p class="trade-reference-note">${esc(data?.methodology || 'No price is substituted when the required market evidence is unavailable.')} Search signal: ${esc(data?.signalStage || 'UNAVAILABLE')}.</p>
+        <p class="trade-reference-note">${esc(data?.methodology || 'Buy At uses immediate support. Sell At uses immediate resistance. Additional evidence determines level alignment.')}</p>
       </section>`;
   }
 

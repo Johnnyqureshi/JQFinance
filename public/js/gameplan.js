@@ -28,8 +28,8 @@ const gamePlan = (() => {
   function trendDot(t) { return dot(t === 'BULLISH' ? 'bull' : t === 'BEARISH' ? 'bear' : 'neut'); }
   function setupClass(setup) {
     const s = String(setup || '').toUpperCase();
-    if (s.includes('BULL') || s.includes('BUY') || s.includes('BREAKOUT')) return 'bull';
-    if (s.includes('BEAR') || s.includes('SELL') || s.includes('BREAKDOWN')) return 'bear';
+    if (s.includes('BULL') || s.includes('BREAKOUT')) return 'bull';
+    if (s.includes('BEAR') || s === 'SELL' || s.includes('BREAKDOWN')) return 'bear';
     return 'neut';
   }
 
@@ -528,8 +528,7 @@ const gamePlan = (() => {
 
     // Header badge
     const verdict = searchSignal?.signal?.label || 'UNAVAILABLE';
-    const direction = searchSignal?.technicalSignal?.direction
-      || searchSignal?.signal?.direction
+    const direction = searchSignal?.signal?.direction
       || (verdict.includes('SELL') ? 'BEARISH' : verdict.includes('BUY') ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);
@@ -542,12 +541,12 @@ const gamePlan = (() => {
       el.style.display = '';
       el.className = `search-verdict-top ${verdictClass} ${verdictStage === 'CONFIRMED' ? 'confirmed' : 'provisional'}`;
     });
-    setSafe('searchVerdictIcon', el => el.textContent = verdict.includes('SELL') ? '↘' : verdict.includes('BUY') ? '↗' : '•');
+    setSafe('searchVerdictIcon', el => el.textContent = verdict === 'SELL' ? '↘' : verdict === 'BUY' ? '↗' : '•');
     setSafe('searchVerdictLabel', el => el.textContent = verdict);
     setSafe('searchVerdictStage', el => el.textContent = verdictStage);
     setSafe('searchVerdictSymbol', el => el.textContent = d.symbol || '--');
     setSafe('searchVerdictDirection', el => el.textContent = direction);
-    setSafe('searchVerdictConfidence', el => el.textContent = `${searchSignal?.confidence ?? '--'}/100`);
+    setSafe('searchVerdictConfidence', el => el.textContent = `${searchSignal?.confidence ?? '--'}%`);
     setSafe('searchVerdictMeter', el => {
       el.style.width = `${Number.isFinite(verdictConfidence) ? Math.max(0, Math.min(100, verdictConfidence)) : 0}%`;
     });

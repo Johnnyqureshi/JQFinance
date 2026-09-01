@@ -66,11 +66,10 @@ test('downgrades a bullish stock against a bearish SPY regime', () => {
   });
   assert.equal(result.signal.label, 'BUY');
   assert.equal(result.marketContext.marketAlignment.state, 'COUNTER-TREND');
-  assert.match(result.marketContext.marketWarning, /Counter-market setup/);
   assert(result.confidence < bullishSignal.confidence);
 });
 
-test('keeps a weak bearish stock at strong sell in a strong bearish market', () => {
+test('keeps the existing sell label when SPY and the stock are bearish', () => {
   const result = applySearchMarketRegime({
     searchSignal: { ...bullishSignal, signal: { label: 'SELL', direction: 'BEARISH', stage: 'CONFIRMED' }, confidence: 80 },
     spyRegime: { available: true, regime: 'STRONG BEARISH', direction: 'BEARISH' },
@@ -78,10 +77,10 @@ test('keeps a weak bearish stock at strong sell in a strong bearish market', () 
     relativeStrength: { label: 'WEAK', score: -10, evidence: 'Multi-session underperformance versus SPY' },
     sensitivity: { high: false },
   });
-  assert.equal(result.signal.label, 'STRONG SELL');
+  assert.equal(result.signal.label, 'SELL');
 });
 
-test('makes a bearish stock a speculative sell when SPY is strongly bullish', () => {
+test('keeps the existing sell label when SPY is strongly bullish', () => {
   const result = applySearchMarketRegime({
     searchSignal: { ...bullishSignal, signal: { label: 'SELL', direction: 'BEARISH', stage: 'PROVISIONAL' }, confidence: 70 },
     spyRegime: { available: true, regime: 'STRONG BULLISH', direction: 'BULLISH' },
@@ -89,11 +88,11 @@ test('makes a bearish stock a speculative sell when SPY is strongly bullish', ()
     relativeStrength: { label: 'WEAK', score: -10, evidence: 'Multi-session underperformance versus SPY' },
     sensitivity: { high: false },
   });
-  assert.equal(result.signal.label, 'SPECULATIVE SELL');
+  assert.equal(result.signal.label, 'SELL');
   assert.equal(result.marketContext.marketAlignment.state, 'COUNTER-TREND');
 });
 
-test('allows only a speculative buy for strong relative strength in a bearish market', () => {
+test('keeps the existing buy label for strong relative strength in a bearish market', () => {
   const result = applySearchMarketRegime({
     searchSignal: { ...bullishSignal, confidence: 55 },
     spyRegime: { available: true, regime: 'BEARISH', direction: 'BEARISH' },
@@ -101,7 +100,7 @@ test('allows only a speculative buy for strong relative strength in a bearish ma
     relativeStrength: { label: 'STRONG', score: 10, evidence: 'Multi-session outperformance versus SPY' },
     sensitivity: { high: false },
   });
-  assert.equal(result.signal.label, 'SPECULATIVE BUY');
+  assert.equal(result.signal.label, 'BUY');
   assert.equal(result.marketContext.marketAlignment.label, 'BEARISH');
 });
 

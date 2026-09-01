@@ -88,7 +88,7 @@ const trader = (() => {
       ? searchSignal.reasons.slice(0, 4)
       : ['Verified multi-timeframe price and volume evidence'];
 
-    if (['STRONG BUY', 'BUY', 'SPECULATIVE BUY', 'WAIT', 'SPECULATIVE SELL', 'SELL', 'STRONG SELL'].includes(label)) {
+    if (label === 'BUY' || label === 'SELL') {
       return { signal: label, confidence, reasons };
     }
     throw new Error('Verified Search signal unavailable');
@@ -222,7 +222,7 @@ const trader = (() => {
     const vwap    = Number(gamePlan?.indicators?.vwap);
     const { signal, confidence, reasons } = computeSignal(gamePlan?.searchSignal);
 
-    const signalBullish = signal.includes('BUY');
+    const signalBullish = signal === 'BUY';
     const dayRngPct = dayHigh>dayLow ? ((price-dayLow)/(dayHigh-dayLow)*100) : 50;
     const fromOpen  = open ? ((price-open)/open*100) : 0;
     const rsiZone   = rsi===null?'--':rsi<30?'Oversold':rsi>70?'Overbought':'Neutral';
@@ -231,7 +231,7 @@ const trader = (() => {
     // verdict
     const vc = $('verdictCard');
     const vb = $('verdictBadge');
-    const cls= signal.includes('BUY') ? 'buy' : signal.includes('SELL') ? 'sell' : 'wait';
+    const cls= signal.toLowerCase();
     ['buy','hold','wait','sell'].forEach(c=>{ vc.classList.remove(c); vb.classList.remove(c); });
     vc.classList.add(cls); vb.classList.add(cls);
     $('verdictBadge').textContent  = signal;

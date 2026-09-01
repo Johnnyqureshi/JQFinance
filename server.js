@@ -3297,17 +3297,6 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       sectorTrend: sectorChg == null ? null : sectorChg >= 0.3 ? 'BULLISH' : sectorChg <= -0.3 ? 'BEARISH' : 'NEUTRAL',
       attribution,
     };
-    const spyRegime = classifySearchMarketRegime({
-      quote: spyQuote,
-      dailyBars: spyDaily,
-      marketState: spyQuote?.marketState,
-    });
-    market.trend = spyRegime.available ? spyRegime.direction : null;
-    market.regime = spyRegime.regime;
-    market.regimeScore = spyRegime.score;
-    market.regimeConfidence = spyRegime.confidence;
-    if (!spyRegime.available) dataGaps.push('SPY market regime unavailable');
-
     // News (Yahoo search — no key needed; NewsAPI headline titles if key present)
     let news = [];
     try {
@@ -3488,7 +3477,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       confluence,
       fibonacci,
       smartMoney,
-      searchSignal: finalSearchSignal,
+      searchSignal,
     });
 
     // Do not manufacture probability percentages when no directly comparable

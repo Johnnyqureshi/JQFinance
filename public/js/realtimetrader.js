@@ -57,7 +57,7 @@ const rtTrader = (() => {
   // ── Signal engine ───────────────────────────────────────────────────────────
   function computeSignal(searchSignal) {
     const searchLabel = String(searchSignal?.signal?.label || '').toUpperCase();
-    if (['STRONG BUY', 'BUY', 'SPECULATIVE BUY', 'WAIT', 'SPECULATIVE SELL', 'SELL', 'STRONG SELL'].includes(searchLabel)) {
+    if (searchLabel === 'BUY' || searchLabel === 'SELL') {
       return {
         signal: searchLabel,
         confidence: Number.isFinite(Number(searchSignal.confidence)) ? Math.round(Number(searchSignal.confidence)) : 30,
@@ -589,7 +589,7 @@ const rtTrader = (() => {
     const vb = $('rtVerdict');
     if (vb) {
       ['buy', 'hold', 'wait', 'sell'].forEach(c => vb.classList.remove(c));
-      vb.classList.add(signal.includes('BUY') ? 'buy' : signal.includes('SELL') ? 'sell' : 'wait');
+      vb.classList.add(signal.toLowerCase());
       vb.textContent = signal;
     }
     setSafe('rtConf',   confidence + '% confidence');

@@ -5,6 +5,11 @@ const gamePlan = (() => {
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n, d = 2) => n == null || !isFinite(n) ? '--' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const dateLabel = value => {
+    if (value == null) return 'Unavailable';
+    const timestamp = typeof value === 'number' ? (value < 10_000_000_000 ? value * 1000 : value) : Date.parse(value);
+    return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : String(value);
+  };
 
   const REFRESH_MS = 60 * 1000;
   const SIGNIFICANT_MOVE_PCT = 1.5;
@@ -12,6 +17,7 @@ const gamePlan = (() => {
   let timer = null;
   let reqToken = 0;   // monotonic token — stale responses are discarded
   let planWatch = null;
+  let smartMoneyRequestToken = 0;
 
   function setSafe(id, fn) { const el = $(id); if (el) fn(el); }
 
@@ -103,6 +109,137 @@ const gamePlan = (() => {
       <div class="gp-fib-extensions"><strong>Extensions</strong>${extensions}</div>
       <p>${esc(fibonacci.methodology)}</p>
     </section>`;
+  }
+
+  function smartMoneyZoneHtml(zone, index) {
+    const type = zone?.type === 'SUPPLY' ? 'supply' : 'demand';
+    const timeframes = Array.isArray(zone?.timeframe) ? zone.timeframe : [zone?.timeframe].filter(Boolean);
+    const factors = (zone?.factors || []).map(item => `<span>${esc(item)}</span>`).join('');
+    return `<details class="sm-zone ${type}${index >= 3 ? ' sm-zone-extra' : ''}">
+      <summary>
+        <span class="sm-zone-type">${esc(zone?.type || 'ZONE')}</span>
+        <b>$${fmt(zone?.low)}–$${fmt(zone?.high)}</b>
+        <span class="sm-zone-score">${esc(zone?.confidence || 'LOW')} · ${zone?.score ?? 0}/100</span>
+        <small>${esc(timeframes.join(' + ') || '—')} · ${esc(zone?.status || 'UNAVAILABLE')}</small>
+      </summary>
+      <div class="sm-zone-detail">
+        <div><span>Midpoint</span><b>$${fmt(zone?.midpoint)}</b></div>
+        <div><span>Origin</span><b>${esc(dateLabel(zone?.origin?.t))}</b></div>
+        <div><span>Mitigation</span><b>${esc(zone?.mitigation || 'Unavailable')}</b></div>
+        <div><span>Touches</span><b>${zone?.touches ?? '—'}</b></div>
+        <div><span>Invalidation reference</span><b>${zone?.invalidation?.reference == null ? 'Unavailable' : '$' + fmt(zone.invalidation.reference)}</b></div>
+        <div><span>Freshness</span><b>${esc(zone?.freshness || 'Unavailable')}</b></div>
+      </div>
+      ${factors ? `<div class="sm-factors">${factors}</div>` : ''}
+      <p>${esc(zone?.invalidation?.rule || '')}</p>
+    </details>`;
+  }
+
+  function smartMoneyHtml(data) {
+    const timeframes = data?.availableTimeframes || ['1H', '4H', '1D', '1W', '1M'];
+    const tfButtons = timeframes.map(tf =>
+      `<button type="button" data-sm-timeframe="${esc(tf)}" class="${tf === data?.timeframe ? 'active' : ''}">${esc(tf)}</button>`).join('');
+    if (!data?.available) {
+      return `<section class="sm-map unavailable" id="smartMoneyMap">
+        <div class="sm-head">
+          <div><span class="gp-sec-title">Smart Money Map</span><span class="gp-sec-note">algorithmically detected potential demand and supply</span></div>
+          <div class="sm-timeframes">${tfButtons}</div>
+        </div>
+        <div class="sm-unavailable"><strong>${esc(data?.status || 'UNAVAILABLE')}</strong><p>${esc(data?.reason || 'Completed OHLCV data is unavailable for this timeframe.')}</p></div>
+        <p class="sm-disclaimer">No zone or confidence value is substituted when the required history is unavailable.</p>
+      </section>`;
+    }
+    const demand = data.nearest?.demand;
+    const supply = data.nearest?.supply;
+    const zones = [...(data.demand || []), ...(data.supply || [])]
+      .sort((a, b) => (a.distancePct ?? Infinity) - (b.distancePct ?? Infinity));
+    const liquidityAbove = data.liquidity?.above?.[0];
+    const liquidityBelow = data.liquidity?.below?.[0];
+    const support = data.supportResistance?.support;
+    const resistance = data.supportResistance?.resistance;
+    const openFvgs = (data.fairValueGaps || []).filter(gap => gap.status !== 'FILLED');
+    const latestSweep = data.liquiditySweeps?.[0];
+    return `<section class="sm-map ${String(data.bias || '').toLowerCase()}" id="smartMoneyMap">
+      <div class="sm-head">
+        <div>
+          <span class="gp-sec-title">Smart Money Map</span>
+          <span class="gp-sec-note">algorithmically detected potential zones · supporting context only</span>
+        </div>
+        <div class="sm-controls">
+          <div class="sm-timeframes" aria-label="Smart Money timeframe">${tfButtons}</div>
+          <button type="button" class="sm-recalculate" data-sm-recalculate title="Recalculate from completed bars">Recalculate</button>
+        </div>
+      </div>
+      <div class="sm-summary">
+        <div><span>Current price</span><b>$${fmt(data.currentPrice)}</b><small>${esc(data.status)} · ${esc(data.timeframe)}</small></div>
+        <div class="demand"><span>Nearest demand</span><b>${demand ? '$' + fmt(demand.low) + '–$' + fmt(demand.high) : 'Unavailable'}</b><small>${demand ? demand.score + '/100 · ' + demand.status : 'No qualifying zone'}</small></div>
+        <div class="supply"><span>Nearest supply</span><b>${supply ? '$' + fmt(supply.low) + '–$' + fmt(supply.high) : 'Unavailable'}</b><small>${supply ? supply.score + '/100 · ' + supply.status : 'No qualifying zone'}</small></div>
+        <div><span>Range position</span><b>${data.range?.positionPct == null ? 'Unavailable' : fmt(data.range.positionPct, 0) + '%'}</b><small>${esc(data.range?.label || 'UNAVAILABLE')}</small></div>
+        <div><span>Zone bias</span><b class="${data.bias === 'DEMAND-LED' ? 'bull' : data.bias === 'SUPPLY-LED' ? 'bear' : 'neut'}">${esc(data.bias)}</b><small>Context, not a second signal</small></div>
+        <div><span>Map confidence</span><b>${data.confidence ?? 0}/100</b><small>${esc(data.dataQuality?.history)} HISTORY</small></div>
+      </div>
+      <div class="sm-level-grid">
+        <div><span>Major swing high</span><b>${data.structure?.swingHigh?.price == null ? 'Unavailable' : '$' + fmt(data.structure.swingHigh.price)}</b><small>${esc(data.structure?.swingHigh?.t || '')}</small></div>
+        <div><span>Major swing low</span><b>${data.structure?.swingLow?.price == null ? 'Unavailable' : '$' + fmt(data.structure.swingLow.price)}</b><small>${esc(data.structure?.swingLow?.t || '')}</small></div>
+        <div><span>Liquidity above</span><b>${liquidityAbove ? '$' + fmt(liquidityAbove.price) : 'Unavailable'}</b><small>${liquidityAbove ? liquidityAbove.touches + ' confirmed swing touches' : 'No equal-high cluster'}</small></div>
+        <div><span>Liquidity below</span><b>${liquidityBelow ? '$' + fmt(liquidityBelow.price) : 'Unavailable'}</b><small>${liquidityBelow ? liquidityBelow.touches + ' confirmed swing touches' : 'No equal-low cluster'}</small></div>
+        <div><span>Support</span><b>${support ? '$' + fmt(support.low) + (support.high !== support.low ? '–$' + fmt(support.high) : '') : 'Unavailable'}</b><small>${esc(support?.source || 'No qualifying support')}</small></div>
+        <div><span>Resistance</span><b>${resistance ? '$' + fmt(resistance.low) + (resistance.high !== resistance.low ? '–$' + fmt(resistance.high) : '') : 'Unavailable'}</b><small>${esc(resistance?.source || 'No qualifying resistance')}</small></div>
+        <div><span>Structure</span><b>${esc(data.structure?.state || 'UNAVAILABLE')}</b><small>Completed ${esc(data.timeframe)} bars</small></div>
+        <div><span>ATR / RSI</span><b>${data.indicators?.atr == null ? 'Unavailable' : '$' + fmt(data.indicators.atr)} · ${data.indicators?.rsi14 == null ? 'RSI unavailable' : 'RSI ' + fmt(data.indicators.rsi14, 0)}</b><small>${data.dataQuality?.volumeAvailable ? 'Volume available' : 'Volume unavailable · score reduced'}</small></div>
+        <div><span>Open FVGs</span><b>${openFvgs.length}</b><small>${openFvgs[0] ? esc(openFvgs[0].type) + ' $' + fmt(openFvgs[0].low) + '–$' + fmt(openFvgs[0].high) : 'No open imbalance detected'}</small></div>
+        <div><span>Reclaim / sweep</span><b>${esc(data.reclaim?.direction || latestSweep?.side || 'NONE CONFIRMED')}</b><small>${esc(data.reclaim?.status || latestSweep?.status || 'No completed-bar reclaim or sweep')}</small></div>
+      </div>
+      <div class="sm-zones-head"><span>Primary potential zones</span><button type="button" data-sm-show-all>Show all zones</button></div>
+      <div class="sm-zones">${zones.length ? zones.map(smartMoneyZoneHtml).join('') : '<div class="sm-unavailable"><strong>No primary zones qualified</strong><p>Low-confidence candidates remain hidden rather than being promoted.</p></div>'}</div>
+      <p class="sm-method">${esc(data.methodology)}</p>
+      <p class="sm-disclaimer">${esc(data.disclaimer)}</p>
+    </section>`;
+  }
+
+  function bindSmartMoneyControls() {
+    const wrap = $('gpSmartMoneyWrap');
+    if (!wrap || !currentSym) return;
+    const loadTimeframe = async (timeframe, force = false) => {
+      const token = ++smartMoneyRequestToken;
+      wrap.classList.add('loading');
+      try {
+        const params = new URLSearchParams({ timeframe });
+        if (force) params.set('force', '1');
+        const response = await fetch(`/api/smart-money/${encodeURIComponent(currentSym)}?${params}`, { credentials: 'same-origin' });
+        const data = await response.json().catch(() => null);
+        if (token !== smartMoneyRequestToken || !response.ok || !data?.ok) {
+          if (token === smartMoneyRequestToken) throw new Error(data?.error || 'Smart Money data unavailable');
+          return;
+        }
+        wrap.innerHTML = smartMoneyHtml(data);
+        window.searchSmartMoney = data;
+        if (typeof window.updateSearchSmartMoney === 'function') window.updateSearchSmartMoney(data);
+        bindSmartMoneyControls();
+      } catch (error) {
+        if (token === smartMoneyRequestToken) {
+          wrap.innerHTML = smartMoneyHtml({
+            available: false, timeframe, status: 'UNAVAILABLE', reason: error.message,
+            availableTimeframes: ['1H', '4H', '1D', '1W', '1M'],
+          });
+          bindSmartMoneyControls();
+        }
+      } finally {
+        if (token === smartMoneyRequestToken) wrap.classList.remove('loading');
+      }
+    };
+    wrap.querySelectorAll('[data-sm-timeframe]').forEach(button =>
+      button.addEventListener('click', () => loadTimeframe(button.dataset.smTimeframe)));
+    wrap.querySelector('[data-sm-recalculate]')?.addEventListener('click', () => {
+      const active = wrap.querySelector('[data-sm-timeframe].active')?.dataset.smTimeframe || '1D';
+      loadTimeframe(active, true);
+    });
+    wrap.querySelector('[data-sm-show-all]')?.addEventListener('click', event => {
+      const map = $('smartMoneyMap');
+      const show = !map?.classList.contains('show-all');
+      map?.classList.toggle('show-all', show);
+      event.currentTarget.textContent = show ? 'Show primary only' : 'Show all zones';
+    });
   }
 
   function list(items, cls) {
@@ -379,6 +516,8 @@ const gamePlan = (() => {
 
       ${searchSignalHtml(searchSignal)}
 
+      <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
+
       <div class="gp-cols">
         <div class="gp-col">
           <div class="gp-sec-title">Decision levels <span class="gp-sec-note">where the direction can strengthen or fail</span></div>
@@ -398,6 +537,9 @@ const gamePlan = (() => {
     setSafe('gpLoading', el => el.style.display = 'none');
     setSafe('gpError', el => el.style.display = 'none');
     c.style.display = '';
+    window.searchSmartMoney = d.smartMoney || null;
+    if (typeof window.updateSearchSmartMoney === 'function') window.updateSearchSmartMoney(d.smartMoney || null);
+    bindSmartMoneyControls();
   }
 
   async function refresh(force, suppliedAnalysis = null) {

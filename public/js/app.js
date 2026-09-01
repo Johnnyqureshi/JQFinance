@@ -172,15 +172,17 @@ function updateMarketStatus() {
 }
 
 // ── Chart drawing ──────────────────────────────────────────────────────────────
-function drawChart(canvas, bars, color, h=300) {
+function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=false) {
   if (!canvas || !bars?.length) return;
   const ctx  = canvas.getContext('2d');
   const w    = canvas.offsetWidth || canvas.parentElement.clientWidth - 40;
   canvas.width  = w;
   canvas.height = h;
   const prices = bars.map(b => b.c);
-  const min    = Math.min(...prices) * 0.998;
-  const max    = Math.max(...prices) * 1.002;
+  const lows = bars.map(b => Number(b.l)).filter(Number.isFinite);
+  const highs = bars.map(b => Number(b.h)).filter(Number.isFinite);
+  const min    = Math.min(...prices, ...lows) * 0.998;
+  const max    = Math.max(...prices, ...highs) * 1.002;
   const range  = max - min || 1;
   const pad    = { t:10, r:10, b:30, l:56 };
   const cw = w - pad.l - pad.r;
@@ -197,6 +199,44 @@ function drawChart(canvas, bars, color, h=300) {
     ctx.fillStyle='#3d5070'; ctx.font='10px Inter'; ctx.textAlign='right';
     ctx.fillText('$'+fmt(v), pad.l-4, y+3);
   }
+
+  // Search-only Smart Money overlays. They are drawn behind price, limited to
+  // primary calculated zones, and never alter the Search verdict.
+  const yForPrice = value => pad.t+ch-((value-min)/range)*ch;
+  const mapZones = (Array.isArray(smartMoney?.zones) ? smartMoney.zones : [])
+    .filter(zone => zone?.status !== 'INVALIDATED')
+    .sort((a,b) => Number(b.score||0)-Number(a.score||0));
+  const visibleZones = (showAllZones ? mapZones : mapZones.slice(0,3))
+    .filter(zone => Number(zone.high) >= min && Number(zone.low) <= max);
+  visibleZones.forEach(zone => {
+    const demand = zone.type === 'DEMAND';
+    const top = yForPrice(Math.min(max, Number(zone.high)));
+    const bottom = yForPrice(Math.max(min, Number(zone.low)));
+    ctx.fillStyle = demand ? 'rgba(29,214,163,.12)' : 'rgba(232,69,69,.12)';
+    ctx.strokeStyle = demand ? 'rgba(29,214,163,.48)' : 'rgba(232,69,69,.48)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(pad.l, top, cw, Math.max(2,bottom-top));
+    ctx.strokeRect(pad.l, top, cw, Math.max(2,bottom-top));
+    ctx.fillStyle = demand ? '#1dd6a3' : '#f87171';
+    ctx.font = '600 9px Inter';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${zone.type} ${zone.score||0}`, pad.l+5, Math.max(pad.t+10,top+10));
+  });
+  const drawReference = (price, color, dash, label) => {
+    const value = Number(price);
+    if (!Number.isFinite(value) || value < min || value > max) return;
+    const y = yForPrice(value);
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.font = '9px Inter'; ctx.textAlign = 'right';
+    ctx.fillText(label, w-pad.r-3, y-3);
+  };
+  (smartMoney?.overlay?.liquidity || []).slice(0, showAllZones ? 6 : 2)
+    .forEach(level => drawReference(level.price, 'rgba(245,200,66,.75)', [4,4], `LIQ ${level.side}`));
+  (smartMoney?.overlay?.swings || []).forEach(level =>
+    drawReference(level.price, 'rgba(167,139,250,.72)', [2,3], level.type === 'HIGH' ? 'SWING HIGH' : 'SWING LOW'));
 
   // gradient fill
   const grad = ctx.createLinearGradient(0,pad.t,0,h-pad.b);
@@ -644,6 +684,8 @@ function ptCard(pt, price) {
 }
 
 // ── Chart tab ──────────────────────────────────────────────────────────────────
+let activeSearchChart = null;
+
 function renderChart(sym, initBars, up) {
   const color = up ? '#1dd6a3' : '#e84545';
   $('tab-chart').innerHTML = `
@@ -653,22 +695,63 @@ function renderChart(sym, initBars, up) {
       <button class="tf-btn" data-tf="1Day" data-lim="90">3M</button>
       <button class="tf-btn" data-tf="1Day" data-lim="180">6M</button>
       <button class="tf-btn" data-tf="1Day" data-lim="365">1Y</button>
+      <span class="sm-chart-status" id="smChartStatus">Smart Money ${escapeHtml(window.searchSmartMoney?.timeframe || '1D')} zones</span>
+      <button class="tf-btn sm-chart-toggle active" id="smChartToggle" type="button">Zones on</button>
+      <button class="tf-btn sm-chart-all" id="smChartAll" type="button">Primary zones</button>
     </div>
     <div class="chart-card"><canvas id="mainCanvas" style="height:340px"></canvas></div>`;
   const canvas = $('mainCanvas');
-  if (initBars?.bars?.length>=2) requestAnimationFrame(() => drawChart(canvas, initBars.bars, color, 340));
-  else api.bars(sym,'1Hour',48).then(d => d?.bars && requestAnimationFrame(() => drawChart(canvas, d.bars, color, 340)));
+  activeSearchChart = { sym, canvas, bars: initBars?.bars || [], color, zones: true, showAll: false };
+  const redraw = () => drawChart(canvas, activeSearchChart.bars, activeSearchChart.color, 340,
+    activeSearchChart.zones ? window.searchSmartMoney : null, activeSearchChart.showAll);
+  if (activeSearchChart.bars.length>=2) requestAnimationFrame(redraw);
+  else api.bars(sym,'1Hour',48).then(d => {
+    if (!d?.bars || activeSearchChart?.sym !== sym) return;
+    activeSearchChart.bars = d.bars;
+    requestAnimationFrame(redraw);
+  });
+  $('smChartToggle')?.addEventListener('click', event => {
+    activeSearchChart.zones = !activeSearchChart.zones;
+    event.currentTarget.classList.toggle('active', activeSearchChart.zones);
+    event.currentTarget.textContent = activeSearchChart.zones ? 'Zones on' : 'Zones off';
+    redraw();
+  });
+  $('smChartAll')?.addEventListener('click', event => {
+    activeSearchChart.showAll = !activeSearchChart.showAll;
+    event.currentTarget.classList.toggle('active', activeSearchChart.showAll);
+    event.currentTarget.textContent = activeSearchChart.showAll ? 'All zones' : 'Primary zones';
+    redraw();
+  });
   $('tab-chart').querySelectorAll('.tf-btn').forEach(btn => {
+    if (!btn.dataset.tf) return;
     btn.addEventListener('click', async () => {
-      $('tab-chart').querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+      $('tab-chart').querySelectorAll('.tf-btn[data-tf]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const d = await api.bars(sym, btn.dataset.tf, +btn.dataset.lim);
       if (!d?.bars) return;
       const up2  = d.bars.at(-1)?.c >= d.bars[0]?.c;
-      requestAnimationFrame(() => drawChart(canvas, d.bars, up2?'#1dd6a3':'#e84545', 340));
+      activeSearchChart.bars = d.bars;
+      activeSearchChart.color = up2?'#1dd6a3':'#e84545';
+      requestAnimationFrame(redraw);
     });
   });
 }
+
+window.updateSearchSmartMoney = data => {
+  window.searchSmartMoney = data || null;
+  if (!activeSearchChart || !document.getElementById('tab-chart')?.classList.contains('active')) return;
+  if (Array.isArray(data?.chartBars) && data.chartBars.length >= 2) {
+    activeSearchChart.bars = data.chartBars;
+    activeSearchChart.color = data.chartBars.at(-1)?.c >= data.chartBars[0]?.c ? '#1dd6a3' : '#e84545';
+    document.querySelectorAll('#tab-chart .tf-btn[data-tf]').forEach(button => button.classList.remove('active'));
+  }
+  const status = $('smChartStatus');
+  if (status) status.textContent = data?.available
+    ? `Smart Money ${data.timeframe} zones · ${data.status}`
+    : `Smart Money ${data?.timeframe || ''} unavailable`;
+  drawChart(activeSearchChart.canvas, activeSearchChart.bars, activeSearchChart.color, 340,
+    activeSearchChart.zones ? data : null, activeSearchChart.showAll);
+};
 
 // ── Analysts tab ───────────────────────────────────────────────────────────────
 function ratingCls(r) {

@@ -18,3 +18,4 @@
 - [Search gaps and patterns](search-gaps-patterns.md) — Search gap rates use completed-session history; chart patterns may influence direction but never confirm a trade alone.
 - [Search Fibonacci confluence](search-fibonacci-confluence.md) — Fibonacci uses confirmed completed-session swings and may assist direction, but never confirms a trade without volume.
 - [Search prediction-market integrity](search-prediction-market-integrity.md) — discover Kalshi through official series metadata; show only relevant measured probabilities and fail closed when unavailable.
+- [Search Smart Money maps](search-smart-money-maps.md) — supporting zones use canonical completed periods and deterministic multi-timeframe confluence; they never become a second verdict.

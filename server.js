@@ -37,6 +37,13 @@ const {
   selectRelevantKalshiMarkets,
 } = require('./lib/search-intelligence');
 const {
+  TIMEFRAMES: SMART_MONEY_TIMEFRAMES,
+  TF_ORDER: SMART_MONEY_TIMEFRAME_ORDER,
+  aggregateCalendarBars: aggregateCalendarDailyBars,
+  aggregateRegularSessionHours,
+  buildSmartMoneyMap,
+} = require('./lib/smart-money-map');
+const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
   buildHistoricalForecast,
@@ -2773,6 +2780,104 @@ function gpFetchIntraday5m(symbol) {
   return gpFetchIntraday(symbol, '5m', '1d');
 }
 
+const _smartMoneyCache = new Map();
+const _smartMoneyInflight = new Map();
+const SMART_MONEY_CACHE_MS = 60 * 1000;
+
+function buildSmartMoneyTimeframes({ hourly, daily, currentPrice, source = 'Yahoo Finance chart API' }) {
+  const barsByTimeframe = {
+    '1H': hourly || [],
+    '4H': aggregateRegularSessionHours(hourly),
+    '1D': daily || [],
+    '1W': aggregateCalendarDailyBars(daily, '1W'),
+    '1M': aggregateCalendarDailyBars(daily, '1M'),
+  };
+  const preliminary = Object.fromEntries(SMART_MONEY_TIMEFRAME_ORDER.map(timeframe => [
+    timeframe,
+    buildSmartMoneyMap({ bars: barsByTimeframe[timeframe], timeframe, currentPrice, source }),
+  ]));
+  return Object.fromEntries(SMART_MONEY_TIMEFRAME_ORDER.map(timeframe => [
+    timeframe,
+    buildSmartMoneyMap({
+      bars: barsByTimeframe[timeframe],
+      timeframe,
+      currentPrice,
+      source,
+      confluenceTimeframes: SMART_MONEY_TIMEFRAME_ORDER
+        .filter(other => other !== timeframe)
+        .flatMap(other => preliminary[other]?.zones || []),
+    }),
+  ]));
+}
+
+async function buildSmartMoneySnapshot(symbol, timeframe, userId) {
+  const tf = String(timeframe || '1D').toUpperCase();
+  if (!SMART_MONEY_TIMEFRAMES[tf]) {
+    return { available: false, status: 'UNAVAILABLE', reason: 'Unsupported timeframe' };
+  }
+  const [quote, hourly, daily] = await Promise.all([
+    fetchLiveQuote(symbol, userId).catch(() => null),
+    gpFetchIntraday(symbol, '1h', '3mo'),
+    gpFetchDaily(symbol, '2y'),
+  ]);
+  if (!hourly?.length && !daily?.length) {
+    return {
+      available: false,
+      status: 'UNAVAILABLE',
+      timeframe: tf,
+      reason: `Yahoo Finance ${SMART_MONEY_TIMEFRAMES[tf].label} OHLCV data unavailable`,
+      generatedAt: new Date().toISOString(),
+      source: 'Yahoo Finance chart API',
+      dataQuality: { bars: 0, history: 'UNAVAILABLE', volumeAvailable: false },
+    };
+  }
+  const currentPrice = quote?.price ?? hourly?.at(-1)?.c ?? daily?.at(-1)?.c;
+  const maps = buildSmartMoneyTimeframes({ hourly, daily, currentPrice });
+  for (const [mapTimeframe, data] of Object.entries(maps)) {
+    _smartMoneyCache.set(`${symbol}:${mapTimeframe}`, { at: Date.now(), data });
+  }
+  return maps[tf];
+}
+
+app.get('/api/smart-money/:sym', requireAuth, async (req, res) => {
+  const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+  const timeframe = String(req.query.timeframe || '1D').toUpperCase();
+  if (!sym) return res.status(400).json({ ok: false, error: 'Symbol required' });
+  if (!SMART_MONEY_TIMEFRAMES[timeframe]) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Unsupported timeframe',
+      availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER,
+    });
+  }
+  const key = `${sym}:${timeframe}`;
+  const cached = _smartMoneyCache.get(key);
+  if (cached && Date.now() - cached.at < SMART_MONEY_CACHE_MS && req.query.force !== '1') {
+    return res.json({ ok: true, symbol: sym, ...cached.data, cached: true });
+  }
+  let job = _smartMoneyInflight.get(key);
+  if (!job) {
+    job = buildSmartMoneySnapshot(sym, timeframe, req.session.userId);
+    _smartMoneyInflight.set(key, job);
+  }
+  try {
+    const data = await job;
+    _smartMoneyCache.set(key, { at: Date.now(), data });
+    if (_smartMoneyCache.size > 100) _smartMoneyCache.delete(_smartMoneyCache.keys().next().value);
+    return res.json({
+      ok: true,
+      symbol: sym,
+      availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER,
+      ...data,
+    });
+  } catch (error) {
+    console.error('[SmartMoney]', sym, timeframe, error.message);
+    return res.status(502).json({ ok: false, error: 'Smart Money OHLCV analysis unavailable' });
+  } finally {
+    _smartMoneyInflight.delete(key);
+  }
+});
+
 function gpTimestampMs(value) {
   if (typeof value === 'number') return value < 10_000_000_000 ? value * 1000 : value;
   const parsed = Date.parse(value);
@@ -2882,7 +2987,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       gpFetchIntraday(sym, '5m', '60d'),
       gpFetchIntraday(sym, '1m', '1d'),
       gpFetchIntraday(sym, '15m', '5d'),
-      gpFetchIntraday(sym, '1h', '1mo'),
+      gpFetchIntraday(sym, '1h', '3mo'),
       yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
     ]);
@@ -3112,6 +3217,12 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
     });
+    const smartMoneyMaps = buildSmartMoneyTimeframes({
+      hourly: intra1h,
+      daily: searchLevelAnalysis.completedBars,
+      currentPrice: price,
+    });
+    const smartMoney = smartMoneyMaps['1D'];
 
     // Technical probability / confluence engine. This is deterministic and uses
     // only the supplied price, volume, and market-context observations. It never
@@ -3279,10 +3390,15 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
+      smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
       probabilities, confluence, searchSignal,
       confidence: { overall, parts },
       ai,
     };
+    _smartMoneyCache.set(`${sym}:1D`, { at: Date.now(), data: smartMoney });
+    for (const [mapTimeframe, data] of Object.entries(smartMoneyMaps)) {
+      if (data.available) _smartMoneyCache.set(`${sym}:${mapTimeframe}`, { at: Date.now(), data });
+    }
     _gpCache.set(sym, { at: Date.now(), data: out });
     if (_gpCache.size > 50) _gpCache.delete(_gpCache.keys().next().value);
     return out;

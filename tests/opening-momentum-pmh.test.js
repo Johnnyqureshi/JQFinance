@@ -152,7 +152,7 @@ test('a stop-cancel fill race reconciles without submitting another sell', async
     exitClientOrderId: 'pmh-exit-1',
     maxQty: 5,
     stopPrice: 10,
-    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
+    parent: { client_order_id: 'pmh-entry-1', legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
     broker: {
       cancelOrder: async () => ({ ok: true }),
       getOrder: async () => ({ id: 'stop-1', type: 'stop', status: 'filled' }),
@@ -168,6 +168,30 @@ test('a stop-cancel fill race reconciles without submitting another sell', async
   assert.strictEqual(result.action, 'reconcile_only');
   assert.strictEqual(exitSubmissions, 0);
 });
+test('a PMH exit never cancels a foreign strategy stop on the same symbol', async () => {
+  let cancellations = 0;
+  let exitSubmissions = 0;
+  const result = await managePmhRunnerExit({
+    symbol: 'TEST',
+    entryOrderId: 'foreign-entry',
+    entryClientOrderId: 'pmh-entry-1',
+    exitClientOrderId: 'pmh-exit-1',
+    maxQty: 5,
+    stopPrice: 10,
+    parent: {
+      client_order_id: 'mt-entry-1',
+      legs: [{ id: 'momentum-stop', type: 'stop', status: 'new' }],
+    },
+    broker: {
+      cancelOrder: async () => { cancellations += 1; },
+      submitMarketExit: async () => { exitSubmissions += 1; },
+      isOwned: (order, expected) => order.client_order_id === expected,
+    },
+  });
+  assert.strictEqual(result.action, 'reconcile_only');
+  assert.strictEqual(cancellations, 0);
+  assert.strictEqual(exitSubmissions, 0);
+});
 test('a failed runner exit attempts to restore broker stop protection', async () => {
   let exitSubmissions = 0;
   let rescueSubmissions = 0;
@@ -178,7 +202,7 @@ test('a failed runner exit attempts to restore broker stop protection', async ()
     exitClientOrderId: 'pmh-exit-1',
     maxQty: 5,
     stopPrice: 10,
-    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
+    parent: { client_order_id: 'pmh-entry-1', legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
     broker: {
       cancelOrder: async () => ({ ok: true }),
       getOrder: async () => ({ id: 'stop-1', type: 'stop', status: 'canceled' }),
@@ -217,7 +241,7 @@ test('an ambiguous runner-exit timeout never submits a competing rescue stop', a
     exitClientOrderId: 'pmh-exit-1',
     maxQty: 5,
     stopPrice: 10,
-    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
+    parent: { client_order_id: 'pmh-entry-1', legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
     broker: {
       getNestedOrder: async () => ({
         client_order_id: 'pmh-entry-1',
@@ -251,7 +275,7 @@ test('a rescue timeout preserves its durable intent for exact reconciliation', a
     exitClientOrderId: 'pmh-exit-1',
     maxQty: 5,
     stopPrice: 10,
-    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
+    parent: { client_order_id: 'pmh-entry-1', legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
     broker: {
       getNestedOrder: async () => ({
         client_order_id: 'pmh-entry-1',

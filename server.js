@@ -10,7 +10,13 @@ const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
 const { createPostgresAuthStore } = require('./lib/postgres-auth-store');
 const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
-const { requiresPriceActionForEntry } = require('./lib/order-entry-policy');
+const {
+  boundedManagedExitQuantity,
+  entryOwnershipConflict,
+  managedExitFillSummary,
+  migrateLegacyMomentumOwnership,
+  requiresPriceActionForEntry,
+} = require('./lib/order-entry-policy');
 const {
   normalizeYahooFloatSummary,
   scannerFloatFields,
@@ -153,7 +159,11 @@ const {
   needsRescueReplacement,
 } = require('./lib/bot-trade-journal');
 const { createCredentialVault } = require('./lib/credential-vault');
-const { brokerOrderMatchesIntent } = require('./lib/broker-order-ownership');
+const {
+  activeProtectiveLegsForIntent,
+  brokerOrderMatchesIntent,
+  protectiveCancellationSettled,
+} = require('./lib/broker-order-ownership');
 const {
   buildTradableEquityCatalog,
   selectTradableEquityCandidates,
@@ -285,6 +295,14 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (trade_id, broker_order_id),
     FOREIGN KEY (trade_id) REFERENCES bot_trade_log(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS managed_symbol_entry_leases (
+    account_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, symbol)
   );
 `);
 
@@ -794,6 +812,14 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+try {
+  const migrated = migrateLegacyMomentumOwnership(db);
+  if (migrated.changes) {
+    console.log(`[Migration] claimed ${migrated.changes} legacy Momentum journal row(s) by durable mt- client ID`);
+  }
+} catch (error) {
+  console.error('[Migration] legacy Momentum ownership failed:', error.message);
+}
 try {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_bot_alpaca_creds_account
     ON bot_alpaca_creds (user_id, account_id)
@@ -3810,6 +3836,61 @@ function getAlpacaCreds(userId, scope = 'manual') {
   return decryptStoredAlpacaCredentials(row, 'alpaca_creds', 'user_id=? AND mode=?', [userId, activeMode]);
 }
 
+function managedSymbolRows(userId, accountId, symbol) {
+  if (!accountId) return [];
+  return db.prepare(`
+    SELECT id,symbol,strategy,status,broker_account_id,shares,entry_filled_qty,
+           entry_order_id,entry_client_order_id,pending_exit_order_id
+    FROM bot_trade_log
+    WHERE user_id=? AND (broker_account_id=? OR broker_account_id IS NULL) AND symbol=?
+      AND (
+        strategy='momentum'
+        OR strategy LIKE 'opening-momentum-pmh%'
+      )
+  `).all(userId, accountId, String(symbol || '').toUpperCase());
+}
+
+function assertManagedEntryOwnership(userId, scope, symbol) {
+  const creds = getAlpacaCreds(userId, scope);
+  if (!creds?.account_id) throw new Error('The active broker account identity is unavailable.');
+  const conflict = entryOwnershipConflict(
+    managedSymbolRows(userId, creds.account_id, symbol),
+    { accountId: creds.account_id, symbol, requestedOwner: scope }
+  );
+  if (conflict) {
+    const owner = conflict.owner === 'pmh' ? 'Opening Momentum' : 'Momentum';
+    throw new Error(`${symbol} is already managed by ${owner}. Use that strategy's explicit close flow before a new entry.`);
+  }
+  return creds;
+}
+
+function reserveManagedSymbolEntry(userId, scope, symbol) {
+  const creds = assertManagedEntryOwnership(userId, scope, symbol);
+  const normalizedSymbol = String(symbol || '').toUpperCase();
+  const owner = scope === 'pmh' ? 'pmh' : scope === 'momentum' ? 'momentum' : 'manual';
+  const token = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO managed_symbol_entry_leases (account_id,symbol,owner,token,expires_at)
+    VALUES (?,?,?,?,datetime('now','+2 minutes'))
+    ON CONFLICT(account_id,symbol) DO UPDATE SET
+      owner=excluded.owner,token=excluded.token,expires_at=excluded.expires_at
+    WHERE managed_symbol_entry_leases.expires_at <= datetime('now')
+  `).run(creds.account_id, normalizedSymbol, owner, token);
+  const lease = db.prepare(`SELECT owner,token FROM managed_symbol_entry_leases
+    WHERE account_id=? AND symbol=?`).get(creds.account_id, normalizedSymbol);
+  if (lease?.token !== token) {
+    throw new Error(`${normalizedSymbol} already has an entry reservation owned by ${lease?.owner || 'another trader'}.`);
+  }
+  return { accountId: creds.account_id, symbol: normalizedSymbol, token };
+}
+
+function releaseManagedSymbolEntry(lease) {
+  if (!lease) return;
+  db.prepare(`DELETE FROM managed_symbol_entry_leases
+    WHERE account_id=? AND symbol=? AND token=?`)
+    .run(lease.accountId, lease.symbol, lease.token);
+}
+
 // Helper: check if a specific mode has valid (non-sentinel) credentials in DB
 function storedCredentialExists(row) {
   if (!row || row.api_key === DISCONNECTED_SENTINEL) return false;
@@ -4618,6 +4699,7 @@ async function placeAlpacaOrder(req, res) {
   }
   const { symbol, side, amount, tpPct, slPct, leverage, clientOrderId } = req.body || {};
   const scope = req._alpacaScope || requestAlpacaScope(req);
+  let ownershipLease = null;
 
   // ── Input validation ───────────────────────────────────────────────────────
   if (!symbol || !side) return res.status(400).json({ error: 'symbol and side required.' });
@@ -4626,6 +4708,7 @@ async function placeAlpacaOrder(req, res) {
   if (sideL !== 'buy' && sideL !== 'sell') return res.status(400).json({ error: 'side must be buy or sell.' });
   const isCryptoSym = isLikelyCryptoSymbol(symbol);
   const requiresMomentumVwap = scope === 'momentum' && sideL === 'buy' && !isCryptoSym;
+  const normalizedSymbol = symbol.toUpperCase();
 
   const amtNum = parseFloat(amount);
   if (!isFinite(amtNum) || amtNum <= 0) return res.status(400).json({ error: 'amount must be a positive number.' });
@@ -4643,6 +4726,9 @@ async function placeAlpacaOrder(req, res) {
   // stock/market, buy the mapped inverse ETF instead (GET /api/inverse/:sym).
   if (sideL === 'sell') {
     try {
+      if (scope === 'manual') {
+        assertManagedEntryOwnership(req.session.userId, 'manual', normalizedSymbol);
+      }
       const pos = await alpacaFetchFor(req.session.userId, scope, `/v2/positions/${symbol.toUpperCase()}`, { method: 'GET' });
       const heldQty = parseFloat(pos?.qty ?? 0);
       if (!isFinite(heldQty) || heldQty <= 0) {
@@ -4653,16 +4739,25 @@ async function placeAlpacaOrder(req, res) {
       }
       req._heldQty = heldQty; // cap the sell below
 
-      // Cancel any open orders on this symbol (e.g. the OTO stop-loss child)
-      // BEFORE selling — otherwise the leftover stop order could later trigger
-      // against nothing (or a re-entered position) and flip the account short.
+      // Manual sells are allowed only when no managed journal owns this
+      // account/symbol. In that case every same-symbol order belongs to the
+      // manual position and can be settled before the quantity-bounded sell.
       try {
         const open = await alpacaFetchFor(req.session.userId, scope, `/v2/orders?status=open&symbols=${symbol.toUpperCase()}`, { method: 'GET' });
         for (const o of (Array.isArray(open) ? open : [])) {
-          await alpacaFetchFor(req.session.userId, scope, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {});
+          await alpacaFetchFor(req.session.userId, scope, `/v2/orders/${o.id}`, { method: 'DELETE' });
         }
-      } catch (_) {} // no open orders / cancel failure → proceed; Alpaca rejects unsafe sells
+        const remaining = await alpacaFetchFor(req.session.userId, scope, `/v2/orders?status=open&symbols=${symbol.toUpperCase()}`, { method: 'GET' });
+        if (Array.isArray(remaining) && remaining.length) {
+          throw new Error(`Open ${normalizedSymbol} orders did not settle; manual sell blocked.`);
+        }
+      } catch (error) {
+        return res.status(409).json({ error: error.message });
+      }
     } catch (e) {
+      if (/already managed by/.test(e.message)) {
+        return res.status(409).json({ error: e.message, managedPosition: true });
+      }
       return res.status(400).json({
         error: `No long position in ${symbol.toUpperCase()} — shorting is not allowed on this platform. To trade the downside, BUY the inverse ETF instead.`,
         noShort: true,
@@ -4697,6 +4792,7 @@ async function placeAlpacaOrder(req, res) {
         return res.status(409).json({ error: 'Another entry is being prepared. Please wait for it to settle.' });
       }
       entryLockHeld = true;
+      ownershipLease = reserveManagedSymbolEntry(req.session.userId, scope, normalizedSymbol);
       if (!isCryptoSym) await assertAlpacaTradableEquity(req.session.userId, symbol, { fresh: true, scope });
       if (requiresMomentumVwap) {
         momentumVwapEntry = await evaluateMomentumOrderVwap(req.session.userId, symbol.toUpperCase());
@@ -4865,6 +4961,7 @@ async function placeAlpacaOrder(req, res) {
       : e.alpacaStatus || (e.message.includes('authentication') ? 401 : 400);
     res.status(status).json({ error: e.message });
   } finally {
+    releaseManagedSymbolEntry(ownershipLease);
     if (entryLockHeld) releaseBotLock(req.session.userId);
   }
 }
@@ -4915,7 +5012,12 @@ app.get('/api/alpaca/order/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
   if (!/^[a-f0-9\-]{10,40}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid order ID.' });
-  try { await alpacaFetchFor(req.session.userId, requestAlpacaScope(req), `/v2/orders/${req.params.id}`, { method: 'DELETE' }); res.json({ ok: true }); }
+  try {
+    const order = await alpacaFetchFor(req.session.userId, 'manual', `/v2/orders/${req.params.id}?nested=true`);
+    assertManagedEntryOwnership(req.session.userId, 'manual', String(order?.symbol || '').toUpperCase());
+    await alpacaFetchFor(req.session.userId, 'manual', `/v2/orders/${req.params.id}`, { method: 'DELETE' });
+    res.json({ ok: true });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -4923,7 +5025,18 @@ app.delete('/api/alpaca/order/:id', requireAuth, async (req, res) => {
 app.delete('/api/alpaca/position/:sym', requireAuth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
   if (!/^[A-Z0-9.\-]{1,12}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol.' });
-  try { res.json(await alpacaFetchFor(req.session.userId, requestAlpacaScope(req), `/v2/positions/${sym}`, { method: 'DELETE' })); }
+  try {
+    assertManagedEntryOwnership(req.session.userId, 'manual', sym);
+    const open = await alpacaFetchFor(req.session.userId, 'manual', `/v2/orders?status=open&symbols=${encodeURIComponent(sym)}`);
+    for (const order of (Array.isArray(open) ? open : [])) {
+      await alpacaFetchFor(req.session.userId, 'manual', `/v2/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' });
+    }
+    const remaining = await alpacaFetchFor(req.session.userId, 'manual', `/v2/orders?status=open&symbols=${encodeURIComponent(sym)}`);
+    if (Array.isArray(remaining) && remaining.length) {
+      return res.status(409).json({ error: `Open ${sym} orders did not settle; position close blocked.` });
+    }
+    res.json(await alpacaFetchFor(req.session.userId, 'manual', `/v2/positions/${sym}`, { method: 'DELETE' }));
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -4936,7 +5049,7 @@ function botTradePerformance(userId, todayOnly = false, strategy = 'all') {
     ? `AND date(closed_at, 'localtime') = date('now', 'localtime')`
     : '';
   const strategyFilter = strategy === 'momentum'
-    ? `AND (strategy IS NULL OR strategy='momentum')`
+    ? `AND strategy='momentum'`
     : '';
   const row = db.prepare(`
     SELECT
@@ -4971,7 +5084,7 @@ app.get('/api/bot-trades', requireAuth, (req, res) => {
   const userId = req.session.userId;
   const momentumOnly = req.query.strategy === 'momentum';
   const strategyClause = momentumOnly
-    ? ` AND (strategy IS NULL OR strategy='momentum')`
+    ? ` AND strategy='momentum'`
     : '';
   const openTrades = db.prepare(`
     SELECT id, symbol, entry_price, exit_price, shares, pnl, mode, status,
@@ -5007,6 +5120,11 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
   const body = req.body || {};
   const userId = req.session.userId;
   const momentumJournal = body.connection === 'momentum';
+  if (momentumJournal) {
+    return res.status(409).json({
+      error: 'Momentum journal updates are server-owned and reconcile only from broker-confirmed orders and fills.',
+    });
+  }
   const action = String(body.action || body.event || '').trim().toLowerCase();
   const isEntry = ['buy', 'entry', 'auto-buy', 'auto_buy'].includes(action);
   const isExit = ['exit', 'close', 'sell', 'auto-exit', 'auto_exit'].includes(action);
@@ -5030,7 +5148,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     }
     const openTrade = db.prepare(`
       SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
-      ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
+      AND strategy IS NULL
     `).get(requestedTradeId, userId, symbol);
     if (!openTrade) {
       return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -5055,7 +5173,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     }
     const openTrade = db.prepare(`
       SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
-      ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
+      AND strategy IS NULL
     `).get(requestedTradeId, userId, symbol);
     if (!openTrade) {
       return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -5099,7 +5217,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
       }
       const openTrade = db.prepare(`
         SELECT * FROM bot_trade_log WHERE id=? AND user_id=? AND symbol=? AND status='open'
-        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
+        AND strategy IS NULL
       `).get(requestedTradeId, userId, symbol);
       if (!openTrade) {
         return res.status(404).json({ error: `No open bot trade found for ${symbol}.` });
@@ -5140,7 +5258,7 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
       : null;
     if (entryOrderId) {
       const existing = db.prepare(`
-        SELECT * FROM bot_trade_log WHERE user_id=? AND entry_order_id=?
+        SELECT * FROM bot_trade_log WHERE user_id=? AND entry_order_id=? AND strategy IS NULL
       `).get(userId, entryOrderId);
       if (existing) {
         return res.json({
@@ -5191,12 +5309,12 @@ app.post('/api/bot-trades', requireAuth, (req, res) => {
     ? db.prepare(`
         SELECT * FROM bot_trade_log
         WHERE id=? AND user_id=? AND symbol=? AND status='open'
-        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
+        AND strategy IS NULL
       `).get(requestedTradeId, userId, symbol)
     : db.prepare(`
         SELECT * FROM bot_trade_log
         WHERE user_id=? AND symbol=? AND status='open'
-        ${momentumJournal ? `AND (strategy IS NULL OR strategy='momentum')` : ''}
+        AND strategy IS NULL
         ORDER BY id DESC LIMIT 1
       `).get(userId, symbol);
   if (!trade) {
@@ -5401,7 +5519,7 @@ function momentumConfigFor(userId) {
   let saved = {};
   try { saved = row?.config_json ? JSON.parse(row.config_json) : {}; } catch (_) {}
   const openTrades = Number(db.prepare(`SELECT COUNT(*) AS count FROM bot_trade_log
-    WHERE user_id=? AND status='open' AND (strategy IS NULL OR strategy='momentum')`).get(userId)?.count || 0);
+    WHERE user_id=? AND status='open' AND strategy='momentum'`).get(userId)?.count || 0);
   const creds = getAlpacaCreds(userId, 'momentum');
   return {
     enabled: !!row?.enabled,
@@ -5444,7 +5562,7 @@ function recordMomentumCycle(userId, outcome) {
 
 function momentumSymbolCoolingDown(userId, symbol) {
   return !!db.prepare(`SELECT 1 FROM bot_trade_log
-    WHERE user_id=? AND symbol=? AND (strategy IS NULL OR strategy='momentum')
+    WHERE user_id=? AND symbol=? AND strategy='momentum'
       AND exit_cooldown_until > datetime('now')
     ORDER BY id DESC LIMIT 1`).get(userId, symbol);
 }
@@ -5969,9 +6087,11 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
   if (livePause) throw pmhError(livePause, 409);
   let clientOrderId = null;
   let submittedOrders = [];
+  let ownershipLease = null;
   try {
     if (!isMarketOpen()) throw pmhError('Market is closed for regular-session PMH entries.', 400);
     await assertAlpacaTradableEquity(userId, normalizedSymbol, { fresh: true, scope: 'pmh' });
+    ownershipLease = reserveManagedSymbolEntry(userId, 'pmh', normalizedSymbol);
     const slots = await getOpenSlots(userId, 'PMH', 'pmh');
     // A PMH setup submits two independently protected BUY parents (partial +
     // runner), so reserve both shared entry units before either reaches Alpaca.
@@ -6040,8 +6160,11 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
       if (existing) throw new Error('This PMH entry lot is already recorded.');
       const strategy = kind === 'partial' ? 'opening-momentum-pmh-partial' : 'opening-momentum-pmh-runner';
       const trade = db.prepare(`INSERT INTO bot_trade_log
-        (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_rsi,entry_order_id,entry_client_order_id,strategy)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(userId, normalizedSymbol, entry, qty, mode, 'pending_entry', stop, config.partialTargetR, clientId, clientId, strategy);
+        (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_rsi,entry_order_id,entry_client_order_id,strategy,broker_account_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          userId, normalizedSymbol, entry, qty, mode, 'pending_entry', stop,
+          config.partialTargetR, clientId, clientId, strategy, getAlpacaCreds(userId, 'pmh')?.account_id
+        );
       // Record the broker submission attempt before issuing POST. A network
       // timeout is ambiguous: Alpaca may accept it, so reconciliation must use
       // this durable client ID even when no broker order ID comes back.
@@ -6077,6 +6200,8 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
     error.reconciliationRequired = submittedOrders.length > 0;
     error.submittedLots = submittedOrders.map(order => ({ kind: order.kind, orderId: order.order?.id || null, qty: order.qty }));
     throw error;
+  } finally {
+    releaseManagedSymbolEntry(ownershipLease);
   }
 }
 
@@ -7319,35 +7444,34 @@ async function applyMomentumExitFill(userId, pinnedCreds, trade, exitOrder, reas
   const totals = db.prepare(`SELECT COALESCE(SUM(filled_qty),0) AS qty,
     COALESCE(SUM(filled_notional),0) AS notional
     FROM momentum_exit_fills WHERE trade_id=?`).get(trade.id);
-  const positions = await momentumBrokerFetch(userId, pinnedCreds, '/v2/positions');
-  const position = (Array.isArray(positions) ? positions : []).find(item => item.symbol === trade.symbol);
-  if (position && Number(position.qty) > 0) {
-    db.prepare('UPDATE bot_trade_log SET shares=? WHERE id=? AND status=\'open\'')
-      .run(Number(position.qty), trade.id);
-    return { recorded: true, closed: false, remainingQty: Number(position.qty) };
-  }
   const totalQty = Number(totals.qty);
   const totalNotional = Number(totals.notional);
   const expectedQty = Number(trade.entry_filled_qty);
-  if (!trade.entry_fill_finalized || !(expectedQty > 0) || totalQty + 1e-8 < expectedQty) {
+  if (!trade.entry_fill_finalized || !(expectedQty > 0)) {
     return {
       recorded: true,
       closed: false,
       discrepancy: true,
-      reason: trade.entry_fill_finalized
-        ? `Broker is flat but only ${totalQty} of ${expectedQty || 'unknown'} entry shares have confirmed exit fills.`
-        : 'Broker is flat but the final confirmed entry quantity is not yet known.',
+      reason: 'The final confirmed Momentum entry quantity is not yet known.',
     };
   }
-  const exitPrice = totalQty > 0 ? totalNotional / totalQty : null;
-  if (!(exitPrice > 0)) return { recorded: true, closed: false };
+  const summary = managedExitFillSummary({
+    filledQty: totalQty,
+    filledNotional: totalNotional,
+    expectedQty,
+    entryPrice: trade.entry_price,
+  });
+  if (!summary) return { recorded: true, closed: false };
+  if (!summary.closed) {
+    return { recorded: true, closed: false, remainingQty: summary.remainingQty };
+  }
   db.prepare(`UPDATE bot_trade_log
     SET shares=?,exit_price=?,pnl=?,status='closed',
       pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,
       rescue_stop_order_id=NULL,rescue_stop_client_order_id=NULL,
       exit_reason=?,exit_cooldown_until=datetime('now','+15 minutes'),closed_at=datetime('now')
     WHERE id=? AND status='open'`)
-    .run(totalQty, exitPrice, +(totalNotional - Number(trade.entry_price) * totalQty).toFixed(6),
+    .run(summary.completedQty, summary.exitPrice, summary.pnl,
       reason, trade.id);
   return { recorded: true, closed: true };
 }
@@ -7356,15 +7480,27 @@ async function ensureMomentumResidualProtection(userId, pinnedCreds, trade, quan
   if (!(quantity > 0) || !(Number(trade.stop_price) > 0)) {
     throw new Error(`Residual stop protection cannot be verified for ${trade.symbol}.`);
   }
-  const openOrders = await momentumBrokerFetch(userId, pinnedCreds, '/v2/orders?limit=500&status=open');
-  const protectedAtBroker = (Array.isArray(openOrders) ? openOrders : []).some(order =>
-    order.symbol === trade.symbol
-    && String(order.side || '').toLowerCase() === 'sell'
-    && ['stop', 'stop_limit'].includes(String(order.type || '').toLowerCase())
+  let parent = null;
+  try {
+    parent = await momentumBrokerFetch(userId, pinnedCreds,
+      `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_order_id)}&nested=true`);
+  } catch (_) {}
+  const parentStop = activeProtectiveLegsForIntent(parent, trade.entry_order_id).find(order =>
+    ['stop', 'stop_limit'].includes(String(order.type || '').toLowerCase())
     && Number(order.qty) >= quantity
     && Number(order.stop_price) + 0.001 >= Number(trade.stop_price)
-    && !['filled', 'canceled', 'cancelled', 'rejected', 'expired'].includes(String(order.status || '').toLowerCase())
   );
+  let rescueStop = null;
+  if (!parentStop && trade.rescue_stop_client_order_id) {
+    try {
+      const order = await momentumBrokerFetch(userId, pinnedCreds,
+        `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.rescue_stop_client_order_id)}`);
+      if (brokerOrderMatchesIntent(order, trade.rescue_stop_client_order_id)
+          && !['filled', 'canceled', 'cancelled', 'rejected', 'expired'].includes(String(order.status || '').toLowerCase())
+          && Number(order.qty) >= quantity) rescueStop = order;
+    } catch (_) {}
+  }
+  const protectedAtBroker = !!(parentStop || rescueStop);
   if (protectedAtBroker) return { existing: true };
   const rescueClientOrderId = `mt-rescue-${userId}-${trade.id}-${Date.now().toString(36)}`.slice(0, 48);
   db.prepare('UPDATE bot_trade_log SET rescue_stop_client_order_id=? WHERE id=?')
@@ -7385,7 +7521,7 @@ async function ensureMomentumResidualProtection(userId, pinnedCreds, trade, quan
 async function reconcileMomentumTrades(userId, pinnedCreds) {
   const trades = db.prepare(`
     SELECT * FROM bot_trade_log
-    WHERE user_id=? AND status='open' AND (strategy IS NULL OR strategy='momentum')
+    WHERE user_id=? AND status='open' AND strategy='momentum'
   `).all(userId);
   const reconciled = [];
   for (const trade of trades) {
@@ -7552,7 +7688,11 @@ async function submitMomentumRsiExit(userId, pinnedCreds, trade, position, rsi) 
   if (!pinnedCreds || pinnedCreds.mode !== trade.mode) {
     throw new Error(`Momentum exit account mismatch for ${trade.symbol}.`);
   }
-  const quantity = Number(position?.qty);
+  if (trade.strategy !== 'momentum' || !trade.broker_account_id
+      || trade.broker_account_id !== pinnedCreds.account_id) {
+    throw new Error(`Momentum journal ownership is unavailable for ${trade.symbol}.`);
+  }
+  const quantity = boundedManagedExitQuantity(trade, position);
   if (!(quantity > 0) || String(position?.symbol || '') !== trade.symbol) {
     throw new Error(`Broker position quantity is unavailable for ${trade.symbol}.`);
   }
@@ -7567,13 +7707,18 @@ async function submitMomentumRsiExit(userId, pinnedCreds, trade, position, rsi) 
   try {
     const parent = await momentumBrokerFetch(userId, pinnedCreds,
       `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_order_id)}&nested=true`);
-    const openProtectiveOrders = (Array.isArray(parent?.legs) ? parent.legs : []).filter(order =>
-      String(order?.side || '').toLowerCase() === 'sell'
-      && !['filled', 'canceled', 'cancelled', 'rejected', 'expired'].includes(String(order?.status || '').toLowerCase())
-    );
+    if (!brokerOrderMatchesIntent(parent, trade.entry_order_id)) {
+      throw new Error(`Momentum entry order ownership is unavailable for ${trade.symbol}.`);
+    }
+    const openProtectiveOrders = activeProtectiveLegsForIntent(parent, trade.entry_order_id);
     for (const order of openProtectiveOrders) {
       await momentumBrokerMutation(userId, pinnedCreds,
         `/v2/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' });
+    }
+    const settledParent = await momentumBrokerFetch(userId, pinnedCreds,
+      `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_order_id)}&nested=true`);
+    if (!protectiveCancellationSettled(settledParent, trade.entry_order_id)) {
+      throw new Error(`Momentum protective orders did not settle for ${trade.symbol}; exit blocked.`);
     }
 
     const submitted = await momentumBrokerMutation(userId, pinnedCreds, '/v2/orders', {
@@ -7625,7 +7770,7 @@ async function submitMomentumRsiExit(userId, pinnedCreds, trade, position, rsi) 
 async function manageMomentumOpenPositions(userId, pinnedCreds) {
   if (!isMarketOpen()) return [];
   const trades = db.prepare(`SELECT * FROM bot_trade_log
-    WHERE user_id=? AND status='open' AND (strategy IS NULL OR strategy='momentum')
+    WHERE user_id=? AND status='open' AND strategy='momentum'
     ORDER BY id`).all(userId);
   if (!trades.length) return [];
   const positions = await momentumBrokerFetch(userId, pinnedCreds, '/v2/positions');
@@ -7672,7 +7817,7 @@ async function executeMomentumEntry(userId, candidate, pinnedCreds = null) {
     SELECT COUNT(*) AS entries,
       COALESCE(SUM(CASE WHEN status='closed' AND pnl < 0 THEN -pnl ELSE 0 END),0) AS losses
     FROM bot_trade_log
-    WHERE user_id=? AND (strategy IS NULL OR strategy='momentum')
+    WHERE user_id=? AND strategy='momentum'
       AND date(timestamp,'localtime')=date('now','localtime') AND status<>'void'
   `).get(userId);
   if (Number(daily.entries) >= config.maxTradesPerDay) throw new Error('Momentum daily trade limit reached.');
@@ -7700,9 +7845,11 @@ async function executeMomentumEntry(userId, candidate, pinnedCreds = null) {
   const clientOrderId = `mt-${userId}-${fresh.symbol}-${Date.now().toString(36)}`.slice(0, 48);
   const stopPrice = +(entryPrice * (1 - slPct / 100)).toFixed(2);
   const targetPrice = +(entryPrice * (1 + tpPct / 100)).toFixed(2);
-  const trade = recordMomentumEntryIntent(userId, fresh, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
+  const ownershipLease = reserveManagedSymbolEntry(userId, 'momentum', fresh.symbol);
+  let trade;
   try {
-  const order = await momentumBrokerMutation(userId, creds, '/v2/orders', {
+    trade = recordMomentumEntryIntent(userId, fresh, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
+    const order = await momentumBrokerMutation(userId, creds, '/v2/orders', {
       method: 'POST',
       body: JSON.stringify({
         symbol: fresh.symbol, qty: String(shares), side: 'buy', type: 'market', time_in_force: 'day',
@@ -7714,11 +7861,13 @@ async function executeMomentumEntry(userId, candidate, pinnedCreds = null) {
     });
     return { trade, order, candidate: fresh };
   } catch (error) {
-    if (!error.alpacaTransient) {
+    if (trade && !error.alpacaTransient) {
       db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
         .run(`Broker entry was not accepted: ${error.message}`.slice(0, 200), trade.id);
     }
     throw error;
+  } finally {
+    releaseManagedSymbolEntry(ownershipLease);
   }
 }
 
@@ -7754,7 +7903,7 @@ async function executeMomentumInverseEntry(userId, marketDirection, pinnedCreds 
     SELECT COUNT(*) AS entries,
       COALESCE(SUM(CASE WHEN status='closed' AND pnl < 0 THEN -pnl ELSE 0 END),0) AS losses
     FROM bot_trade_log
-    WHERE user_id=? AND (strategy IS NULL OR strategy='momentum')
+    WHERE user_id=? AND strategy='momentum'
       AND date(timestamp,'localtime')=date('now','localtime') AND status<>'void'
   `).get(userId);
   if (Number(daily.entries) >= config.maxTradesPerDay) throw new Error('Momentum daily trade limit reached.');
@@ -7775,8 +7924,10 @@ async function executeMomentumInverseEntry(userId, marketDirection, pinnedCreds 
   const stopPrice = +(entryPrice * (1 - slPct / 100)).toFixed(2);
   const targetPrice = +(entryPrice * (1 + tpPct / 100)).toFixed(2);
   const candidate = { symbol };
-  const trade = recordMomentumEntryIntent(userId, candidate, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
+  const ownershipLease = reserveManagedSymbolEntry(userId, 'momentum', symbol);
+  let trade;
   try {
+    trade = recordMomentumEntryIntent(userId, candidate, entryPrice, shares, stopPrice, clientOrderId, creds.mode, tpPct);
     const order = await momentumBrokerMutation(userId, creds, '/v2/orders', {
       method: 'POST',
       body: JSON.stringify({
@@ -7790,11 +7941,13 @@ async function executeMomentumInverseEntry(userId, marketDirection, pinnedCreds 
     console.log(`[Momentum] MARKET DOWN — inverse mode BUY ${symbol}: ${freshMarket.reason}`);
     return { trade, order, candidate, marketDirection: freshMarket };
   } catch (error) {
-    if (!error.alpacaTransient) {
+    if (trade && !error.alpacaTransient) {
       db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
         .run(`Broker inverse entry was not accepted: ${error.message}`.slice(0, 200), trade.id);
     }
     throw error;
+  } finally {
+    releaseManagedSymbolEntry(ownershipLease);
   }
 }
 
@@ -12445,7 +12598,7 @@ setInterval(async () => {
   try {
     const users = db.prepare(`SELECT user_id FROM momentum_settings WHERE enabled=1
       UNION SELECT DISTINCT user_id FROM bot_trade_log
-      WHERE status='open' AND (strategy IS NULL OR strategy='momentum')`).all();
+      WHERE status='open' AND strategy='momentum'`).all();
     for (const { user_id: userId } of users) {
       await runMomentumCycle(userId);
     }

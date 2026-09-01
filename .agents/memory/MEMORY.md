@@ -21,3 +21,4 @@
 - [Search prediction-market integrity](search-prediction-market-integrity.md) — discover Kalshi through official series metadata; show only relevant measured probabilities and fail closed when unavailable.
 - [Search Smart Money maps](search-smart-money-maps.md) — supporting zones use canonical completed periods and deterministic multi-timeframe confluence; they never become a second verdict.
 - [Money Printer automation](money-printer-automation.md) — Search science drives server-scheduled long/short brackets through an isolated, pinned Alpaca account and fail-closed reconciliation.
+- [Custom-domain TLS routing](custom-domain-tls-routing.md) — keep the apex behind Cloudflare’s active Universal SSL while preserving the verified Replit origin.

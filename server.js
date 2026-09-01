@@ -132,6 +132,7 @@ const {
   reservePmhEntryIntent,
   summarizePmhTerminalExit,
   managePmhRunnerExit,
+  preparePmhManagedCycle,
 } = require('./lib/opening-momentum-pmh');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
@@ -12089,22 +12090,22 @@ setInterval(async () => {
 // connected a dedicated PMH broker account.
 async function runPmhCycle(userId, source = 'server-scheduler') {
   const outcome = { bot: 'pmh', status: 'skipped', reconciled: 0, submitted: false };
-  if (!isBotEnabled(userId, 'pmh')) return { ...outcome, reason: 'Strategy is disabled.' };
   const settings = pmhConfigFor(userId);
-  if (!settings.enabled) return { ...outcome, reason: 'Strategy is disabled.' };
   const creds = getAlpacaCreds(userId, 'pmh');
   if (!creds) return { ...outcome, reason: 'Dedicated broker account is not connected.' };
-  if (PMH_LIVE_AUTOMATION_PAUSED && creds.mode === 'live') {
-    return { ...outcome, status: 'paused_live', reason: 'PMH live automation is paused for safety validation. Paper mode remains available.' };
-  }
-  if (creds.mode === 'live' && !settings.liveArmed) {
-    return { ...outcome, status: 'live_unarmed', reason: 'PMH Live orders are not explicitly armed.' };
-  }
   if (!acquireBotLock(userId)) return { ...outcome, status: 'busy', reason: 'Another broker cycle is in progress.' };
   try {
-    const reconciliation = await reconcilePmhTrades(userId);
-    outcome.reconciled = reconciliation.reconciled.length;
-    if (!isMarketOpen()) return { ...outcome, status: 'reconciled' };
+    const gate = await preparePmhManagedCycle({
+      reconcile: () => reconcilePmhTrades(userId),
+      botEnabled: isBotEnabled(userId, 'pmh'),
+      settingsEnabled: settings.enabled,
+      mode: creds.mode,
+      liveArmed: settings.liveArmed,
+      livePaused: PMH_LIVE_AUTOMATION_PAUSED,
+      marketOpen: isMarketOpen(),
+    });
+    outcome.reconciled = gate.reconciled;
+    if (!gate.allowEntry) return { ...outcome, status: gate.status, reason: gate.reason };
     const config = settings.config;
     const catalogEntry = await getAlpacaTradableEquityCatalog(userId, { scope: 'pmh' });
     const rotation = nextAlpacaCatalogRotation(catalogEntry, PMH_DEFAULT_SYMBOLS, {
@@ -12129,7 +12130,12 @@ setInterval(async () => {
   if (pmhSchedulerRunning) return;
   pmhSchedulerRunning = true;
   try {
-    const users = db.prepare('SELECT user_id FROM pmh_settings WHERE enabled=1').all();
+    const users = db.prepare(`SELECT user_id FROM pmh_settings WHERE enabled=1
+      UNION
+      SELECT DISTINCT user_id FROM bot_trade_log
+      WHERE strategy LIKE 'opening-momentum-pmh%'
+        AND status IN ('pending_entry','open','pending_exit','exit_reserving','stop_cancel_unknown',
+          'protected_after_exit_failure','protection_unresolved')`).all();
     for (const { user_id: userId } of users) {
       await runPmhCycle(userId);
     }

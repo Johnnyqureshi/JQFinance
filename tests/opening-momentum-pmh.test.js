@@ -9,6 +9,7 @@ const {
   reservePmhEntryIntent,
   summarizePmhTerminalExit,
   managePmhRunnerExit,
+  preparePmhManagedCycle,
 } = require('../lib/opening-momentum-pmh');
 let passed = 0, failed = 0;
 const tests = [];
@@ -295,6 +296,40 @@ test('a terminal partial runner exit protects only residual runner shares', () =
   assert.strictEqual(terminal.realizedPnl, 2);
   const independentlyProtectedPartialQty = 5;
   assert(terminal.protectionQty + independentlyProtectedPartialQty <= terminal.availablePositionQty);
+});
+test('live entry pause reconciles existing PMH state before suppressing new entries', async () => {
+  const calls = [];
+  const result = await preparePmhManagedCycle({
+    reconcile: async () => {
+      calls.push('reconcile');
+      return { reconciled: [{ id: 1, status: 'open' }] };
+    },
+    botEnabled: true,
+    settingsEnabled: true,
+    mode: 'live',
+    liveArmed: true,
+    livePaused: true,
+    marketOpen: true,
+  });
+  assert.deepStrictEqual(calls, ['reconcile']);
+  assert.strictEqual(result.allowEntry, false);
+  assert.strictEqual(result.status, 'reconciled_live_paused');
+  assert.strictEqual(result.reconciled, 1);
+});
+test('disabled PMH entry still reconciles unresolved broker state', async () => {
+  let reconciled = false;
+  const result = await preparePmhManagedCycle({
+    reconcile: async () => { reconciled = true; return { reconciled: [] }; },
+    botEnabled: false,
+    settingsEnabled: false,
+    mode: 'paper',
+    liveArmed: false,
+    livePaused: true,
+    marketOpen: true,
+  });
+  assert.strictEqual(reconciled, true);
+  assert.strictEqual(result.allowEntry, false);
+  assert.strictEqual(result.status, 'reconciled_paused');
 });
 
 (async () => {

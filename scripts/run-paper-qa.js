@@ -21,8 +21,10 @@ console.log('====================');
 console.log(`Mode: ${report.mode}`);
 console.log(`Live orders placed: ${report.liveOrdersPlaced ? 'YES' : 'NO'}`);
 console.log(`Scenarios: ${report.total} total · ${report.passed} passed · ${report.failed} failed`);
+console.log(`Strategy/scanner regressions: ${report.regressions.filter(item => item.status === 'PASS').length}/${report.regressions.length} passed`);
 for (const bot of report.readiness) {
   console.log(`${bot.strategy}: ${bot.status} · ${bot.simulatedPassed}/${bot.simulatedScenarios} simulated scenarios passed`);
+  if (bot.failedGates.length) console.log(`  Failed: ${bot.failedGates.join(', ')}`);
   console.log(`  Blocked: ${bot.blocked.join(', ')}`);
 }
 if (report.failed) {
@@ -33,5 +35,7 @@ if (report.failed) {
 }
 console.log('\nCritical remaining issues:');
 report.criticalRemainingIssues.forEach(issue => console.log(`- ${issue}`));
+console.log('\nLive-trading blockers:');
+report.liveTradingBlockers.forEach(issue => console.log(`- ${issue}`));
 
 process.exit(report.failed ? 1 : 0);

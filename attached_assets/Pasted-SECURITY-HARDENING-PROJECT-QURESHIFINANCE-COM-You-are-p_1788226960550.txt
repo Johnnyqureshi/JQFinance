@@ -1,0 +1,1092 @@
+SECURITY HARDENING PROJECT — QURESHIFINANCE.COM
+
+You are performing a SECURITY HARDENING AND SAFETY AUDIT of an existing production financial/trading application.
+
+CRITICAL OBJECTIVE:
+
+Harden the application against security vulnerabilities WITHOUT breaking any existing functionality.
+
+This application handles user accounts, brokerage connections, market data, automated trading, trading settings, and potentially LIVE MONEY.
+
+Treat this as a fintech-grade security hardening project.
+
+DO NOT rewrite the application.
+DO NOT replace working architecture unnecessarily.
+DO NOT change trading strategies.
+DO NOT change trading logic unless required to fix a security vulnerability.
+DO NOT change UI behavior unnecessarily.
+DO NOT disable working features as a shortcut.
+DO NOT remove functionality simply because it is difficult to secure.
+
+FIRST AUDIT.
+THEN FIX.
+THEN TEST.
+THEN REPORT.
+
+==================================================
+PHASE 1 — CREATE A SAFE BASELINE
+==================================================
+
+Before changing anything:
+
+1. Inspect the entire existing codebase.
+2. Identify:
+   - frontend
+   - backend
+   - authentication
+   - database
+   - API routes
+   - broker integrations
+   - Alpaca integration
+   - trading execution
+   - automated bots
+   - schedulers
+   - WebSockets
+   - background workers
+   - secrets/environment variables
+   - logging
+   - external APIs
+   - AI integrations
+   - file handling
+   - admin functionality
+
+3. Identify all security-sensitive endpoints.
+
+4. Identify all data belonging to individual users.
+
+5. Identify all places where user IDs, account IDs, broker IDs, position IDs, order IDs, bot IDs, watchlist IDs, etc. enter the system.
+
+6. Create a SECURITY_BASELINE.md documenting the existing architecture and findings.
+
+IMPORTANT:
+
+Do not modify code during the initial audit unless an immediately dangerous vulnerability requires emergency mitigation.
+
+==================================================
+PHASE 2 — USER DATA ISOLATION
+==================================================
+
+This is the highest priority.
+
+Guarantee strict server-side tenant isolation.
+
+Every request involving user-owned data must verify ownership SERVER-SIDE.
+
+Never trust:
+
+- user_id supplied by frontend
+- account_id supplied by frontend
+- broker_connection_id supplied by frontend
+- order_id supplied by frontend
+- position_id supplied by frontend
+- bot_id supplied by frontend
+- watchlist_id supplied by frontend
+- settings ID supplied by frontend
+
+Example:
+
+Authenticated User A must NEVER be able to access User B's:
+
+- broker credentials
+- brokerage account
+- positions
+- orders
+- trading history
+- bot settings
+- watchlists
+- alerts
+- strategy configuration
+- account settings
+- activity logs
+- performance data
+
+Do not rely on frontend filtering.
+
+Authorization must happen on the backend/database query.
+
+Bad:
+
+SELECT * FROM positions WHERE id = requested_id
+
+Good:
+
+SELECT * FROM positions
+WHERE id = requested_id
+AND user_id = authenticated_user_id
+
+Apply this principle throughout the entire application.
+
+Look specifically for:
+
+IDOR
+BOLA
+Broken Access Control
+Privilege Escalation
+Horizontal Privilege Escalation
+Vertical Privilege Escalation
+
+==================================================
+PHASE 3 — ALPACA CREDENTIAL SECURITY
+==================================================
+
+Treat broker credentials as HIGHLY SENSITIVE.
+
+Never expose Alpaca API secrets to the browser.
+
+Never return them through API responses.
+
+Never store them in:
+
+- localStorage
+- sessionStorage
+- frontend state unnecessarily
+- URLs
+- query parameters
+- cookies
+- client-side configuration
+- analytics
+- error messages
+
+Never send broker secrets to:
+
+- AI models
+- analytics systems
+- third-party APIs
+- frontend logging
+- telemetry
+
+Search the entire repository for:
+
+ALPACA
+API_KEY
+API_SECRET
+SECRET
+PASSWORD
+TOKEN
+AUTHORIZATION
+
+Determine where credentials are stored.
+
+If credentials are stored in the database:
+
+- encrypt them at rest using authenticated encryption
+- keep encryption keys outside the database
+- use environment-managed secrets
+- never log plaintext credentials
+- decrypt only on the server when actually required
+- minimize credential exposure
+- securely delete/revoke credentials when disconnected
+
+IMPORTANT:
+
+Do not expose encryption keys in source code.
+
+Do not commit secrets to Git.
+
+Do not print secrets during debugging.
+
+==================================================
+PHASE 4 — LIVE VS PAPER TRADING
+==================================================
+
+This is CRITICAL.
+
+Never trust the frontend to determine whether an account is:
+
+PAPER
+or
+LIVE.
+
+The backend must determine the actual environment.
+
+A malicious user must not be able to modify a frontend request such as:
+
+{
+  "mode": "paper"
+}
+
+into:
+
+{
+  "mode": "live"
+}
+
+and bypass safeguards.
+
+Every broker request must verify:
+
+1. authenticated user
+2. authorized broker connection
+3. correct owner
+4. correct broker account
+5. correct environment
+6. requested operation
+7. current user permissions
+
+==================================================
+PHASE 5 — PROTECT TRADING ENDPOINTS
+==================================================
+
+Identify every endpoint capable of changing financial state.
+
+Examples:
+
+PLACE ORDER
+CANCEL ORDER
+MODIFY ORDER
+FLATTEN POSITION
+FLATTEN ALL
+START BOT
+STOP BOT
+ENABLE AUTOMATION
+DISABLE AUTOMATION
+CHANGE RISK
+CHANGE POSITION SIZE
+CHANGE TRADING MODE
+CONNECT BROKER
+DISCONNECT BROKER
+
+Every sensitive endpoint must enforce:
+
+- authentication
+- server-side authorization
+- input validation
+- ownership verification
+- rate limiting
+- audit logging
+- safe error handling
+- idempotency where appropriate
+
+Never trust frontend validation.
+
+All security validation must be repeated server-side.
+
+==================================================
+PHASE 6 — PREVENT DUPLICATE ORDERS
+==================================================
+
+Protect order execution against:
+
+- double clicks
+- browser retries
+- network retries
+- API retries
+- webhook retries
+- worker retries
+- scheduler overlap
+- race conditions
+
+Implement idempotency for order-producing operations where appropriate.
+
+A retry must NOT accidentally produce duplicate live orders.
+
+Before placing an order, verify that an equivalent operation has not already been accepted.
+
+Do NOT alter legitimate trading strategy behavior.
+
+This is an execution-safety improvement only.
+
+==================================================
+PHASE 7 — AUTHENTICATION HARDENING
+==================================================
+
+Strengthen authentication without breaking existing users unnecessarily.
+
+Requirements:
+
+- secure password hashing
+- minimum strong password policy
+- long passphrases supported
+- no plaintext passwords
+- no reversible password encryption
+- login rate limiting
+- brute-force protection
+- secure password reset
+- password reset tokens must expire
+- reset tokens must be single-use
+- invalidate appropriate sessions after password change
+
+Do NOT force destructive password resets unless absolutely necessary.
+
+If existing passwords are securely hashed, preserve compatibility.
+
+Upgrade hashing only through a safe migration strategy.
+
+==================================================
+PHASE 8 — MULTI-FACTOR AUTHENTICATION
+==================================================
+
+Determine whether MFA already exists.
+
+If it exists:
+
+Audit its implementation.
+
+If it does not exist:
+
+Design MFA support without breaking normal account access.
+
+Strongly consider requiring step-up authentication before extremely sensitive actions such as:
+
+- enabling LIVE trading
+- connecting a new broker
+- changing broker credentials
+- changing security settings
+- changing critical risk controls
+
+Do not lock users out accidentally.
+
+==================================================
+PHASE 9 — SESSION SECURITY
+==================================================
+
+Audit session management.
+
+If cookie-based authentication is used, ensure cookies are appropriately configured with:
+
+Secure
+HttpOnly
+SameSite
+
+Use appropriate session expiration.
+
+Verify:
+
+- logout invalidates sessions
+- password changes invalidate appropriate sessions
+- security-sensitive changes rotate/invalidate sessions where appropriate
+- expired sessions cannot be reused
+- session tokens are unpredictable
+- authentication tokens are never logged
+
+Do not expose authentication tokens to frontend logs.
+
+==================================================
+PHASE 10 — CSRF PROTECTION
+==================================================
+
+Determine whether authentication uses cookies or another architecture.
+
+If CSRF is relevant, protect all state-changing authenticated operations.
+
+Especially:
+
+- orders
+- bot controls
+- broker connections
+- settings changes
+- account changes
+- security changes
+
+Also implement appropriate Origin/Referer validation where appropriate.
+
+Do not break legitimate API requests.
+
+==================================================
+PHASE 11 — XSS PROTECTION
+==================================================
+
+Treat ALL external and user-generated content as untrusted.
+
+Potential sources include:
+
+- usernames
+- watchlists
+- company data
+- news
+- Reddit
+- external APIs
+- AI output
+- market descriptions
+- search queries
+- ticker symbols
+- error messages
+
+Prevent:
+
+Stored XSS
+Reflected XSS
+DOM XSS
+
+Do not render arbitrary HTML from external sources.
+
+Avoid unsafe HTML rendering unless absolutely required.
+
+If HTML rendering is required, sanitize it with a reputable maintained sanitizer.
+
+==================================================
+PHASE 12 — CONTENT SECURITY POLICY
+==================================================
+
+Implement a strong Content-Security-Policy appropriate for the existing application.
+
+Do NOT blindly use:
+
+unsafe-inline
+unsafe-eval
+
+unless technically unavoidable.
+
+If either is currently required:
+
+- identify why
+- minimize its scope
+- document it
+- create a migration path
+
+Do not break legitimate application functionality.
+
+==================================================
+PHASE 13 — SECURITY HEADERS
+==================================================
+
+Audit and implement appropriate production security headers including:
+
+Strict-Transport-Security
+Content-Security-Policy
+X-Content-Type-Options
+Referrer-Policy
+Permissions-Policy
+Frame protection / clickjacking protection
+
+Use headers compatible with the existing application.
+
+==================================================
+PHASE 14 — API SECURITY
+==================================================
+
+Audit every API endpoint.
+
+For each endpoint determine:
+
+- authentication required?
+- authorization required?
+- ownership check?
+- input validation?
+- output filtering?
+- rate limiting?
+- sensitive data exposure?
+- error leakage?
+- logging?
+- CSRF protection where applicable?
+
+Prevent:
+
+SQL injection
+NoSQL injection
+Command injection
+Path traversal
+SSRF
+XSS
+Prototype pollution
+Mass assignment
+Parameter pollution
+Broken authorization
+
+Use parameterized queries.
+
+Never construct database queries using unsafe string concatenation.
+
+==================================================
+PHASE 15 — MASS ASSIGNMENT
+==================================================
+
+Audit endpoints that accept JSON objects from the frontend.
+
+Never blindly persist entire request bodies.
+
+For example, do NOT automatically accept:
+
+{
+  ...req.body
+}
+
+when updating user/account/trading objects.
+
+Explicitly allow only fields that the user is permitted to modify.
+
+Sensitive fields such as:
+
+role
+user_id
+account_id
+broker_id
+permissions
+is_admin
+is_live
+trading_mode
+security flags
+
+must be server-controlled.
+
+==================================================
+PHASE 16 — RATE LIMITING
+==================================================
+
+Implement appropriate rate limiting for:
+
+login
+signup
+password reset
+API endpoints
+search
+AI endpoints
+broker endpoints
+trading endpoints
+bot controls
+
+Use stricter controls for financial operations.
+
+Do not make normal users unusably slow.
+
+Use sensible per-user and/or per-IP controls.
+
+==================================================
+PHASE 17 — SECRET MANAGEMENT
+==================================================
+
+Search Git history and current files for accidentally committed secrets.
+
+Look for:
+
+API keys
+API secrets
+database passwords
+JWT secrets
+encryption keys
+OAuth secrets
+broker credentials
+
+NEVER print discovered secrets in the final report.
+
+If real credentials are found:
+
+- immediately flag them as compromised
+- recommend rotation
+- remove them from source
+- move them into secure environment secrets
+- ensure they are not exposed in build artifacts
+
+Do not publish the secret values in logs or reports.
+
+==================================================
+PHASE 18 — LOGGING SECURITY
+==================================================
+
+Audit every log statement.
+
+Never log:
+
+passwords
+API secrets
+broker secrets
+session tokens
+JWTs
+authorization headers
+encryption keys
+reset tokens
+
+Use structured security logs.
+
+Record security-relevant events such as:
+
+login
+failed login
+password change
+MFA change
+broker connection
+broker disconnection
+live trading enabled
+live trading disabled
+order submitted
+order cancelled
+bot started
+bot stopped
+security setting changed
+
+Include:
+
+user
+timestamp
+action
+result
+request identifier
+
+but NEVER sensitive credentials.
+
+==================================================
+PHASE 19 — ERROR HANDLING
+==================================================
+
+Production errors must NOT expose:
+
+- stack traces
+- database credentials
+- SQL queries
+- environment variables
+- API secrets
+- filesystem paths unnecessarily
+- internal service details
+
+Return safe user-facing errors.
+
+Log detailed diagnostics securely on the server.
+
+==================================================
+PHASE 20 — DATABASE SECURITY
+==================================================
+
+Audit:
+
+- database permissions
+- connection security
+- user isolation
+- foreign keys
+- ownership relationships
+- unsafe queries
+- migrations
+- backups
+
+Ensure application database credentials are never exposed to the browser.
+
+If practical, enforce ownership constraints at the database/query layer as well as application logic.
+
+Defense in depth.
+
+==================================================
+PHASE 21 — WEB SOCKET SECURITY
+==================================================
+
+If WebSockets are used:
+
+Audit:
+
+- authentication
+- authorization
+- subscription isolation
+- message validation
+- reconnect behavior
+- rate limiting
+
+A user must never be able to subscribe to another user's private account stream by modifying an identifier.
+
+==================================================
+PHASE 22 — BACKGROUND JOBS / AUTOMATION
+==================================================
+
+Audit all:
+
+- schedulers
+- workers
+- cron jobs
+- trading bots
+- background processes
+
+Ensure they cannot accidentally operate on the wrong user's account.
+
+Every job must have an explicit ownership context.
+
+Especially verify that:
+
+User A's bot
+NEVER
+executes against User B's broker account.
+
+Also ensure disabling a bot does not accidentally disable critical reconciliation or safety logic required for already-open positions.
+
+Do not break existing safety mechanisms.
+
+==================================================
+PHASE 23 — BROKER FAILSAFE
+==================================================
+
+Broker API failures must fail safely.
+
+Do not:
+
+- blindly retry indefinitely
+- duplicate orders
+- assume an order failed without checking
+- assume an order succeeded without confirmation
+- change live trading state based solely on a frontend response
+
+When broker state is uncertain:
+
+RECONCILE FIRST.
+
+The system should prefer verified broker state over assumptions.
+
+==================================================
+PHASE 24 — DEPENDENCY SECURITY
+==================================================
+
+Audit all dependencies.
+
+Check for:
+
+- known vulnerabilities
+- abandoned packages
+- suspicious packages
+- unnecessary packages
+
+DO NOT blindly upgrade every dependency.
+
+Upgrade carefully.
+
+Before each upgrade:
+
+- identify breaking-change risk
+- run tests
+- verify application functionality
+
+Never introduce dependency upgrades simply for cosmetic reasons.
+
+==================================================
+PHASE 25 — FILE UPLOAD / FILE HANDLING
+==================================================
+
+If the application accepts files:
+
+Audit for:
+
+- malicious uploads
+- path traversal
+- executable uploads
+- MIME spoofing
+- oversized files
+- unsafe filenames
+- unauthorized file access
+
+Users must only access files they own or are authorized to access.
+
+==================================================
+PHASE 26 — AI / EXTERNAL DATA SECURITY
+==================================================
+
+The application may process external information such as:
+
+news
+Reddit
+market data
+prediction markets
+economic information
+AI-generated content
+
+Treat all external content as UNTRUSTED DATA.
+
+External content must NEVER become a system instruction.
+
+Protect against prompt injection.
+
+Never send:
+
+passwords
+broker credentials
+API secrets
+session tokens
+private user data
+
+to AI systems.
+
+==================================================
+PHASE 27 — SECURITY MONITORING
+==================================================
+
+Implement or improve detection for suspicious behavior:
+
+- repeated failed logins
+- abnormal API activity
+- excessive trading requests
+- repeated authorization failures
+- unexpected account access
+- unusual broker connection activity
+- repeated failed order operations
+
+Do not expose security monitoring information to ordinary users.
+
+==================================================
+PHASE 28 — SECURITY.TXT
+==================================================
+
+Add:
+
+/.well-known/security.txt
+
+with an appropriate vulnerability reporting contact.
+
+Do not expose private infrastructure information.
+
+==================================================
+PHASE 29 — TESTING
+==================================================
+
+Before declaring success, create security tests.
+
+At minimum test:
+
+AUTHORIZATION:
+
+User A cannot access User B's data.
+
+BROKER:
+
+User A cannot access User B's broker credentials.
+
+TRADING:
+
+User A cannot place orders using User B's account.
+
+ORDERS:
+
+Duplicate requests do not create duplicate orders.
+
+BOTS:
+
+User A cannot start/stop User B's bot.
+
+POSITIONS:
+
+User A cannot access or manipulate User B's positions.
+
+WATCHLISTS:
+
+User A cannot access User B's watchlist.
+
+SETTINGS:
+
+User A cannot modify User B's settings.
+
+ADMIN:
+
+Normal users cannot elevate themselves to admin.
+
+LIVE/PAPER:
+
+Frontend manipulation cannot bypass server-side environment controls.
+
+XSS:
+
+User-controlled and external data cannot execute JavaScript.
+
+CSRF:
+
+Unauthorized cross-origin state-changing requests fail.
+
+RATE LIMITING:
+
+Brute-force and abusive request patterns are throttled.
+
+SESSIONS:
+
+Logout and security changes invalidate appropriate sessions.
+
+SECRETS:
+
+Secrets do not appear in browser responses, logs, source, or client bundles.
+
+==================================================
+PHASE 30 — REGRESSION TESTING
+==================================================
+
+This is extremely important.
+
+Security improvements MUST NOT break existing functionality.
+
+After changes test:
+
+- login
+- signup
+- logout
+- password reset
+- dashboard
+- search
+- stock data
+- charts
+- watchlists
+- alerts
+- Alpaca connection
+- paper trading
+- live trading safeguards
+- bot start
+- bot stop
+- position management
+- order management
+- trade history
+- performance
+- market data
+- AI features
+- macro data
+- prediction market data
+- mobile interface
+
+If automated tests already exist, run them.
+
+If tests do not exist for a critical area, create them.
+
+==================================================
+PHASE 31 — SAFE DEPLOYMENT
+==================================================
+
+Do not make destructive database changes.
+
+Before migrations:
+
+- create/verify backup
+- verify rollback strategy
+- test migration against development/staging database
+
+Never experiment with production user data.
+
+Do not reset production databases.
+
+Do not delete user accounts.
+
+Do not invalidate all users unless absolutely necessary.
+
+==================================================
+PHASE 32 — SECURITY REPORT
+==================================================
+
+After completing the audit, create:
+
+SECURITY_AUDIT_REPORT.md
+
+Include:
+
+1. Vulnerabilities discovered
+2. Severity
+3. Affected component
+4. What was changed
+5. Why it was changed
+6. How it was tested
+7. Remaining risks
+8. Recommended future improvements
+
+Use:
+
+CRITICAL
+HIGH
+MEDIUM
+LOW
+INFORMATIONAL
+
+Do NOT include actual passwords, API keys, secrets, tokens, or private user information.
+
+==================================================
+CRITICAL DEVELOPMENT RULES
+==================================================
+
+RULE 1:
+
+SECURITY > CONVENIENCE.
+
+RULE 2:
+
+SERVER-SIDE AUTHORIZATION > FRONTEND CHECKS.
+
+RULE 3:
+
+NEVER TRUST CLIENT-SUPPLIED USER IDs OR ACCOUNT IDs.
+
+RULE 4:
+
+NEVER TRUST CLIENT-SUPPLIED LIVE/PAPER STATUS.
+
+RULE 5:
+
+NEVER EXPOSE BROKER SECRETS.
+
+RULE 6:
+
+NEVER LOG SECRETS.
+
+RULE 7:
+
+NEVER SEND SECRETS TO AI OR THIRD PARTIES.
+
+RULE 8:
+
+NEVER BREAK EXISTING TRADING SAFETY SYSTEMS.
+
+RULE 9:
+
+DO NOT CHANGE STRATEGY LOGIC.
+
+RULE 10:
+
+DO NOT "FIX" A SECURITY PROBLEM BY SIMPLY DISABLING THE FEATURE.
+
+SECURE THE FEATURE.
+
+==================================================
+FINAL ACCEPTANCE CRITERIA
+==================================================
+
+Do not declare the application secure merely because the code compiles.
+
+The final system must demonstrate:
+
+✓ Strong authentication
+✓ Strong session security
+✓ Server-side authorization
+✓ Strict user isolation
+✓ Secure broker credential handling
+✓ Protected live trading
+✓ Protected automated trading
+✓ Duplicate-order protection
+✓ CSRF protection where applicable
+✓ XSS protection
+✓ API validation
+✓ Rate limiting
+✓ Secure logging
+✓ Secure error handling
+✓ Security headers
+✓ Dependency review
+✓ Secret scanning
+✓ Background-job isolation
+✓ WebSocket authorization
+✓ Regression testing
+✓ Rollback strategy
+
+MOST IMPORTANT:
+
+If you discover an existing vulnerability that could expose another user's data, broker account, credentials, orders, or money:
+
+1. Do NOT exploit it further.
+2. Document the vulnerability safely.
+3. Fix it.
+4. Create a regression test proving the vulnerability is closed.
+5. Verify User A cannot access User B's resource afterward.
+
+DO NOT perform destructive penetration testing against production.
+
+Use a development/test environment for adversarial tests.
+
+Before finishing, provide a concise summary:
+
+SECURITY STATUS:
+CRITICAL:
+HIGH:
+MEDIUM:
+LOW:
+
+FUNCTIONS PRESERVED:
+YES/NO
+
+REGRESSION TESTS:
+PASSED/FAILED
+
+USER DATA ISOLATION:
+PASSED/FAILED
+
+BROKER CREDENTIAL SECURITY:
+PASSED/FAILED
+
+LIVE TRADING SECURITY:
+PASSED/FAILED
+
+REMAINING RISKS:
+
+Do not claim "100% secure" or "impossible to hack."
+
+The objective is defense-in-depth, least privilege, strict tenant isolation, secure credential handling, and safe financial execution while preserving all existing functionality.

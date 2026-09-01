@@ -103,45 +103,6 @@ const gamePlan = (() => {
     </section>`;
   }
 
-  function marketContextHtml(context) {
-    const spy = context?.spy || {};
-    const sector = context?.sector || {};
-    const relative = context?.relativeStrength || {};
-    const alignment = context?.marketAlignment || {};
-    const sensitivity = context?.sensitivity || {};
-    const unavailable = spy.available !== true;
-    const value = value => value == null ? 'Unavailable' : value;
-    const stateClass = value => setupClass(value);
-    const spyChange = spy.changePct == null ? '' : `${spy.changePct >= 0 ? '+' : ''}${fmt(spy.changePct, 2)}%`;
-    const relativeDetail = relative.vs5 == null
-      ? (relative.evidence || 'Multi-session comparison unavailable')
-      : `5-session edge ${relative.vs5 >= 0 ? '+' : ''}${fmt(relative.vs5, 2)} pts${relative.vs20 == null ? '' : ` · 20-session ${relative.vs20 >= 0 ? '+' : ''}${fmt(relative.vs20, 2)} pts`}`;
-    const why = Array.isArray(context?.why) ? context.why : [];
-    return `<section class="gp-market-context ${unavailable ? 'unavailable' : ''}" aria-label="Market context">
-      <div class="gp-market-context-head">
-        <div>
-          <span class="gp-sec-title">Market context</span>
-          <span class="gp-sec-note">Market regime → sector / asset regime → individual setup</span>
-        </div>
-        <strong class="${stateClass(context?.finalSignal)}">${esc(context?.finalSignal || 'BUY')}</strong>
-      </div>
-      ${unavailable
-        ? '<div class="gp-market-unavailable">Market context unavailable — Search keeps the stock&#39;s BUY/SELL direction and reduces confidence instead of hiding the direction.</div>'
-        : `<div class="gp-market-context-grid">
-            <div><span>SPY</span><b>$${fmt(spy.price)}</b><small class="${stateClass(spy.regime)}">${esc(spy.regime)}${spyChange ? ` · ${spyChange}` : ''}</small></div>
-            <div><span>Market alignment</span><b class="${stateClass(alignment.label)}">${esc(value(alignment.label))}</b><small>${esc(alignment.state || 'UNAVAILABLE')} · score ${alignment.score ?? '--'}</small></div>
-            <div><span>Sector alignment</span><b class="${stateClass(sector.label)}">${esc(value(sector.label))}</b><small>${esc(sector.etf || 'Sector ETF unavailable')}${sector.changePct == null ? '' : ` · ${sector.changePct >= 0 ? '+' : ''}${fmt(sector.changePct, 2)}%`}</small></div>
-            <div><span>Relative strength vs SPY</span><b class="${stateClass(relative.label)}">${esc(value(relative.label))}</b><small>${esc(relativeDetail)}</small></div>
-          </div>`}
-      ${context?.marketWarning ? `<p class="gp-market-warning">⚠ ${esc(context.marketWarning)}</p>` : ''}
-      <div class="gp-market-why">
-        <span>Why this signal?</span>
-        <div>${why.map(item => `<i class="${item.tone === 'warning' ? 'warning' : 'positive'}">${item.tone === 'warning' ? '⚠' : '✓'} ${esc(item.text)}</i>`).join('')}</div>
-      </div>
-      ${sensitivity?.high ? `<small class="gp-market-sensitivity">Higher market sensitivity: ${esc(sensitivity.reason || 'bearish market conditions carry additional weight')}</small>` : ''}
-    </section>`;
-  }
-
   function fibonacciHtml(fibonacci) {
     if (!fibonacci?.available) {
       return `<section class="gp-fibonacci unavailable">
@@ -642,7 +603,6 @@ const gamePlan = (() => {
       </div>
 
        ${tradeReferenceHtml(tradeLevels)}
-       ${marketContextHtml(searchSignal?.marketContext || d.marketContext)}
        ${searchSignalHtml(searchSignal)}
 
        <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>

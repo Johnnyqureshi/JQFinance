@@ -13,6 +13,9 @@ const state = {
   currentUser: null,
   loadId:      0,
 };
+// The AI assistant is loaded as a separate browser module and reads the live
+// session context through this explicit bridge.
+window.state = state;
 
 // ── utils ──────────────────────────────────────────────────────────────────────
 const fmt  = (n, d=2) => n == null || isNaN(n) ? '--' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});

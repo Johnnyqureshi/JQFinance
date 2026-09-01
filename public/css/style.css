@@ -894,6 +894,51 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 }
 .analysts-main { display:flex; flex-direction:column; gap:0; }
 .analysts-side  { display:flex; flex-direction:column; gap:16px; }
+.analyst-top-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+
+/* Verified analyst-tab reference levels */
+.analyst-trade-levels {
+  position:relative; overflow:hidden; margin:0 0 16px; padding:17px 18px 14px;
+  border:1px solid rgba(74,144,226,.3); border-radius:var(--radius);
+  background:linear-gradient(120deg,rgba(14,38,62,.98),rgba(10,20,36,.98));
+  box-shadow:0 12px 28px rgba(0,0,0,.18);
+}
+.analyst-trade-levels:before {
+  content:""; position:absolute; inset:0 0 auto; height:2px;
+  background:linear-gradient(90deg,#00f5ad,#38bdf8,#ff3f5f);
+}
+.analyst-trade-levels-head {
+  display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;
+}
+.analyst-trade-levels-head>div { display:flex; flex-direction:column; gap:3px; }
+.analyst-trade-kicker { color:#8ba4c8; font-size:9px; font-weight:800; letter-spacing:.15em; }
+.analyst-trade-levels-head strong { color:var(--t1); font-size:15px; letter-spacing:-.01em; }
+.analyst-trade-status {
+  padding:4px 8px; border-radius:999px; font-size:9px; font-weight:800; letter-spacing:.08em;
+}
+.analyst-trade-status.ready { color:#00f5ad; background:rgba(0,245,173,.1); border:1px solid rgba(0,245,173,.32); }
+.analyst-trade-status.waiting { color:var(--gold); background:rgba(245,200,66,.1); border:1px solid rgba(245,200,66,.3); }
+.analyst-trade-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.analyst-trade-level {
+  position:relative; display:flex; flex-direction:column; gap:5px; min-width:0;
+  padding:13px 14px 12px 17px; border:1px solid rgba(255,255,255,.1); border-radius:9px;
+}
+.analyst-trade-level:before {
+  content:""; position:absolute; inset:0 auto 0 0; width:4px; border-radius:9px 0 0 9px;
+}
+.analyst-trade-level.buy { background:linear-gradient(115deg,rgba(0,245,173,.16),rgba(0,245,173,.035)); border-color:rgba(0,245,173,.34); }
+.analyst-trade-level.sell { background:linear-gradient(115deg,rgba(255,63,95,.16),rgba(255,63,95,.035)); border-color:rgba(255,63,95,.34); }
+.analyst-trade-level.buy:before { background:#00f5ad; box-shadow:0 0 14px rgba(0,245,173,.8); }
+.analyst-trade-level.sell:before { background:#ff3f5f; box-shadow:0 0 14px rgba(255,63,95,.8); }
+.analyst-trade-label { display:flex; align-items:center; gap:6px; color:var(--t2); font-size:10px; font-weight:850; letter-spacing:.1em; }
+.analyst-trade-label i { width:7px; height:7px; flex-shrink:0; border-radius:50%; }
+.analyst-trade-level.buy .analyst-trade-label i { background:#00f5ad; box-shadow:0 0 8px rgba(0,245,173,.9); }
+.analyst-trade-level.sell .analyst-trade-label i { background:#ff3f5f; box-shadow:0 0 8px rgba(255,63,95,.9); }
+.analyst-trade-level>strong { color:var(--t1); font:800 23px 'DM Mono',monospace; letter-spacing:-.04em; white-space:nowrap; }
+.analyst-trade-level.buy>strong { color:#42f5c2; }
+.analyst-trade-level.sell>strong { color:#ff6d84; }
+.analyst-trade-level small { color:var(--t2); font-size:10px; line-height:1.35; }
+.analyst-trade-note { margin:10px 1px 0; color:var(--t3); font-size:10px; line-height:1.4; }
 
 /* valuation card */
 .val-card {
@@ -969,6 +1014,17 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 @media (max-width:1100px) {
   .analysts-layout { grid-template-columns:1fr; }
   .val-card { position:static; }
+}
+@media (max-width:640px) {
+  .analyst-top-grid { grid-template-columns:1fr; }
+  .analyst-trade-levels { padding:15px 14px 13px; }
+  .analyst-trade-grid { grid-template-columns:1fr 1fr; gap:8px; }
+  .analyst-trade-level { padding:12px 10px 11px 14px; }
+  .analyst-trade-level>strong { font-size:20px; }
+  .analyst-trade-level small { font-size:9px; }
+}
+@media (max-width:390px) {
+  .analyst-trade-grid { grid-template-columns:1fr; }
 }
 
 /* ── NEWS GRID ─────────────────────────────────────────────────────────────── */

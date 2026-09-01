@@ -352,40 +352,43 @@ const gamePlan = (() => {
     </section>`;
   }
 
-  function tradeReferenceHtml(displayLevels, levels, currentPrice) {
-    const price = Number(currentPrice);
-    const support = [...(displayLevels?.support || []), ...(levels?.support || [])];
-    const resistance = [...(displayLevels?.resistance || []), ...(levels?.resistance || [])];
-    const nearest = (candidates, direction) => candidates
-      .map(level => Number(level?.price))
-      .filter(level => Number.isFinite(level) && level > 0 && Number.isFinite(price)
-        && (direction === 'below' ? level < price : level > price))
-      .sort((a, b) => direction === 'below' ? b - a : a - b)[0] ?? null;
-    const buy = nearest(support, 'below');
-    const sell = nearest(resistance, 'above');
-    const ready = buy != null && sell != null;
+  function tradeReferenceHtml(data) {
+    const buy = data?.buy || null;
+    const sell = data?.sell || null;
+    const status = data?.status || 'WAITING';
+    const statusClass = status === 'VERIFIED' ? 'ready' : status === 'PROVISIONAL' ? 'provisional' : 'waiting';
+    const evidence = level => Array.isArray(level?.evidence) && level.evidence.length
+      ? level.evidence.join(' + ')
+      : level?.source || 'Verified level unavailable';
+    const considered = Array.isArray(data?.considered) ? data.considered : [];
     return `
       <section class="trade-reference" aria-label="Verified buy and sell levels">
         <div class="trade-reference-head">
           <div>
-            <span class="trade-reference-kicker">PRICE LEVELS</span>
-            <strong>Buy &amp; sell reference</strong>
+            <span class="trade-reference-kicker">SEARCH TRADE PLAN</span>
+            <strong>Calculated buy &amp; sell levels</strong>
           </div>
-          <span class="trade-reference-status ${ready ? 'ready' : 'waiting'}">${ready ? 'VERIFIED' : 'WAITING'}</span>
+          <span class="trade-reference-status ${statusClass}">${esc(status)}</span>
         </div>
         <div class="trade-reference-grid">
           <div class="trade-reference-level buy">
             <span class="trade-reference-label"><i></i>BUY AT</span>
-            <strong>${buy == null ? '—' : '$' + fmt(buy)}</strong>
-            <small>${buy == null ? 'Verified support unavailable' : 'Nearest completed-session support'}</small>
+            <strong>${buy?.price == null ? '—' : '$' + fmt(buy.price)}</strong>
+            <small>${buy?.price == null ? 'Verified buy level unavailable' : esc(evidence(buy))}</small>
+            ${buy?.alignment ? `<em>${esc(buy.alignment)} LEVEL ALIGNMENT</em>` : ''}
           </div>
           <div class="trade-reference-level sell">
             <span class="trade-reference-label"><i></i>SELL AT</span>
-            <strong>${sell == null ? '—' : '$' + fmt(sell)}</strong>
-            <small>${sell == null ? 'Verified resistance unavailable' : 'Nearest completed-session resistance'}</small>
+            <strong>${sell?.price == null ? '—' : '$' + fmt(sell.price)}</strong>
+            <small>${sell?.price == null ? 'Verified sell level unavailable' : esc(evidence(sell))}</small>
+            ${sell?.alignment ? `<em>${esc(sell.alignment)} LEVEL ALIGNMENT</em>` : ''}
           </div>
         </div>
-        <p class="trade-reference-note">Deterministic levels from completed daily OHLC data. Supporting research context, not a guaranteed execution price.</p>
+        <div class="trade-reference-science">
+          <span>CALCULATION INPUTS</span>
+          <div>${considered.map(item => `<i>${esc(item)}</i>`).join('') || '<i>Waiting for complete verified inputs</i>'}</div>
+        </div>
+        <p class="trade-reference-note">${esc(data?.methodology || 'No price is substituted when the required market evidence is unavailable.')} Search signal: ${esc(data?.signalStage || 'UNAVAILABLE')}.</p>
       </section>`;
   }
 
@@ -470,7 +473,7 @@ const gamePlan = (() => {
 
     const {
       snapshot: s, indicators: ind, confidence, dataGaps, searchSignal,
-      levels, displayLevels, gapAnalysis, analogs, probabilities,
+      levels, displayLevels, gapAnalysis, analogs, probabilities, tradeLevels,
     } = d;
     const generatedAt = d.generatedAt;
     const snapshotPrice = Number(s?.price);
@@ -560,8 +563,8 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>Day range</span><b>${dayRangePct == null ? '--' : fmt(dayRangePct, 0) + '%'}</b><small>${s.low != null && s.high != null ? '$' + fmt(s.low) + '–$' + fmt(s.high) : 'Unavailable'}</small></div>
       </div>
 
+      ${tradeReferenceHtml(tradeLevels)}
       ${searchSignalHtml(searchSignal)}
-      ${tradeReferenceHtml(displayLevels, levels, snapshotPrice)}
 
       <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
 

@@ -917,6 +917,7 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
   padding:4px 8px; border-radius:999px; font-size:9px; font-weight:800; letter-spacing:.08em;
 }
 .trade-reference-status.ready { color:#00f5ad; background:rgba(0,245,173,.1); border:1px solid rgba(0,245,173,.32); }
+.trade-reference-status.provisional { color:var(--gold); background:rgba(245,200,66,.1); border:1px solid rgba(245,200,66,.3); }
 .trade-reference-status.waiting { color:var(--gold); background:rgba(245,200,66,.1); border:1px solid rgba(245,200,66,.3); }
 .trade-reference-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
 .trade-reference-level {
@@ -938,6 +939,14 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 .trade-reference-level.buy>strong { color:#42f5c2; }
 .trade-reference-level.sell>strong { color:#ff6d84; }
 .trade-reference-level small { color:var(--t2); font-size:10px; line-height:1.35; }
+.trade-reference-level em { align-self:flex-start; font-style:normal; color:var(--t3); font-size:8px; font-weight:850; letter-spacing:.08em; }
+.trade-reference-science { margin-top:11px; padding-top:10px; border-top:1px solid rgba(255,255,255,.08); }
+.trade-reference-science>span { color:#8ba4c8; font-size:8px; font-weight:850; letter-spacing:.12em; }
+.trade-reference-science>div { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.trade-reference-science i {
+  font-style:normal; padding:4px 7px; border:1px solid rgba(56,189,248,.16);
+  border-radius:999px; background:rgba(56,189,248,.07); color:#a8c5df; font-size:8px; line-height:1.2;
+}
 .trade-reference-note { margin:10px 1px 0; color:var(--t3); font-size:10px; line-height:1.4; }
 
 /* valuation card */

@@ -34,6 +34,7 @@ const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
+const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
 const {
   TOPICS: SEARCH_INTELLIGENCE_TOPICS,
   buildMacroPressure,
@@ -3326,6 +3327,14 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       patternAnalysis,
       fibonacci,
     });
+    const tradeLevels = buildSearchTradeLevels({
+      currentPrice: price,
+      levels,
+      confluence,
+      fibonacci,
+      smartMoney,
+      searchSignal,
+    });
 
     // Do not manufacture probability percentages when no directly comparable
     // historical sample exists. Exact analog statistics are rendered separately.
@@ -3426,7 +3435,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       analogs: analogs ? { threshold, ...analogs } : null,
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
-      probabilities, confluence, searchSignal,
+      probabilities, confluence, searchSignal, tradeLevels,
       confidence: { overall, parts },
       ai,
     };

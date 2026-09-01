@@ -115,6 +115,7 @@ test('search levels use 14 completed sessions and expose narrow ATR zones', () =
   assert.equal(result.displayLevels.anchorDate, '2026-08-20');
   assert.ok(result.displayLevels.bias.zoneLow < result.displayLevels.bias.price);
   assert.ok(result.displayLevels.bias.zoneHigh > result.displayLevels.bias.price);
+  assert.equal(result.levels.bias.price, result.displayLevels.bias.price);
   assert.ok(result.levels.buffer > 0);
   assert.ok(result.dailyPivots);
 });

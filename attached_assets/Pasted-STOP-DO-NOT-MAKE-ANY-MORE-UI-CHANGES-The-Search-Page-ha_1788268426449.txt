@@ -1,0 +1,406 @@
+STOP. DO NOT MAKE ANY MORE UI CHANGES.
+
+The Search Page has been damaged by the previous implementation.
+
+I am providing a screenshot of the CORRECT/EXPECTED Search Page behavior.
+
+The most important broken feature is SUPPORT & RESISTANCE.
+
+The previous working version displayed actual calculated levels such as:
+
+KEY BIAS LEVEL
+$130.69
+
+RESISTANCE
+$127.99
+
+NEXT RESISTANCE
+$133.38
+
+SUPPORT
+$125.74
+
+NEXT SUPPORT
+$123.05
+
+The current version incorrectly displays:
+
+SUPPORT
+UNAVAILABLE
+
+NEXT SUPPORT
+UNAVAILABLE
+
+THIS MUST BE FIXED.
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+RESTORE THE ORIGINAL SUPPORT & RESISTANCE CALCULATION.
+
+Do NOT redesign the Search Page.
+
+Do NOT modify the visual layout.
+
+Do NOT add new cards.
+
+Do NOT change the signal terminology.
+
+Do NOT change BUY/SELL.
+
+Do NOT change the Search Trade Plan.
+
+Do NOT remove any existing functionality.
+
+The only objective of this task is to restore the actual support/resistance levels that were working previously.
+
+==================================================
+1. FIND THE ORIGINAL SUPPORT/RESISTANCE LOGIC
+==================================================
+
+Inspect the current codebase and identify:
+
+- the function that calculates support
+- the function that calculates resistance
+- the function that calculates the key bias level
+- the function that calculates next support
+- the function that calculates next resistance
+- the data source used for those calculations
+
+Determine what changed during the previous implementation that caused these values to become UNAVAILABLE.
+
+DO NOT create a brand-new support/resistance algorithm if the original algorithm still exists.
+
+Restore/reconnect the ORIGINAL calculation.
+
+==================================================
+2. SUPPORT MUST NEVER BECOME UNAVAILABLE JUST BECAUSE SPY DATA IS MISSING
+==================================================
+
+This is critical.
+
+Support/resistance is an INDIVIDUAL SECURITY calculation.
+
+It must NOT depend on the new SPY market-context calculation.
+
+For example:
+
+MSTR support/resistance
+
+must be calculated from MSTR's own historical price/technical data.
+
+SPY being unavailable must NOT cause:
+
+MSTR Support = UNAVAILABLE
+
+MSTR Next Support = UNAVAILABLE
+
+The two systems must be independent.
+
+==================================================
+3. RESTORE THE EXPECTED LEVELS
+==================================================
+
+For the reference MSTR state, the Search Page should be capable of producing the same type of output as the working screenshot:
+
+Key Bias Level: $130.69
+
+Resistance: $127.99
+
+Next Resistance: $133.38
+
+Support: $125.74
+
+Next Support: $123.05
+
+Do NOT hardcode these prices.
+
+They are provided as a reference to demonstrate what the ORIGINAL calculation was producing.
+
+The system must dynamically calculate current levels from the underlying market data.
+
+==================================================
+4. DO NOT USE "UNAVAILABLE" AS A LAZY FALLBACK
+==================================================
+
+The application currently appears to be falling back to UNAVAILABLE too aggressively.
+
+Audit all conditions that produce:
+
+"UNAVAILABLE"
+
+Determine whether:
+
+- the data request is failing
+- the wrong timeframe is being requested
+- completed-session data is missing
+- a field was renamed
+- a calculation function was disconnected
+- a previous refactor changed the expected data structure
+- SPY/market-regime logic accidentally became a dependency
+- a null/undefined condition was introduced
+- the wrong price series is being passed to the calculation
+
+Fix the actual cause.
+
+Do NOT simply hide "UNAVAILABLE" with fake values.
+
+==================================================
+5. COMPLETED-SESSION DATA
+==================================================
+
+The existing Search Page specifically uses completed-session historical data for support/resistance.
+
+Preserve that behavior.
+
+Where possible, calculate support/resistance from completed-session historical OHLC data rather than incomplete current-session data.
+
+If the market is currently closed, use the latest completed session.
+
+If premarket data exists, do NOT allow that to destroy the completed-session support/resistance calculation.
+
+==================================================
+6. PRESERVE THE EXISTING CALCULATION METHODOLOGY
+==================================================
+
+Do not replace the original support/resistance methodology with:
+
+- arbitrary percentages
+- generic pivot points
+- hardcoded distances
+- random price levels
+- AI-generated levels
+- fabricated levels
+
+Use the application's existing methodology.
+
+If the original code is present, restore it.
+
+If a recent refactor renamed or moved the function, reconnect the existing logic.
+
+==================================================
+7. SUPPORT/RESISTANCE HIERARCHY
+==================================================
+
+The output should continue to identify:
+
+1. Key Bias Level
+2. Nearest Resistance
+3. Next Resistance Above
+4. Nearest Support
+5. Next Support Below
+
+Levels should be ordered logically around the current price.
+
+Do not return the same level for multiple categories.
+
+Do not return a resistance below the current price.
+
+Do not return a support above the current price.
+
+==================================================
+8. SEARCH TRADE PLAN MUST CONTINUE USING THESE LEVELS
+==================================================
+
+The Search Trade Plan depends on real price levels.
+
+Restore the connection between:
+
+Support/Resistance
+↓
+Calculated Buy At
+↓
+Calculated Sell At
+
+The Search Trade Plan should continue displaying:
+
+BUY AT $X
+
+SELL AT $X
+
+Do not replace these with generic percentages.
+
+==================================================
+9. GAP ANALYSIS MUST REMAIN INTACT
+==================================================
+
+Do not modify the Open Daily Price Gaps system.
+
+The existing gap information must continue appearing.
+
+Support/resistance restoration must not break:
+
+- gap above
+- current gap
+- gap below
+- historical fill rates
+
+==================================================
+10. SPY LOGIC MUST BE ISOLATED
+==================================================
+
+The SPY market-context enhancement is a separate concern.
+
+Architecture should be:
+
+                    SEARCHED STOCK
+                         |
+          +--------------+--------------+
+          |                             |
+          v                             v
+ SUPPORT/RESISTANCE                 SIGNAL ENGINE
+     OWN DATA                         |
+          |                           +---- SPY CONTEXT
+          |                           |
+          v                           v
+ TRADE PLAN                       BUY / SELL
+                                 CONFIDENCE %
+
+SPY must NOT sit in the dependency chain for support/resistance.
+
+==================================================
+11. UI MUST MATCH THE REFERENCE
+==================================================
+
+Restore the Search Page visually to the reference version.
+
+The Support & Resistance card must remain in the same position and style.
+
+It should show actual numbers:
+
+$XXX.XX
+
+not:
+
+UNAVAILABLE
+
+when sufficient historical data exists.
+
+Keep:
+
+SUPPORT & RESISTANCE
+
+nearest and next decision points
+
+Key bias level · break/hold above = bullish · below = bearish
+
+Resistance
+
+Next resistance if price breaks up
+
+Support
+
+Next support if price breaks down
+
+==================================================
+12. DO NOT CHANGE THE SIGNAL UI
+==================================================
+
+Keep the original:
+
+SEARCH SIGNAL
+
+BUY / SELL
+
+BULLISH / BEARISH
+
+CONFIDENCE
+
+Do NOT introduce:
+
+SPECULATIVE BUY
+SPECULATIVE SELL
+WAIT
+PROVISIONAL
+HIGH RISK
+MARKET WARNING
+
+Do not redesign this card.
+
+==================================================
+13. TEST WITH MULTIPLE STOCKS
+==================================================
+
+After fixing the issue, test at least:
+
+MSTR
+SPY
+NVDA
+AMD
+SNDK
+
+For every ticker verify that:
+
+- Key bias level appears
+- Resistance appears
+- Next resistance appears
+- Support appears
+- Next support appears
+
+when sufficient completed-session data exists.
+
+Do NOT accept a result where these values are unnecessarily UNAVAILABLE.
+
+==================================================
+14. TEST MARKET CLOSED / PREMARKET
+==================================================
+
+The screenshot shows:
+
+Market Closed
+
+and PRE data.
+
+Verify that market-closed/premarket conditions do not break completed-session support/resistance.
+
+The system should use the latest valid completed-session history for these calculations.
+
+==================================================
+15. REGRESSION TEST
+==================================================
+
+After making the fix, verify:
+
+✓ Search still works
+✓ Stock price displays
+✓ Premarket displays
+✓ Search Signal displays
+✓ BUY/SELL displays
+✓ Confidence displays
+✓ Support/Resistance displays real levels
+✓ Key bias displays
+✓ Next resistance displays
+✓ Next support displays
+✓ Open Daily Price Gaps displays
+✓ Search Trade Plan displays
+✓ Buy At displays
+✓ Sell At displays
+✓ Fibonacci inputs remain
+✓ Smart Money inputs remain
+✓ Market regime remains
+✓ No unrelated pages changed
+
+==================================================
+FINAL INSTRUCTION
+==================================================
+
+DO NOT TRY TO IMPROVE THE DESIGN.
+
+DO NOT ADD FEATURES.
+
+DO NOT REWRITE THE SIGNAL ENGINE.
+
+DO NOT CHANGE THE UI.
+
+FIX THE BROKEN SUPPORT/RESISTANCE DATA PIPELINE.
+
+The reference screenshot is the visual and functional baseline.
+
+The goal is simply:
+
+MAKE THE SEARCH PAGE SHOW THE ACTUAL SUPPORT AND RESISTANCE LEVELS AGAIN.
+
+Once that is confirmed working, STOP.
+
+Do not make additional changes.

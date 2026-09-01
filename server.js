@@ -3362,7 +3362,10 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     const levels = searchLevelAnalysis.levels || {
       support: [], resistance: [], breakdown: null, currentPrice: +price.toFixed(2),
     };
-    const displayLevels = searchLevelAnalysis.displayLevels;
+    // Keep the existing completed-session calculation authoritative. If the
+    // presentation-shaped object is absent, pass through the same calculated
+    // levels object rather than replacing valid levels with an empty fallback.
+    const displayLevels = searchLevelAnalysis.displayLevels || searchLevelAnalysis.levels;
     const dailyPivots = searchLevelAnalysis.dailyPivots;
     const gapAnalysis = buildSearchGapAnalysis({
       dailyBars: searchLevelAnalysis.completedBars,

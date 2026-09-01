@@ -68,6 +68,30 @@ test('builds normalized, weighted historical outcomes only from prior windows', 
   if (result.paths.bearish) assert.equal(result.paths.bearish.average[0], 100);
 });
 
+test('returns read-only historical match metrics without exposing chart internals', () => {
+  const result = buildHistoricalForecast({ ticker: 'TEST', bars: buildHistory(), lookback: 90, horizon: 30 });
+  assert.ok(result.displayable);
+  assert.equal(result.matches.length, result.matchCount);
+  assert.ok(result.matches.every(match =>
+    typeof match.date === 'string'
+    && Number.isFinite(match.similarity)
+    && ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(match.outcome)
+    && Number.isFinite(match.forwardReturn)
+    && Number.isFinite(match.maxRise)
+    && Number.isFinite(match.maxDrawdown)
+    && !Object.hasOwn(match, 'forwardPath')
+    && !Object.hasOwn(match, 'endIndex')));
+});
+
+test('rejects out-of-order history through the clean-history sample gate', () => {
+  const bars = buildHistory();
+  [bars[0], bars[1]] = [bars[1], bars[0]];
+  const result = buildHistoricalForecast({ ticker: 'TEST', bars, lookback: 90, horizon: 30 });
+  assert.equal(result.dataQuality.clean, false);
+  assert.equal(result.status, 'INSUFFICIENT_HISTORICAL_DATA');
+  assert.equal(result.matches.length, 0);
+});
+
 test('purges outcome windows overlapping the current reference pattern', () => {
   const bars = buildHistory();
   const lookback = 90;

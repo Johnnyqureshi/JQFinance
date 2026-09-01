@@ -779,6 +779,46 @@ function probabilitySegment(label, value, cls) {
   </div>`;
 }
 
+function historicalMatchOutcome(outcome) {
+  const value = String(outcome || '').toUpperCase();
+  if (value === 'BULLISH') return { label: 'Bullish', cls: 'bull' };
+  if (value === 'BEARISH') return { label: 'Bearish', cls: 'bear' };
+  return { label: 'Neutral', cls: 'neutral' };
+}
+
+function historicalMatchSimilarity(value) {
+  const score = Number(value);
+  return Number.isFinite(score) ? `${(Math.max(0, Math.min(1, score)) * 100).toFixed(0)}%` : '—';
+}
+
+function renderHistoricalMatches(data) {
+  if (!data?.displayable || !Array.isArray(data.matches) || !data.matches.length) return '';
+  const matches = [...data.matches].sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
+  const rows = matches.map(match => {
+    const outcome = historicalMatchOutcome(match.outcome);
+    const date = escapeHtml(match.date || '—');
+    return `<tr>
+      <td><time datetime="${date}">${date}</time></td>
+      <td class="hf-match-similarity">${historicalMatchSimilarity(match.similarity)}</td>
+      <td><span class="hf-match-result ${outcome.cls}">${pct(match.forwardReturn)}</span><small>${outcome.label}</small></td>
+      <td class="up">${pct(match.maxRise)}</td>
+      <td class="down">${pct(match.maxDrawdown)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<details class="hf-matches">
+    <summary><span>Review historical matches</span><strong>${matches.length}</strong></summary>
+    <div class="hf-matches-note">Past analogs only — these are realized historical outcomes, not live or guaranteed results.</div>
+    <div class="hf-match-table-wrap">
+      <table class="hf-match-table">
+        <caption class="hf-sr-only">Historical pattern matches and their realized outcomes</caption>
+        <thead><tr><th scope="col">Historical date</th><th scope="col">Similarity</th><th scope="col">Forward result</th><th scope="col">Max favorable</th><th scope="col">Max adverse</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </details>`;
+}
+
 function drawForecastPath(canvas, data) {
   if (!canvas || !data?.paths?.current?.length) return;
   const current = data.paths.current;
@@ -904,6 +944,7 @@ function renderForecastPanel(data, symbol) {
       <div><span>Historical range</span><strong class="up">${pct(closest.maxRise)}</strong><small class="down">Worst path: ${pct(closest.maxDrawdown)}</small></div>
     </div>
     <p class="hf-explain">${escapeHtml(data.explanation || '')}</p>
+    ${renderHistoricalMatches(data)}
     <details class="hf-method"><summary>How calculated?</summary><p>Each comparison uses the selected normalized price path plus return correlation, volatility, momentum, and drawdown. A match’s influence is its similarity cubed. Bullish and bearish require a move beyond ±${Number(data.thresholdPct || 2).toFixed(1)}% over ${horizon} sessions. Future candles are used only to measure historical outcomes, never to select a match.</p><p>Historical outcomes among comparable patterns are not guarantees of future performance. This panel is read-only and does not change trading signals or place orders.</p></details>
   </div>`;
   const canvas = $('forecastPathCanvas');

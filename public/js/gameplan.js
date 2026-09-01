@@ -123,10 +123,10 @@ const gamePlan = (() => {
           <span class="gp-sec-title">Market context</span>
           <span class="gp-sec-note">Market regime → sector / asset regime → individual setup</span>
         </div>
-        <strong class="${stateClass(context?.finalSignal)}">${esc(context?.finalSignal || 'WAIT')}</strong>
+        <strong class="${stateClass(context?.finalSignal)}">${esc(context?.finalSignal || 'BUY')}</strong>
       </div>
       ${unavailable
-        ? '<div class="gp-market-unavailable">Market context unavailable — the final Search signal will not assume a favorable market environment.</div>'
+        ? '<div class="gp-market-unavailable">Market context unavailable — Search keeps the stock&#39;s BUY/SELL direction and reduces confidence instead of hiding the direction.</div>'
         : `<div class="gp-market-context-grid">
             <div><span>SPY</span><b>$${fmt(spy.price)}</b><small class="${stateClass(spy.regime)}">${esc(spy.regime)}${spyChange ? ` · ${spyChange}` : ''}</small></div>
             <div><span>Market alignment</span><b class="${stateClass(alignment.label)}">${esc(value(alignment.label))}</b><small>${esc(alignment.state || 'UNAVAILABLE')} · score ${alignment.score ?? '--'}</small></div>

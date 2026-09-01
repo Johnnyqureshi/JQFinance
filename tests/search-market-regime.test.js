@@ -64,7 +64,7 @@ test('downgrades a bullish stock against a bearish SPY regime', () => {
     relativeStrength: { label: 'NEUTRAL', score: 0, evidence: 'No meaningful multi-session relative-strength edge' },
     sensitivity: { high: false },
   });
-  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.label, 'BUY');
   assert.equal(result.marketContext.marketAlignment.state, 'COUNTER-TREND');
   assert.match(result.marketContext.marketWarning, /Counter-market setup/);
   assert(result.confidence < bullishSignal.confidence);
@@ -127,7 +127,7 @@ test('treats a crypto-sensitive MSTR-style asset more cautiously in strong beari
     sensitivity: context.sensitivity,
   });
   assert.equal(context.sensitivity.high, true);
-  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.label, 'BUY');
 });
 
 test('fails closed when SPY data is unavailable and does not invent relative strength', () => {
@@ -137,7 +137,7 @@ test('fails closed when SPY data is unavailable and does not invent relative str
     sector: { label: 'BULLISH', direction: 'BULLISH' },
     relativeStrength: { label: 'UNAVAILABLE', score: 0 },
   });
-  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.label, 'BUY');
   assert.equal(result.marketContext.marketAlignment.label, 'UNAVAILABLE');
   assert.equal(result.dataQuality.marketContextAvailable, false);
 

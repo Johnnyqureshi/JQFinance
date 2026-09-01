@@ -194,13 +194,20 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     .filter(zone => zone?.status !== 'INVALIDATED'
       && Number.isFinite(Number(zone.low)) && Number.isFinite(Number(zone.high)))
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-  const zoneLimit = showAllZones ? mapZones.length : 3;
   const latestPrice = prices.at(-1);
   const contextDistance = Math.max(rawRange * 1.75, latestPrice * 0.18);
-  const nearbyZones = mapZones.filter(zone => {
+  const nearbyCandidates = mapZones.filter(zone => {
     const midpoint = (Number(zone.low) + Number(zone.high)) / 2;
     return Math.abs(midpoint - latestPrice) <= contextDistance;
-  }).slice(0, zoneLimit);
+  });
+  // The default view is intentionally calm: show the strongest nearby buyer
+  // and seller area. "All zones" remains available for deeper inspection.
+  const nearbyZones = showAllZones
+    ? nearbyCandidates
+    : [
+      nearbyCandidates.find(zone => zone.type === 'DEMAND'),
+      nearbyCandidates.find(zone => zone.type === 'SUPPLY'),
+    ].filter(Boolean);
   const visibleZoneBounds = nearbyZones.flatMap(zone => [Number(zone.low), Number(zone.high)]);
   const scaleMin = Math.min(rawMin, ...visibleZoneBounds);
   const scaleMax = Math.max(rawMax, ...visibleZoneBounds);
@@ -236,7 +243,10 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
   }
 
   // Draw the zones first so the candles remain the most legible layer.
-  const visibleZones = nearbyZones.filter(zone => Number(zone.high) >= min && Number(zone.low) <= max);
+  const visibleZones = nearbyZones
+    .filter(zone => Number(zone.high) >= min && Number(zone.low) <= max)
+    .sort((a, b) => Number(a.low) - Number(b.low));
+  let previousLabelBottom = -Infinity;
   visibleZones.forEach(zone => {
     const demand = zone.type === 'DEMAND';
     const top = yForPrice(Math.min(max, Number(zone.high)));
@@ -244,27 +254,32 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     const zoneHeight = Math.max(8, bottom - top);
     const zoneColor = demand ? '#00f5ad' : '#ff3f5f';
     ctx.save();
-    ctx.fillStyle = demand ? 'rgba(0,245,173,.28)' : 'rgba(255,63,95,.28)';
-    ctx.strokeStyle = demand ? 'rgba(0,245,173,.98)' : 'rgba(255,63,95,.98)';
-    ctx.shadowColor = demand ? 'rgba(0,245,173,.42)' : 'rgba(255,63,95,.42)';
-    ctx.shadowBlur = 10;
-    ctx.lineWidth = 2;
+    ctx.fillStyle = demand ? 'rgba(0,245,173,.14)' : 'rgba(255,63,95,.14)';
+    ctx.strokeStyle = demand ? 'rgba(0,245,173,.82)' : 'rgba(255,63,95,.82)';
+    ctx.shadowColor = demand ? 'rgba(0,245,173,.22)' : 'rgba(255,63,95,.22)';
+    ctx.shadowBlur = 5;
+    ctx.lineWidth = 1.5;
     ctx.fillRect(pad.l, top, cw, zoneHeight);
     ctx.strokeRect(pad.l, top, cw, zoneHeight);
     ctx.shadowBlur = 0;
     ctx.fillStyle = zoneColor;
-    ctx.fillRect(pad.l, top, 5, zoneHeight);
+    ctx.fillRect(pad.l, top, 4, zoneHeight);
     ctx.font = '700 10px Inter';
     ctx.textAlign = 'left';
-    const zoneText = `${demand ? 'BUYERS' : 'SELLERS'}  $${fmt(zone.low)}–$${fmt(zone.high)}  ·  ${zone.score || 0}`;
+    const zoneText = `${demand ? 'BUYERS' : 'SELLERS'}  ·  ${zone.score || 0}`;
     const labelWidth = Math.min(cw - 12, ctx.measureText(zoneText).width + 14);
-    const labelY = Math.max(pad.t + 3, Math.min(priceBottom - 19, top + 4));
-    ctx.fillStyle = demand ? 'rgba(0,86,64,.98)' : 'rgba(120,15,34,.98)';
+    let labelY = Math.max(pad.t + 3, Math.min(priceBottom - 19, top + 4));
+    if (labelY < previousLabelBottom + 3) {
+      labelY = Math.min(priceBottom - 19, previousLabelBottom + 3);
+    }
+    if (labelY > bottom - 19 && zoneHeight >= 20) labelY = Math.max(pad.t + 3, bottom - 19);
+    previousLabelBottom = labelY + 17;
+    ctx.fillStyle = demand ? 'rgba(0,73,57,.94)' : 'rgba(105,13,31,.94)';
     ctx.beginPath();
-    ctx.roundRect(pad.l + 7, labelY, labelWidth, 17, 4);
+    ctx.roundRect(pad.l + 8, labelY, labelWidth, 17, 4);
     ctx.fill();
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(zoneText, pad.l + 14, labelY + 12);
+    ctx.fillText(zoneText, pad.l + 15, labelY + 12);
     ctx.restore();
   });
 
@@ -287,7 +302,16 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     ctx.fillText(label, w - pad.r - 4, y - 4);
     ctx.restore();
   };
-  (smartMoney?.overlay?.liquidity || []).slice(0, showAllZones ? 6 : 2)
+  const liquidityLevels = [];
+  const seenLiquiditySides = new Set();
+  (smartMoney?.overlay?.liquidity || []).forEach(level => {
+    const side = level.side || 'LEVEL';
+    if (showAllZones || !seenLiquiditySides.has(side)) {
+      liquidityLevels.push(level);
+      seenLiquiditySides.add(side);
+    }
+  });
+  liquidityLevels.slice(0, showAllZones ? 6 : 2)
     .forEach(level => drawReference(level.price, 'rgba(245,200,66,.9)', [5, 4], `LIQ ${level.side || ''}`));
   (smartMoney?.overlay?.swings || []).forEach(level =>
     drawReference(level.price, 'rgba(182,148,255,.9)', [2, 3], level.type === 'HIGH' ? 'SWING HIGH' : 'SWING LOW'));

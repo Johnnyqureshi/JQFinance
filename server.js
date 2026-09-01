@@ -12547,10 +12547,18 @@ async function reconcileMoneyPrinterTrades(userId) {
     const terminal = ['canceled', 'rejected', 'expired'].includes(brokerStatus);
     const children = Array.isArray(order?.legs) ? order.legs : [];
     let position = null;
-    try { position = await alpacaFetchWithCredentials(creds, `/v2/positions/${encodeURIComponent(trade.symbol)}`); }
-    catch (_) { /* A missing Alpaca position is a normal 404 after an exit. */ }
+    let positionKnown = false;
+    try {
+      position = await alpacaFetchWithCredentials(creds, `/v2/positions/${encodeURIComponent(trade.symbol)}`);
+      positionKnown = true;
+    } catch (error) {
+      // A 404 conclusively means the position is absent after an exit. Any
+      // other response is an unknown position state and must not close a row.
+      positionKnown = error?.alpacaStatus === 404;
+    }
     const protection = ownedBracketProtection({
-      direction: trade.direction, filledQty: filled, positionQty: position?.qty, parent: order, children,
+      direction: trade.direction, filledQty: filled, positionQty: position?.qty, positionKnown,
+      parent: order, children,
     });
     // A partial fill stays managed even when the parent was canceled. It cannot
     // become reusable until no shares remain and every owned OCO leg is terminal.

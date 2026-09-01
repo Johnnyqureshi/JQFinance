@@ -75,4 +75,10 @@ const fullySettled = ownedBracketProtection({
   children: [{ status: 'canceled', side: 'sell', type: 'stop', qty: '5' }, { status: 'filled', side: 'sell', type: 'limit', qty: '5' }],
 });
 assert.strictEqual(fullySettled.canClose, true, 'only absent position plus terminal owned legs closes');
+const unknownPosition = ownedBracketProtection({
+  direction: 'LONG', filledQty: 0, positionQty: 0, positionKnown: false,
+  parent: { status: 'canceled' }, children: [],
+});
+assert.strictEqual(unknownPosition.canClose, false, 'unknown broker position state cannot close a journal row');
+assert.strictEqual(unknownPosition.requiresManagement, true);
 console.log('Money Printer policy tests passed');

@@ -7,4 +7,4 @@ The Money Printer must reuse the same deterministic Search analysis that owns th
 
 **Why:** The product is intended to turn the full proprietary Search science into unattended execution without allowing a second strategy implementation, browser lifecycle, or account-mode race to change what gets traded.
 
-**How to apply:** Keep scheduling and entry gates server-owned. Use a dedicated Alpaca identity, pin every in-flight broker/data request and journal row to the captured account and mode, revalidate authorization immediately before submission, and treat missing or undersized bracket protection as unresolved rather than closed.
+**How to apply:** Keep scheduling and entry gates server-owned. Use a dedicated Alpaca identity, pin every in-flight broker/data request and journal row to the captured account and mode, revalidate authorization immediately before submission, and treat unknown position state, missing protection, or undersized bracket legs as unresolved rather than closed.

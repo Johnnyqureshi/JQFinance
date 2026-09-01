@@ -9,6 +9,7 @@ const {
   reservePmhEntryIntent,
   summarizePmhTerminalExit,
   managePmhRunnerExit,
+  pmhUsableRescueStop,
   preparePmhManagedCycle,
 } = require('../lib/opening-momentum-pmh');
 let passed = 0, failed = 0;
@@ -305,6 +306,24 @@ test('a rescue timeout preserves its durable intent for exact reconciliation', a
   assert.strictEqual(rescueSubmissions, 1);
   assert.strictEqual(reservedRescue, true);
   assert.match(result.rescueError, /timed out/);
+});
+test('a terminal partial rescue stop is not mistaken for active residual protection', () => {
+  const terminalPartial = {
+    client_order_id: 'pmhr-1',
+    side: 'sell',
+    type: 'stop',
+    status: 'canceled',
+    qty: '5',
+    filled_qty: '2',
+  };
+  assert.strictEqual(pmhUsableRescueStop(terminalPartial, 'pmhr-1', 3), false);
+  assert.strictEqual(pmhUsableRescueStop({
+    ...terminalPartial,
+    client_order_id: 'pmhr-2',
+    status: 'accepted',
+    qty: '3',
+    filled_qty: '0',
+  }, 'pmhr-2', 3), true);
 });
 test('a terminal partial runner exit protects only residual runner shares', () => {
   const terminal = summarizePmhTerminalExit({

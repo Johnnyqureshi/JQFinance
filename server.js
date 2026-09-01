@@ -13,7 +13,6 @@ const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
 const {
   boundedManagedExitQuantity,
   entryOwnershipConflict,
-  managedExitFillSummary,
   migrateLegacyMomentumOwnership,
   requiresPriceActionForEntry,
 } = require('./lib/order-entry-policy');
@@ -143,8 +142,8 @@ const {
   pmhRegularSessionOpenAt,
   calculatePmhBoundedEntry,
   reservePmhEntryIntent,
-  summarizePmhTerminalExit,
   managePmhRunnerExit,
+  pmhUsableRescueStop,
   preparePmhManagedCycle,
 } = require('./lib/opening-momentum-pmh');
 const {
@@ -153,10 +152,14 @@ const {
 } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 const {
+  applyBrokerEntryState,
+  brokerEntryTransition,
   filledSellOrder,
+  isTerminalOrder,
   isTerminalWithoutFill,
   momentumWorkerHealth,
   needsRescueReplacement,
+  reconcileManagedFillLedger,
 } = require('./lib/bot-trade-journal');
 const { createCredentialVault } = require('./lib/credential-vault');
 const {
@@ -3480,7 +3483,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       confluence,
       fibonacci,
       smartMoney,
-      searchSignal,
+      searchSignal: finalSearchSignal,
     });
 
     // Do not manufacture probability percentages when no directly comparable
@@ -6223,7 +6226,7 @@ async function reconcilePmhTrades(userId) {
     }
   };
   const restorePmhRunnerStop = async (trade, reason, maxRunnerQty = trade.shares) => {
-    const rescueClientId = trade.rescue_stop_client_order_id
+    let rescueClientId = trade.rescue_stop_client_order_id
       || `pmhr_${userId}_${trade.id}_${trade.symbol}`.slice(0, 48);
     db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',
       rescue_stop_client_order_id=?,pending_exit_reason=? WHERE id=?`)
@@ -6236,6 +6239,13 @@ async function reconcilePmhTrades(userId) {
       }
     } catch (error) {
       if (error.alpacaStatus !== 404) throw error;
+    }
+    if (rescueOrder && !pmhUsableRescueStop(rescueOrder, rescueClientId, maxRunnerQty)) {
+      rescueOrder = null;
+      rescueClientId = `pmhr_${userId}_${trade.id}_${Date.now().toString(36)}`.slice(0, 48);
+      db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',
+        rescue_stop_order_id=NULL,rescue_stop_client_order_id=?,pending_exit_reason=? WHERE id=?`)
+        .run(rescueClientId, reason, trade.id);
     }
     if (!rescueOrder) {
       const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
@@ -6253,6 +6263,9 @@ async function reconcilePmhTrades(userId) {
           client_order_id: rescueClientId,
         }),
       });
+      if (!pmhUsableRescueStop(rescueOrder, rescueClientId, rescueQty)) {
+        throw new Error('Replacement PMH stop was not confirmed active at the broker.');
+      }
     }
     db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure',
       rescue_stop_order_id=?,rescue_stop_client_order_id=?,
@@ -6274,11 +6287,25 @@ async function reconcilePmhTrades(userId) {
         if (!brokerOrderMatchesIntent(order, trade.entry_client_order_id)) {
           throw new Error('Broker response does not match the PMH entry intent.');
         }
-        if (Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
-          db.prepare(`UPDATE bot_trade_log SET status='open', entry_price=?, shares=?, entry_order_id=? WHERE id=?`)
-            .run(Number(order.filled_avg_price), Number(order.filled_qty), order.id, trade.id);
-          reconciled.push({ id: trade.id, status: 'open', event: order.status === 'filled' ? 'entry fill confirmed' : 'partial entry fill confirmed' });
-        } else if (['canceled', 'rejected', 'expired'].includes(order.status)) {
+        const transition = brokerEntryTransition(order);
+        if (transition.filledQty > 0 && transition.filledAvgPrice > 0) {
+          db.prepare(`UPDATE bot_trade_log SET status=?,entry_price=?,shares=?,entry_order_id=?,
+            entry_filled_qty=?,entry_fill_finalized=? WHERE id=?`)
+            .run(
+              transition.state,
+              transition.filledAvgPrice,
+              transition.filledQty,
+              order.id,
+              transition.filledQty,
+              transition.terminal ? 1 : 0,
+              trade.id,
+            );
+          reconciled.push({
+            id: trade.id,
+            status: transition.state,
+            event: transition.terminal ? 'entry fill finalized' : 'partial entry fill confirmed; remainder pending',
+          });
+        } else if (transition.void) {
           db.prepare(`UPDATE bot_trade_log SET status='void', exit_reason=?, closed_at=datetime('now') WHERE id=?`)
             .run(`Entry ${order.status} by broker`, trade.id);
           reconciled.push({ id: trade.id, status: 'void', event: `entry ${order.status}` });
@@ -6301,18 +6328,36 @@ async function reconcilePmhTrades(userId) {
           throw new Error('Broker response does not match the PMH rescue-stop intent.');
         }
         const rescueStatus = String(rescueOrder.status || '').toLowerCase();
-        if (rescueStatus === 'filled' && Number(rescueOrder.filled_qty) > 0
-            && Number(rescueOrder.filled_avg_price) > 0) {
-          const filledQty = Number(rescueOrder.filled_qty);
-          const exitPrice = Number(rescueOrder.filled_avg_price);
-          const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
-          const priorPnl = Number(trade.pnl) || 0;
-          const totalPnl = +(priorPnl + pnl).toFixed(6);
-          db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,pnl=?,
-            exit_reason='Replacement protective stop broker fill',closed_at=datetime('now')
-            WHERE id=?`).run(exitPrice, totalPnl, trade.id);
-          reconciled.push({ id: trade.id, status: 'closed', event: 'replacement protective stop fill confirmed' });
-        } else if (['canceled', 'cancelled', 'rejected', 'expired'].includes(rescueStatus)) {
+        if (Number(rescueOrder.filled_qty) > 0 && Number(rescueOrder.filled_avg_price) > 0) {
+          const applied = await applyMomentumExitFill(
+            userId, null, trade, rescueOrder, 'Replacement protective stop broker fill'
+          );
+          reconciled.push({
+            id: trade.id,
+            status: applied.closed ? 'closed' : trade.status,
+            event: applied.closed ? 'replacement protective stop fill confirmed' : 'partial replacement stop fill confirmed',
+          });
+          if (applied.closed) continue;
+          if (isTerminalOrder(rescueOrder)) {
+            const positions = await pmhFetch('/v2/positions');
+            const position = (Array.isArray(positions) ? positions : [])
+              .find(item => item.symbol === trade.symbol);
+            const protectionQty = Math.min(
+              Number(applied.remainingQty),
+              Math.max(0, Number(position?.qty) || 0),
+            );
+            const restored = await restorePmhRunnerStop(
+              trade,
+              `Replacement protective stop ${rescueStatus} after a partial fill`,
+              protectionQty,
+            );
+            reconciled.push({
+              id: trade.id,
+              status: restored ? 'protected_after_exit_failure' : 'protection_unresolved',
+              event: restored ? 'partial replacement-stop fill protected' : 'partial replacement-stop fill requires reconciliation',
+            });
+          }
+        } else if (isTerminalOrder(rescueOrder)) {
           db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',pending_exit_reason=? WHERE id=?`)
             .run(`Replacement protective stop ${rescueStatus}; manual broker protection required`, trade.id);
           reconciled.push({ id: trade.id, status: 'protection_unresolved', event: `replacement protective stop ${rescueStatus}; manual reconciliation required` });
@@ -6331,47 +6376,41 @@ async function reconcilePmhTrades(userId) {
             throw new Error('Broker response does not match the reserved PMH exit intent.');
           }
           const reservedStatus = String(reservedExit.status || '').toLowerCase();
-          if (reservedStatus === 'filled' && Number(reservedExit.filled_qty) > 0
-              && Number(reservedExit.filled_avg_price) > 0) {
-            const filledQty = Number(reservedExit.filled_qty);
-            const exitPrice = Number(reservedExit.filled_avg_price);
-            const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
-            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,shares=?,pnl=?,exit_reason=?,
-              pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,
-              closed_at=datetime('now') WHERE id=?`)
-              .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
-            reconciled.push({ id: trade.id, status: 'closed', event: 'reserved exit fill confirmed' });
+          if (Number(reservedExit.filled_qty) > 0 && Number(reservedExit.filled_avg_price) > 0
+              && !isTerminalOrder(reservedExit)) {
+            const applied = await applyMomentumExitFill(
+              userId, null, trade, reservedExit, trade.pending_exit_reason || 'PMH runner exit'
+            );
+            reconciled.push({
+              id: trade.id,
+              status: applied.closed ? 'closed' : 'pending_exit',
+              event: applied.closed ? 'reserved exit fill confirmed' : 'partial reserved exit fill confirmed',
+            });
             continue;
           }
-          if (!['canceled', 'cancelled', 'rejected', 'expired'].includes(reservedStatus)) {
+          if (!isTerminalOrder(reservedExit)) {
             db.prepare(`UPDATE bot_trade_log SET status='pending_exit',pending_exit_order_id=? WHERE id=?`)
               .run(reservedExit.id || trade.pending_exit_client_order_id, trade.id);
             reconciled.push({ id: trade.id, status: 'pending_exit', event: 'reserved exit found at broker' });
             continue;
           }
-          const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
-          const terminal = summarizePmhTerminalExit({
-            runnerQty: trade.shares,
-            filledQty: reservedExit.filled_qty,
-            filledAvgPrice: reservedExit.filled_avg_price,
-            entryPrice: trade.entry_price,
-            accountPositionQty: position?.qty,
-          });
-          if (terminal.confirmedFilledQty > 0) {
-            db.prepare(`UPDATE bot_trade_log SET shares=?,pnl=COALESCE(pnl,0)+? WHERE id=?`)
-              .run(terminal.remainingRunnerQty, terminal.realizedPnl, trade.id);
-          }
-          if (!(terminal.remainingRunnerQty > 0)) {
-            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,exit_reason=?,
-              closed_at=datetime('now') WHERE id=?`)
-              .run(Number(reservedExit.filled_avg_price) || null, `Runner exit ${reservedStatus} after complete fill`, trade.id);
+          const applied = Number(reservedExit.filled_qty) > 0
+            ? await applyMomentumExitFill(
+              userId, null, trade, reservedExit, `Runner exit ${reservedStatus} after complete fill`
+            )
+            : { closed: false, remainingQty: Number(trade.entry_filled_qty || trade.shares) };
+          if (applied.closed) {
             reconciled.push({ id: trade.id, status: 'closed', event: 'terminal runner exit fully reconciled' });
             continue;
           }
+          const positions = await pmhFetch('/v2/positions');
+          const position = (Array.isArray(positions) ? positions : [])
+            .find(item => item.symbol === trade.symbol);
+          const protectionQty = Math.min(Number(applied.remainingQty), Math.max(0, Number(position?.qty) || 0));
           const restored = await restorePmhRunnerStop(
-            { ...trade, shares: terminal.remainingRunnerQty },
+            { ...trade, shares: applied.remainingQty },
             `Runner exit ${reservedStatus}; replacement stop submitted`,
-            terminal.protectionQty,
+            protectionQty,
           );
           reconciled.push({
             id: trade.id,
@@ -6400,38 +6439,34 @@ async function reconcilePmhTrades(userId) {
         if (!brokerOrderMatchesIntent(order, expectedExitClientId)) {
           throw new Error('Broker response does not match the PMH exit intent.');
         }
-        if (order.status === 'filled' && Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0) {
-          const filledQty = Number(order.filled_qty);
-          const exitPrice = Number(order.filled_avg_price);
-          const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
-          db.prepare(`UPDATE bot_trade_log SET status='closed', exit_price=?, shares=?, pnl=?, exit_reason=?,
-            pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,closed_at=datetime('now') WHERE id=?`)
-            .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
-          reconciled.push({ id: trade.id, status: 'closed', event: 'exit fill confirmed' });
-        } else if (['canceled', 'cancelled', 'rejected', 'expired'].includes(String(order.status || '').toLowerCase())) {
-          const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
-          const terminal = summarizePmhTerminalExit({
-            runnerQty: trade.shares,
-            filledQty: order.filled_qty,
-            filledAvgPrice: order.filled_avg_price,
-            entryPrice: trade.entry_price,
-            accountPositionQty: position?.qty,
+        if (Number(order.filled_qty) > 0 && Number(order.filled_avg_price) > 0
+            && !isTerminalOrder(order)) {
+          const applied = await applyMomentumExitFill(
+            userId, null, trade, order, trade.pending_exit_reason || 'PMH runner exit'
+          );
+          reconciled.push({
+            id: trade.id,
+            status: applied.closed ? 'closed' : 'pending_exit',
+            event: applied.closed ? 'exit fill confirmed' : 'partial exit fill confirmed',
           });
-          if (terminal.confirmedFilledQty > 0) {
-            db.prepare(`UPDATE bot_trade_log SET shares=?,pnl=COALESCE(pnl,0)+? WHERE id=?`)
-              .run(terminal.remainingRunnerQty, terminal.realizedPnl, trade.id);
-          }
-          if (!(terminal.remainingRunnerQty > 0)) {
-            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,exit_reason=?,
-              closed_at=datetime('now') WHERE id=?`)
-              .run(Number(order.filled_avg_price) || null, `Runner exit ${String(order.status).toLowerCase()} after complete fill`, trade.id);
+        } else if (isTerminalOrder(order)) {
+          const applied = Number(order.filled_qty) > 0
+            ? await applyMomentumExitFill(
+              userId, null, trade, order, `Runner exit ${String(order.status).toLowerCase()} after complete fill`
+            )
+            : { closed: false, remainingQty: Number(trade.entry_filled_qty || trade.shares) };
+          if (applied.closed) {
             reconciled.push({ id: trade.id, status: 'closed', event: 'terminal runner exit fully reconciled' });
             continue;
           }
+          const positions = await pmhFetch('/v2/positions');
+          const position = (Array.isArray(positions) ? positions : [])
+            .find(item => item.symbol === trade.symbol);
+          const protectionQty = Math.min(Number(applied.remainingQty), Math.max(0, Number(position?.qty) || 0));
           const restored = await restorePmhRunnerStop(
-            { ...trade, shares: terminal.remainingRunnerQty },
+            { ...trade, shares: applied.remainingQty },
             `Runner exit ${String(order.status).toLowerCase()}; replacement stop submitted`,
-            terminal.protectionQty,
+            protectionQty,
           );
           reconciled.push({
             id: trade.id,
@@ -6447,17 +6482,77 @@ async function reconcilePmhTrades(userId) {
       if (!brokerOrderMatchesIntent(parent, trade.entry_client_order_id)) {
         throw new Error('Broker response does not match the PMH journal owner.');
       }
+      const parentEntry = brokerEntryTransition(parent);
+      if (parentEntry.filledQty > 0 && parentEntry.filledAvgPrice > 0
+          && (
+            parentEntry.filledQty !== Number(trade.entry_filled_qty)
+            || parentEntry.terminal !== Boolean(trade.entry_fill_finalized)
+          )) {
+        db.prepare(`UPDATE bot_trade_log SET entry_price=?,shares=?,entry_filled_qty=?,
+          entry_fill_finalized=? WHERE id=?`).run(
+          parentEntry.filledAvgPrice,
+          parentEntry.filledQty,
+          parentEntry.filledQty,
+          parentEntry.terminal ? 1 : 0,
+          trade.id,
+        );
+        trade.entry_price = parentEntry.filledAvgPrice;
+        trade.shares = parentEntry.filledQty;
+        trade.entry_filled_qty = parentEntry.filledQty;
+        trade.entry_fill_finalized = parentEntry.terminal ? 1 : 0;
+      }
       const filledLeg = (parent?.legs || []).find(leg =>
-        leg.status === 'filled' && Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0
+        Number(leg.filled_qty) > 0 && Number(leg.filled_avg_price) > 0
       );
       if (filledLeg) {
-        const filledQty = Number(filledLeg.filled_qty);
-        const exitPrice = Number(filledLeg.filled_avg_price);
-        const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
-        db.prepare(`UPDATE bot_trade_log SET status='closed', exit_price=?, shares=?, pnl=?, exit_reason=?, closed_at=datetime('now') WHERE id=?`)
-          .run(exitPrice, filledQty, pnl, filledLeg.type === 'limit' ? 'Partial target broker fill' : 'Protective stop broker fill', trade.id);
-        reconciled.push({ id: trade.id, status: 'closed', event: 'protective leg fill confirmed' });
+        const applied = await applyMomentumExitFill(
+          userId,
+          null,
+          trade,
+          filledLeg,
+          filledLeg.type === 'limit' ? 'Partial target broker fill' : 'Protective stop broker fill',
+        );
+        reconciled.push({
+          id: trade.id,
+          status: applied.closed ? 'closed' : trade.status,
+          event: applied.closed ? 'protective leg fill confirmed' : 'partial protective leg fill confirmed',
+        });
+        if (applied.closed) continue;
+      }
+      const externalClose = await reconcileExternallyClosedManagedTrade(
+        userId,
+        path => pmhFetch(path),
+        trade,
+      );
+      if (externalClose.flat) {
+        reconciled.push({
+          id: trade.id,
+          status: externalClose.closed ? 'closed' : trade.status,
+          event: externalClose.closed
+            ? 'external/manual close reconciled'
+            : 'flat broker position awaiting complete sell fills',
+        });
         continue;
+      }
+      if (parentEntry.terminal && parentEntry.filledQty > 0) {
+        const activeStop = (Array.isArray(parent?.legs) ? parent.legs : []).find(leg =>
+          ['stop', 'stop_limit', 'stop_loss'].includes(String(leg?.type || '').toLowerCase())
+          && ['new', 'accepted', 'pending_new'].includes(String(leg?.status || '').toLowerCase())
+          && Number(leg?.qty) + 1e-8 >= parentEntry.filledQty
+        );
+        if (!activeStop) {
+          const restored = await restorePmhRunnerStop(
+            trade,
+            `Terminal ${String(parent.status || '').toLowerCase()} entry remainder requires independent stop protection`,
+            parentEntry.filledQty,
+          );
+          reconciled.push({
+            id: trade.id,
+            status: restored ? 'protected_after_exit_failure' : 'protection_unresolved',
+            event: restored ? 'terminal partial entry protected' : 'terminal partial entry requires reconciliation',
+          });
+          continue;
+        }
       }
       // The partial lot has a native Alpaca bracket. It never uses the runner
       // manager or a browser-estimated partial sell.
@@ -6482,9 +6577,7 @@ async function reconcilePmhTrades(userId) {
           reconciled.push({ id: trade.id, status: 'stop_cancel_unknown', event: 'runner stop cancellation remains unsettled; no sell submitted' });
           continue;
         }
-        const terminalWithoutFill = stopLegs.length > 0 && stopLegs.every(leg =>
-          ['canceled', 'cancelled', 'rejected', 'expired'].includes(String(leg.status || '').toLowerCase())
-        );
+        const terminalWithoutFill = stopLegs.length > 0 && stopLegs.every(isTerminalOrder);
         if (terminalWithoutFill) {
           const restored = await restorePmhRunnerStop(
             trade,
@@ -7416,7 +7509,7 @@ function recordMomentumEntryIntent(userId, candidate, entryPrice, shares, stopPr
   const result = db.prepare(`
     INSERT INTO bot_trade_log
       (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_pct,entry_order_id,strategy,broker_account_id)
-    VALUES (?,?,?,?,?,'open',?,?,?,'momentum',?)
+    VALUES (?,?,?,?,?,'pending_entry',?,?,?,'momentum',?)
   `).run(userId, candidate.symbol, entryPrice, shares, mode, stopPrice, takeProfitPct,
     clientOrderId, creds.account_id);
   return db.prepare('SELECT * FROM bot_trade_log WHERE id=?').get(result.lastInsertRowid);
@@ -7427,17 +7520,6 @@ async function applyMomentumExitFill(userId, pinnedCreds, trade, exitOrder, reas
   const filledQty = Number(exitOrder?.filled_qty);
   const filledPrice = Number(exitOrder?.filled_avg_price);
   if (!orderId || !(filledQty > 0 && filledPrice > 0)) return { recorded: false, closed: false };
-  db.prepare(`INSERT INTO momentum_exit_fills
-    (trade_id,broker_order_id,filled_qty,filled_notional,updated_at)
-    VALUES (?,?,?,?,datetime('now'))
-    ON CONFLICT(trade_id,broker_order_id) DO UPDATE SET
-      filled_qty=excluded.filled_qty,filled_notional=excluded.filled_notional,updated_at=datetime('now')`)
-    .run(trade.id, orderId, filledQty, filledQty * filledPrice);
-  const totals = db.prepare(`SELECT COALESCE(SUM(filled_qty),0) AS qty,
-    COALESCE(SUM(filled_notional),0) AS notional
-    FROM momentum_exit_fills WHERE trade_id=?`).get(trade.id);
-  const totalQty = Number(totals.qty);
-  const totalNotional = Number(totals.notional);
   const expectedQty = Number(trade.entry_filled_qty);
   if (!trade.entry_fill_finalized || !(expectedQty > 0)) {
     return {
@@ -7447,12 +7529,7 @@ async function applyMomentumExitFill(userId, pinnedCreds, trade, exitOrder, reas
       reason: 'The final confirmed Momentum entry quantity is not yet known.',
     };
   }
-  const summary = managedExitFillSummary({
-    filledQty: totalQty,
-    filledNotional: totalNotional,
-    expectedQty,
-    entryPrice: trade.entry_price,
-  });
+  const summary = reconcileManagedFillLedger(db, trade, exitOrder);
   if (!summary) return { recorded: true, closed: false };
   if (!summary.closed) {
     return { recorded: true, closed: false, remainingQty: summary.remainingQty };
@@ -7462,10 +7539,83 @@ async function applyMomentumExitFill(userId, pinnedCreds, trade, exitOrder, reas
       pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,
       rescue_stop_order_id=NULL,rescue_stop_client_order_id=NULL,
       exit_reason=?,exit_cooldown_until=datetime('now','+15 minutes'),closed_at=datetime('now')
-    WHERE id=? AND status='open'`)
-    .run(summary.completedQty, summary.exitPrice, summary.pnl,
+    WHERE id=? AND status NOT IN ('closed','void')`)
+    .run(summary.filledQty, summary.exitPrice, summary.pnl,
       reason, trade.id);
   return { recorded: true, closed: true };
+}
+
+async function reconcileExternallyClosedManagedTrade(userId, brokerFetch, trade) {
+  if (!trade.entry_fill_finalized || !(Number(trade.entry_filled_qty) > 0)) {
+    return { flat: false, closed: false };
+  }
+  const positions = await brokerFetch('/v2/positions');
+  const position = (Array.isArray(positions) ? positions : [])
+    .find(item => String(item?.symbol || '').toUpperCase() === trade.symbol);
+  if (Number(position?.qty) > 0) {
+    return { flat: false, closed: false, positionQty: Number(position.qty) };
+  }
+
+  const after = new Date(String(trade.timestamp || '').replace(' ', 'T') + 'Z');
+  const afterQuery = Number.isFinite(after.getTime()) ? `&after=${encodeURIComponent(after.toISOString())}` : '';
+  const orders = await brokerFetch(
+    `/v2/orders?status=closed&direction=asc&limit=500&symbols=${encodeURIComponent(trade.symbol)}${afterQuery}`
+  );
+  const brokerOrders = Array.isArray(orders) ? orders : [];
+  const managedEntryIds = new Set(db.prepare(`SELECT entry_client_order_id,entry_order_id
+    FROM bot_trade_log WHERE user_id=? AND symbol=?
+      AND (strategy='momentum' OR strategy LIKE 'opening-momentum-pmh%')`)
+    .all(userId, trade.symbol)
+    .flatMap(row => [row.entry_client_order_id, row.entry_order_id])
+    .filter(Boolean)
+    .map(String));
+  const foreignBuy = brokerOrders.find(order =>
+    String(order?.side || '').toLowerCase() === 'buy'
+    && Number(order?.filled_qty) > 0
+    && !managedEntryIds.has(String(order?.client_order_id || ''))
+    && !managedEntryIds.has(String(order?.id || ''))
+  );
+  if (foreignBuy) {
+    return { flat: true, closed: false, unresolved: true, ambiguousOwnership: true };
+  }
+  const sells = brokerOrders
+    .filter(order =>
+      String(order?.side || '').toLowerCase() === 'sell'
+      && Number(order?.filled_qty) > 0
+      && Number(order?.filled_avg_price) > 0
+      && String(order?.id || '')
+    );
+  let lastResult = { flat: true, closed: false };
+  for (const order of sells) {
+    const allocations = db.prepare(`SELECT trade_id,filled_qty FROM momentum_exit_fills
+      WHERE broker_order_id=?`).all(String(order.id));
+    const current = Number(allocations.find(row => Number(row.trade_id) === Number(trade.id))?.filled_qty || 0);
+    const allocatedElsewhere = allocations
+      .filter(row => Number(row.trade_id) !== Number(trade.id))
+      .reduce((sum, row) => sum + Number(row.filled_qty || 0), 0);
+    const tradeAllocatedElsewhere = Number(db.prepare(`SELECT COALESCE(SUM(filled_qty),0) AS qty
+      FROM momentum_exit_fills WHERE trade_id=? AND broker_order_id<>?`)
+      .get(trade.id, String(order.id))?.qty || 0);
+    const remainingForThisOrder = Math.max(
+      0,
+      Number(trade.entry_filled_qty) - tradeAllocatedElsewhere,
+    );
+    const availableForThisTrade = Math.max(0, Number(order.filled_qty) - allocatedElsewhere);
+    const allocation = Math.min(remainingForThisOrder, availableForThisTrade);
+    if (!(allocation > current)) continue;
+    lastResult = {
+      flat: true,
+      ...(await applyMomentumExitFill(
+        userId,
+        null,
+        trade,
+        { ...order, filled_qty: allocation },
+        'External/manual broker close reconciled',
+      )),
+    };
+    if (lastResult.closed) return lastResult;
+  }
+  return { ...lastResult, unresolved: !lastResult.closed };
 }
 
 async function ensureMomentumResidualProtection(userId, pinnedCreds, trade, quantity) {
@@ -7488,7 +7638,7 @@ async function ensureMomentumResidualProtection(userId, pinnedCreds, trade, quan
       const order = await momentumBrokerFetch(userId, pinnedCreds,
         `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.rescue_stop_client_order_id)}`);
       if (brokerOrderMatchesIntent(order, trade.rescue_stop_client_order_id)
-          && !['filled', 'canceled', 'cancelled', 'rejected', 'expired'].includes(String(order.status || '').toLowerCase())
+          && !isTerminalOrder(order)
           && Number(order.qty) >= quantity) rescueStop = order;
     } catch (_) {}
   }
@@ -7513,7 +7663,8 @@ async function ensureMomentumResidualProtection(userId, pinnedCreds, trade, quan
 async function reconcileMomentumTrades(userId, pinnedCreds) {
   const trades = db.prepare(`
     SELECT * FROM bot_trade_log
-    WHERE user_id=? AND status='open' AND strategy='momentum'
+    WHERE user_id=? AND status IN ('pending_entry','open','pending_exit',
+      'protected_after_exit_failure','protection_unresolved') AND strategy='momentum'
   `).all(userId);
   const reconciled = [];
   for (const trade of trades) {
@@ -7542,16 +7693,28 @@ async function reconcileMomentumTrades(userId, pinnedCreds) {
         entryOrder = await momentumBrokerFetch(userId, pinnedCreds,
           `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}&nested=true`);
       }
-      const observedEntryQty = Number(entryOrder?.filled_qty);
-      const entryTerminal = ['filled', 'canceled', 'cancelled', 'rejected', 'expired']
-        .includes(String(entryOrder?.status || '').toLowerCase());
+      const entryTransition = brokerEntryTransition(entryOrder);
+      const observedEntryQty = entryTransition.filledQty;
+      const entryTerminal = entryTransition.terminal;
+      if (!brokerOrderMatchesIntent(entryOrder, clientOrderId)) {
+        throw new Error('Broker response does not match the Momentum order intent.');
+      }
       if (observedEntryQty > Number(trade.entry_filled_qty || 0) || (entryTerminal && !trade.entry_fill_finalized)) {
-        db.prepare(`UPDATE bot_trade_log SET
-          entry_filled_qty=MAX(COALESCE(entry_filled_qty,0),?),
-          entry_fill_finalized=CASE WHEN ? THEN 1 ELSE entry_fill_finalized END
-          WHERE id=?`).run(Math.max(0, observedEntryQty || 0), entryTerminal ? 1 : 0, trade.id);
-        trade.entry_filled_qty = Math.max(Number(trade.entry_filled_qty || 0), observedEntryQty || 0);
-        trade.entry_fill_finalized = entryTerminal ? 1 : trade.entry_fill_finalized;
+        if (observedEntryQty > 0 && entryTransition.filledAvgPrice > 0) {
+          db.prepare(`UPDATE bot_trade_log SET entry_price=?,shares=?,status=?,
+            entry_filled_qty=?,entry_fill_finalized=? WHERE id=?`).run(
+            entryTransition.filledAvgPrice,
+            observedEntryQty,
+            entryTransition.state,
+            observedEntryQty,
+            entryTerminal ? 1 : 0,
+            trade.id,
+          );
+          applyBrokerEntryState(trade, entryTransition);
+        } else {
+          db.prepare(`UPDATE bot_trade_log SET entry_fill_finalized=1 WHERE id=?`).run(trade.id);
+          trade.entry_fill_finalized = 1;
+        }
       }
       if (trade.rescue_stop_order_id || trade.rescue_stop_client_order_id) {
         const rescuePath = trade.rescue_stop_order_id
@@ -7566,7 +7729,7 @@ async function reconcileMomentumTrades(userId, pinnedCreds) {
           if (applied.discrepancy) throw new Error(applied.reason);
           reconciled.push({ id: trade.id, event: applied.closed ? 'rescue stop fill confirmed' : 'partial rescue fill confirmed' });
           if (applied.closed) continue;
-          if (['canceled', 'cancelled', 'rejected', 'expired'].includes(String(rescueOrder.status || '').toLowerCase())) {
+          if (isTerminalOrder(rescueOrder)) {
             await ensureMomentumResidualProtection(userId, pinnedCreds, trade, applied.remainingQty);
             reconciled.push({ id: trade.id, event: 'residual stop protection restored' });
           }
@@ -7602,7 +7765,7 @@ async function reconcileMomentumTrades(userId, pinnedCreds) {
           if (applied.discrepancy) throw new Error(applied.reason);
           reconciled.push({ id: trade.id, event: applied.closed ? 'RSI exit fill confirmed' : 'partial RSI exit fill confirmed' });
           if (applied.closed) continue;
-          if (['canceled', 'cancelled', 'rejected', 'expired'].includes(String(pendingOrder.status || '').toLowerCase())) {
+          if (isTerminalOrder(pendingOrder)) {
             await ensureMomentumResidualProtection(userId, pinnedCreds, trade, applied.remainingQty);
             db.prepare(`UPDATE bot_trade_log SET pending_exit_order_id=NULL,
               pending_exit_client_order_id=NULL,pending_exit_reason=NULL WHERE id=?`).run(trade.id);
@@ -7623,17 +7786,12 @@ async function reconcileMomentumTrades(userId, pinnedCreds) {
         }
       }
       const order = entryOrder;
-      if (!brokerOrderMatchesIntent(order, clientOrderId)) {
-        throw new Error('Broker response does not match the Momentum order intent.');
-      }
       const status = String(order?.status || '').toLowerCase();
-      const filledEntry = Number(order?.filled_avg_price);
-      const filledShares = Number(order?.filled_qty);
+      const filledEntry = entryTransition.filledAvgPrice;
+      const filledShares = entryTransition.filledQty;
       if (filledEntry > 0 && filledShares > 0) {
-        db.prepare('UPDATE bot_trade_log SET entry_price=?,shares=? WHERE id=?')
-          .run(filledEntry, filledShares, trade.id);
-        reconciled.push({ id: trade.id, event: status === 'filled' ? 'entry fill confirmed' : 'partial entry fill confirmed' });
-      } else if (['canceled', 'rejected', 'expired'].includes(status) && !(filledShares > 0)) {
+        reconciled.push({ id: trade.id, event: entryTransition.terminal ? 'entry fill finalized' : 'partial entry fill confirmed' });
+      } else if (entryTransition.void) {
         db.prepare(`UPDATE bot_trade_log SET status='void',exit_reason=?,closed_at=datetime('now') WHERE id=?`)
           .run(`Broker entry ${status}`, trade.id);
         reconciled.push({ id: trade.id, event: `entry ${status}` });
@@ -7643,13 +7801,33 @@ async function reconcileMomentumTrades(userId, pinnedCreds) {
         String(leg?.side || '').toLowerCase() === 'sell' &&
         Number(leg?.filled_avg_price) > 0 && Number(leg?.filled_qty) > 0
       );
-      if (!exit) continue;
-      const applied = await applyMomentumExitFill(
-        userId, pinnedCreds, { ...trade, entry_price: filledEntry > 0 ? filledEntry : trade.entry_price }, exit,
-        String(exit.type || '').startsWith('stop') ? 'Broker stop-loss filled' : 'Broker take-profit filled'
+      if (exit) {
+        const applied = await applyMomentumExitFill(
+          userId, pinnedCreds, { ...trade, entry_price: filledEntry > 0 ? filledEntry : trade.entry_price }, exit,
+          String(exit.type || '').startsWith('stop') ? 'Broker stop-loss filled' : 'Broker take-profit filled'
+        );
+        if (applied.discrepancy) throw new Error(applied.reason);
+        reconciled.push({ id: trade.id, event: applied.closed ? 'protected exit fill confirmed' : 'partial protected exit fill confirmed' });
+        if (applied.closed) continue;
+      }
+      const external = await reconcileExternallyClosedManagedTrade(
+        userId,
+        path => momentumBrokerFetch(userId, pinnedCreds, path),
+        trade,
       );
-      if (applied.discrepancy) throw new Error(applied.reason);
-      reconciled.push({ id: trade.id, event: applied.closed ? 'protected exit fill confirmed' : 'partial protected exit fill confirmed' });
+      if (external.flat) {
+        reconciled.push({
+          id: trade.id,
+          event: external.closed ? 'external/manual close reconciled' : 'flat broker position awaiting complete sell fills',
+        });
+      } else if (trade.entry_fill_finalized && Number(external.positionQty) > 0) {
+        await ensureMomentumResidualProtection(
+          userId,
+          pinnedCreds,
+          trade,
+          Math.min(Number(trade.entry_filled_qty), Number(external.positionQty)),
+        );
+      }
     } catch (error) {
       // Network failures and ambiguous broker POSTs are intentionally left open
       // for a later exact-client-order reconciliation; never infer a close.
@@ -7762,7 +7940,7 @@ async function submitMomentumRsiExit(userId, pinnedCreds, trade, position, rsi) 
 async function manageMomentumOpenPositions(userId, pinnedCreds) {
   if (!isMarketOpen()) return [];
   const trades = db.prepare(`SELECT * FROM bot_trade_log
-    WHERE user_id=? AND status='open' AND strategy='momentum'
+    WHERE user_id=? AND status='open' AND entry_fill_finalized=1 AND strategy='momentum'
     ORDER BY id`).all(userId);
   if (!trades.length) return [];
   const positions = await momentumBrokerFetch(userId, pinnedCreds, '/v2/positions');
@@ -12590,7 +12768,8 @@ setInterval(async () => {
   try {
     const users = db.prepare(`SELECT user_id FROM momentum_settings WHERE enabled=1
       UNION SELECT DISTINCT user_id FROM bot_trade_log
-      WHERE status='open' AND strategy='momentum'`).all();
+      WHERE status IN ('pending_entry','open','pending_exit','protected_after_exit_failure','protection_unresolved')
+        AND strategy='momentum'`).all();
     for (const { user_id: userId } of users) {
       await runMomentumCycle(userId);
     }

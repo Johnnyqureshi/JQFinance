@@ -12,6 +12,12 @@ const { createPostgresAuthStore } = require('./lib/postgres-auth-store');
 const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
 const { requiresPriceActionForEntry } = require('./lib/order-entry-policy');
 const {
+  normalizeYahooFloatSummary,
+  scannerFloatFields,
+  fetchMomentumQuoteWithFloat,
+  momentumRowFromQuote,
+} = require('./lib/momentum-float');
+const {
   serverOwnedConfig,
   serverOwnedMomentumConfig,
   shouldAutoEnableAfterConnection,
@@ -1353,18 +1359,7 @@ async function _fetchFloatData(sym) {
     const summary = await yf.quoteSummary(sym, {
       modules: ['defaultKeyStatistics', 'summaryDetail'],
     }, { validateResult: false });
-    const stats = summary?.defaultKeyStatistics || {};
-    const detail = summary?.summaryDetail || {};
-    const floatShares = Number.isFinite(stats.floatShares) ? stats.floatShares : null;
-    const sharesOutstanding = Number.isFinite(stats.sharesOutstanding)
-      ? stats.sharesOutstanding
-      : Number.isFinite(detail.sharesOutstanding) ? detail.sharesOutstanding : null;
-    const data = {
-      float: floatShares ?? sharesOutstanding,
-      floatShares,
-      sharesOutstanding,
-      floatSource: floatShares != null ? 'floatShares' : sharesOutstanding != null ? 'sharesOutstanding' : null,
-    };
+    const data = normalizeYahooFloatSummary(summary);
     _floatCacheSet(sym, data);
     return data;
   } catch (_) {
@@ -1372,6 +1367,13 @@ async function _fetchFloatData(sym) {
     // unavailable (for example, a temporary Yahoo module/rate-limit failure).
     return { float: null, floatShares: null, sharesOutstanding: null, floatSource: null };
   }
+}
+
+function _fetchMomentumQuote(sym) {
+  return fetchMomentumQuoteWithFloat(sym, {
+    fetchQuote: symbol => yf.quote(symbol, {}, { validateResult: false }),
+    fetchFloatData: _fetchFloatData,
+  });
 }
 
 // ── Auth Routes ────────────────────────────────────────────────────────────────
@@ -2277,12 +2279,7 @@ app.post('/api/scanner-batch', async (req, res) => {
         const marketCap = quote.marketCap ?? null;
         // Prefer quoteSummary's floatShares, then sharesOutstanding, then the
         // quote endpoint's optional floatShares field as a final fallback.
-        const floatSh   = fundamentals.float
-          ?? quote.floatShares
-          ?? null;
-        const floatSource = fundamentals.float != null
-          ? fundamentals.floatSource
-          : quote.floatShares != null ? 'quote' : null;
+        const floatFields = scannerFloatFields(fundamentals, quote);
         const w52High   = quote.fiftyTwoWeekHigh ?? null;
         const w52Dist   = w52High ? +((price - w52High) / w52High * 100).toFixed(2) : null;
         const name      = quote.shortName ?? quote.longName ?? sym;
@@ -2296,8 +2293,7 @@ app.post('/api/scanner-batch', async (req, res) => {
 
         return {
           sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14,
-          float: floatSh, floatSh, floatShares: fundamentals.floatShares ?? quote.floatShares ?? null,
-          sharesOutstanding: fundamentals.sharesOutstanding ?? null, floatSource,
+          ...floatFields,
           marketCap, w52Dist,
         };
       } catch { return null; }
@@ -6811,39 +6807,9 @@ app.put('/api/momentum/settings', requireAuth, (req, res) => {
   res.json({ ok: true, enabled, liveArmed, config });
 });
 
-function momentumRowFromQuote(symbol, quote, config) {
-  const price = Number(quote?.regularMarketPrice);
-  const change = Number(quote?.regularMarketChangePercent ?? 0);
-  const volume = Number(quote?.regularMarketVolume ?? 0);
-  const averageVolume = Number(quote?.averageDailyVolume3Month ?? quote?.averageDailyVolume10Day ?? 0);
-  const relVol = averageVolume > 0 ? volume / averageVolume : null;
-  const floatShares = Number(quote?.floatShares);
-  const row = {
-    symbol,
-    price,
-    change,
-    volume,
-    relVol,
-    floatShares: Number.isFinite(floatShares) && floatShares > 0 ? floatShares : null,
-  };
-  if (!(price >= config.minPrice && price <= config.maxPrice)) return { eligible: false, reason: 'price outside configured range', row };
-  if (!(change >= config.minGainPercent)) return { eligible: false, reason: 'daily momentum below threshold', row };
-  if (!(volume >= config.minVolume)) return { eligible: false, reason: 'absolute volume below threshold', row };
-  if (!(relVol >= config.minRelVol)) return { eligible: false, reason: 'relative volume below threshold', row };
-  if (row.floatShares != null && row.floatShares > config.maxFloat) return { eligible: false, reason: 'float above configured maximum', row };
-  let score = 0;
-  if (change >= 2) score++;
-  if (change >= 10) score++;
-  if (change >= 30) score++;
-  if (relVol >= 1.5) score++;
-  if (relVol >= 5) score++;
-  if (row.floatShares != null && row.floatShares < 5_000_000) score++;
-  return { eligible: score >= config.minScore, reason: score >= config.minScore ? null : 'scanner score below threshold', row: { ...row, score } };
-}
-
 async function buildMomentumCandidate(userId, symbol, config) {
   const sym = String(symbol || '').toUpperCase();
-  const quote = await yf.quote(sym, {}, { validateResult: false });
+  const quote = await _fetchMomentumQuote(sym);
   if (!hasCompleteMomentumQuote(quote)) {
     throw new Error('Fresh candidate quote lacks required finite price, change, or volume evidence.');
   }
@@ -11592,7 +11558,7 @@ async function runMomentumCycle(userId, source = 'server-scheduler') {
     });
     let quoteResults = await mapWithConcurrency(rotation.symbols, 8, async symbol => {
       try {
-        const quote = await yf.quote(symbol, {}, { validateResult: false });
+        const quote = await _fetchMomentumQuote(symbol);
         if (!hasCompleteMomentumQuote(quote)) throw new Error('Quote payload lacks required price, change, or volume evidence.');
         const basic = momentumRowFromQuote(symbol, quote, config);
         return { ok: true, row: basic.eligible ? basic.row : null };
@@ -11609,7 +11575,7 @@ async function runMomentumCycle(userId, source = 'server-scheduler') {
       const retries = await mapWithConcurrency(failedQuoteIndexes, 4, async index => {
         const symbol = rotation.symbols[index];
         try {
-          const quote = await yf.quote(symbol, {}, { validateResult: false });
+          const quote = await _fetchMomentumQuote(symbol);
           if (!hasCompleteMomentumQuote(quote)) throw new Error('Quote payload lacks required price, change, or volume evidence.');
           const basic = momentumRowFromQuote(symbol, quote, config);
           return { index, result: { ok: true, row: basic.eligible ? basic.row : null } };

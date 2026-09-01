@@ -4,7 +4,10 @@
 'use strict';
 
 const assert = require('assert');
-const { evaluatePriceActionSetup } = require('../lib/price-action-setups');
+const {
+  evaluatePriceActionSetup,
+  summarizePriceActionResult,
+} = require('../lib/price-action-setups');
 
 let passed = 0;
 let failed = 0;
@@ -66,6 +69,7 @@ test('fails closed for stale data and contradictory market context', () => {
   const closes = Array.from({ length: 21 }, (_, i) => 10 + i * 0.02);
   const stale = evaluatePriceActionSetup(base(closes, { freshness: { fresh: false } }));
   assert.strictEqual(stale.eligible, false);
+  assert.strictEqual(stale.setupType, 'UNAVAILABLE');
   assert(stale.reasons.some(reason => /stale/i.test(reason)));
   const contradictory = evaluatePriceActionSetup(base(closes, {
     market: { trend: 'BEARISH' }, relativeStrength: false,
@@ -81,6 +85,7 @@ test('fails closed when a final candle has a missing open', () => {
   bars.at(-1).o = null;
   const result = evaluatePriceActionSetup(base(closes, { bars }));
   assert.strictEqual(result.eligible, false);
+  assert.strictEqual(result.setupType, 'UNAVAILABLE');
   assert(result.reasons.some(reason => /incomplete|malformed/i.test(reason)));
 });
 
@@ -91,6 +96,7 @@ test('fails closed when historical volume is missing instead of treating it as z
   bars[5].v = null;
   const result = evaluatePriceActionSetup(base(closes, { bars }));
   assert.strictEqual(result.eligible, false);
+  assert.strictEqual(result.setupType, 'UNAVAILABLE');
   assert(result.reasons.some(reason => /incomplete|malformed/i.test(reason)));
 });
 
@@ -100,6 +106,22 @@ test('never emits a short or inverse-ETF instruction', () => {
   assert.strictEqual(result.direction, 'LONG_ONLY');
   assert(!JSON.stringify(result).toLowerCase().includes('short'));
   assert(!JSON.stringify(result).toLowerCase().includes('inverse'));
+});
+
+test('normalizes setup, invalidation, and no-trade reason for evidence reports', () => {
+  const blocked = summarizePriceActionResult({
+    strategy: 'smb-compatible-long-v1',
+    direction: 'LONG_ONLY',
+    status: 'SETUP CONFIRMED — WAIT',
+    eligible: false,
+    setup: { type: 'CONTROLLED_PULLBACK', label: 'Controlled pullback' },
+    invalidation: 9.75,
+    reasons: ['Relative strength is unavailable.'],
+  });
+  assert.strictEqual(blocked.setupType, 'CONTROLLED_PULLBACK');
+  assert.strictEqual(blocked.invalidation, 9.75);
+  assert.strictEqual(blocked.noTradeReason, 'Relative strength is unavailable.');
+  assert.strictEqual(blocked.eligible, false);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

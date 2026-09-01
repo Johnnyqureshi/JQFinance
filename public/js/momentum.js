@@ -1052,9 +1052,20 @@
         const shadowLabel = shadow?.available
           ? `${shadow.pairedDecisions || 0} paired live shadow decisions recorded`
           : 'live shadow evidence unavailable';
+        const priceActionEvidence = report.priceActionEvidence
+          || shadow?.priceActionEvidence?.selected
+          || null;
+        const setupEvidence = Object.entries(priceActionEvidence?.setupTypes || {})
+          .filter(([setupType]) => !['UNAVAILABLE', 'NO_CONFIRMED_SETUP'].includes(setupType))
+          .sort(([, a], [, b]) => (b.outcomes || 0) - (a.outcomes || 0));
+        const setupSummary = setupEvidence.length
+          ? setupEvidence.map(([setupType, item]) =>
+            `${setupType.replaceAll('_', ' ')}: ${item.outcomes || 0}/${priceActionEvidence.minimumSample || 30} closed (${item.assessment || 'INSUFFICIENT_SAMPLE'})`
+          ).join('; ')
+          : `No setup-specific closed outcomes yet; minimum ${priceActionEvidence?.minimumSample || 30} per setup`;
         note.textContent = report.strategyEvaluable
           ? `${report.selectedName} passed the configured validation checks. It remains paper-only.`
-          : `No strategy change is evaluable or promoted. ${shadowLabel}; selected result remains ${report.selectedName}.`;
+          : `No strategy change is evaluable or promoted. ${shadowLabel}. Price-action evidence: ${setupSummary}.`;
 
         const trades = $('mtValidationTrades');
         const winRate = $('mtValidationWinRate');
@@ -1076,7 +1087,10 @@
         if (caveats) {
           const failures = (report.failedChecks || []).join(', ') || 'none';
           const shadowCaveat = shadow?.caveat ? ` ${shadow.caveat}` : '';
-          caveats.textContent = `${report.provider} ${report.feed}; ${report.receivedSymbols} symbols, ${report.barCount.toLocaleString()} bars. Failed checks: ${failures}. ${report.primaryCaveat}${shadowCaveat}`;
+          const priceActionCaveat = priceActionEvidence?.caveat
+            ? ` ${priceActionEvidence.caveat}`
+            : ' Price-action setup evidence is paper-only and cannot change live execution.';
+          caveats.textContent = `${report.provider} ${report.feed}; ${report.receivedSymbols} symbols, ${report.barCount.toLocaleString()} bars. Failed checks: ${failures}. ${report.primaryCaveat}${shadowCaveat}${priceActionCaveat}`;
         }
       } catch (error) {
         status.textContent = 'UNAVAILABLE';

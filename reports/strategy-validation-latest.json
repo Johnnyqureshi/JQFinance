@@ -1,6 +1,6 @@
 {
-  "studyId": "15a559f7d1a3",
-  "generatedAt": "2026-08-22T16:05:23.086Z",
+  "studyId": "a043bd815c82",
+  "generatedAt": "2026-09-01T08:06:16.936Z",
   "contractVersion": 2,
   "mode": "PAPER_ONLY",
   "inputSnapshot": {
@@ -8,23 +8,23 @@
     "snapshotPath": "reports/data/strategy-ohlcv-c7398cab4f6dc426.json.gz",
     "loadCommand": "node scripts/validate-strategy.js --snapshot reports/data/strategy-ohlcv-c7398cab4f6dc426.json.gz",
     "retrievedAt": "2026-08-22T16:03:02.915Z",
-    "loadedFromArchive": false,
+    "loadedFromArchive": true,
     "immutable": true
   },
   "experiment": {
-    "experimentSha256": "15a559f7d1a3ad21949944d90e5ea019f6d17665d875b219621fb96fff4d23dc",
-    "experimentPath": "reports/data/strategy-experiment-15a559f7d1a3.json",
-    "replayCommand": "node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-15a559f7d1a3.json",
+    "experimentSha256": "a043bd815c82a731eac51b328296bd46c16d1ea8e5ac676463f2bc14086cb701",
+    "experimentPath": "reports/data/strategy-experiment-a043bd815c82.json",
+    "replayCommand": "node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-a043bd815c82.json",
     "configLocked": true,
     "sourceHashes": {
-      "validatorSha256": "5cb79f53be8f9260a44feb86f25032b85baba5432355aec096e21499e8816e8a",
-      "runnerSha256": "c33ad16fa77ad6d2f152ea6e80d1eba1d85327f6488d287b3e213210e18ecb62"
+      "validatorSha256": "e5d8bfc835ae9a32e211922dab3542b3fc9c5179be92341e651c939f57af4f33",
+      "runnerSha256": "4c49a3eecf35495ee9ff7d85db110e957d0b3ec2418930fdfd12b56459ac270b"
     }
   },
   "dataQuality": {
     "provider": "alpaca",
     "feed": "IEX historical 5-minute bars",
-    "credentialSource": "live-data-key",
+    "credentialSource": "archived-snapshot",
     "requestedDays": 120,
     "requestedSymbols": 100,
     "receivedSymbols": 100,
@@ -51,7 +51,7 @@
     "benchmarkSymbol": "SPY",
     "volumeLookbackSessions": 20,
     "minHistorySessions": 5,
-    "generatedAt": 1787414675526,
+    "generatedAt": 1788249768435,
     "unavailableGates": [
       "news_catalyst",
       "float_shares",
@@ -5876,6 +5876,9 @@
           "mfe": 0,
           "holdBars": 3,
           "marketRegime": "NEUTRAL",
+          "decisionId": "d2-mt30aslc-USDE-1",
+          "priceActionSetupType": "NO_CONFIRMED_SETUP",
+          "priceActionInvalidation": null,
           "ignoredStopBreaches": 0,
           "firstIgnoredStopTime": null
         },
@@ -5897,6 +5900,9 @@
           "mfe": 0,
           "holdBars": 1,
           "marketRegime": "NEUTRAL",
+          "decisionId": "d2-mt30nnk0-JUNS-1",
+          "priceActionSetupType": "NO_CONFIRMED_SETUP",
+          "priceActionInvalidation": null,
           "ignoredStopBreaches": 0,
           "firstIgnoredStopTime": null
         },
@@ -5918,6 +5924,9 @@
           "mfe": 813.7575599999996,
           "holdBars": 6,
           "marketRegime": "NEUTRAL",
+          "decisionId": "d2-mt31jsyo-USDE-2",
+          "priceActionSetupType": "NO_CONFIRMED_SETUP",
+          "priceActionInvalidation": null,
           "ignoredStopBreaches": 0,
           "firstIgnoredStopTime": null
         },
@@ -5939,6 +5948,9 @@
           "mfe": 0,
           "holdBars": 1,
           "marketRegime": "NEUTRAL",
+          "decisionId": "d2-mt31q8g0-JUNS-1",
+          "priceActionSetupType": "NO_CONFIRMED_SETUP",
+          "priceActionInvalidation": null,
           "ignoredStopBreaches": 0,
           "firstIgnoredStopTime": null
         },
@@ -5960,10 +5972,769 @@
           "mfe": 23.768385000000162,
           "holdBars": 3,
           "marketRegime": "NEUTRAL",
+          "decisionId": "d2-mt32mduo-JUNS-1",
+          "priceActionSetupType": "NO_CONFIRMED_SETUP",
+          "priceActionInvalidation": null,
           "ignoredStopBreaches": 0,
           "firstIgnoredStopTime": null
         }
       ]
+    },
+    "priceActionEvidence": {
+      "mode": "PAPER_ONLY",
+      "minimumSample": 30,
+      "sampleAdequate": false,
+      "promotionEligible": false,
+      "setupTypes": {
+        "BREAKOUT_CONTINUATION": {
+          "candidates": 75,
+          "eligible": 70,
+          "noTrade": 5,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 5
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "CONTROLLED_PULLBACK": {
+          "candidates": 77,
+          "eligible": 71,
+          "noTrade": 6,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 6
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "FAILED_BREAK_RECLAIM": {
+          "candidates": 0,
+          "eligible": 0,
+          "noTrade": 0,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {},
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "EXTREME_MOVE_REVERSAL": {
+          "candidates": 5,
+          "eligible": 4,
+          "noTrade": 1,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 1
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "NO_CONFIRMED_SETUP": {
+          "candidates": 2937,
+          "eligible": 0,
+          "noTrade": 2937,
+          "outcomes": 5,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 5,
+            "winCount": 1,
+            "lossCount": 4,
+            "winRate": 0.2,
+            "avgWin": 779.25771,
+            "avgLoss": -146.20979333437492,
+            "netExpectancy": 38.88370733250005,
+            "profitFactor": 1.3324307699038227,
+            "totalPnl": 194.41853666250034,
+            "avgHoldBars": 2.8,
+            "turnover": 5,
+            "avgMae": -177.931009,
+            "avgMfe": 167.50518899999994,
+            "worstMae": -463.61477000000025,
+            "maxDrawdown": 313.0605899999998,
+            "exitReasons": {
+              "STOP": 4,
+              "RSI_EXIT": 1
+            },
+            "monthly": {
+              "2026-08": {
+                "count": 5,
+                "pnl": 194.41853666250034,
+                "wins": 1,
+                "winRate": 0.2
+              }
+            },
+            "byGroup": {
+              "stock": {
+                "count": 5,
+                "pnl": 194.41853666250034,
+                "wins": 1,
+                "losses": 4,
+                "winRate": 0.2,
+                "netExpectancy": 38.883707332500066,
+                "profitFactor": 1.3324307699038227,
+                "maxDrawdown": 313.0605899999998
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 5,
+                "pnl": 194.41853666250034,
+                "wins": 1,
+                "losses": 4,
+                "winRate": 0.2,
+                "netExpectancy": 38.883707332500066,
+                "profitFactor": 1.3324307699038227,
+                "maxDrawdown": 313.0605899999998
+              }
+            }
+          },
+          "noTradeReasons": {
+            "No confirmed compatible long-side price-action setup is present.": 2086,
+            "Price is extended 3.1% above the active reference; do not chase.": 22,
+            "Price is extended 3.9% above the active reference; do not chase.": 12,
+            "Price is extended 4.0% above the active reference; do not chase.": 16,
+            "Price is extended 4.7% above the active reference; do not chase.": 9,
+            "Price is extended 7.2% above the active reference; do not chase.": 6,
+            "Price is extended 3.7% above the active reference; do not chase.": 20,
+            "The stock is underperforming its comparison market.": 341,
+            "Price is extended 6.5% above the active reference; do not chase.": 2,
+            "Price is extended 5.1% above the active reference; do not chase.": 11,
+            "Price is extended 5.9% above the active reference; do not chase.": 8,
+            "Price is extended 6.1% above the active reference; do not chase.": 8,
+            "Price is extended 5.2% above the active reference; do not chase.": 9,
+            "Price is extended 4.8% above the active reference; do not chase.": 7,
+            "Price is extended 5.0% above the active reference; do not chase.": 9,
+            "Market context is bearish without confirmed relative strength.": 24,
+            "Price is extended 3.8% above the active reference; do not chase.": 19,
+            "Price is extended 5.5% above the active reference; do not chase.": 16,
+            "Price is extended 5.4% above the active reference; do not chase.": 6,
+            "Price is extended 5.7% above the active reference; do not chase.": 6,
+            "Price is extended 4.6% above the active reference; do not chase.": 7,
+            "Price is extended 3.3% above the active reference; do not chase.": 19,
+            "Price is extended 6.4% above the active reference; do not chase.": 10,
+            "Price is extended 3.4% above the active reference; do not chase.": 13,
+            "Price is extended 6.0% above the active reference; do not chase.": 4,
+            "Price is extended 4.4% above the active reference; do not chase.": 6,
+            "Price is extended 4.2% above the active reference; do not chase.": 8,
+            "Price is extended 7.8% above the active reference; do not chase.": 5,
+            "Price is extended 4.1% above the active reference; do not chase.": 15,
+            "Price is extended 7.5% above the active reference; do not chase.": 3,
+            "Price is extended 6.2% above the active reference; do not chase.": 6,
+            "Price is extended 4.5% above the active reference; do not chase.": 12,
+            "Price is extended 6.3% above the active reference; do not chase.": 2,
+            "Price is extended 6.8% above the active reference; do not chase.": 3,
+            "Price is extended 6.6% above the active reference; do not chase.": 3,
+            "Price is extended 7.0% above the active reference; do not chase.": 1,
+            "Price is extended 4.9% above the active reference; do not chase.": 9,
+            "Price is extended 3.2% above the active reference; do not chase.": 17,
+            "Price is extended 5.6% above the active reference; do not chase.": 11,
+            "Price is extended 3.6% above the active reference; do not chase.": 15,
+            "Price is extended 4.3% above the active reference; do not chase.": 9,
+            "Price is extended 5.8% above the active reference; do not chase.": 4,
+            "Price is extended 7.4% above the active reference; do not chase.": 4,
+            "Price is extended 7.3% above the active reference; do not chase.": 3,
+            "Price is extended 7.7% above the active reference; do not chase.": 4,
+            "Price is extended 8.2% above the active reference; do not chase.": 2,
+            "Price is extended 7.6% above the active reference; do not chase.": 2,
+            "Price is extended 5.3% above the active reference; do not chase.": 1,
+            "Price is extended 7.9% above the active reference; do not chase.": 4,
+            "Price is extended 7.1% above the active reference; do not chase.": 4,
+            "Price is extended 8.0% above the active reference; do not chase.": 1,
+            "Price is extended 3.0% above the active reference; do not chase.": 7,
+            "Price is extended 8.1% above the active reference; do not chase.": 4,
+            "Price is extended 8.4% above the active reference; do not chase.": 3,
+            "Price is extended 9.7% above the active reference; do not chase.": 1,
+            "Price is extended 3.5% above the active reference; do not chase.": 21,
+            "Price is extended 8.6% above the active reference; do not chase.": 1,
+            "Price is extended 9.1% above the active reference; do not chase.": 1,
+            "Price is extended 11.5% above the active reference; do not chase.": 1,
+            "Price is extended 17.2% above the active reference; do not chase.": 1,
+            "Price is extended 14.2% above the active reference; do not chase.": 1,
+            "Price is extended 9.0% above the active reference; do not chase.": 1,
+            "Price is extended 14.3% above the active reference; do not chase.": 1,
+            "Price is extended 10.5% above the active reference; do not chase.": 3,
+            "Price is extended 14.5% above the active reference; do not chase.": 3,
+            "Price is extended 9.4% above the active reference; do not chase.": 2,
+            "Price is extended 21.6% above the active reference; do not chase.": 1,
+            "Price is extended 19.6% above the active reference; do not chase.": 1,
+            "Price is extended 18.3% above the active reference; do not chase.": 1,
+            "Price is extended 22.0% above the active reference; do not chase.": 2,
+            "Price is extended 12.1% above the active reference; do not chase.": 3,
+            "Price is extended 21.0% above the active reference; do not chase.": 1,
+            "Price is extended 12.0% above the active reference; do not chase.": 1,
+            "Price is extended 8.3% above the active reference; do not chase.": 1,
+            "Price is extended 11.1% above the active reference; do not chase.": 2,
+            "Price is extended 12.9% above the active reference; do not chase.": 2,
+            "Price is extended 10.0% above the active reference; do not chase.": 1,
+            "Price is extended 19.4% above the active reference; do not chase.": 1,
+            "Price is extended 13.8% above the active reference; do not chase.": 1,
+            "Price is extended 13.5% above the active reference; do not chase.": 1,
+            "Price is extended 14.9% above the active reference; do not chase.": 1,
+            "Price is extended 15.4% above the active reference; do not chase.": 1,
+            "Price is extended 14.8% above the active reference; do not chase.": 1,
+            "Price is extended 15.8% above the active reference; do not chase.": 1,
+            "Price is extended 9.2% above the active reference; do not chase.": 1,
+            "Price is extended 10.4% above the active reference; do not chase.": 2,
+            "Price is extended 9.6% above the active reference; do not chase.": 1,
+            "Price is extended 12.2% above the active reference; do not chase.": 1,
+            "Price is extended 13.3% above the active reference; do not chase.": 1,
+            "Price is extended 11.7% above the active reference; do not chase.": 2,
+            "Price is extended 11.4% above the active reference; do not chase.": 1,
+            "Price is extended 10.3% above the active reference; do not chase.": 2,
+            "Price is extended 9.3% above the active reference; do not chase.": 1,
+            "Price is extended 10.8% above the active reference; do not chase.": 1,
+            "Price is extended 15.6% above the active reference; do not chase.": 1,
+            "Price is extended 12.4% above the active reference; do not chase.": 1,
+            "Price is extended 11.0% above the active reference; do not chase.": 1,
+            "Price is extended 8.7% above the active reference; do not chase.": 1,
+            "Price is extended 12.6% above the active reference; do not chase.": 1,
+            "Price is extended 11.3% above the active reference; do not chase.": 1
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 5 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "UNAVAILABLE": {
+          "candidates": 0,
+          "eligible": 0,
+          "noTrade": 0,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {},
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        }
+      },
+      "caveat": "Setup outcomes are paper/replay evidence only; insufficient samples are not promotion claims."
     },
     "promotionChecks": {
       "minValidationTrades": {
@@ -6117,6 +6888,783 @@
     },
     "candidateCount": 11374,
     "filledCount": 10,
+    "priceActionEvidence": {
+      "mode": "PAPER_ONLY",
+      "minimumSample": 30,
+      "sampleAdequate": false,
+      "promotionEligible": false,
+      "setupTypes": {
+        "BREAKOUT_CONTINUATION": {
+          "candidates": 298,
+          "eligible": 287,
+          "noTrade": 11,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 10,
+            "Market context is bearish without confirmed relative strength.": 1
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "CONTROLLED_PULLBACK": {
+          "candidates": 311,
+          "eligible": 289,
+          "noTrade": 22,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 20,
+            "Market context is bearish without confirmed relative strength.": 2
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "FAILED_BREAK_RECLAIM": {
+          "candidates": 0,
+          "eligible": 0,
+          "noTrade": 0,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {},
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "EXTREME_MOVE_REVERSAL": {
+          "candidates": 7,
+          "eligible": 6,
+          "noTrade": 1,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {
+            "The stock is underperforming its comparison market.": 1
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "NO_CONFIRMED_SETUP": {
+          "candidates": 10758,
+          "eligible": 0,
+          "noTrade": 10758,
+          "outcomes": 10,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 10,
+            "winCount": 1,
+            "lossCount": 9,
+            "winRate": 0.1,
+            "avgWin": 755.64384,
+            "avgLoss": -145.02578666152772,
+            "netExpectancy": -54.95882399537494,
+            "profitFactor": 0.5789344681344148,
+            "totalPnl": -549.5882399537496,
+            "avgHoldBars": 4.7,
+            "turnover": 10,
+            "avgMae": -205.38890450000002,
+            "avgMfe": 211.56090949999992,
+            "worstMae": -451.1408300000002,
+            "maxDrawdown": 1041.3434638262497,
+            "exitReasons": {
+              "STOP": 9,
+              "RSI_EXIT": 1
+            },
+            "monthly": {
+              "2026-06": {
+                "count": 5,
+                "pnl": -737.2379038262497,
+                "wins": 0,
+                "winRate": 0
+              },
+              "2026-08": {
+                "count": 5,
+                "pnl": 187.64966387250027,
+                "wins": 1,
+                "winRate": 0.2
+              }
+            },
+            "byGroup": {
+              "stock": {
+                "count": 10,
+                "pnl": -549.5882399537496,
+                "wins": 1,
+                "losses": 9,
+                "winRate": 0.1,
+                "netExpectancy": -54.95882399537496,
+                "profitFactor": 0.5789344681344148,
+                "maxDrawdown": 1041.3434638262497
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 10,
+                "pnl": -549.5882399537496,
+                "wins": 1,
+                "losses": 9,
+                "winRate": 0.1,
+                "netExpectancy": -54.95882399537496,
+                "profitFactor": 0.5789344681344148,
+                "maxDrawdown": 1041.3434638262497
+              }
+            }
+          },
+          "noTradeReasons": {
+            "No confirmed compatible long-side price-action setup is present.": 8422,
+            "Price is extended 3.3% above the active reference; do not chase.": 70,
+            "Price is extended 3.2% above the active reference; do not chase.": 62,
+            "Price is extended 3.5% above the active reference; do not chase.": 54,
+            "Price is extended 4.0% above the active reference; do not chase.": 57,
+            "Price is extended 3.6% above the active reference; do not chase.": 63,
+            "Price is extended 3.4% above the active reference; do not chase.": 57,
+            "Price is extended 3.1% above the active reference; do not chase.": 75,
+            "Price is extended 3.9% above the active reference; do not chase.": 50,
+            "Price is extended 3.7% above the active reference; do not chase.": 57,
+            "The stock is underperforming its comparison market.": 893,
+            "Price is extended 3.8% above the active reference; do not chase.": 58,
+            "Price is extended 3.0% above the active reference; do not chase.": 39,
+            "Price is extended 4.4% above the active reference; do not chase.": 33,
+            "Price is extended 4.8% above the active reference; do not chase.": 18,
+            "Price is extended 4.3% above the active reference; do not chase.": 29,
+            "Price is extended 4.1% above the active reference; do not chase.": 51,
+            "Price is extended 4.6% above the active reference; do not chase.": 29,
+            "Price is extended 5.0% above the active reference; do not chase.": 21,
+            "Price is extended 4.9% above the active reference; do not chase.": 24,
+            "Price is extended 4.2% above the active reference; do not chase.": 26,
+            "Price is extended 5.2% above the active reference; do not chase.": 15,
+            "Price is extended 7.1% above the active reference; do not chase.": 6,
+            "Price is extended 7.0% above the active reference; do not chase.": 5,
+            "Price is extended 8.8% above the active reference; do not chase.": 1,
+            "Price is extended 7.8% above the active reference; do not chase.": 8,
+            "Price is extended 8.0% above the active reference; do not chase.": 4,
+            "Price is extended 5.8% above the active reference; do not chase.": 10,
+            "Price is extended 7.3% above the active reference; do not chase.": 6,
+            "Price is extended 5.1% above the active reference; do not chase.": 21,
+            "Price is extended 5.5% above the active reference; do not chase.": 24,
+            "Price is extended 4.5% above the active reference; do not chase.": 29,
+            "Price is extended 5.3% above the active reference; do not chase.": 7,
+            "Price is extended 4.7% above the active reference; do not chase.": 29,
+            "Price is extended 5.6% above the active reference; do not chase.": 14,
+            "Price is extended 6.3% above the active reference; do not chase.": 5,
+            "Price is extended 6.0% above the active reference; do not chase.": 9,
+            "Price is extended 7.4% above the active reference; do not chase.": 6,
+            "Price is extended 7.6% above the active reference; do not chase.": 8,
+            "Price is extended 5.7% above the active reference; do not chase.": 15,
+            "Price is extended 8.6% above the active reference; do not chase.": 4,
+            "Price is extended 5.4% above the active reference; do not chase.": 10,
+            "Price is extended 6.2% above the active reference; do not chase.": 10,
+            "Price is extended 8.2% above the active reference; do not chase.": 3,
+            "Price is extended 7.5% above the active reference; do not chase.": 8,
+            "Price is extended 9.8% above the active reference; do not chase.": 2,
+            "Market context is bearish without confirmed relative strength.": 118,
+            "Relative strength is unavailable; do not infer a long-side edge.": 22,
+            "Price is extended 22.6% above the active reference; do not chase.": 1,
+            "Price is extended 16.6% above the active reference; do not chase.": 2,
+            "Price is extended 17.9% above the active reference; do not chase.": 1,
+            "Price is extended 21.3% above the active reference; do not chase.": 1,
+            "Price is extended 20.6% above the active reference; do not chase.": 1,
+            "Price is extended 23.3% above the active reference; do not chase.": 1,
+            "Price is extended 5.9% above the active reference; do not chase.": 20,
+            "Price is extended 6.1% above the active reference; do not chase.": 13,
+            "Price is extended 6.8% above the active reference; do not chase.": 15,
+            "Price is extended 6.5% above the active reference; do not chase.": 4,
+            "Price is extended 6.7% above the active reference; do not chase.": 3,
+            "Price is extended 9.2% above the active reference; do not chase.": 2,
+            "Price is extended 14.9% above the active reference; do not chase.": 2,
+            "Price is extended 11.6% above the active reference; do not chase.": 1,
+            "Price is extended 10.0% above the active reference; do not chase.": 2,
+            "Price is extended 16.8% above the active reference; do not chase.": 1,
+            "Price is extended 14.5% above the active reference; do not chase.": 4,
+            "Price is extended 6.4% above the active reference; do not chase.": 16,
+            "Price is extended 7.7% above the active reference; do not chase.": 6,
+            "Price is extended 8.1% above the active reference; do not chase.": 6,
+            "Price is extended 6.6% above the active reference; do not chase.": 4,
+            "Price is extended 6.9% above the active reference; do not chase.": 1,
+            "Price is extended 7.2% above the active reference; do not chase.": 6,
+            "Price is extended 7.9% above the active reference; do not chase.": 4,
+            "Price is extended 8.4% above the active reference; do not chase.": 3,
+            "Price is extended 9.7% above the active reference; do not chase.": 1,
+            "Price is extended 9.1% above the active reference; do not chase.": 1,
+            "Price is extended 11.5% above the active reference; do not chase.": 1,
+            "Price is extended 17.2% above the active reference; do not chase.": 1,
+            "Price is extended 14.2% above the active reference; do not chase.": 1,
+            "Price is extended 9.0% above the active reference; do not chase.": 1,
+            "Price is extended 14.3% above the active reference; do not chase.": 1,
+            "Price is extended 10.5% above the active reference; do not chase.": 3,
+            "Price is extended 9.4% above the active reference; do not chase.": 2,
+            "Price is extended 21.6% above the active reference; do not chase.": 1,
+            "Price is extended 19.6% above the active reference; do not chase.": 1,
+            "Price is extended 18.3% above the active reference; do not chase.": 1,
+            "Price is extended 22.0% above the active reference; do not chase.": 2,
+            "Price is extended 12.1% above the active reference; do not chase.": 3,
+            "Price is extended 21.0% above the active reference; do not chase.": 1,
+            "Price is extended 12.0% above the active reference; do not chase.": 1,
+            "Price is extended 8.3% above the active reference; do not chase.": 1,
+            "Price is extended 11.1% above the active reference; do not chase.": 2,
+            "Price is extended 12.9% above the active reference; do not chase.": 2,
+            "Price is extended 19.4% above the active reference; do not chase.": 1,
+            "Price is extended 13.8% above the active reference; do not chase.": 1,
+            "Price is extended 13.5% above the active reference; do not chase.": 1,
+            "Price is extended 15.4% above the active reference; do not chase.": 1,
+            "Price is extended 14.8% above the active reference; do not chase.": 1,
+            "Price is extended 15.8% above the active reference; do not chase.": 1,
+            "Price is extended 10.4% above the active reference; do not chase.": 2,
+            "Price is extended 9.6% above the active reference; do not chase.": 1,
+            "Price is extended 12.2% above the active reference; do not chase.": 1,
+            "Price is extended 13.3% above the active reference; do not chase.": 1,
+            "Price is extended 11.7% above the active reference; do not chase.": 2,
+            "Price is extended 11.4% above the active reference; do not chase.": 1,
+            "Price is extended 10.3% above the active reference; do not chase.": 2,
+            "Price is extended 9.3% above the active reference; do not chase.": 1,
+            "Price is extended 10.8% above the active reference; do not chase.": 1,
+            "Price is extended 15.6% above the active reference; do not chase.": 1,
+            "Price is extended 12.4% above the active reference; do not chase.": 1,
+            "Price is extended 11.0% above the active reference; do not chase.": 1,
+            "Price is extended 8.7% above the active reference; do not chase.": 1,
+            "Price is extended 12.6% above the active reference; do not chase.": 1,
+            "Price is extended 11.3% above the active reference; do not chase.": 1
+          },
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 10 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        },
+        "UNAVAILABLE": {
+          "candidates": 0,
+          "eligible": 0,
+          "noTrade": 0,
+          "outcomes": 0,
+          "outcomeMetrics": {
+            "contractVersion": 2,
+            "n": 0,
+            "winCount": 0,
+            "lossCount": 0,
+            "winRate": 0,
+            "avgWin": 0,
+            "avgLoss": 0,
+            "netExpectancy": 0,
+            "profitFactor": 0,
+            "totalPnl": 0,
+            "avgHoldBars": 0,
+            "turnover": 0,
+            "avgMae": 0,
+            "avgMfe": 0,
+            "worstMae": 0,
+            "maxDrawdown": 0,
+            "exitReasons": {},
+            "monthly": {},
+            "byGroup": {
+              "stock": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "long_leveraged_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "inverse_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "other_etf": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            },
+            "byRegime": {
+              "BULLISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "BEARISH": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              },
+              "UNKNOWN": {
+                "count": 0,
+                "pnl": 0,
+                "wins": 0,
+                "losses": 0,
+                "winRate": 0,
+                "netExpectancy": 0,
+                "profitFactor": 0,
+                "maxDrawdown": 0
+              }
+            }
+          },
+          "noTradeReasons": {},
+          "sampleAdequate": false,
+          "promotionEligible": false,
+          "assessment": "INSUFFICIENT_SAMPLE",
+          "conclusion": "Only 0 closed paper outcomes; at least 30 are required before this setup can be evaluated."
+        }
+      },
+      "caveat": "Setup outcomes are paper/replay evidence only; insufficient samples are not promotion claims."
+    },
     "rejectionCounts": {
       "REL_VOL": 3487,
       "GAIN_PCT": 4910,
@@ -6137,6 +7685,6 @@
     "decisions": "reports/strategy-decisions-latest.jsonl.gz",
     "trades": "reports/strategy-trades-latest.csv",
     "inputSnapshot": "reports/data/strategy-ohlcv-c7398cab4f6dc426.json.gz",
-    "experiment": "reports/data/strategy-experiment-15a559f7d1a3.json"
+    "experiment": "reports/data/strategy-experiment-a043bd815c82.json"
   }
 }

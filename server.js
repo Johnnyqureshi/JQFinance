@@ -135,7 +135,10 @@ const {
   managePmhRunnerExit,
   preparePmhManagedCycle,
 } = require('./lib/opening-momentum-pmh');
-const { createPaperShadow } = require('./lib/paper-shadow');
+const {
+  annotateScannerRowsForShadow,
+  createPaperShadow,
+} = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 const {
   filledSellOrder,
@@ -2344,7 +2347,7 @@ app.post('/api/scanner-batch', async (req, res) => {
   // Feed the exact same observed rows into the order-free shadow comparator.
   // It records paired baseline/selected decisions and hypothetical outcomes;
   // this path has no broker client and cannot place an order.
-  paperShadow.ingest(out, { snapshotAt: Date.now() })
+  paperShadow.ingest(annotateScannerRowsForShadow(out), { snapshotAt: Date.now() })
     .catch(error => console.error('[PaperShadow]', error.message));
 });
 
@@ -5491,6 +5494,7 @@ app.get('/api/momentum/strategy-validation', requireAuth, (req, res) => {
       selectedName: walkForward.selectionAudit?.selectedName || 'baseline',
       testMetrics: walkForward.testResults?.metrics || {},
       testConfidenceInterval: walkForward.testResults?.ci || null,
+      priceActionEvidence: walkForward.priceActionEvidence || null,
       inputSha256: report.inputSnapshot?.inputSha256 || null,
       snapshotPath: report.inputSnapshot?.snapshotPath || null,
       experimentSha256: report.experiment?.experimentSha256 || null,

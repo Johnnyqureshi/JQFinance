@@ -28,6 +28,7 @@ const {
   buildOhlcvSeries,
   buildPointInTimeSignals,
   createConfig,
+  buildPriceActionOutcomeReport,
   replaySession,
   runWalkForwardValidation,
   runStopFreeDiagnostic,
@@ -481,6 +482,7 @@ function tradesCsv(trades) {
   const columns = [
     'symbol', 'entryTime', 'exitTime', 'entryPrice', 'exitPrice', 'stopPrice',
     'qty', 'notional', 'netPnl', 'netPnlPct', 'exitReason', 'holdBars', 'mae', 'mfe',
+    'priceActionSetupType', 'priceActionInvalidation',
   ];
   return [
     columns.join(','),
@@ -508,6 +510,10 @@ function markdownSummary(report) {
     .filter(([, check]) => !check.pass)
     .map(([name, check]) => `- ${name}: required ${check.required}; observed ${check.actual}`)
     .join('\n') || '- None';
+  const priceAction = report.walkForward.priceActionEvidence || {};
+  const priceActionRows = Object.entries(priceAction.setupTypes || {})
+    .map(([setupType, item]) => `| ${setupType} | ${item.candidates} | ${item.eligible} | ${item.outcomes} | ${pct(item.outcomeMetrics?.winRate)} | ${money(item.outcomeMetrics?.netExpectancy)} | ${item.assessment} |`)
+    .join('\n') || '| No recorded setup evidence | 0 | 0 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |';
   return `# Strategy Validation Report
 
 Generated: ${report.generatedAt}
@@ -532,6 +538,16 @@ No live-order settings or execution code were changed.
 | Development | ${report.walkForward.splitAudit.devSessions.length} | ${b.dev.n} | ${pct(b.dev.winRate)} | ${money(b.dev.netExpectancy)} | ${b.dev.profitFactor} | ${money(b.dev.maxDrawdown)} |
 | Validation | ${report.walkForward.splitAudit.valSessions.length} | ${b.val.n} | ${pct(b.val.winRate)} | ${money(b.val.netExpectancy)} | ${b.val.profitFactor} | ${money(b.val.maxDrawdown)} |
 | Untouched test | ${report.walkForward.splitAudit.testSessions.length} | ${test.n} | ${pct(test.winRate)} | ${money(test.netExpectancy)} | ${test.profitFactor} | ${money(test.maxDrawdown)} |
+
+## Compatible price-action evidence
+
+Minimum closed outcomes required per setup: **${priceAction.minimumSample ?? 30}**
+
+| Setup type | Candidates | Eligible | Closed outcomes | Win rate | Net expectancy | Assessment |
+|---|---:|---:|---:|---:|---:|---|
+${priceActionRows}
+
+This setup comparison is descriptive paper/replay evidence only. It cannot promote a setup or change live execution, and every setup below the minimum remains labelled **INSUFFICIENT_SAMPLE**.
 
 ## Promotion checks that failed
 
@@ -858,6 +874,11 @@ async function main() {
       metrics: fullBaseline.metrics,
       candidateCount: fullBaseline.candidates.length,
       filledCount: fullBaseline.trades.length,
+      priceActionEvidence: buildPriceActionOutcomeReport(
+        fullBaseline.candidates,
+        fullBaseline.trades,
+        baseConfig,
+      ),
       rejectionCounts: fullBaseline.candidates.reduce((counts, candidate) => {
         const key = candidate.rejectCode || candidate.status;
         counts[key] = (counts[key] || 0) + 1;

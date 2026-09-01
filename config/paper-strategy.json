@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "studyId": "15a559f7d1a3",
-  "experimentSha256": "15a559f7d1a3ad21949944d90e5ea019f6d17665d875b219621fb96fff4d23dc",
-  "experimentPath": "reports/data/strategy-experiment-15a559f7d1a3.json",
-  "generatedAt": "2026-08-22T16:05:23.086Z",
+  "studyId": "a043bd815c82",
+  "experimentSha256": "a043bd815c82a731eac51b328296bd46c16d1ea8e5ac676463f2bc14086cb701",
+  "experimentPath": "reports/data/strategy-experiment-a043bd815c82.json",
+  "generatedAt": "2026-09-01T08:06:16.936Z",
   "mode": "PAPER_ONLY",
   "liveExecutionAllowed": false,
   "status": "NO_PROMOTION",

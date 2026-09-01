@@ -39,6 +39,7 @@ const {
   evaluateCandidate,
   replaySession,
   computeMetrics,
+  buildPriceActionOutcomeReport,
   bootstrapCI,
   ablationRun,
   buildPointInTimeSignals,
@@ -1375,6 +1376,67 @@ test('signal outside hours allowed when enforceMarketHours=false', () => {
   const rec   = evaluateCandidate(
     makeSignal('WF', 0, { tMs: weekendMs }), bars, createConfig({ enforceMarketHours: false }), makeState());
   assert.notStrictEqual(rec.rejectCode, 'OUTSIDE_MARKET_HOURS');
+});
+
+console.log('\nSection 22 — price-action paper evidence\n');
+
+test('candidate replay records setup, invalidation, and no-trade reason without changing gate status', () => {
+  const bars = makeBars('PA', 30);
+  const signal = makeSignal('PA', 20, {
+    priceAction: {
+      strategy: 'smb-compatible-long-v1',
+      direction: 'LONG_ONLY',
+      status: 'SETUP CONFIRMED — WAIT',
+      eligible: false,
+      setup: { type: 'CONTROLLED_PULLBACK', label: 'Controlled pullback' },
+      invalidation: 9.25,
+      reasons: ['Relative strength is unavailable.'],
+    },
+  });
+  const rec = evaluateCandidate(
+    signal,
+    bars,
+    createConfig({ enforceMarketHours: false }),
+    makeState(),
+  );
+  assert.strictEqual(rec.priceActionSetupType, 'CONTROLLED_PULLBACK');
+  assert.strictEqual(rec.priceActionInvalidation, 9.25);
+  assert.strictEqual(rec.priceActionNoTradeReason, 'Relative strength is unavailable.');
+  assert.notStrictEqual(rec.rejectCode, 'PRICE_ACTION');
+});
+
+test('setup outcome report stays descriptive and labels insufficient samples', () => {
+  const cfg = createConfig({ promotionMinTestTrades: 3 });
+  const report = buildPriceActionOutcomeReport([
+    {
+      priceAction: {
+        setupType: 'BREAKOUT_CONTINUATION',
+        eligible: true,
+        noTradeReason: null,
+      },
+    },
+  ], [{
+    symbol: 'PA',
+    netPnl: 10,
+    win: true,
+    entryTime: Date.now(),
+    exitTime: Date.now() + 300_000,
+    qty: 1,
+    notional: 10,
+    mae: 0,
+    mfe: 1,
+    holdBars: 1,
+    marketRegime: 'BULLISH',
+    priceActionSetupType: 'BREAKOUT_CONTINUATION',
+  }], cfg);
+  const breakout = report.setupTypes.BREAKOUT_CONTINUATION;
+  assert.strictEqual(report.mode, 'PAPER_ONLY');
+  assert.strictEqual(report.promotionEligible, false);
+  assert.strictEqual(breakout.outcomes, 1);
+  assert.strictEqual(breakout.assessment, 'INSUFFICIENT_SAMPLE');
+  assert.strictEqual(breakout.promotionEligible, false);
+  assert.strictEqual(report.setupTypes.FAILED_BREAK_RECLAIM.outcomes, 0);
+  assert.strictEqual(report.setupTypes.EXTREME_MOVE_REVERSAL.assessment, 'INSUFFICIENT_SAMPLE');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

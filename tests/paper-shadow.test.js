@@ -7,9 +7,23 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const { createConfig } = require('../lib/strategy-validator');
-const { createPaperShadow } = require('../lib/paper-shadow');
+const {
+  annotateScannerRowsForShadow,
+  createPaperShadow,
+} = require('../lib/paper-shadow');
 
 async function main() {
+  const productionShapedRow = annotateScannerRowsForShadow([{
+    sym: 'MSFT',
+    price: 10,
+    change: 1,
+    relVol: 2,
+    volume: 100_000,
+    rsi14: 50,
+  }])[0];
+  assert.strictEqual(productionShapedRow.priceActionEvidence.setupType, 'UNAVAILABLE');
+  assert.match(productionShapedRow.priceActionEvidence.noTradeReason, /completed 5-minute/i);
+
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'paper-shadow-'));
   fs.mkdirSync(path.join(rootDir, 'config'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'reports', 'data'), { recursive: true });
@@ -69,6 +83,17 @@ async function main() {
     relVol: 12,
     volume: 2_000_000,
     rsi14: 50,
+    priceAction: {
+      strategy: 'smb-compatible-long-v1',
+      direction: 'LONG_ONLY',
+      status: 'TRADE ELIGIBLE',
+      eligible: true,
+      setup: { type: 'BREAKOUT_CONTINUATION', label: 'Breakout continuation' },
+      invalidation: 9.5,
+      target: 11,
+      riskReward: 2,
+      reasons: [],
+    },
   };
   const t0 = Date.parse('2026-08-20T14:00:00.000Z'); // 10:00 ET
   await shadow.ingest([row], { snapshotAt: t0 });
@@ -88,10 +113,41 @@ async function main() {
   assert.strictEqual(summary.selected.outcomes.metrics.n, 0);
   assert.strictEqual(summary.baseline.outcomes.metrics.byRegime.BULLISH.count, 1);
   assert(summary.baseline.outcomes.metrics.totalPnl > 0);
+  const breakoutEvidence = summary.priceActionEvidence.baseline
+    .setupTypes.BREAKOUT_CONTINUATION;
+  assert.strictEqual(summary.priceActionEvidence.promotionEligible, false);
+  assert.strictEqual(breakoutEvidence.candidates, 3);
+  assert.strictEqual(breakoutEvidence.outcomes, 1);
+  assert.strictEqual(breakoutEvidence.assessment, 'INSUFFICIENT_SAMPLE');
+  assert.strictEqual(breakoutEvidence.promotionEligible, false);
 
-  const decisions = db.prepare('SELECT COUNT(*) AS n FROM paper_shadow_decisions').get().n;
+  await shadow.ingest([{
+    ...row,
+    sym: 'MSFT',
+    change: 1,
+    priceAction: undefined,
+    priceActionEvidence: productionShapedRow.priceActionEvidence,
+  }], { snapshotAt: t0 });
+  const unavailable = db.prepare(`
+    SELECT price_action_setup_type, price_action_invalidation,
+           price_action_no_trade_reason
+    FROM paper_shadow_decisions
+    WHERE symbol='MSFT' AND config_name='baseline'
+  `).get();
+  assert.strictEqual(unavailable.price_action_setup_type, 'UNAVAILABLE');
+  assert.strictEqual(unavailable.price_action_invalidation, null);
+  assert.match(unavailable.price_action_no_trade_reason, /unavailable/i);
+
+  const decisionRow = db.prepare(`
+    SELECT COUNT(*) AS n, MIN(price_action_setup_type) AS setup_type,
+           MIN(price_action_invalidation) AS invalidation
+    FROM paper_shadow_decisions
+  `).get();
+  const decisions = decisionRow.n;
   const positions = db.prepare('SELECT COUNT(*) AS n FROM paper_shadow_positions').get().n;
-  assert.strictEqual(decisions, 6);
+  assert.strictEqual(decisions, 8);
+  assert.strictEqual(decisionRow.setup_type, 'BREAKOUT_CONTINUATION');
+  assert.strictEqual(decisionRow.invalidation, 9.5);
   assert.strictEqual(positions, 1);
 
   const paperPath = path.join(rootDir, 'config', 'paper-strategy.json');

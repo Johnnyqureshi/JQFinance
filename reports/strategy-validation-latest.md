@@ -1,11 +1,11 @@
 # Strategy Validation Report
 
-Generated: 2026-08-22T16:05:23.086Z
-Study: 15a559f7d1a3
+Generated: 2026-09-01T08:06:16.936Z
+Study: a043bd815c82
 Mode: **PAPER_ONLY**
 Input SHA-256: `c7398cab4f6dc4268d8c21df803e4d5b35026c1e7a2b06b027148336c97a18cb`
-Experiment SHA-256: `15a559f7d1a3ad21949944d90e5ea019f6d17665d875b219621fb96fff4d23dc`
-Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-15a559f7d1a3.json`
+Experiment SHA-256: `a043bd815c82a731eac51b328296bd46c16d1ea8e5ac676463f2bc14086cb701`
+Exact replay: `node scripts/validate-strategy.js --experiment reports/data/strategy-experiment-a043bd815c82.json`
 
 ## Decision
 
@@ -22,6 +22,21 @@ No live-order settings or execution code were changed.
 | Development | 45 | 5 | 0.0% | $-147.45 | 0 | $737.24 |
 | Validation | 15 | 0 | 0.0% | $0.00 | 0 | $0.00 |
 | Untouched test | 15 | 5 | 20.0% | $38.88 | 1.3324307699038227 | $444.54 |
+
+## Compatible price-action evidence
+
+Minimum closed outcomes required per setup: **30**
+
+| Setup type | Candidates | Eligible | Closed outcomes | Win rate | Net expectancy | Assessment |
+|---|---:|---:|---:|---:|---:|---|
+| BREAKOUT_CONTINUATION | 75 | 70 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |
+| CONTROLLED_PULLBACK | 77 | 71 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |
+| FAILED_BREAK_RECLAIM | 0 | 0 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |
+| EXTREME_MOVE_REVERSAL | 5 | 4 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |
+| NO_CONFIRMED_SETUP | 2937 | 0 | 5 | 20.0% | $38.88 | INSUFFICIENT_SAMPLE |
+| UNAVAILABLE | 0 | 0 | 0 | 0.0% | $0.00 | INSUFFICIENT_SAMPLE |
+
+This setup comparison is descriptive paper/replay evidence only. It cannot promote a setup or change live execution, and every setup below the minimum remains labelled **INSUFFICIENT_SAMPLE**.
 
 ## Promotion checks that failed
 

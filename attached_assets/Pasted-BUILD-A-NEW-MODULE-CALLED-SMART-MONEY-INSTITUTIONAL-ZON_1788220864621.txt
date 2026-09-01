@@ -1,0 +1,1061 @@
+BUILD A NEW MODULE CALLED:
+
+SMART MONEY / INSTITUTIONAL ZONE ENGINE
+
+IMPORTANT:
+This module is ONLY for the existing Search/Stock Analysis experience.
+
+Do not modify trading execution, automated trading bots, order placement, portfolio management, authentication, or unrelated pages.
+
+The purpose of this module is to algorithmically identify and visualize high-probability price zones similar to:
+
+- Institutional Buy Zones
+- Institutional Sell Zones
+- Smart Money Zones
+- Supply Zones
+- Demand Zones
+- Support/Resistance
+- Liquidity Zones
+- Swing Highs
+- Swing Lows
+- Breakout/Breakdown Zones
+- Reclaimed Zones
+
+The system must NOT claim that we can literally see institutional orders or know exactly where institutions traded.
+
+Use language such as:
+
+"Algorithmically detected demand zone"
+
+"Potential institutional accumulation zone"
+
+"Potential institutional distribution zone"
+
+"Smart Money Confluence Zone"
+
+"High-confidence demand area"
+
+These are analytical estimates based on market data.
+
+==================================================
+1. CORE OBJECTIVE
+==================================================
+
+When a user searches a stock such as:
+
+NVDA
+TSLA
+SMCI
+SNDK
+AMD
+CRWV
+SPY
+QQQ
+
+the system should analyze historical OHLCV data and automatically detect important price zones.
+
+The user should be able to select:
+
+1D
+1H
+4H
+1W
+1M
+
+and the zones should recalculate appropriately for that timeframe.
+
+The module should work across multiple timeframes.
+
+==================================================
+2. DATA REQUIRED
+==================================================
+
+Use the existing market-data infrastructure whenever possible.
+
+Required:
+
+- Open
+- High
+- Low
+- Close
+- Volume
+- Timestamp
+
+Calculate:
+
+- ATR
+- Relative Volume
+- VWAP where appropriate
+- Moving averages
+- RSI
+- Volume profile if data permits
+- Market structure
+- Swing highs
+- Swing lows
+
+Do NOT invent missing data.
+
+If volume is unavailable, lower confidence in volume-based signals and clearly indicate this.
+
+==================================================
+3. SWING HIGH / SWING LOW ENGINE
+==================================================
+
+Identify meaningful swing points algorithmically.
+
+Use configurable pivot logic rather than simply identifying every local high/low.
+
+Example:
+
+Swing High:
+
+High is greater than the highs of N candles on both sides.
+
+Swing Low:
+
+Low is lower than the lows of N candles on both sides.
+
+Allow the lookback to adapt based on timeframe and ATR.
+
+Classify swings:
+
+Minor
+Intermediate
+Major
+
+A major swing should require greater price displacement and/or structural importance.
+
+Display important levels on the chart.
+
+Example:
+
+MAJOR SWING HIGH
+$499.44
+
+MAJOR SWING LOW
+$215.47
+
+==================================================
+4. DEMAND / INSTITUTIONAL BUY ZONE ENGINE
+==================================================
+
+Identify potential demand zones by looking for areas from which substantial bullish displacement originated.
+
+A candidate demand zone can be created when:
+
+A) Price consolidates or bases
+
+AND
+
+B) Strong bullish displacement follows
+
+AND
+
+C) The displacement exceeds a configurable ATR threshold
+
+AND/OR
+
+D) Relative volume is elevated
+
+AND/OR
+
+E) Market structure shifts bullish
+
+AND/OR
+
+F) Price sweeps a previous low/liquidity level before reversing
+
+AND/OR
+
+G) An imbalance/FVG is created during the move
+
+AND/OR
+
+H) The area produces significant subsequent upside movement.
+
+Possible zone construction:
+
+For a bullish order-block style zone:
+
+Zone High =
+highest relevant candle/base high before displacement
+
+Zone Low =
+lowest relevant candle/base low before displacement
+
+Do not automatically label every bullish candle an institutional zone.
+
+Require confluence.
+
+==================================================
+5. SUPPLY / INSTITUTIONAL SELL ZONE ENGINE
+==================================================
+
+Mirror the demand-zone logic.
+
+Identify areas from which substantial bearish displacement originated.
+
+Conditions may include:
+
+- Consolidation/base
+- Strong bearish displacement
+- Elevated relative volume
+- Bearish market structure shift
+- Liquidity sweep above a prior high
+- Fair Value Gap
+- Large ATR expansion
+- Significant subsequent downside movement
+
+Create a price range rather than a single line.
+
+Label:
+
+POTENTIAL SUPPLY ZONE
+
+rather than claiming:
+
+INSTITUTIONAL SELL ZONE
+
+unless the confidence threshold is extremely high.
+
+==================================================
+6. SMART MONEY CONFLUENCE ENGINE
+==================================================
+
+Create a separate score that combines multiple signals.
+
+For every candidate zone calculate:
+
+ZONE SCORE = 0–100
+
+Possible scoring model:
+
+Market Structure: 15 points
+Displacement: 15 points
+Relative Volume: 10 points
+Liquidity Sweep: 15 points
+Fair Value Gap: 10 points
+Swing Confluence: 10 points
+Repeated Reaction: 10 points
+ATR Expansion: 5 points
+Multi-Timeframe Confluence: 10 points
+
+Total = 100
+
+Make the weighting configurable.
+
+Example:
+
+92–100:
+VERY HIGH CONFIDENCE
+
+80–91:
+HIGH CONFIDENCE
+
+65–79:
+MODERATE CONFIDENCE
+
+50–64:
+WEAK
+
+Below 50:
+DO NOT DISPLAY AS A PRIMARY ZONE
+
+==================================================
+7. LIQUIDITY SWEEPS
+==================================================
+
+Detect potential liquidity sweeps.
+
+Bullish liquidity sweep:
+
+Price trades below a significant prior swing low and then closes back above it.
+
+Bearish liquidity sweep:
+
+Price trades above a significant prior swing high and then closes back below it.
+
+Record:
+
+- Swept level
+- Sweep candle
+- Volume
+- Reversal strength
+- Subsequent displacement
+
+Use this as a major confidence factor for zone detection.
+
+==================================================
+8. FAIR VALUE GAPS / IMBALANCES
+==================================================
+
+Detect three-candle imbalance structures.
+
+Bullish FVG:
+
+Current candle low > high of candle two candles earlier.
+
+Bearish FVG:
+
+Current candle high < low of candle two candles earlier.
+
+Record:
+
+- FVG high
+- FVG low
+- Size
+- ATR-normalized size
+- Whether filled
+- Percentage filled
+- Whether price reacted from it
+
+FVGs should contribute to zone confidence.
+
+Do not display every tiny FVG.
+
+Filter by minimum size relative to ATR.
+
+==================================================
+9. DISPLACEMENT ENGINE
+==================================================
+
+Detect unusually strong directional moves.
+
+Calculate:
+
+Candle range / ATR
+
+and
+
+Move magnitude / ATR
+
+Example:
+
+If a bullish move is > 1.5 ATR from a base and has elevated volume, increase demand-zone confidence.
+
+Create configurable thresholds.
+
+==================================================
+10. RELATIVE VOLUME
+==================================================
+
+Calculate:
+
+Current Volume / Average Volume
+
+Example:
+
+RVOL = 2.4
+
+means volume is approximately 2.4x the reference average.
+
+Use relative volume as evidence, not proof of institutional activity.
+
+Examples:
+
+RVOL < 1:
+little confirmation
+
+RVOL 1–1.5:
+normal
+
+RVOL 1.5–2:
+strong
+
+RVOL > 2:
+very strong
+
+Make thresholds configurable.
+
+==================================================
+11. ZONE FRESHNESS
+==================================================
+
+Every zone must have a freshness score.
+
+A newly created zone should receive a higher score.
+
+Each subsequent test should be tracked.
+
+Track:
+
+- Creation date
+- Number of touches
+- First reaction
+- Most recent reaction
+- Whether zone was partially mitigated
+- Whether zone was fully broken
+
+Important:
+
+Do not assume more touches = stronger.
+
+Repeated tests can weaken a zone.
+
+==================================================
+12. ZONE INVALIDATION
+==================================================
+
+A zone must be marked invalid when price decisively breaks through it.
+
+Define invalidation using:
+
+- Candle close beyond zone
+- ATR-adjusted penetration
+- Volume confirmation
+
+Avoid invalidating based on tiny intraday wicks.
+
+Example:
+
+Demand zone:
+
+$300–$320
+
+If price briefly trades to $298 but closes back above $300:
+
+DO NOT automatically invalidate.
+
+If price closes at $285 with strong volume:
+
+ZONE INVALIDATED.
+
+==================================================
+13. MULTI-TIMEFRAME CONFLUENCE
+==================================================
+
+This is extremely important.
+
+Analyze:
+
+1W
+1D
+4H
+1H
+
+when data is available.
+
+A weekly demand zone overlapping with a daily demand zone should receive a major confidence boost.
+
+Example:
+
+WEEKLY DEMAND
+$300–$325
+
+DAILY DEMAND
+$308–$320
+
+OVERLAP:
+
+$308–$320
+
+Display:
+
+MULTI-TIMEFRAME CONFLUENCE
+
+Confidence:
+94/100
+
+This should be considered a much stronger zone than a single-timeframe zone.
+
+==================================================
+14. ZONE MERGING
+==================================================
+
+Do not display 15 overlapping rectangles.
+
+If multiple zones overlap or are extremely close based on ATR distance:
+
+merge them.
+
+Create:
+
+PRIMARY ZONE
+
+and preserve the underlying evidence.
+
+Example:
+
+$302–$318
+
+Sources:
+
+Weekly Demand
+Daily Demand
+Bullish FVG
+Liquidity Sweep
+High RVOL
+
+==================================================
+15. SUPPORT / RESISTANCE
+==================================================
+
+Detect important horizontal levels separately from zones.
+
+Use:
+
+- Major swing highs
+- Major swing lows
+- Repeated reactions
+- Breakouts
+- Breakdowns
+- Previous highs/lows
+- High-volume areas
+
+Differentiate:
+
+LEVEL
+
+from
+
+ZONE.
+
+A level is a price.
+
+A zone is a range.
+
+==================================================
+16. BREAKOUT / RECLAIM LOGIC
+==================================================
+
+Detect when price:
+
+Breaks resistance
+
+Then returns to test it
+
+Then holds above it.
+
+Label:
+
+RESISTANCE RECLAIMED
+
+Potential new support.
+
+Likewise:
+
+Support breaks
+
+Price retests from below
+
+Fails
+
+Label:
+
+SUPPORT LOST
+
+Potential new resistance.
+
+These events should affect zone scoring.
+
+==================================================
+17. CHART VISUALIZATION
+==================================================
+
+On the Search page chart, draw zones as translucent rectangles.
+
+Demand:
+
+blue/green family
+
+Supply:
+
+red/orange family
+
+Smart Money Confluence:
+
+purple
+
+Liquidity:
+
+neutral dashed levels
+
+Swing High:
+
+horizontal level
+
+Swing Low:
+
+horizontal level
+
+Keep the chart clean.
+
+Do NOT cover the entire chart with boxes.
+
+Only display the highest-quality zones by default.
+
+Allow:
+
+SHOW ALL ZONES
+
+toggle.
+
+==================================================
+18. ZONE LABELS
+==================================================
+
+Use labels such as:
+
+HIGH-CONFIDENCE DEMAND
+HIGH-CONFIDENCE SUPPLY
+SMART MONEY CONFLUENCE
+LIQUIDITY SWEEP
+FAIR VALUE GAP
+MAJOR SWING HIGH
+MAJOR SWING LOW
+RESISTANCE
+SUPPORT
+RECLAIMED SUPPORT
+RECLAIMED RESISTANCE
+
+Avoid making unsupported claims such as:
+
+"Institutions bought exactly here."
+
+==================================================
+19. ZONE DETAILS PANEL
+==================================================
+
+When the user clicks a zone, show:
+
+ZONE TYPE
+
+Demand
+
+PRICE RANGE
+
+$300–$322
+
+ZONE SCORE
+
+91/100
+
+CONFIDENCE
+
+HIGH
+
+TIMEFRAME
+
+1W
+
+CONFLUENCE
+
+✓ Bullish displacement
+✓ High relative volume
+✓ Liquidity sweep
+✓ Market structure shift
+✓ Bullish FVG
+✓ Major swing low
+✓ Daily/weekly overlap
+
+STATUS
+
+ACTIVE
+
+TESTS
+
+2
+
+CREATED
+
+DATE
+
+INVALIDATION
+
+Below $XXX
+
+Then:
+
+WHY THIS ZONE MATTERS
+
+Generate a concise explanation from the actual detected signals.
+
+==================================================
+20. ENTRY / RISK INFORMATION
+==================================================
+
+Do NOT automatically generate a trade order.
+
+Instead provide analytical reference levels:
+
+Zone high
+Zone midpoint
+Zone low
+Invalidation level
+Nearest resistance
+Nearest demand
+Nearest supply
+
+Example:
+
+Demand:
+$300–$322
+
+Midpoint:
+$311
+
+Invalidation:
+$292
+
+Nearest resistance:
+$367
+
+This allows the user to make their own decision.
+
+==================================================
+21. RANGE ANALYSIS
+==================================================
+
+Add a "Current Range" module.
+
+Identify:
+
+External Swing High
+External Swing Low
+
+Then calculate:
+
+Range High
+Range Low
+50% equilibrium
+Upper half
+Lower half
+
+Determine whether current price is:
+
+DISCOUNT
+
+EQUILIBRIUM
+
+PREMIUM
+
+For example:
+
+Range:
+$215–$499
+
+Current price:
+$368
+
+Equilibrium:
+$357
+
+Current location:
+PREMIUM
+
+Use this together with demand/supply zones.
+
+==================================================
+22. LIQUIDITY TARGETS
+==================================================
+
+Identify potential liquidity pools around:
+
+- Previous major highs
+- Previous major lows
+- Equal highs
+- Equal lows
+- Major swing points
+
+Display:
+
+BUY-SIDE LIQUIDITY
+
+and
+
+SELL-SIDE LIQUIDITY
+
+Do not claim these represent actual visible orders.
+
+They are areas where stop/order concentration may plausibly exist.
+
+==================================================
+23. SEARCH PAGE SUMMARY
+==================================================
+
+At the top of the analysis, create:
+
+SMART MONEY MAP
+
+Current Price:
+$XXX
+
+Nearest Demand:
+$XXX–$XXX
+
+Nearest Supply:
+$XXX–$XXX
+
+Major Resistance:
+$XXX
+
+Major Support:
+$XXX
+
+Liquidity Above:
+$XXX
+
+Liquidity Below:
+$XXX
+
+Current Range Position:
+PREMIUM / EQUILIBRIUM / DISCOUNT
+
+Overall Zone Bias:
+
+BULLISH
+NEUTRAL
+BEARISH
+
+Confidence:
+XX/100
+
+==================================================
+24. EXAMPLE FOR TSLA
+==================================================
+
+For a chart similar to the provided example, the system might identify:
+
+EXTERNAL SWING HIGH
+$499.44
+
+WEEKLY SWING HIGH
+$432.85
+
+POTENTIAL SUPPLY
+approximately $380–$410
+
+POTENTIAL DEMAND
+approximately $300–$322
+
+SMART MONEY CONFLUENCE
+approximately $260–$280
+
+EXTERNAL SWING LOW
+$215.47
+
+IMPORTANT:
+
+These exact levels are ONLY an example based on the provided chart.
+
+Do NOT hardcode them.
+
+The algorithm must calculate them from current historical market data.
+
+==================================================
+25. AI INTERPRETATION
+==================================================
+
+After calculating the zones, provide a concise AI-generated explanation.
+
+Example:
+
+"Price is currently trading above the major weekly demand area but below the prior weekly swing high. The strongest detected demand sits around $300–$322, while supply is concentrated around $380–$410. A sustained move above $410 would improve the structural picture, while a decisive breakdown through $300 would weaken the bullish thesis."
+
+The AI must only reference levels actually calculated by the engine.
+
+Never hallucinate levels.
+
+==================================================
+26. HISTORICAL BACKTESTING
+==================================================
+
+Build an internal validation system.
+
+For every detected zone, track what happened afterward.
+
+Measure:
+
+- Maximum favorable excursion
+- Maximum adverse excursion
+- Percentage of zones respected
+- Average reaction
+- Average time until reaction
+- Failure rate
+
+Eventually display:
+
+ZONE PERFORMANCE
+
+Demand zones:
+78% respected
+
+Supply zones:
+73% respected
+
+IMPORTANT:
+
+Only display these statistics after sufficient historical sample size.
+
+Do not create fake statistics.
+
+==================================================
+27. DATABASE / STORAGE
+==================================================
+
+If necessary, create a lightweight structure to store:
+
+symbol
+timeframe
+zone_type
+zone_high
+zone_low
+score
+confidence
+created_at
+status
+touch_count
+invalidation
+confluence_factors
+
+Avoid unnecessary database changes.
+
+==================================================
+28. PERFORMANCE
+==================================================
+
+Zone calculations can be computationally expensive.
+
+Do NOT calculate everything on every frontend render.
+
+Use backend processing/caching where appropriate.
+
+Cache historical calculations.
+
+Recalculate when:
+
+- Symbol changes
+- Timeframe changes
+- New market data arrives
+- User manually refreshes
+
+==================================================
+29. ERROR HANDLING
+==================================================
+
+If insufficient historical data exists:
+
+"Insufficient historical data to reliably identify zones."
+
+Do not fabricate zones.
+
+If volume is unavailable:
+
+"Volume unavailable — volume-based confidence reduced."
+
+==================================================
+30. USER CONTROLS
+==================================================
+
+Add controls:
+
+TIMEFRAME
+
+1H | 4H | 1D | 1W | 1M
+
+ZONE TYPES
+
+☑ Demand
+☑ Supply
+☑ Smart Money
+☑ Liquidity
+☑ FVG
+☑ Support/Resistance
+
+Additional:
+
+Show only high-confidence zones
+
+Show all zones
+
+Multi-timeframe confluence
+
+==================================================
+31. DESIGN
+==================================================
+
+Make this feel like a professional institutional market-analysis tool.
+
+Avoid a cluttered TradingView-style mess.
+
+The chart should remain readable.
+
+Use subtle translucent zones.
+
+Use clean typography.
+
+Provide confidence badges.
+
+Provide expandable explanations.
+
+Make it excellent on desktop AND mobile.
+
+==================================================
+32. IMPORTANT ARCHITECTURE REQUIREMENT
+==================================================
+
+Separate the actual mathematical detection engine from the UI.
+
+Create reusable functions/services such as:
+
+detectSwingPoints()
+detectDemandZones()
+detectSupplyZones()
+detectLiquiditySweeps()
+detectFairValueGaps()
+detectDisplacement()
+calculateRelativeVolume()
+calculateZoneScore()
+calculateMultiTimeframeConfluence()
+calculateRange()
+calculateLiquidityLevels()
+validateZones()
+
+The UI should consume structured results from this engine.
+
+This will allow the same engine to eventually power:
+
+- Stock Search
+- AI analysis
+- Screener
+- Alerts
+- Trading signals
+
+without duplicating logic.
+
+==================================================
+33. FINAL REQUIREMENT
+==================================================
+
+After implementation, test the module on:
+
+TSLA
+NVDA
+SMCI
+SNDK
+AMD
+SPY
+QQQ
+BTC
+
+Test:
+
+1H
+4H
+1D
+1W
+
+Verify:
+
+- Zones are dynamically calculated
+- No hardcoded levels
+- No fabricated data
+- Zones invalidate correctly
+- Overlapping zones merge
+- Multi-timeframe confluence works
+- Chart remains readable
+- Mobile UI works
+- API failures don't crash Search
+- AI explanation only references actual calculated values
+
+DO NOT MODIFY ANYTHING OUTSIDE THE SEARCH PAGE AND THE BACKEND SERVICES REQUIRED TO POWER THIS MODULE.

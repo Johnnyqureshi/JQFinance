@@ -195,6 +195,20 @@
 <!-- HOME PAGE — unified analysis workspace -->
 <div class="page active" id="page-home">
 
+  <!-- Market-wide breaking news; hidden unless a fresh, verified headline qualifies. -->
+  <section class="market-alert-bar" id="marketAlertBar" aria-label="Breaking market news" aria-live="polite">
+    <div class="market-alert-inner">
+      <div class="market-alert-kicker">
+        <span class="market-alert-bolt" aria-hidden="true">⚡</span>
+        <strong>BREAKING</strong>
+      </div>
+      <div class="market-alert-viewport" id="marketAlertViewport">
+        <div class="market-alert-track" id="marketAlertTrack"></div>
+      </div>
+      <button class="market-alert-close" id="marketAlertClose" type="button" aria-label="Dismiss breaking market news">×</button>
+    </div>
+  </section>
+
   <!-- Always-visible search bar -->
   <div class="home-bar">
     <div class="home-search-wrap">

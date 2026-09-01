@@ -426,6 +426,101 @@ html[data-theme="light"] .theme-toggle-thumb { transform:translateX(18px); backg
 #page-home { display:none; flex-direction:column; }
 #page-home.active { display:flex; }
 
+/* ── Breaking market-news band ─────────────────────────────────────────────── */
+.market-alert-bar {
+  display:none;
+  width:100%;
+  background:#d6212e;
+  color:#fff;
+  border-bottom:1px solid rgba(255,255,255,.16);
+  overflow:hidden;
+}
+.market-alert-bar.is-visible { display:block; }
+.market-alert-inner {
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:0 28px;
+}
+.market-alert-kicker {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
+  padding-right:16px;
+  border-right:1px solid rgba(255,255,255,.35);
+  font-size:12px;
+  letter-spacing:.08em;
+}
+.market-alert-bolt { font-size:16px; line-height:1; }
+.market-alert-viewport {
+  min-width:0;
+  flex:1;
+  overflow:hidden;
+}
+.market-alert-track {
+  display:flex;
+  width:max-content;
+  align-items:center;
+}
+.market-alert-group {
+  display:flex;
+  align-items:center;
+  gap:24px;
+  flex-shrink:0;
+  white-space:nowrap;
+}
+.market-alert-group-copy { display:none; }
+.market-alert-track.is-scrollable .market-alert-group-copy { display:flex; }
+.market-alert-track.is-scrollable {
+  animation:market-alert-scroll 34s linear infinite;
+}
+.market-alert-item {
+  display:inline-flex;
+  align-items:baseline;
+  gap:12px;
+  color:#fff;
+  text-decoration:none;
+}
+.market-alert-item:hover .market-alert-headline,
+.market-alert-item:focus-visible .market-alert-headline { text-decoration:underline; }
+.market-alert-headline {
+  font-size:14px;
+  font-weight:700;
+}
+.market-alert-source {
+  color:rgba(255,255,255,.72);
+  font-size:11px;
+}
+.market-alert-separator {
+  color:rgba(255,255,255,.62);
+  font-size:18px;
+}
+.market-alert-close {
+  width:28px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  flex-shrink:0;
+  border:0;
+  border-radius:50%;
+  background:transparent;
+  color:#fff;
+  cursor:pointer;
+  font-size:27px;
+  font-weight:300;
+  line-height:1;
+}
+.market-alert-close:hover,
+.market-alert-close:focus-visible { background:rgba(0,0,0,.18); }
+@keyframes market-alert-scroll {
+  from { transform:translateX(0); }
+  to { transform:translateX(-50%); }
+}
+.market-alert-track.is-scrollable:hover,
+.market-alert-track.is-scrollable:focus-within { animation-play-state:paused; }
+
 .home-bar {
   padding:20px 28px 0;
   position:relative;
@@ -3147,7 +3242,19 @@ option { background: var(--card); }
   .home-empty { padding: 40px 16px; }
   .home-empty-title { font-size: 22px; }
   .home-empty-sub   { font-size: 13px; }
+  .market-alert-inner { min-height:42px; gap:10px; padding:0 14px; }
+  .market-alert-kicker { gap:5px; padding-right:10px; font-size:10px; }
+  .market-alert-bolt { font-size:14px; }
+  .market-alert-headline { font-size:12px; }
+  .market-alert-source { font-size:10px; }
+  .market-alert-group { gap:16px; }
+  .market-alert-item { gap:8px; }
   .home-bar { padding: 12px 14px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .market-alert-track.is-scrollable { animation:none; overflow-x:auto; }
+  .market-alert-track.is-scrollable .market-alert-group-copy { display:none; }
 }
 
 /* ── JQF Agent Widget ─────────────────────────────────────────────────────── */

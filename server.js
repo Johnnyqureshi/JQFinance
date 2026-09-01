@@ -29,6 +29,7 @@ const {
   buildCatalystEvent,
   dedupeEvents,
 } = require('./lib/catalyst-intel');
+const { selectMarketAlerts } = require('./lib/market-alerts');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
 const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
@@ -2239,6 +2240,88 @@ app.get('/api/news/:symbol', async (req, res) => {
     }));
     res.json({ news, source: 'yahoo' });
   } catch { res.json({ news: [], source: 'none' }); }
+});
+
+// ── GET /api/market-alerts ─────────────────────────────────────────────────────
+// The banner is deliberately narrower than the News tab: only fresh headlines
+// that contain both market context and an explicit move/event are eligible.
+const MARKET_ALERT_CACHE_MS = 3 * 60 * 1000;
+let marketAlertCache = null;
+let marketAlertInflight = null;
+
+app.get('/api/market-alerts', requireAuth, async (req, res) => {
+  if (marketAlertCache && Date.now() - marketAlertCache.at < MARKET_ALERT_CACHE_MS) {
+    return res.json({ ...marketAlertCache.data, cached: true });
+  }
+  if (marketAlertInflight) {
+    try { return res.json(await marketAlertInflight); }
+    catch { return res.json({ ok: true, alerts: [], unavailable: true }); }
+  }
+
+  marketAlertInflight = (async () => {
+    const articles = [];
+    const sources = [];
+
+    try {
+      const url = 'https://query1.finance.yahoo.com/v1/finance/search?q=stock%20market&newsCount=30&quotesCount=0';
+      const response = await fetch(url, { headers: YH, signal: AbortSignal.timeout(7000) });
+      if (!response.ok) throw new Error(`Yahoo Finance HTTP ${response.status}`);
+      const data = await response.json();
+      for (const article of data?.news || []) {
+        articles.push({
+          title: article.title,
+          url: article.link,
+          publisher: article.publisher,
+          providerPublishTime: article.providerPublishTime,
+        });
+      }
+      sources.push({ name: 'Yahoo Finance', status: 'live' });
+    } catch (error) {
+      sources.push({ name: 'Yahoo Finance', status: 'unavailable' });
+      console.warn(`[MarketAlerts] Yahoo Finance unavailable: ${error.message}`);
+    }
+
+    if (NEWS_KEY) {
+      try {
+        const from = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+        const query = '(stock market OR futures OR "bond yields" OR inflation OR tariffs OR "Federal Reserve" OR oil)';
+        const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&from=${encodeURIComponent(from)}&language=en&sortBy=publishedAt&pageSize=50&apiKey=${NEWS_KEY}`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!response.ok) throw new Error(`NewsAPI HTTP ${response.status}`);
+        const data = await response.json();
+        for (const article of data?.articles || []) {
+          articles.push({
+            title: article.title,
+            description: article.description,
+            url: article.url,
+            source: article.source?.name,
+            publishedAt: article.publishedAt,
+          });
+        }
+        sources.push({ name: 'NewsAPI', status: 'live' });
+      } catch (error) {
+        sources.push({ name: 'NewsAPI', status: 'unavailable' });
+        console.warn(`[MarketAlerts] NewsAPI unavailable: ${error.message}`);
+      }
+    }
+
+    const alerts = selectMarketAlerts(articles);
+    return {
+      ok: true,
+      alerts,
+      checkedAt: new Date().toISOString(),
+      sources,
+      unavailable: sources.length > 0 && sources.every(source => source.status !== 'live'),
+    };
+  })();
+
+  try {
+    const data = await marketAlertInflight;
+    marketAlertCache = { at: Date.now(), data };
+    return res.json(data);
+  } finally {
+    marketAlertInflight = null;
+  }
 });
 
 // ── GET /api/stock/:symbol ─────────────────────────────────────────────────────

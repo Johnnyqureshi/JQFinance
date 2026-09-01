@@ -89,6 +89,13 @@ const api = {
   async news(sym) {
     try { const r = await fetch(`/api/news/${sym}`); const d = await r.json(); return d.news || []; } catch { return []; }
   },
+  async marketAlerts() {
+    try {
+      const r = await fetch('/api/market-alerts', { credentials: 'include' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  },
   async search(q) {
     try { const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`); return r.ok ? r.json() : []; } catch { return []; }
   },
@@ -128,6 +135,102 @@ window.searchContext = (() => {
     return request;
   }
   return { load, invalidate: symbol => cache.delete(String(symbol || '').toUpperCase()) };
+})();
+
+// ── Breaking market-news band ─────────────────────────────────────────────────
+const marketAlerts = (() => {
+  const DISMISSED_KEY = 'jqf-dismissed-market-alerts';
+  const POLL_MS = 5 * 60 * 1000;
+  let timer = null;
+  let currentFingerprint = '';
+  let requestInFlight = false;
+
+  function readDismissed() {
+    try { return localStorage.getItem(DISMISSED_KEY) || ''; } catch { return ''; }
+  }
+
+  function setDismissed(value) {
+    try { localStorage.setItem(DISMISSED_KEY, value); } catch {}
+  }
+
+  function hide() {
+    const bar = $('marketAlertBar');
+    if (bar) {
+      bar.classList.remove('is-visible');
+      bar.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function render(alerts) {
+    const bar = $('marketAlertBar');
+    const viewport = $('marketAlertViewport');
+    const track = $('marketAlertTrack');
+    if (!bar || !viewport || !track || !alerts?.length) {
+      hide();
+      return;
+    }
+
+    currentFingerprint = alerts.map(alert => alert.id).join('|');
+    if (readDismissed() === currentFingerprint) {
+      hide();
+      return;
+    }
+
+    const items = alerts.map(alert => {
+      const safeUrl = /^https?:\/\//i.test(String(alert.url || '')) ? alert.url : '';
+      const content = `
+        <span class="market-alert-headline">${escapeHtml(alert.headline)}</span>
+        <span class="market-alert-source">${escapeHtml(alert.source || 'Market news')} · ${timeAgo(alert.publishedAt)}</span>`;
+      return safeUrl
+        ? `<a class="market-alert-item" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${content}</a>`
+        : `<span class="market-alert-item">${content}</span>`;
+    }).join('<span class="market-alert-separator" aria-hidden="true">•</span>');
+
+    const group = `<div class="market-alert-group">${items}</div>`;
+    track.innerHTML = `${group}<div class="market-alert-group market-alert-group-copy" aria-hidden="true">${items}</div>`;
+    bar.classList.add('is-visible');
+    bar.setAttribute('aria-hidden', 'false');
+
+    requestAnimationFrame(() => {
+      const groups = track.querySelectorAll('.market-alert-group');
+      const needsScroll = groups.length > 1 && groups[0].scrollWidth > viewport.clientWidth;
+      track.classList.toggle('is-scrollable', needsScroll);
+      if (!needsScroll) groups[1]?.remove();
+    });
+  }
+
+  async function refresh() {
+    if (requestInFlight) return;
+    requestInFlight = true;
+    try {
+      const data = await api.marketAlerts();
+      render(data?.alerts || []);
+    } finally {
+      requestInFlight = false;
+    }
+  }
+
+  function start() {
+    clearInterval(timer);
+    refresh();
+    timer = setInterval(refresh, POLL_MS);
+  }
+
+  function stop() {
+    clearInterval(timer);
+    timer = null;
+    currentFingerprint = '';
+    hide();
+  }
+
+  function setup() {
+    $('marketAlertClose')?.addEventListener('click', () => {
+      if (currentFingerprint) setDismissed(currentFingerprint);
+      hide();
+    });
+  }
+
+  return { setup, start, stop };
 })();
 
 function renderStockHeader(sym, snap) {
@@ -1989,6 +2092,7 @@ function showApp(user) {
   $('navUsername').textContent = user.username;
   window.jqfAgent?.show();
   futuresTracker.init();
+  marketAlerts.start();
   // Silently restore Alpaca connection state on every login/page-load —
   // credentials live in the DB and must not require a manual tab click to reconnect.
   alpacaTrader.checkCredentials();
@@ -1998,6 +2102,7 @@ function showAuthOverlay() {
   $('authOverlay').classList.remove('auth-hidden');
   $('navUser').style.display = 'none';
   window.jqfAgent?.hide();
+  marketAlerts.stop();
   // Stop the trading desk poll and clear connection state cleanly on logout
   alpacaTrader.reset();
   // Pause scanner auto-refresh so it doesn't fire API calls while logged out
@@ -2086,6 +2191,7 @@ function setupAuthUI() {
 document.addEventListener('DOMContentLoaded', async () => {
   setupThemeToggle();
   setupAuthUI();
+  marketAlerts.setup();
 
   // Check if already logged in
   const me = await authAPI.me();

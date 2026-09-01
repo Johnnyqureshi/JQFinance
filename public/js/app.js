@@ -1027,49 +1027,6 @@ function valuationRow(label, key, value, formatted) {
     </div>`;
 }
 
-function analystTradeLevels(analysis, currentPrice) {
-  const price = Number(currentPrice);
-  const source = analysis?.displayLevels || analysis?.levels || {};
-  const nearest = (levels, direction) => (Array.isArray(levels) ? levels : [])
-    .map(level => Number(level?.price))
-    .filter(level => Number.isFinite(level) && level > 0
-      && Number.isFinite(price)
-      && (direction === 'below' ? level < price : level > price))
-    .sort((a, b) => direction === 'below' ? b - a : a - b)[0] ?? null;
-  return {
-    buy: nearest(source.support, 'below'),
-    sell: nearest(source.resistance, 'above'),
-  };
-}
-
-function analystTradeLevelsHtml(analysis, currentPrice) {
-  const { buy, sell } = analystTradeLevels(analysis, currentPrice);
-  const ready = buy != null && sell != null;
-  return `
-    <section class="analyst-trade-levels" aria-label="Verified buy and sell levels">
-      <div class="analyst-trade-levels-head">
-        <div>
-          <span class="analyst-trade-kicker">PRICE LEVELS</span>
-          <strong>Buy &amp; sell reference</strong>
-        </div>
-        <span class="analyst-trade-status ${ready ? 'ready' : 'waiting'}">${ready ? 'VERIFIED' : 'WAITING'}</span>
-      </div>
-      <div class="analyst-trade-grid">
-        <div class="analyst-trade-level buy">
-          <span class="analyst-trade-label"><i></i>BUY AT</span>
-          <strong>${buy == null ? '—' : '$' + fmt(buy)}</strong>
-          <small>${buy == null ? 'Verified support unavailable' : 'Nearest completed-session support'}</small>
-        </div>
-        <div class="analyst-trade-level sell">
-          <span class="analyst-trade-label"><i></i>SELL AT</span>
-          <strong>${sell == null ? '—' : '$' + fmt(sell)}</strong>
-          <small>${sell == null ? 'Verified resistance unavailable' : 'Nearest completed-session resistance'}</small>
-        </div>
-      </div>
-      <p class="analyst-trade-note">Deterministic levels from completed daily OHLC data. Supporting research context, not a guaranteed execution price.</p>
-    </section>`;
-}
-
 function renderValuation(val) {
   if (!val) return '<p class="no-data">Valuation data unavailable.</p>';
 
@@ -1097,7 +1054,7 @@ function renderValuation(val) {
     </div>`;
 }
 
-function renderAnalysts(fmp, price, val, analysis) {
+function renderAnalysts(fmp, price, val) {
   const r  = fmp?.ratings || {};
   const pt = fmp?.priceTarget;
   const up = fmp?.upgrades || [];
@@ -1153,7 +1110,6 @@ function renderAnalysts(fmp, price, val, analysis) {
           <div class="score-card"><div class="score-card-title">Analyst Consensus</div>${consensusHtml}</div>
           <div>${ptCard(pt,price)}</div>
         </div>
-        ${analystTradeLevelsHtml(analysis, price)}
         <div class="upgrades-card"><div class="upgrades-title">Recent Rating Changes</div>${upgradesHtml}</div>
       </div>
       <div class="analysts-side">

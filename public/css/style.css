@@ -633,8 +633,16 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
   background:var(--card); border:1px solid var(--border);
   border-radius:var(--radius); padding:20px; margin-bottom:20px;
 }
-.chart-card h3 { font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--t3); font-weight:600; margin-bottom:14px; }
+.chart-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.chart-card h3 { font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--t3); font-weight:600; margin:0; }
 .chart-card canvas { width:100%; display:block; }
+.chart-smart-legend { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; color:var(--t2); font-size:9px; }
+.chart-smart-legend span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.chart-legend-dot { width:8px; height:8px; border-radius:3px; display:inline-block; }
+.chart-legend-dot.buy { background:rgba(29,214,163,.9); box-shadow:0 0 7px rgba(29,214,163,.55); }
+.chart-legend-dot.sell { background:rgba(232,69,69,.9); box-shadow:0 0 7px rgba(232,69,69,.55); }
+.chart-legend-line { width:12px; height:0; border-top:2px dashed var(--gold); display:inline-block; }
+@media(max-width:600px){.chart-card-head{align-items:flex-start;flex-direction:column;gap:6px}.chart-smart-legend{justify-content:flex-start}}
 
 /* ── Historical Forecast (Search workspace; read-only historical evidence) ─── */
 .forecast-panel { margin-top:24px; }

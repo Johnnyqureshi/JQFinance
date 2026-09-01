@@ -212,15 +212,23 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     const demand = zone.type === 'DEMAND';
     const top = yForPrice(Math.min(max, Number(zone.high)));
     const bottom = yForPrice(Math.max(min, Number(zone.low)));
-    ctx.fillStyle = demand ? 'rgba(29,214,163,.12)' : 'rgba(232,69,69,.12)';
-    ctx.strokeStyle = demand ? 'rgba(29,214,163,.48)' : 'rgba(232,69,69,.48)';
+    ctx.fillStyle = demand ? 'rgba(29,214,163,.19)' : 'rgba(232,69,69,.19)';
+    ctx.strokeStyle = demand ? 'rgba(29,214,163,.72)' : 'rgba(232,69,69,.72)';
     ctx.lineWidth = 1;
     ctx.fillRect(pad.l, top, cw, Math.max(2,bottom-top));
     ctx.strokeRect(pad.l, top, cw, Math.max(2,bottom-top));
     ctx.fillStyle = demand ? '#1dd6a3' : '#f87171';
     ctx.font = '600 9px Inter';
     ctx.textAlign = 'left';
-    ctx.fillText(`${zone.type} ${zone.score||0}`, pad.l+5, Math.max(pad.t+10,top+10));
+    const zoneText = `${demand ? 'BUYERS' : 'SELLERS'} ${zone.score || 0}`;
+    const labelWidth = ctx.measureText(zoneText).width + 12;
+    const labelY = Math.max(pad.t + 4, Math.min(h-pad.b-17, top + 4));
+    ctx.fillStyle = demand ? 'rgba(3,44,36,.92)' : 'rgba(69,10,10,.92)';
+    ctx.beginPath();
+    ctx.roundRect(pad.l + 5, labelY, labelWidth, 14, 4);
+    ctx.fill();
+    ctx.fillStyle = demand ? '#6ee7c4' : '#fda4af';
+    ctx.fillText(zoneText, pad.l + 11, labelY + 10);
   });
   const drawReference = (price, color, dash, label) => {
     const value = Number(price);
@@ -262,6 +270,16 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
   const lx=pad.l+(prices.length-1)*sx, ly=pad.t+ch-((prices.at(-1)-min)/range)*ch;
   ctx.beginPath(); ctx.arc(lx,ly,4,0,Math.PI*2);
   ctx.fillStyle=color; ctx.fill();
+}
+
+let activeOverviewChart = null;
+
+function chartLegendHtml() {
+  return `<div class="chart-smart-legend" aria-label="Smart Money chart legend">
+    <span><i class="chart-legend-dot buy"></i>Buyer zone</span>
+    <span><i class="chart-legend-dot sell"></i>Seller zone</span>
+    <span><i class="chart-legend-line liq"></i>Liquidity</span>
+  </div>`;
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -406,7 +424,7 @@ function renderOverview(snap, bars, up) {
     '<div class="stat-cell"><label>Day Low</label><span id="ov-low"></span></div>' +
     '<div class="stat-cell"><label>Volume</label><span id="ov-vol"></span></div>' +
     '<div class="stat-cell"><label>Avg Volume</label><span id="ov-avgvol"></span></div>' +
-    '</div><div class="chart-card"><h3>Intraday \u2014 Last 48 hours</h3>' +
+    `</div><div class="chart-card"><div class="chart-card-head"><h3>Intraday \u2014 Last 48 hours</h3>${chartLegendHtml()}</div>` +
     '<canvas id="ovCanvas" style="height:220px"></canvas></div></div>' +
     '<div id="scorePanel"></div></div>';
   $('ov-open').textContent   = '$' + fmt(p.open);
@@ -416,7 +434,11 @@ function renderOverview(snap, bars, up) {
   $('ov-vol').textContent    = fmtV(p.volume);
   $('ov-avgvol').textContent = fmtV(p.avgVolume);
   const canvas = $('ovCanvas');
-  if (canvas && bars?.bars?.length >= 2) requestAnimationFrame(() => drawChart(canvas, bars.bars, color, 220));
+  activeOverviewChart = canvas && bars?.bars?.length >= 2
+    ? { canvas, bars: bars.bars, color, showAll: false }
+    : null;
+  if (activeOverviewChart) requestAnimationFrame(() =>
+    drawChart(canvas, bars.bars, color, 220, window.searchSmartMoney, false));
   // async score panel
   loadScorePanel(state.stockData?.fmp, p.price||0);
 }
@@ -699,7 +721,7 @@ function renderChart(sym, initBars, up) {
       <button class="tf-btn sm-chart-toggle active" id="smChartToggle" type="button">Zones on</button>
       <button class="tf-btn sm-chart-all" id="smChartAll" type="button">Primary zones</button>
     </div>
-    <div class="chart-card"><canvas id="mainCanvas" style="height:340px"></canvas></div>`;
+    <div class="chart-card"><div class="chart-card-head"><h3>Price action with potential zones</h3>${chartLegendHtml()}</div><canvas id="mainCanvas" style="height:340px"></canvas></div>`;
   const canvas = $('mainCanvas');
   activeSearchChart = { sym, canvas, bars: initBars?.bars || [], color, zones: true, showAll: false };
   const redraw = () => drawChart(canvas, activeSearchChart.bars, activeSearchChart.color, 340,
@@ -739,6 +761,10 @@ function renderChart(sym, initBars, up) {
 
 window.updateSearchSmartMoney = data => {
   window.searchSmartMoney = data || null;
+  if (activeOverviewChart) {
+    drawChart(activeOverviewChart.canvas, activeOverviewChart.bars, activeOverviewChart.color, 220,
+      data, activeOverviewChart.showAll);
+  }
   if (!activeSearchChart || !document.getElementById('tab-chart')?.classList.contains('active')) return;
   if (Array.isArray(data?.chartBars) && data.chartBars.length >= 2) {
     activeSearchChart.bars = data.chartBars;

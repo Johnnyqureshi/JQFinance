@@ -135,17 +135,19 @@ test('exposes the next completed-session support and resistance rungs in order',
   assert.ok(result.displayLevels.support[0].price > result.displayLevels.support[1].price);
 });
 
-test('does not invent a next level when only one side level is available', () => {
+test('projects ordered next levels when price is outside completed-session structure', () => {
   const result = buildSearchLevels({
     dailyBars: bars(20),
     currentPrice: 1000,
     marketState: 'CLOSED',
     nowMs: Date.parse('2026-08-21T12:00:00Z'),
   });
-  assert.equal(result.levels.nextResistance, null);
-  assert.equal(result.levels.nextSupport, null);
-  assert.deepEqual(result.displayLevels.resistance, []);
-  assert.deepEqual(result.displayLevels.support, []);
+  assert.equal(result.displayLevels.support.length, 2);
+  assert.equal(result.displayLevels.resistance.length, 2);
+  assert.ok(result.displayLevels.support[0].price > result.displayLevels.support[1].price);
+  assert.ok(result.displayLevels.support[0].price < result.displayLevels.currentPrice);
+  assert.ok(result.displayLevels.resistance[0].price > result.displayLevels.currentPrice);
+  assert.ok(result.displayLevels.resistance[1].price > result.displayLevels.resistance[0].price);
 });
 
 test('forming candle changes cannot repaint regular-session levels', () => {
@@ -163,16 +165,16 @@ test('forming candle changes cannot repaint regular-session levels', () => {
   assert.deepEqual(first.dailyPivots, second.dailyPivots);
 });
 
-test('withholds ATR-buffered levels when completed history is insufficient', () => {
+test('uses prior-session range levels when ATR history is shorter than 14 sessions', () => {
   const result = buildSearchLevels({
     dailyBars: bars(14),
     currentPrice: 114.5,
     marketState: 'CLOSED',
     nowMs: Date.parse('2026-08-15T22:00:00Z'),
   });
-  assert.equal(result.levels, null);
-  assert.equal(result.displayLevels, null);
   assert.equal(result.atr, null);
   assert.ok(result.dailyPivots);
-  assert.match(result.unavailableReason, /15 completed sessions/);
+  assert.equal(result.displayLevels.volatilitySource, 'prior-session range');
+  assert.equal(result.displayLevels.support.length, 2);
+  assert.equal(result.displayLevels.resistance.length, 2);
 });

@@ -53,6 +53,33 @@ const base = {
 {
   const result = buildSearchTradeLevels({
     ...base,
+    confluence: {
+      ...base.confluence,
+      levels: {
+        criticalSupport: { price: 90, label: 'Alternative technical support' },
+        criticalResistance: { price: 110, label: 'Alternative technical resistance' },
+      },
+    },
+    fibonacci: {
+      ...base.fibonacci,
+      nearestSupport: { price: 90.1 },
+      nearestResistance: { price: 109.9 },
+    },
+    smartMoney: {
+      ...base.smartMoney,
+      nearest: {
+        demand: { midpoint: 90.2, confidence: 'HIGH' },
+        supply: { midpoint: 109.8, confidence: 'HIGH' },
+      },
+    },
+  });
+  assert.strictEqual(result.buy.price, 96);
+  assert.strictEqual(result.sell.price, 104);
+}
+
+{
+  const result = buildSearchTradeLevels({
+    ...base,
     confluence: { ...base.confluence, dataQuality: { ...base.confluence.dataQuality, fresh: false } },
   });
   assert.strictEqual(result.status, 'PROVISIONAL');

@@ -115,11 +115,12 @@ const gamePlan = (() => {
     const type = zone?.type === 'SUPPLY' ? 'supply' : 'demand';
     const timeframes = Array.isArray(zone?.timeframe) ? zone.timeframe : [zone?.timeframe].filter(Boolean);
     const factors = (zone?.factors || []).map(item => `<span>${esc(item)}</span>`).join('');
+    const confidence = String(zone?.confidence || 'LOW').toLowerCase();
     return `<details class="sm-zone ${type}${index >= 3 ? ' sm-zone-extra' : ''}">
       <summary>
-        <span class="sm-zone-type">${esc(zone?.type || 'ZONE')}</span>
+        <span class="sm-zone-type">${type === 'demand' ? 'BUYERS' : 'SELLERS'}</span>
         <b>$${fmt(zone?.low)}–$${fmt(zone?.high)}</b>
-        <span class="sm-zone-score">${esc(zone?.confidence || 'LOW')} · ${zone?.score ?? 0}/100</span>
+        <span class="sm-zone-score ${confidence}">${esc(zone?.confidence || 'LOW')} · ${zone?.score ?? 0}/100</span>
         <small>${esc(timeframes.join(' + ') || '—')} · ${esc(zone?.status || 'UNAVAILABLE')}</small>
       </summary>
       <div class="sm-zone-detail">
@@ -159,24 +160,32 @@ const gamePlan = (() => {
     const resistance = data.supportResistance?.resistance;
     const openFvgs = (data.fairValueGaps || []).filter(gap => gap.status !== 'FILLED');
     const latestSweep = data.liquiditySweeps?.[0];
+    const confidence = Math.max(0, Math.min(100, Number(data.confidence) || 0));
+    const rangePct = data.range?.positionPct == null ? null : Math.max(0, Math.min(100, Number(data.range.positionPct)));
+    const biasCopy = data.bias === 'DEMAND-LED' ? 'Buyers have stronger nearby zones' : data.bias === 'SUPPLY-LED' ? 'Sellers have stronger nearby zones' : 'Neither side clearly leads';
     return `<section class="sm-map ${String(data.bias || '').toLowerCase()}" id="smartMoneyMap">
       <div class="sm-head">
         <div>
-          <span class="gp-sec-title">Smart Money Map</span>
-          <span class="gp-sec-note">algorithmically detected potential zones · supporting context only</span>
+          <span class="gp-sec-title"><i class="sm-title-dot"></i>Smart Money Map</span>
+          <span class="gp-sec-note">Potential buyer and seller areas · supporting context only</span>
         </div>
         <div class="sm-controls">
           <div class="sm-timeframes" aria-label="Smart Money timeframe">${tfButtons}</div>
           <button type="button" class="sm-recalculate" data-sm-recalculate title="Recalculate from completed bars">Recalculate</button>
         </div>
       </div>
+      <div class="sm-beginner-guide">
+        <div class="sm-guide-icon">?</div>
+        <div><strong>How to read this</strong><p><b class="sm-key-buy">Green</b> marks possible buyer support. <b class="sm-key-sell">Red</b> marks possible seller resistance. Stronger color means more measured evidence—not a trade instruction.</p></div>
+        <div class="sm-legend"><span><i class="sm-dot buy"></i>Demand = buyers</span><span><i class="sm-dot sell"></i>Supply = sellers</span></div>
+      </div>
       <div class="sm-summary">
-        <div><span>Current price</span><b>$${fmt(data.currentPrice)}</b><small>${esc(data.status)} · ${esc(data.timeframe)}</small></div>
-        <div class="demand"><span>Nearest demand</span><b>${demand ? '$' + fmt(demand.low) + '–$' + fmt(demand.high) : 'Unavailable'}</b><small>${demand ? demand.score + '/100 · ' + demand.status : 'No qualifying zone'}</small></div>
-        <div class="supply"><span>Nearest supply</span><b>${supply ? '$' + fmt(supply.low) + '–$' + fmt(supply.high) : 'Unavailable'}</b><small>${supply ? supply.score + '/100 · ' + supply.status : 'No qualifying zone'}</small></div>
-        <div><span>Range position</span><b>${data.range?.positionPct == null ? 'Unavailable' : fmt(data.range.positionPct, 0) + '%'}</b><small>${esc(data.range?.label || 'UNAVAILABLE')}</small></div>
-        <div><span>Zone bias</span><b class="${data.bias === 'DEMAND-LED' ? 'bull' : data.bias === 'SUPPLY-LED' ? 'bear' : 'neut'}">${esc(data.bias)}</b><small>Context, not a second signal</small></div>
-        <div><span>Map confidence</span><b>${data.confidence ?? 0}/100</b><small>${esc(data.dataQuality?.history)} HISTORY</small></div>
+        <div class="sm-card-price"><span>Current price</span><b>$${fmt(data.currentPrice)}</b><small><em class="sm-status ${String(data.status).toLowerCase()}">${esc(data.status)}</em> · ${esc(data.timeframe)}</small></div>
+        <div class="demand"><span>Demand <em>(buyers)</em></span><b>${demand ? '$' + fmt(demand.low) + '–$' + fmt(demand.high) : 'Unavailable'}</b><small>${demand ? demand.score + '/100 · ' + demand.status : 'No qualifying zone'}</small></div>
+        <div class="supply"><span>Supply <em>(sellers)</em></span><b>${supply ? '$' + fmt(supply.low) + '–$' + fmt(supply.high) : 'Unavailable'}</b><small>${supply ? supply.score + '/100 · ' + supply.status : 'No qualifying zone'}</small></div>
+        <div class="sm-card-range"><span>Where price sits</span><b>${rangePct == null ? 'Unavailable' : fmt(rangePct, 0) + '%'}</b><div class="sm-range-bar" aria-label="Price range position"><i style="width:${rangePct ?? 0}%"></i></div><small>${esc(data.range?.label || 'UNAVAILABLE')} of recent range</small></div>
+        <div class="sm-card-bias"><span>Zone bias</span><b class="${data.bias === 'DEMAND-LED' ? 'bull' : data.bias === 'SUPPLY-LED' ? 'bear' : 'neut'}">${data.bias === 'DEMAND-LED' ? 'BUYER-LEANING' : data.bias === 'SUPPLY-LED' ? 'SELLER-LEANING' : 'BALANCED'}</b><small>${esc(biasCopy)}</small></div>
+        <div class="sm-card-confidence"><span>Map confidence</span><b>${confidence}/100</b><div class="sm-confidence-bar" aria-label="Map confidence"><i style="width:${confidence}%"></i></div><small>${esc(data.dataQuality?.history)} history · context only</small></div>
       </div>
       <div class="sm-level-grid">
         <div><span>Major swing high</span><b>${data.structure?.swingHigh?.price == null ? 'Unavailable' : '$' + fmt(data.structure.swingHigh.price)}</b><small>${esc(data.structure?.swingHigh?.t || '')}</small></div>

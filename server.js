@@ -180,6 +180,16 @@ const {
   CANDLESTICK_WATCHLIST,
   nextCandlestickWatchlistBatch,
 } = require('./lib/candlestick-watchlist');
+const {
+  DEFAULT_SETTINGS: MONEY_PRINTER_DEFAULTS,
+  sanitizeMoneyPrinterSettings,
+  evaluateMoneyPrinterPlan,
+  executablePrice: moneyPrinterExecutablePrice,
+  buildMoneyPrinterBracket,
+  moneyPrinterClientOrderId,
+  finalMoneyPrinterAuthorization,
+  ownedBracketProtection,
+} = require('./lib/money-printer-policy');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -308,6 +318,87 @@ db.exec(`
     PRIMARY KEY (account_id, symbol)
   );
 `);
+
+// The Money Printer has a dedicated broker identity and a small, explicit
+// settings surface. Search trigger thresholds remain server-owned.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS money_printer_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    live_armed INTEGER NOT NULL DEFAULT 0,
+    max_position_dollars REAL NOT NULL DEFAULT 1000,
+    take_profit_pct REAL NOT NULL DEFAULT 3,
+    stop_loss_pct REAL NOT NULL DEFAULT 1.5,
+    revision INTEGER NOT NULL DEFAULT 0,
+    last_cycle_at TEXT,
+    last_cycle_status TEXT,
+    last_cycle_reason TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS money_printer_alpaca_creds (
+    user_id INTEGER NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
+    api_key TEXT NOT NULL,
+    api_secret TEXT NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
+    account_id TEXT,
+    PRIMARY KEY (user_id,mode),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_money_printer_alpaca_account
+    ON money_printer_alpaca_creds(user_id,account_id)
+    WHERE account_id IS NOT NULL AND api_key <> '__disconnected__';
+  CREATE TABLE IF NOT EXISTS money_printer_alpaca_active_mode (
+    user_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'paper' CHECK(mode IN ('paper','live')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS money_printer_candidates (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(user_id,symbol),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS money_printer_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('LONG','SHORT')),
+    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
+    account_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'entry_intent',
+    requested_shares INTEGER NOT NULL,
+    filled_shares REAL NOT NULL DEFAULT 0,
+    entry_price REAL NOT NULL,
+    target_price REAL NOT NULL,
+    stop_price REAL NOT NULL,
+    entry_client_order_id TEXT NOT NULL,
+    entry_order_id TEXT,
+    setup_json TEXT NOT NULL DEFAULT '{}',
+    broker_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT,
+    UNIQUE(user_id,entry_client_order_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_money_printer_open
+    ON money_printer_trades(user_id,symbol,status);
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_money_printer_active_symbol
+    ON money_printer_trades(user_id,symbol)
+    WHERE status NOT IN ('closed','canceled','rejected','expired');
+  CREATE TABLE IF NOT EXISTS money_printer_execution_leases (
+    user_id INTEGER PRIMARY KEY,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+try { db.prepare('ALTER TABLE money_printer_settings ADD COLUMN revision INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
 
 // PMH snapshots are frozen per user/symbol/session. Settings are separate from
 // Momentum Trader so changing one strategy cannot silently change the other.
@@ -868,6 +959,9 @@ for (const seed of [
   `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
    SELECT account_id,user_id,'options',mode FROM options_alpaca_creds
    WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
+  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
+   SELECT account_id,user_id,'money-printer',mode FROM money_printer_alpaca_creds
+   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
 ]) {
   try { db.prepare(seed).run(); } catch (error) {
     console.error('[Alpaca] Broker ownership registry seed failed:', error.message);
@@ -888,6 +982,9 @@ const legacyBrokerAssignments = db.prepare(`
       WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
     UNION ALL
     SELECT account_id,user_id,'options' AS scope FROM options_alpaca_creds
+      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
+    UNION ALL
+    SELECT account_id,user_id,'money-printer' AS scope FROM money_printer_alpaca_creds
       WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
   )
 `).all();
@@ -1654,9 +1751,8 @@ async function yfChartQuote(symbol) {
 // Uses stored user Alpaca credentials for the data feed.
 // The data API key is identical to the trading API key.
 
-async function alpacaDataFetch(userId, path, scope = 'manual', _attempt = 0) {
+async function alpacaDataFetchWithCredentials(creds, path, _attempt = 0) {
   try {
-    const creds = getAlpacaCreds(userId, scope);
     if (!creds) return null;
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 12000);
@@ -1674,22 +1770,26 @@ async function alpacaDataFetch(userId, path, scope = 'manual', _attempt = 0) {
       if (_attempt < 2) {
         const delay = Math.min(1000 * 2 ** _attempt, 4000);
         await new Promise(res => setTimeout(res, delay));
-        return alpacaDataFetch(userId, path, scope, _attempt + 1);
+        return alpacaDataFetchWithCredentials(creds, path, _attempt + 1);
       }
       return null;
     }
     clearTimeout(timeoutId);
     if (r.status === 429 && _attempt < 2) {
       await new Promise(res => setTimeout(res, 2000 * (_attempt + 1)));
-      return alpacaDataFetch(userId, path, scope, _attempt + 1);
+      return alpacaDataFetchWithCredentials(creds, path, _attempt + 1);
     }
     if ([502, 503, 504].includes(r.status) && _attempt < 2) {
       await new Promise(res => setTimeout(res, 1500 * (_attempt + 1)));
-      return alpacaDataFetch(userId, path, scope, _attempt + 1);
+      return alpacaDataFetchWithCredentials(creds, path, _attempt + 1);
     }
     if (!r.ok) return null;
     return r.json();
   } catch { return null; }
+}
+
+async function alpacaDataFetch(userId, path, scope = 'manual', _attempt = 0) {
+  return alpacaDataFetchWithCredentials(getAlpacaCreds(userId, scope), path, _attempt);
 }
 
 // Fetch Alpaca snapshot(s) for one or more symbols.
@@ -3106,14 +3206,11 @@ function gpMACD(closes) {
 
 const { buildIntradayAnalogs, selectCurrentRegularSnapshot } = require('./lib/gameplan-analogs');
 
-app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
-  const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
-  if (!sym) return res.status(400).json({ ok: false, error: 'Symbol required' });
-
-  // ?force=1 bypasses the cache, but per user+symbol at most once per cooldown window
-  let force = !!req.query.force;
+async function buildSearchGameplanForUser(sym, userId, requestedForce = false, quoteScope = 'manual') {
+  // Forced refreshes are bounded per user and symbol.
+  let force = !!requestedForce;
   if (force) {
-    const fKey = `${req.session.userId}:${sym}`;
+    const fKey = `${userId}:${sym}`;
     const lastForce = _gpForceAt.get(fKey) || 0;
     if (Date.now() - lastForce < GP_FORCE_COOLDOWN_MS) force = false;
     else {
@@ -3124,19 +3221,18 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 
   const cached = _gpCache.get(sym);
   if (cached && Date.now() - cached.at < GP_CACHE_MS && !force) {
-    return res.json({ ...cached.data, cached: true });
+    return { ...cached.data, cached: true };
   }
 
   // Coalesce: if a generation for this symbol is already running, share its result
   const inflight = _gpInflight.get(sym);
   if (inflight) {
-    try { return res.json(await inflight); }
-    catch { return res.status(500).json({ ok: false, error: 'Game plan generation failed' }); }
+    return inflight;
   }
 
   const job = (async () => {
     const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw, spyDaily] = await Promise.all([
-      fetchLiveQuote(sym, req.session.userId).catch(() => null),
+      fetchLiveQuote(sym, userId, quoteScope).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
       gpFetchIntraday(sym, '5m', '5d'),
@@ -3606,12 +3702,20 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 
   _gpInflight.set(sym, job);
   try {
-    res.json(await job);
+    return await job;
+  } finally {
+    _gpInflight.delete(sym);
+  }
+}
+
+app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
+  const sym = String(req.params.sym || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+  if (!sym) return res.status(400).json({ ok: false, error: 'Symbol required' });
+  try {
+    res.json(await buildSearchGameplanForUser(sym, req.session.userId, !!req.query.force));
   } catch (e) {
     console.error('[GamePlan]', sym, e.message);
     res.status(500).json({ ok: false, error: 'Game plan generation failed' });
-  } finally {
-    _gpInflight.delete(sym);
   }
 });
 
@@ -3621,19 +3725,23 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // environment-variable fallback is suppressed for that user.
 const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
-const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick', 'swing', 'options']);
+const BOT_ALPACA_SCOPES = new Set(['momentum', 'pmh', 'candlestick', 'swing', 'options', 'money-printer']);
 const isCandlestickScope = scope => scope === 'candlestick';
 const isSwingScope = scope => scope === 'swing';
 const isOptionsScope = scope => scope === 'options';
+const isMoneyPrinterScope = scope => scope === 'money-printer';
 const hasActiveSwingTrades = userId => !!db.prepare(`SELECT 1 FROM swing_trades
   WHERE user_id=? AND status NOT IN ('closed','rejected','canceled') LIMIT 1`).get(userId);
 const hasActiveOptionsTrades = userId => !!db.prepare(`SELECT 1 FROM options_trades
   WHERE user_id=? AND status NOT IN ('closed','rejected','canceled') LIMIT 1`).get(userId);
+const hasActiveMoneyPrinterTrades = userId => !!db.prepare(`SELECT 1 FROM money_printer_trades
+  WHERE user_id=? AND status NOT IN ('closed','rejected','canceled','expired') LIMIT 1`).get(userId);
 const brokerScopeLabel = scope => scope === 'pmh' ? 'Opening Momentum'
   : scope === 'momentum' ? 'Momentum Trader'
     : scope === 'candlestick' ? 'Candlestick Automation'
       : scope === 'swing' ? 'Swing Trading Bot'
-        : scope === 'options' ? 'LEAP Options Bot' : 'manual trading';
+        : scope === 'options' ? 'LEAP Options Bot'
+          : scope === 'money-printer' ? 'The Money Printer' : 'manual trading';
 
 function normalizeAlpacaScope(value, fallback = 'manual') {
   return BOT_ALPACA_SCOPES.has(value) ? value : fallback;
@@ -3679,6 +3787,12 @@ function alpacaAccountConflict(userId, scope, accountId) {
         WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
       same: row => scope === 'options' && row.user_id === userId,
     },
+    {
+      owner: 'The Money Printer',
+      rows: db.prepare(`SELECT user_id FROM money_printer_alpaca_creds
+        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
+      same: row => scope === 'money-printer' && row.user_id === userId,
+    },
   ];
   return queries.find(item => item.rows.some(row => !item.same(row))) || null;
 }
@@ -3703,8 +3817,10 @@ function brokerAccountOwnerCount(accountId) {
       UNION ALL SELECT user_id,'candlestick' AS scope FROM candlestick_alpaca_creds WHERE account_id=? AND api_key<>?
       UNION ALL SELECT user_id,'swing' AS scope FROM swing_alpaca_creds WHERE account_id=? AND api_key<>?
       UNION ALL SELECT user_id,'options' AS scope FROM options_alpaca_creds WHERE account_id=? AND api_key<>?
+      UNION ALL SELECT user_id,'money-printer' AS scope FROM money_printer_alpaca_creds WHERE account_id=? AND api_key<>?
     )
   `).all(
+    accountId, DISCONNECTED_SENTINEL,
     accountId, DISCONNECTED_SENTINEL,
     accountId, DISCONNECTED_SENTINEL,
     accountId, DISCONNECTED_SENTINEL,
@@ -3738,6 +3854,7 @@ function storedBrokerAccountId(userId, scope, mode) {
   if (scope === 'candlestick') return db.prepare(`SELECT account_id FROM candlestick_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
   if (scope === 'swing') return db.prepare(`SELECT account_id FROM swing_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
   if (scope === 'options') return db.prepare(`SELECT account_id FROM options_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
+  if (scope === 'money-printer') return db.prepare(`SELECT account_id FROM money_printer_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode)?.account_id || null;
   return db.prepare(`SELECT account_id FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND mode=?`).get(userId, scope, mode)?.account_id || null;
 }
 
@@ -3748,6 +3865,7 @@ function releaseBrokerAccountOwnershipIfUnused(userId, scope, accountId) {
   else if (scope === 'candlestick') inUse = db.prepare(`SELECT 1 FROM candlestick_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
   else if (scope === 'swing') inUse = db.prepare(`SELECT 1 FROM swing_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
   else if (scope === 'options') inUse = db.prepare(`SELECT 1 FROM options_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
+  else if (scope === 'money-printer') inUse = db.prepare(`SELECT 1 FROM money_printer_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, accountId, DISCONNECTED_SENTINEL);
   else inUse = db.prepare(`SELECT 1 FROM bot_alpaca_creds WHERE user_id=? AND bot=? AND account_id=? AND api_key<>? LIMIT 1`).get(userId, scope, accountId, DISCONNECTED_SENTINEL);
   if (!inUse) db.prepare(`DELETE FROM broker_account_owners WHERE account_id=? AND user_id=? AND scope=?`).run(accountId, userId, scope);
   refreshBrokerAccountQuarantine(accountId);
@@ -3788,6 +3906,14 @@ function decryptStoredAlpacaCredentials(row, table, whereClause, whereValues) {
 }
 
 function getAlpacaCreds(userId, scope = 'manual') {
+  if (isMoneyPrinterScope(scope)) {
+    const active = db.prepare('SELECT mode FROM money_printer_alpaca_active_mode WHERE user_id=?')
+      .get(userId)?.mode || 'paper';
+    const row = db.prepare(`SELECT api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id
+      FROM money_printer_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, active);
+    if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
+    return decryptStoredAlpacaCredentials(row, 'money_printer_alpaca_creds', 'user_id=? AND mode=?', [userId, active]);
+  }
   if (isOptionsScope(scope)) {
     const active = db.prepare('SELECT mode FROM options_alpaca_active_mode WHERE user_id=?')
       .get(userId)?.mode || 'paper';
@@ -3835,6 +3961,18 @@ function getAlpacaCreds(userId, scope = 'manual') {
   // revalidated and associated with a specific broker account ID.
   if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id || isBrokerAccountQuarantined(row.account_id)) return null;
   return decryptStoredAlpacaCredentials(row, 'alpaca_creds', 'user_id=? AND mode=?', [userId, activeMode]);
+}
+
+// Money Printer journal rows pin both mode and account. Reconciliation must
+// never follow the mutable active-mode pointer.
+function getMoneyPrinterPinnedCreds(userId, mode, accountId) {
+  const row = db.prepare(`SELECT api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id
+    FROM money_printer_alpaca_creds WHERE user_id=? AND mode=? AND account_id=?`)
+    .get(userId, mode, accountId);
+  if (!row || row.api_key === DISCONNECTED_SENTINEL || isBrokerAccountQuarantined(accountId)) return null;
+  return decryptStoredAlpacaCredentials(
+    row, 'money_printer_alpaca_creds', 'user_id=? AND mode=?', [userId, mode],
+  );
 }
 
 function managedSymbolRows(userId, accountId, symbol) {
@@ -3902,6 +4040,11 @@ function storedCredentialExists(row) {
 }
 
 function _alpacaCredsExist(userId, mode, scope = 'manual') {
+  if (isMoneyPrinterScope(scope)) {
+    const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM money_printer_alpaca_creds WHERE user_id=? AND mode=?')
+      .get(userId, mode);
+    return storedCredentialExists(row) && !isBrokerAccountQuarantined(row.account_id);
+  }
   if (isOptionsScope(scope)) {
     const row = db.prepare('SELECT api_key,api_secret,api_key_enc,api_secret_enc,account_id FROM options_alpaca_creds WHERE user_id=? AND mode=?')
       .get(userId, mode);
@@ -4160,6 +4303,13 @@ function autoEnablePaperStrategy(userId, scope, mode) {
       VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
       enabled=1,live_armed=0,updated_at=datetime('now')`)
       .run(userId, settings.maxPositionDollars);
+  } else if (scope === 'money-printer') {
+    const settings = moneyPrinterSettingsFor(userId);
+    db.prepare(`INSERT INTO money_printer_settings
+      (user_id,enabled,live_armed,max_position_dollars,take_profit_pct,stop_loss_pct,updated_at)
+      VALUES (?,1,0,?,?,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=1,live_armed=0,updated_at=datetime('now')`)
+      .run(userId, settings.maxPositionDollars, settings.takeProfitPct, settings.stopLossPct);
   } else {
     return false;
   }
@@ -4201,6 +4351,11 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       error: 'Close or fully reconcile active LEAP option positions before replacing this broker connection.',
     });
   }
+  if (isMoneyPrinterScope(scope) && hasActiveMoneyPrinterTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Money Printer positions before replacing this broker connection.',
+    });
+  }
 
   // ── Validate credentials against Alpaca before saving ─────────────────────
   // Never store credentials that Alpaca rejects.
@@ -4237,6 +4392,11 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     if (isOptionsScope(scope) && hasActiveOptionsTrades(uid)) {
       return res.status(409).json({
         error: 'A LEAP entry became active while Alpaca was verifying this connection. Reconcile it before changing accounts.',
+      });
+    }
+    if (isMoneyPrinterScope(scope) && hasActiveMoneyPrinterTrades(uid)) {
+      return res.status(409).json({
+        error: 'A Money Printer entry became active while Alpaca was verifying this connection. Reconcile it before changing accounts.',
       });
     }
     const ownershipConflict = alpacaAccountConflict(uid, scope, verifiedAccountId);
@@ -4279,13 +4439,29 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       if (optionsConflict) return res.status(409).json({
         error: 'This Alpaca account is already connected to the LEAP Options Bot. Each bot must use a different Alpaca account.',
       });
+      const moneyPrinterConflict = !isMoneyPrinterScope(scope) && db.prepare(`
+        SELECT 1 FROM money_printer_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+      `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+      if (moneyPrinterConflict) return res.status(409).json({
+        error: 'This Alpaca account is already connected to The Money Printer. Each bot must use a different Alpaca account.',
+      });
       const manualConflict = db.prepare(`
         SELECT 1 FROM alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
       `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
       if (manualConflict) {
         return res.status(409).json({ error: 'This Alpaca account is already connected for manual trading. Use a separate account for each automated bot.' });
       }
-      if (isOptionsScope(scope)) {
+      if (isMoneyPrinterScope(scope)) {
+        db.prepare(`INSERT INTO money_printer_alpaca_creds
+          (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+          VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
+          api_key=excluded.api_key,api_secret=excluded.api_secret,
+          api_key_enc=excluded.api_key_enc,api_secret_enc=excluded.api_secret_enc,
+          account_id=excluded.account_id`)
+          .run(uid, m, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, verifiedAccountId);
+        db.prepare('INSERT OR REPLACE INTO money_printer_alpaca_active_mode(user_id,mode) VALUES (?,?)').run(uid, m);
+        db.prepare('UPDATE money_printer_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      } else if (isOptionsScope(scope)) {
         db.prepare(`INSERT INTO options_alpaca_creds
           (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
           VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,mode) DO UPDATE SET
@@ -4385,6 +4561,14 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       error: 'This Alpaca account is already connected to the LEAP Options Bot. Manual trading requires its own broker account.',
     });
   }
+  const moneyPrinterConflict = db.prepare(`
+    SELECT 1 FROM money_printer_alpaca_creds WHERE user_id=? AND account_id=? AND api_key<>? LIMIT 1
+  `).get(uid, verifiedAccountId, DISCONNECTED_SENTINEL);
+  if (moneyPrinterConflict) {
+    return res.status(409).json({
+      error: 'This Alpaca account is already connected to The Money Printer. Manual trading requires its own broker account.',
+    });
+  }
   if (candleConflict) {
     return res.status(409).json({
       error: 'This Alpaca account is already connected to Candlestick Automation. Manual trading requires its own broker account.',
@@ -4424,7 +4608,22 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
       error: 'Close or fully reconcile active LEAP option positions before disconnecting this broker account.',
     });
   }
+  if (isMoneyPrinterScope(scope) && hasActiveMoneyPrinterTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Money Printer positions before disconnecting this broker account.',
+    });
+  }
   if (scope !== 'manual') {
+    if (isMoneyPrinterScope(scope)) {
+      const active = db.prepare('SELECT mode FROM money_printer_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
+      const accountId = storedBrokerAccountId(uid, scope, active);
+      db.prepare(`INSERT OR REPLACE INTO money_printer_alpaca_creds
+        (user_id,mode,api_key,api_secret,api_key_enc,api_secret_enc,account_id)
+        VALUES (?,?,?,?,?,?,NULL)`).run(uid, active, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL, null, null);
+      db.prepare('UPDATE money_printer_settings SET live_armed=0,enabled=0 WHERE user_id=?').run(uid);
+      releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
+      return res.json({ ok: true, connection: scope });
+    }
     if (isOptionsScope(scope)) {
       const active = db.prepare('SELECT mode FROM options_alpaca_active_mode WHERE user_id=?').get(uid)?.mode || 'paper';
       const accountId = storedBrokerAccountId(uid, scope, active);
@@ -4495,6 +4694,8 @@ app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
   const liveConnected  = _alpacaCredsExist(uid, 'live', scope);
   const activeModeRow  = scope === 'manual'
     ? db.prepare('SELECT mode FROM alpaca_active_mode WHERE user_id=?').get(uid)
+    : isMoneyPrinterScope(scope)
+      ? db.prepare('SELECT mode FROM money_printer_alpaca_active_mode WHERE user_id=?').get(uid)
     : isOptionsScope(scope)
       ? db.prepare('SELECT mode FROM options_alpaca_active_mode WHERE user_id=?').get(uid)
     : isSwingScope(scope)
@@ -4529,11 +4730,19 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
       error: 'Close or fully reconcile active LEAP option positions before switching its broker mode.',
     });
   }
+  if (isMoneyPrinterScope(scope) && hasActiveMoneyPrinterTrades(uid)) {
+    return res.status(409).json({
+      error: 'Close or fully reconcile active Money Printer positions before switching its broker mode.',
+    });
+  }
   if (!_alpacaCredsExist(uid, m, scope)) {
     return res.status(400).json({ error: `No ${m} account connected. Save your ${m} API keys first.` });
   }
   if (scope === 'manual') {
     db.prepare('INSERT OR REPLACE INTO alpaca_active_mode (user_id, mode) VALUES (?,?)').run(uid, m);
+  } else if (isMoneyPrinterScope(scope)) {
+    db.prepare('INSERT OR REPLACE INTO money_printer_alpaca_active_mode(user_id,mode) VALUES (?,?)').run(uid, m);
+    db.prepare('UPDATE money_printer_settings SET live_armed=0 WHERE user_id=?').run(uid);
   } else if (isOptionsScope(scope)) {
     db.prepare('INSERT OR REPLACE INTO options_alpaca_active_mode (user_id,mode) VALUES (?,?)').run(uid, m);
     db.prepare('UPDATE options_settings SET live_armed=0 WHERE user_id=?').run(uid);
@@ -12262,6 +12471,393 @@ function groupDailyToWeekly(dailyBars) {
 //
 
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── The Money Printer ─────────────────────────────────────────────────────────
+const MONEY_PRINTER_UNIVERSE = Object.freeze([
+  'SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU',
+]);
+
+function moneyPrinterSettingsFor(userId) {
+  const row = db.prepare(`SELECT enabled,live_armed,max_position_dollars,take_profit_pct,stop_loss_pct,revision
+    FROM money_printer_settings WHERE user_id=?`).get(userId);
+  if (!row) return { ...MONEY_PRINTER_DEFAULTS, revision: 0 };
+  return { ...sanitizeMoneyPrinterSettings({
+    enabled: row.enabled === 1,
+    liveArmed: row.live_armed === 1,
+    maxPositionDollars: row.max_position_dollars,
+    takeProfitPct: row.take_profit_pct,
+    stopLossPct: row.stop_loss_pct,
+  }), revision: Number(row.revision || 0) };
+}
+
+function assertMoneyPrinterFinalAuthorization(userId, captured, settingsSnapshot) {
+  const current = getAlpacaCreds(userId, 'money-printer');
+  const settings = moneyPrinterSettingsFor(userId);
+  const decision = finalMoneyPrinterAuthorization({ captured, current, settings });
+  if (!decision.authorized || settings.revision !== settingsSnapshot.revision) {
+    throw new Error(decision.reason || 'Money Printer settings changed during this cycle.');
+  }
+}
+
+function acquireMoneyPrinterLease(userId) {
+  const token = crypto.randomUUID();
+  const changed = db.prepare(`INSERT INTO money_printer_execution_leases(user_id,token,expires_at)
+    VALUES (?,?,datetime('now','+5 minutes'))
+    ON CONFLICT(user_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at
+    WHERE money_printer_execution_leases.expires_at<=datetime('now')`).run(userId, token).changes;
+  return changed === 1 ? token : null;
+}
+
+function releaseMoneyPrinterLease(userId, token) {
+  if (token) db.prepare('DELETE FROM money_printer_execution_leases WHERE user_id=? AND token=?').run(userId, token);
+}
+
+function recordMoneyPrinterCycle(userId, status, reason) {
+  db.prepare(`INSERT INTO money_printer_settings(user_id,last_cycle_at,last_cycle_status,last_cycle_reason)
+    VALUES (?,datetime('now'),?,?)
+    ON CONFLICT(user_id) DO UPDATE SET last_cycle_at=datetime('now'),
+      last_cycle_status=excluded.last_cycle_status,last_cycle_reason=excluded.last_cycle_reason`)
+    .run(userId, status, String(reason || '').slice(0, 300));
+}
+
+async function reconcileMoneyPrinterTrades(userId) {
+  const trades = db.prepare(`SELECT * FROM money_printer_trades WHERE user_id=?
+    AND status NOT IN ('closed','canceled','rejected','expired') ORDER BY id`).all(userId);
+  const events = [];
+  for (const trade of trades) {
+    const creds = getMoneyPrinterPinnedCreds(userId, trade.mode, trade.account_id);
+    if (!creds) {
+      db.prepare(`UPDATE money_printer_trades SET status='protection_unresolved',updated_at=datetime('now') WHERE id=?`).run(trade.id);
+      events.push({ tradeId: trade.id, status: 'protection_unresolved' });
+      continue;
+    }
+    let order;
+    try {
+      order = await alpacaFetchWithCredentials(creds,
+        `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.entry_client_order_id)}&nested=true`);
+    } catch (error) {
+      if (trade.status === 'entry_intent') {
+        db.prepare(`UPDATE money_printer_trades SET status='entry_unknown',updated_at=datetime('now') WHERE id=?`).run(trade.id);
+      }
+      events.push({ tradeId: trade.id, status: 'lookup_failed' });
+      continue;
+    }
+    const brokerStatus = String(order?.status || '').toLowerCase();
+    const filled = Number(order?.filled_qty || 0);
+    const terminal = ['canceled', 'rejected', 'expired'].includes(brokerStatus);
+    const children = Array.isArray(order?.legs) ? order.legs : [];
+    let position = null;
+    try { position = await alpacaFetchWithCredentials(creds, `/v2/positions/${encodeURIComponent(trade.symbol)}`); }
+    catch (_) { /* A missing Alpaca position is a normal 404 after an exit. */ }
+    const protection = ownedBracketProtection({
+      direction: trade.direction, filledQty: filled, positionQty: position?.qty, parent: order, children,
+    });
+    // A partial fill stays managed even when the parent was canceled. It cannot
+    // become reusable until no shares remain and every owned OCO leg is terminal.
+    const status = protection.requiresManagement && !protection.protected
+      ? 'protection_unresolved'
+      : protection.canClose ? 'closed'
+        : filled > 0 ? 'open' : terminal ? brokerStatus : (brokerStatus || 'entry_unknown');
+    db.prepare(`UPDATE money_printer_trades SET status=?,entry_order_id=COALESCE(?,entry_order_id),
+      filled_shares=?,entry_price=COALESCE(?,entry_price),broker_json=?,updated_at=datetime('now')${status === 'closed' ? ",closed_at=datetime('now')" : ''}
+      WHERE id=?`).run(
+      status, order?.id || null, filled,
+      Number.isFinite(Number(order?.filled_avg_price)) && Number(order.filled_avg_price) > 0
+        ? Number(order.filled_avg_price) : null,
+      JSON.stringify({
+        id: order?.id || null, status: order?.status || null,
+        filledQty: order?.filled_qty || null, filledAvgPrice: order?.filled_avg_price || null,
+        protection,
+        legs: children.map(leg => ({ id: leg.id, status: leg.status, side: leg.side, type: leg.type, qty: leg.qty })),
+      }), trade.id,
+    );
+    events.push({ tradeId: trade.id, status });
+  }
+  return events;
+}
+
+async function buildMoneyPrinterCandidate(userId, symbol, force = false) {
+  const plan = await Promise.race([
+    buildSearchGameplanForUser(symbol, userId, force, 'money-printer'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Search evaluation timed out.')), 20000)),
+  ]);
+  const gate = evaluateMoneyPrinterPlan(plan);
+  const display = plan?.displayLevels || {};
+  const support = Array.isArray(display.support) ? display.support : [];
+  const resistance = Array.isArray(display.resistance) ? display.resistance : [];
+  const direction = gate.direction === 'LONG' ? 'BUY' : gate.direction === 'SHORT' ? 'SELL' : null;
+  const row = {
+    symbol, eligible: gate.eligible, direction, executionDirection: gate.direction,
+    status: gate.eligible ? 'ELIGIBLE' : 'REJECTED',
+    blockers: gate.blockers, reasons: gate.blockers, generatedAt: plan?.generatedAt || null,
+    confidence: plan?.searchSignal?.confidence ?? null,
+    signal: plan?.searchSignal?.signal || null,
+    tradeLevels: plan?.tradeLevels || null,
+    support: support[0]?.price ?? plan?.levels?.support?.[0]?.price ?? null,
+    nextSupport: support[1]?.price ?? plan?.levels?.nextSupport?.price ?? null,
+    resistance: resistance[0]?.price ?? plan?.levels?.resistance?.[0]?.price ?? null,
+    nextResistance: resistance[1]?.price ?? plan?.levels?.nextResistance?.price ?? null,
+    evidenceSummary: Array.isArray(plan?.tradeLevels?.considered)
+      ? plan.tradeLevels.considered.join(' · ')
+      : null,
+  };
+  db.prepare(`INSERT INTO money_printer_candidates(user_id,symbol,payload_json,evaluated_at)
+    VALUES (?,?,?,datetime('now')) ON CONFLICT(user_id,symbol) DO UPDATE SET
+    payload_json=excluded.payload_json,evaluated_at=datetime('now')`).run(userId, symbol, JSON.stringify(row));
+  return { ...row, plan };
+}
+
+async function scanMoneyPrinter(userId, force = false) {
+  return mapWithConcurrency(MONEY_PRINTER_UNIVERSE, 3, async symbol => {
+    try {
+      const candidate = await buildMoneyPrinterCandidate(userId, symbol, force);
+      const { plan, ...publicRow } = candidate;
+      return publicRow;
+    } catch (error) {
+      return { symbol, eligible: false, direction: null, blockers: [String(error.message).slice(0, 200)] };
+    }
+  });
+}
+
+async function executeMoneyPrinterCandidate(userId, symbol) {
+  if (!isMarketOpen()) throw new Error('The regular-session entry window is closed.');
+  const settings = moneyPrinterSettingsFor(userId);
+  const creds = getAlpacaCreds(userId, 'money-printer');
+  if (!creds || !settings.enabled || (creds.mode === 'live' && !settings.liveArmed)) {
+    throw new Error('Money Printer broker or automation authorization is not ready.');
+  }
+  const [account, positions, orders, asset] = await Promise.all([
+    alpacaFetchWithCredentials(creds, '/v2/account'),
+    alpacaFetchWithCredentials(creds, '/v2/positions'),
+    alpacaFetchWithCredentials(creds, '/v2/orders?status=open&limit=500'),
+    alpacaFetchWithCredentials(creds, `/v2/assets/${encodeURIComponent(symbol)}`),
+  ]);
+  if (account?.trading_blocked || account?.account_blocked || String(account?.status).toUpperCase() !== 'ACTIVE') {
+    throw new Error('Alpaca account is not active and unblocked.');
+  }
+  if (asset?.tradable !== true || String(asset?.status || '').toLowerCase() !== 'active') {
+    throw new Error('Alpaca does not mark this symbol active and tradable.');
+  }
+  if (!Array.isArray(positions) || !Array.isArray(orders)) throw new Error('Alpaca risk collections are invalid.');
+  if (positions.some(row => String(row.symbol).toUpperCase() === symbol)
+    || orders.some(row => !row.parent_order_id && String(row.symbol).toUpperCase() === symbol)) {
+    throw new Error('The broker already has an open or pending position for this symbol.');
+  }
+  if (db.prepare(`SELECT 1 FROM money_printer_trades WHERE user_id=? AND symbol=?
+    AND status NOT IN ('closed','canceled','rejected','expired')`).get(userId, symbol)) {
+    throw new Error('A Money Printer intent already owns this symbol.');
+  }
+  // Rebuild all Search science immediately before submission, then price from a
+  // fresh dedicated-scope Alpaca quote. No AI narrative participates.
+  const candidate = await buildMoneyPrinterCandidate(userId, symbol, true);
+  if (!candidate.eligible) throw new Error(candidate.blockers.join('; '));
+  if (candidate.executionDirection === 'SHORT' && asset?.shortable !== true) throw new Error('Alpaca does not mark this symbol shortable.');
+  const snapshots = await alpacaDataFetchWithCredentials(creds,
+    `/v2/stocks/snapshots?symbols=${encodeURIComponent(symbol)}&feed=iex`);
+  const snapshot = snapshots?.[symbol] || snapshots?.[symbol.toUpperCase()];
+  const price = moneyPrinterExecutablePrice(snapshot, candidate.executionDirection);
+  const bucketMs = Math.floor(Date.now() / 300000) * 300000;
+  const clientOrderId = moneyPrinterClientOrderId({
+    userId, accountId: creds.account_id, symbol, direction: candidate.executionDirection, bucketMs,
+  });
+  const bracket = buildMoneyPrinterBracket({
+    symbol, direction: candidate.executionDirection, executablePrice: price, settings, clientOrderId,
+  });
+  if (Number(account?.buying_power) < bracket.qty * price) throw new Error('Insufficient broker buying power.');
+  assertMoneyPrinterFinalAuthorization(userId, creds, settings);
+  let tradeId;
+  try {
+    tradeId = db.prepare(`INSERT INTO money_printer_trades
+      (user_id,symbol,direction,mode,account_id,status,requested_shares,entry_price,target_price,
+       stop_price,entry_client_order_id,setup_json)
+      VALUES (?,?,?,?,?,'entry_intent',?,?,?,?,?,?)`).run(
+      userId, symbol, candidate.executionDirection, creds.mode, creds.account_id, bracket.qty,
+      bracket.entryPrice, bracket.targetPrice, bracket.stopPrice, clientOrderId,
+      JSON.stringify({ generatedAt: candidate.generatedAt, signal: candidate.signal, tradeLevels: candidate.tradeLevels }),
+    ).lastInsertRowid;
+  } catch (error) {
+    if (error.code?.startsWith('SQLITE_CONSTRAINT')) throw new Error('A deterministic entry intent already exists for this symbol or cycle.');
+    throw error;
+  }
+  try {
+    assertMoneyPrinterFinalAuthorization(userId, creds, settings);
+  } catch (error) {
+    // No broker request has begun. This is a conclusively canceled local intent,
+    // not an ambiguous POST that needs client-ID reconciliation.
+    db.prepare(`UPDATE money_printer_trades SET status='canceled',updated_at=datetime('now') WHERE id=?`).run(tradeId);
+    throw error;
+  }
+  try {
+    // No await occurs between the authoritative revalidation above and invoking
+    // this pinned POST. A paper cycle cannot redirect or inherit live mode.
+    const submitted = await alpacaFetchWithCredentials(creds, '/v2/orders', {
+      method: 'POST', body: JSON.stringify(bracket.order),
+    });
+    db.prepare(`UPDATE money_printer_trades SET status=?,entry_order_id=?,broker_json=?,updated_at=datetime('now') WHERE id=?`)
+      .run(String(submitted?.status || 'pending_new').toLowerCase(), submitted?.id || null,
+        JSON.stringify({ id: submitted?.id || null, status: submitted?.status || null }), tradeId);
+    return { tradeId, symbol, direction: candidate.executionDirection, status: submitted?.status || 'pending_new' };
+  } catch (error) {
+    // POST timeouts remain unknown until reconciliation looks up the immutable
+    // client ID; never retry the non-idempotent request.
+    db.prepare(`UPDATE money_printer_trades SET status='entry_unknown',updated_at=datetime('now') WHERE id=?`).run(tradeId);
+    throw new Error('Order submission outcome is unknown; reconciliation will resolve the deterministic client ID.');
+  }
+}
+
+app.get('/api/money-printer/settings', requireAuth, async (req, res) => {
+  try {
+    const { enabled, liveArmed, maxPositionDollars, takeProfitPct, stopLossPct } =
+      moneyPrinterSettingsFor(await ensureSessionUserInTradingStore(req));
+    res.json({ enabled, liveArmed, config: { maxPositionDollars, takeProfitPct, stopLossPct } });
+  }
+  catch { res.status(503).json({ error: 'Money Printer settings are temporarily unavailable.' }); }
+});
+
+app.put('/api/money-printer/settings', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const settings = sanitizeMoneyPrinterSettings(req.body || {}, moneyPrinterSettingsFor(userId));
+    const creds = getAlpacaCreds(userId, 'money-printer');
+    settings.liveArmed = settings.liveArmed && creds?.mode === 'live';
+    db.prepare(`INSERT INTO money_printer_settings
+      (user_id,enabled,live_armed,max_position_dollars,take_profit_pct,stop_loss_pct,revision,updated_at)
+      VALUES (?,?,?,?,?,?,1,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
+      enabled=excluded.enabled,live_armed=excluded.live_armed,max_position_dollars=excluded.max_position_dollars,
+      take_profit_pct=excluded.take_profit_pct,stop_loss_pct=excluded.stop_loss_pct,
+      revision=money_printer_settings.revision+1,updated_at=datetime('now')`)
+      .run(userId, settings.enabled ? 1 : 0, settings.liveArmed ? 1 : 0,
+        settings.maxPositionDollars, settings.takeProfitPct, settings.stopLossPct);
+    const { enabled, liveArmed, maxPositionDollars, takeProfitPct, stopLossPct } = settings;
+    res.json({ ok: true, enabled, liveArmed, config: { maxPositionDollars, takeProfitPct, stopLossPct } });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.get('/api/money-printer/readiness', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    const settings = moneyPrinterSettingsFor(userId);
+    const creds = getAlpacaCreds(userId, 'money-printer');
+    let account = null;
+    try { if (creds) account = await alpacaFetchFor(userId, 'money-printer', '/v2/account'); } catch (_) {}
+    const broker = {
+      reachable: !!account,
+      active: String(account?.status || '').toUpperCase() === 'ACTIVE',
+      tradingBlocked: account?.trading_blocked === true,
+      accountBlocked: account?.account_blocked === true,
+    };
+    const brokerReady = !!creds && broker.reachable && broker.active
+      && !broker.tradingBlocked && !broker.accountBlocked;
+    const runtime = db.prepare(`SELECT last_cycle_at,last_cycle_status,last_cycle_reason
+      FROM money_printer_settings WHERE user_id=?`).get(userId) || {};
+    const blockers = [];
+    if (!creds) blockers.push('Dedicated Money Printer Alpaca account is not connected.');
+    if (creds && !brokerReady) blockers.push('Alpaca account is unavailable, inactive, or blocked.');
+    if (!settings.enabled) blockers.push('Money Printer automation is disabled.');
+    if (creds?.mode === 'live' && !settings.liveArmed) blockers.push('Live trading is not explicitly armed.');
+    if (!isMarketOpen()) blockers.push('The regular-session entry window is closed.');
+    res.set('Cache-Control', 'no-store').json({
+      connected: !!creds, accountId: creds?.account_id || null, mode: creds?.mode || null,
+      ...settings, broker, brokerReady, marketOpen: isMarketOpen(),
+      reconciliationReady: brokerReady,
+      schedulerEligible: brokerReady && settings.enabled && isMarketOpen()
+        && (creds?.mode !== 'live' || settings.liveArmed),
+      universe: MONEY_PRINTER_UNIVERSE, blockers,
+      lastCycleAt: runtime.last_cycle_at || null,
+      lastCycleStatus: runtime.last_cycle_status || null,
+      lastCycleReason: runtime.last_cycle_reason || null,
+      triggerCriteria: [
+        'Confirmed Search BUY or SELL with fresh complete volume evidence',
+        'Verified Search Trade Plan and completed-session support and resistance',
+        'Technical confluence, patterns, Fibonacci, Smart Money, gaps, catalysts, SPY and sector context',
+        'Fresh executable Alpaca quote, tradable asset, buying power, capacity and duplicate-position checks',
+      ],
+    });
+  } catch { res.status(503).json({ error: 'Money Printer readiness could not be verified.' }); }
+});
+
+app.get('/api/money-printer/scan', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    if (!getAlpacaCreds(userId, 'money-printer')) return res.status(400).json({ error: 'Connect the dedicated Money Printer Alpaca account to scan.' });
+    const results = await scanMoneyPrinter(userId, true);
+    const settings = moneyPrinterSettingsFor(userId);
+    const funnel = results.reduce((acc, row) => {
+      acc[row.eligible ? 'eligible' : 'rejected'] += 1;
+      return acc;
+    }, { eligible: 0, rejected: 0 });
+    res.set('Cache-Control', 'no-store').json({
+      results,
+      evaluatedAt: new Date().toISOString(),
+      funnel,
+      config: {
+        maxPositionDollars: settings.maxPositionDollars,
+        takeProfitPct: settings.takeProfitPct,
+        stopLossPct: settings.stopLossPct,
+      },
+    });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.get('/api/money-printer/trades', requireAuth, async (req, res) => {
+  try {
+    const userId = await ensureSessionUserInTradingStore(req);
+    res.json({ trades: db.prepare(`SELECT * FROM money_printer_trades WHERE user_id=? ORDER BY created_at DESC LIMIT 100`).all(userId) });
+  } catch { res.status(503).json({ error: 'Money Printer journal is unavailable.' }); }
+});
+
+app.post('/api/money-printer/reconcile', requireAuth, async (req, res) => {
+  const userId = await ensureSessionUserInTradingStore(req).catch(() => null);
+  if (!userId) return res.status(503).json({ error: 'Trading identity could not be verified.' });
+  const lease = acquireMoneyPrinterLease(userId);
+  if (!lease) return res.status(409).json({ error: 'Another Money Printer cycle is active.' });
+  try {
+    const events = await reconcileMoneyPrinterTrades(userId);
+    const trades = db.prepare(`SELECT * FROM money_printer_trades WHERE user_id=?
+      ORDER BY created_at DESC LIMIT 100`).all(userId);
+    res.json({ ok: true, events, trades });
+  }
+  catch (error) { res.status(400).json({ error: error.message }); }
+  finally { releaseMoneyPrinterLease(userId, lease); }
+});
+
+async function runMoneyPrinterCycle(userId) {
+  const lease = acquireMoneyPrinterLease(userId);
+  if (!lease) return;
+  let status = 'skipped'; let reason = '';
+  try {
+    const creds = getAlpacaCreds(userId, 'money-printer');
+    if (!creds) { reason = 'Dedicated broker account is not connected.'; return; }
+    const events = await reconcileMoneyPrinterTrades(userId);
+    const settings = moneyPrinterSettingsFor(userId);
+    if (!settings.enabled) { status = 'reconciled_paused'; reason = `${events.length} reconciliation event(s).`; return; }
+    if (creds.mode === 'live' && !settings.liveArmed) { status = 'reconciled_live_unarmed'; reason = 'Live entries are not armed.'; return; }
+    if (!isMarketOpen()) { status = 'market_closed'; reason = 'Reconciliation completed outside regular hours.'; return; }
+    const candidates = await scanMoneyPrinter(userId, true);
+    const candidate = candidates.filter(row => row.eligible)
+      .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0];
+    if (!candidate) { status = 'no_entry'; reason = 'No fully confirmed Search setup.'; return; }
+    await executeMoneyPrinterCandidate(userId, candidate.symbol);
+    status = 'submitted'; reason = `Submitted ${candidate.symbol}.`;
+  } catch (error) {
+    status = 'withheld'; reason = String(error.message || 'Safety gate withheld entry.').slice(0, 300);
+  } finally {
+    recordMoneyPrinterCycle(userId, status, reason);
+    releaseMoneyPrinterLease(userId, lease);
+  }
+}
+
+let moneyPrinterSchedulerRunning = false;
+setInterval(async () => {
+  if (moneyPrinterSchedulerRunning) return;
+  moneyPrinterSchedulerRunning = true;
+  try {
+    const users = db.prepare(`SELECT user_id FROM money_printer_settings WHERE enabled=1
+      UNION SELECT DISTINCT user_id FROM money_printer_trades
+      WHERE status NOT IN ('closed','canceled','rejected','expired')`).all();
+    for (const { user_id: userId } of users) await runMoneyPrinterCycle(userId);
+  } finally { moneyPrinterSchedulerRunning = false; }
+}, 5 * 60 * 1000);
 
 // ── Candlestick Automation API ─────────────────────────────────────────────────
 app.get('/api/candlestick/settings', requireAuth, async (req, res) => {

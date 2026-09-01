@@ -115,6 +115,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       Scanner
     </button>
+    <button class="nav-link money-printer-nav" data-page="money-printer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v10H4z"/><path d="M8 7V4h8v3M8 17h8"/><circle cx="12" cy="12" r="2.5"/></svg>
+      Money Printer
+    </button>
     <button class="nav-link" data-page="momentum">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
       Momentum
@@ -746,6 +750,56 @@
 </div>
 
 <!-- TRADING PAGE -->
+<!-- THE MONEY PRINTER — Search automation command surface -->
+<div class="page" id="page-money-printer">
+  <div class="mp-page">
+    <header class="mp-hero">
+      <div class="mp-brandline"><span class="mp-brand-mark"></span><span>FLAGSHIP AUTOMATION / SEARCH SCIENCE</span></div>
+      <div class="mp-hero-main">
+        <div><h1>The Money Printer</h1><p>The Search decision machine, continuously evaluated through its own Alpaca account.</p></div>
+        <div class="mp-hero-actions">
+          <button class="mp-connect" id="mpConnectBtn" type="button">Connect Alpaca</button>
+          <button class="mp-toggle" id="mpToggleBtn" type="button">Enable automation</button>
+        </div>
+      </div>
+      <div class="mp-statusline">
+        <span class="mp-status-dot" id="mpConnDot"></span><span id="mpConnText">Checking dedicated broker connection</span>
+        <span class="mp-divider"></span><span id="mpCycleText">Cycle telemetry loading</span>
+        <button class="mp-refresh" id="mpRefreshBtn" type="button">Refresh intelligence</button>
+      </div>
+    </header>
+
+    <div class="mp-alert" id="mpReadinessNote">Reading the server safety gates.</div>
+    <section class="mp-overview">
+      <article class="mp-panel mp-control-panel">
+        <div class="mp-panel-head"><div><span class="mp-kicker">AUTOMATION CONTROL</span><h2>Capital mandate</h2></div><span class="mp-mode" id="mpMode">OFFLINE</span></div>
+        <div class="mp-control-grid">
+          <label><span>Max position dollars</span><div class="mp-input-wrap"><i>$</i><input id="mpPosition" type="number" min="1" step="25"></div></label>
+          <label><span>Take profit</span><div class="mp-input-wrap"><input id="mpProfit" type="number" min="0.1" step="0.1"><i>%</i></div></label>
+          <label><span>Stop loss</span><div class="mp-input-wrap"><input id="mpStop" type="number" min="0.1" step="0.1"><i>%</i></div></label>
+        </div>
+        <div class="mp-control-foot"><label class="mp-arm"><input id="mpLiveArm" type="checkbox"><span></span><b>Arm live capital</b></label><button id="mpSaveBtn" class="mp-save" type="button">Save mandate</button></div>
+        <p class="mp-fineprint">Live arming is available only when this dedicated account is verified for live trading.</p>
+      </article>
+      <article class="mp-panel mp-rules-panel">
+        <div class="mp-panel-head"><div><span class="mp-kicker">SERVER-OWNED</span><h2>Trigger criteria</h2></div><span class="mp-lock">READ ONLY</span></div>
+        <div class="mp-rule-list" id="mpRuleList"><div class="mp-skeleton"></div><div class="mp-skeleton short"></div><div class="mp-skeleton"></div></div>
+        <p class="mp-fineprint">Criteria are evaluated and enforced by the server scheduler; this console cannot alter them.</p>
+      </article>
+    </section>
+
+    <section class="mp-panel mp-candidates">
+      <div class="mp-panel-head"><div><span class="mp-kicker">RANKED DECISION QUEUE</span><h2>Search candidates</h2></div><div class="mp-head-meta"><span id="mpFunnel">No scan received</span><button id="mpScanBtn" class="mp-refresh" type="button">Run scan</button></div></div>
+      <div class="mp-table-wrap"><table class="mp-table"><thead><tr><th>Rank / symbol</th><th>Direction</th><th>Confidence</th><th>Immediate levels</th><th>Next levels</th><th>Evidence</th><th>Decision</th></tr></thead><tbody id="mpCandidatesBody"><tr><td colspan="7"><div class="mp-loading-row"><span></span><span></span><span></span></div></td></tr></tbody></table></div>
+      <div class="mp-detail" id="mpDetail">Select a ranked candidate to inspect the full evidence record and every server decision gate.</div>
+    </section>
+
+    <div class="mp-lower">
+      <section class="mp-panel mp-journal"><div class="mp-panel-head"><div><span class="mp-kicker">BROKER JOURNAL</span><h2>Order reconciliation</h2></div><button id="mpReconcileBtn" class="mp-refresh" type="button">Reconcile</button></div><div id="mpTradesBody" class="mp-trades-empty">No broker journal entries loaded.</div></section>
+      <section class="mp-panel mp-telemetry"><div class="mp-panel-head"><div><span class="mp-kicker">CYCLE TELEMETRY</span><h2>Scheduler status</h2></div></div><div id="mpTelemetryBody" class="mp-telemetry-grid"><div>Awaiting readiness response.</div></div></section>
+    </div>
+  </div>
+</div>
 <!-- ══════════════════════════════════════════════════════════════════════════
      MOMENTUM TRADER PAGE
      ══════════════════════════════════════════════════════════════════════════ -->
@@ -1385,6 +1439,7 @@
 
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
+<script src="/js/money-printer.js"></script>
 <script src="/js/momentum.js"></script>
 <script src="/js/opening-momentum.js"></script>
 <script src="/js/candlestick.js"></script>
@@ -1408,6 +1463,10 @@
   <button class="mobile-nav-btn nav-link" data-page="scanner" aria-label="Scanner">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
+  </button>
+  <button class="mobile-nav-btn nav-link" data-page="money-printer" aria-label="The Money Printer">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v10H4z"/><path d="M8 7V4h8v3M8 17h8"/><circle cx="12" cy="12" r="2.5"/></svg>
+    <span>Printer</span>
   </button>
   <button class="mobile-nav-btn nav-link" data-page="momentum" aria-label="Momentum">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>

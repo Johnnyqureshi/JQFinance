@@ -33,6 +33,11 @@ const { selectMarketAlerts } = require('./lib/market-alerts');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
 const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
+const {
+  applySearchMarketRegime,
+  buildSearchMarketContext,
+  classifySearchMarketRegime,
+} = require('./lib/search-market-regime');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
@@ -3101,7 +3106,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
   }
 
   const job = (async () => {
-    const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw] = await Promise.all([
+    const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw, spyDaily] = await Promise.all([
       fetchLiveQuote(sym, req.session.userId).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
@@ -3112,6 +3117,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       gpFetchIntraday(sym, '1h', '3mo'),
       yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
+      gpFetchDaily('SPY', '2y'),
     ]);
 
     if (!quote?.price || !daily?.length) {
@@ -3231,14 +3237,20 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
     // Market + sector context
     const mktArr = Array.isArray(mktRaw) ? mktRaw : mktRaw ? [mktRaw] : [];
     const mkt = {};
-    mktArr.forEach(q => { if (q?.symbol) mkt[q.symbol] = +(q.regularMarketChangePercent ?? 0).toFixed(2); });
+    mktArr.forEach(q => {
+      if (!q?.symbol) return;
+      const change = Number(q.regularMarketChangePercent);
+      mkt[q.symbol] = Number.isFinite(change) ? +change.toFixed(2) : null;
+    });
+    const spyQuote = mktArr.find(item => item?.symbol === 'SPY') || null;
     const sectorName = profile?.assetProfile?.sector || null;
     const sectorEtf = sectorName ? SECTOR_ETF[sectorName] || null : null;
     let sectorChg = null;
     if (sectorEtf) {
       try {
         const sq = await yf.quote(sectorEtf, {}, { validateResult: false });
-        sectorChg = +(sq?.regularMarketChangePercent ?? 0).toFixed(2);
+        const sectorMove = Number(sq?.regularMarketChangePercent);
+        sectorChg = Number.isFinite(sectorMove) ? +sectorMove.toFixed(2) : null;
       } catch { /* sector data unavailable */ }
     }
     if (sectorChg == null) dataGaps.push('Sector ETF data unavailable');
@@ -3259,6 +3271,16 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       sectorTrend: sectorChg == null ? null : sectorChg >= 0.3 ? 'BULLISH' : sectorChg <= -0.3 ? 'BEARISH' : 'NEUTRAL',
       attribution,
     };
+    const spyRegime = classifySearchMarketRegime({
+      quote: spyQuote,
+      dailyBars: spyDaily,
+      marketState: spyQuote?.marketState,
+    });
+    market.trend = spyRegime.available ? spyRegime.direction : null;
+    market.regime = spyRegime.regime;
+    market.regimeScore = spyRegime.score;
+    market.regimeConfidence = spyRegime.confidence;
+    if (!spyRegime.available) dataGaps.push('SPY market regime unavailable');
 
     // News (Yahoo search — no key needed; NewsAPI headline titles if key present)
     let news = [];
@@ -3413,13 +3435,34 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       patternAnalysis,
       fibonacci,
     });
+    const marketContext = buildSearchMarketContext({
+      symbol: sym,
+      quote: spyQuote,
+      stockQuote: quote,
+      spyDailyBars: spyDaily,
+      stockDailyBars: daily,
+      stockMarketState: quote.marketState,
+      spyMarketState: spyQuote?.marketState,
+      stockSignal: searchSignal,
+      sectorTrend: market.sectorTrend,
+      sectorChangePct: market.sectorChangePct,
+      sectorEtf: market.sectorEtf,
+      profile,
+    });
+    const finalSearchSignal = applySearchMarketRegime({
+      searchSignal,
+      spyRegime: marketContext.spy,
+      sector: marketContext.sector,
+      relativeStrength: marketContext.relativeStrength,
+      sensitivity: marketContext.sensitivity,
+    });
     const tradeLevels = buildSearchTradeLevels({
       currentPrice: price,
       levels,
       confluence,
       fibonacci,
       smartMoney,
-      searchSignal,
+      searchSignal: finalSearchSignal,
     });
 
     // Do not manufacture probability percentages when no directly comparable
@@ -3521,7 +3564,7 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
       analogs: analogs ? { threshold, ...analogs } : null,
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
-      probabilities, confluence, searchSignal, tradeLevels,
+      probabilities, confluence, searchSignal: finalSearchSignal, marketContext, tradeLevels,
       confidence: { overall, parts },
       ai,
     };

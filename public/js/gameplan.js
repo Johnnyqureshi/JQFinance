@@ -44,13 +44,34 @@ const gamePlan = (() => {
   }
 
   function levelRows(levels) {
-    if (!levels) return '';
-    const row = (l, type) => `<div class="gp-lvl-row ${type}">
-      <span class="gp-lvl-price">$${fmt(l.price)}</span><span class="gp-lvl-label">${esc(l.label)}</span></div>`;
-    const bias = levels.bias ? row({ ...levels.bias, label: 'Key bias level · break/hold above = bullish · below = bearish' }, 'bias') : '';
-    const res = (levels.resistance || []).slice(0, 1).map(l => row({ ...l, label: 'Resistance' }, 'res')).join('');
-    const sup = (levels.support || []).slice(0, 1).map(l => row({ ...l, label: 'Support' }, 'sup')).join('');
-    return bias + res + sup;
+    const source = levels || {};
+    const row = (l, type, label) => `<div class="gp-lvl-row ${type}">
+      <span class="gp-lvl-price">${l?.price == null ? 'UNAVAILABLE' : '$' + fmt(l.price)}</span><span class="gp-lvl-label">${esc(label || l?.label || 'Level unavailable')}</span></div>`;
+    const unavailable = (type, label) => row(null, `${type} unavailable`, label);
+    const bias = source.bias
+      ? row(source.bias, 'bias', 'Key bias level · break/hold above = bullish · below = bearish')
+      : unavailable('bias', 'Key bias level unavailable · completed-session history required');
+    const resistanceLevels = (source.resistance || []).slice(0, 2);
+    const supportLevels = (source.support || []).slice(0, 2);
+    const res = resistanceLevels.map((l, index) => row(
+      l,
+      `res${index === 1 ? ' next' : ''}`,
+      index === 0 ? 'Resistance' : 'Next resistance if price breaks up',
+    )).join('');
+    const sup = supportLevels.map((l, index) => row(
+      l,
+      `sup${index === 1 ? ' next' : ''}`,
+      index === 0 ? 'Support' : 'Next support if price breaks down',
+    )).join('');
+    return bias
+      + (res || unavailable('res', 'Resistance unavailable · completed-session history required'))
+      + (resistanceLevels.length > 1 || source.nextResistance
+        ? ''
+        : unavailable('res next', 'Next resistance if price breaks up · no additional qualified level'))
+      + (sup || unavailable('sup', 'Support unavailable · completed-session history required'))
+      + (supportLevels.length > 1 || source.nextSupport
+        ? ''
+        : unavailable('sup next', 'Next support if price breaks down · no additional qualified level'));
   }
 
   function gapRows(gaps) {
@@ -71,6 +92,15 @@ const gamePlan = (() => {
       </div>`;
     };
     return row('above', gaps?.above) + row('current', gaps?.current) + row('below', gaps?.below);
+  }
+
+  function decisionLevelsHtml(levels, gaps) {
+    return `<section class="search-decision-levels-top" aria-label="Search support and resistance levels">
+      <div class="gp-sec-title">Support &amp; resistance <span class="gp-sec-note">nearest and next decision points</span></div>
+      <div class="gp-levels">${levelRows(levels)}</div>
+      <div class="gp-sec-title">Open daily price gaps <span class="gp-sec-note">historical fill rates, not guarantees</span></div>
+      <div class="gp-levels">${gapRows(gaps)}</div>
+    </section>`;
   }
 
   function fibonacciHtml(fibonacci) {
@@ -461,6 +491,10 @@ const gamePlan = (() => {
 
     if (!d?.ok) {
       setSafe('searchVerdictTop', el => el.style.display = 'none');
+      setSafe('searchDecisionLevelsTop', el => {
+        el.style.display = 'none';
+        el.innerHTML = '';
+      });
       setSafe('gpLoading', el => el.style.display = 'none');
       setSafe('gpError', el => {
         el.style.display = '';
@@ -521,6 +555,10 @@ const gamePlan = (() => {
         ? signalReasons.join(' · ')
         : 'Using all available verified Search evidence; missing inputs remain provisional.';
     });
+    setSafe('searchDecisionLevelsTop', el => {
+      el.innerHTML = decisionLevelsHtml(displayLevels || levels, gapAnalysis);
+      el.style.display = '';
+    });
     setSafe('gpSetupBadge', el => {
       el.style.display = '';
       el.textContent = setup || '--';
@@ -563,19 +601,10 @@ const gamePlan = (() => {
         <div class="gp-vcell"><span>Day range</span><b>${dayRangePct == null ? '--' : fmt(dayRangePct, 0) + '%'}</b><small>${s.low != null && s.high != null ? '$' + fmt(s.low) + '–$' + fmt(s.high) : 'Unavailable'}</small></div>
       </div>
 
-      ${tradeReferenceHtml(tradeLevels)}
-      ${searchSignalHtml(searchSignal)}
+       ${tradeReferenceHtml(tradeLevels)}
+       ${searchSignalHtml(searchSignal)}
 
-      <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
-
-      <div class="gp-cols">
-        <div class="gp-col">
-          <div class="gp-sec-title">Decision levels <span class="gp-sec-note">where the direction can strengthen or fail</span></div>
-          <div class="gp-levels">${levelRows(displayLevels || levels)}</div>
-          <div class="gp-sec-title">Open daily price gaps <span class="gp-sec-note">historical fill rates, not guarantees</span></div>
-          <div class="gp-levels">${gapRows(gapAnalysis)}</div>
-        </div>
-      </div>
+       <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
 
       ${fibonacciHtml(d.fibonacci)}
 
@@ -622,6 +651,10 @@ const gamePlan = (() => {
     setSafe('gpLoading', el => el.style.display = 'flex');
     setSafe('gpError', el => el.style.display = 'none');
     setSafe('gpContent', el => el.style.display = 'none');
+    setSafe('searchDecisionLevelsTop', el => {
+      el.style.display = 'none';
+      el.innerHTML = '';
+    });
     setSafe('gpSetupBadge', el => el.style.display = 'none');
     refresh(false, suppliedAnalysis);
     schedule();
@@ -632,6 +665,10 @@ const gamePlan = (() => {
     if (btn) btn.addEventListener('click', () => {
       setSafe('gpLoading', el => el.style.display = 'flex');
       setSafe('gpContent', el => el.style.display = 'none');
+      setSafe('searchDecisionLevelsTop', el => {
+        el.style.display = 'none';
+        el.innerHTML = '';
+      });
       const sharedRefresh = currentSym
         ? window.searchContext.load(currentSym, { force: true })
         : null;

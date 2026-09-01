@@ -119,6 +119,34 @@ test('search levels use 14 completed sessions and expose narrow ATR zones', () =
   assert.ok(result.dailyPivots);
 });
 
+test('exposes the next completed-session support and resistance rungs in order', () => {
+  const result = buildSearchLevels({
+    dailyBars: bars(20),
+    currentPrice: 120.5,
+    marketState: 'CLOSED',
+    nowMs: Date.parse('2026-08-21T12:00:00Z'),
+  });
+  assert.ok(result.levels.resistance.length >= 2);
+  assert.ok(result.levels.support.length >= 2);
+  assert.equal(result.levels.nextResistance, result.levels.resistance[1]);
+  assert.equal(result.levels.nextSupport, result.levels.support[1]);
+  assert.ok(result.displayLevels.resistance[0].price < result.displayLevels.resistance[1].price);
+  assert.ok(result.displayLevels.support[0].price > result.displayLevels.support[1].price);
+});
+
+test('does not invent a next level when only one side level is available', () => {
+  const result = buildSearchLevels({
+    dailyBars: bars(20),
+    currentPrice: 1000,
+    marketState: 'CLOSED',
+    nowMs: Date.parse('2026-08-21T12:00:00Z'),
+  });
+  assert.equal(result.levels.nextResistance, null);
+  assert.equal(result.levels.nextSupport, null);
+  assert.deepEqual(result.displayLevels.resistance, []);
+  assert.deepEqual(result.displayLevels.support, []);
+});
+
 test('forming candle changes cannot repaint regular-session levels', () => {
   const completed = bars(15);
   const formingA = { t: '2026-08-16', o: 115, h: 116, l: 114, c: 115.5, v: 100 };

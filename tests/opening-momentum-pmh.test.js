@@ -1,8 +1,18 @@
 'use strict';
 const assert = require('assert');
-const { evaluatePmhBreak, evaluatePmhRunnerExit } = require('../lib/opening-momentum-pmh');
+const Database = require('better-sqlite3');
+const {
+  evaluatePmhBreak,
+  evaluatePmhRunnerExit,
+  pmhRegularSessionOpenAt,
+  calculatePmhBoundedEntry,
+  reservePmhEntryIntent,
+  summarizePmhTerminalExit,
+  managePmhRunnerExit,
+} = require('../lib/opening-momentum-pmh');
 let passed = 0, failed = 0;
-function test(name, fn) { try { fn(); console.log(`  ✓ ${name}`); passed++; } catch (e) { console.error(`  ✗ ${name}\n    ${e.message}`); failed++; } }
+const tests = [];
+function test(name, fn) { tests.push({ name, fn }); }
 function valid(overrides = {}) {
   return {
     symbol: 'TEST', freshness: { bars: true, quote: true },
@@ -69,5 +79,235 @@ test('runner exits only after a completed failure condition', () => {
   assert.strictEqual(evaluatePmhRunnerExit({ candle: { close: 10.4 }, pmh: 10.5, ema9: 10.45 }).exit, true);
   assert.strictEqual(evaluatePmhRunnerExit({ candle: { close: 10.7 }, pmh: 10.5, ema9: 10.6 }).exit, false);
 });
-if (failed) process.exitCode = 1;
-console.log(`\n${passed} passed, ${failed} failed`);
+test('cannot freeze the pre-market range before the 09:30 ET regular open', () => {
+  assert.strictEqual(pmhRegularSessionOpenAt('2026-09-01T13:29:59.000Z'), false);
+  assert.strictEqual(pmhRegularSessionOpenAt('2026-09-01T13:30:00.000Z'), true);
+  assert.strictEqual(pmhRegularSessionOpenAt('2026-09-05T14:00:00.000Z'), false);
+});
+test('a fast quote gap re-sizes against the executable limit without exceeding risk', () => {
+  const now = new Date('2026-09-01T14:00:00.000Z');
+  const result = calculatePmhBoundedEntry({
+    ask: 10.50,
+    quoteAt: now,
+    now,
+    stop: 10,
+    resistance: 12,
+    config: { maxRiskDollars: 100, maxPositionDollars: 5000 },
+    maxTradePrice: 15,
+  });
+  assert.strictEqual(result.eligible, true);
+  assert(result.entry <= 10.50 * 1.0025);
+  assert(result.shares < Math.floor(100 / (10.20 - 10)));
+  assert(result.shares * result.riskPerShare <= 100 + 1e-9);
+  assert(result.shares * result.entry <= 5000 + 1e-9);
+});
+test('a quote gap blocks when the new executable price invalidates room to resistance', () => {
+  const now = new Date('2026-09-01T14:00:00.000Z');
+  const result = calculatePmhBoundedEntry({
+    ask: 11.40,
+    quoteAt: now,
+    now,
+    stop: 10,
+    resistance: 12,
+    config: { maxRiskDollars: 100, maxPositionDollars: 5000 },
+    maxTradePrice: 15,
+  });
+  assert.strictEqual(result.eligible, false);
+  assert(result.reasons.some(reason => /resistance-risk/.test(reason)));
+});
+test('concurrent reservations create one symbol/session intent', async () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE pmh_entry_intents (
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT,
+    PRIMARY KEY (user_id, symbol, session_date)
+  )`);
+  let submissions = 0;
+  const execute = async () => {
+    await Promise.resolve();
+    reservePmhEntryIntent(db, {
+      userId: 7,
+      symbol: 'test',
+      sessionDate: '2026-09-01',
+      detail: 'mock execute',
+    });
+    submissions += 1;
+  };
+  const results = await Promise.allSettled([execute(), execute()]);
+  assert.strictEqual(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.strictEqual(submissions, 1);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS count FROM pmh_entry_intents').get().count, 1);
+  db.close();
+});
+test('a stop-cancel fill race reconciles without submitting another sell', async () => {
+  let exitSubmissions = 0;
+  const result = await managePmhRunnerExit({
+    symbol: 'TEST',
+    entryOrderId: 'entry-1',
+    entryClientOrderId: 'pmh-entry-1',
+    exitClientOrderId: 'pmh-exit-1',
+    maxQty: 5,
+    stopPrice: 10,
+    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
+    broker: {
+      cancelOrder: async () => ({ ok: true }),
+      getOrder: async () => ({ id: 'stop-1', type: 'stop', status: 'filled' }),
+      getNestedOrder: async () => {
+        throw new Error('should not fetch after an unsettled cancellation');
+      },
+      getPosition: async () => ({ qty: '0' }),
+      submitMarketExit: async () => { exitSubmissions += 1; },
+      submitProtectiveStop: async () => ({ id: 'rescue-1' }),
+      isOwned: () => true,
+    },
+  });
+  assert.strictEqual(result.action, 'reconcile_only');
+  assert.strictEqual(exitSubmissions, 0);
+});
+test('a failed runner exit attempts to restore broker stop protection', async () => {
+  let exitSubmissions = 0;
+  let rescueSubmissions = 0;
+  const result = await managePmhRunnerExit({
+    symbol: 'TEST',
+    entryOrderId: 'entry-1',
+    entryClientOrderId: 'pmh-entry-1',
+    exitClientOrderId: 'pmh-exit-1',
+    maxQty: 5,
+    stopPrice: 10,
+    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'new' }] },
+    broker: {
+      cancelOrder: async () => ({ ok: true }),
+      getOrder: async () => ({ id: 'stop-1', type: 'stop', status: 'canceled' }),
+      getNestedOrder: async () => ({
+        client_order_id: 'pmh-entry-1',
+        legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }],
+      }),
+      getPosition: async () => ({ qty: '5' }),
+      submitMarketExit: async () => {
+        exitSubmissions += 1;
+        const error = new Error('mock broker rejection');
+        error.alpacaStatus = 422;
+        throw error;
+      },
+      submitProtectiveStop: async body => {
+        rescueSubmissions += 1;
+        assert.strictEqual(body.qty, '5');
+        assert.strictEqual(body.stop_price, '10.00');
+        return { id: 'rescue-1' };
+      },
+      isOwned: (order, expected) => order.client_order_id === expected,
+      isDefinitiveExitFailure: error => error.alpacaStatus === 422,
+    },
+  });
+  assert.strictEqual(result.action, 'protected_after_exit_failure');
+  assert.strictEqual(exitSubmissions, 1);
+  assert.strictEqual(rescueSubmissions, 1);
+  assert.strictEqual(result.rescueOrder.id, 'rescue-1');
+});
+test('an ambiguous runner-exit timeout never submits a competing rescue stop', async () => {
+  let rescueSubmissions = 0;
+  const result = await managePmhRunnerExit({
+    symbol: 'TEST',
+    entryOrderId: 'entry-1',
+    entryClientOrderId: 'pmh-entry-1',
+    exitClientOrderId: 'pmh-exit-1',
+    maxQty: 5,
+    stopPrice: 10,
+    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
+    broker: {
+      getNestedOrder: async () => ({
+        client_order_id: 'pmh-entry-1',
+        legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }],
+      }),
+      getPosition: async () => ({ qty: '5' }),
+      submitMarketExit: async () => {
+        const error = new Error('mock timeout after possible acceptance');
+        error.alpacaTransient = true;
+        throw error;
+      },
+      submitProtectiveStop: async () => {
+        rescueSubmissions += 1;
+        return { id: 'must-not-submit' };
+      },
+      isOwned: (order, expected) => order.client_order_id === expected,
+      isDefinitiveExitFailure: () => false,
+    },
+  });
+  assert.strictEqual(result.action, 'exit_unknown');
+  assert.strictEqual(rescueSubmissions, 0);
+});
+test('a rescue timeout preserves its durable intent for exact reconciliation', async () => {
+  let reservedRescue = false;
+  let exitSubmissions = 0;
+  let rescueSubmissions = 0;
+  const result = await managePmhRunnerExit({
+    symbol: 'TEST',
+    entryOrderId: 'entry-1',
+    entryClientOrderId: 'pmh-entry-1',
+    exitClientOrderId: 'pmh-exit-1',
+    maxQty: 5,
+    stopPrice: 10,
+    parent: { legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }] },
+    broker: {
+      getNestedOrder: async () => ({
+        client_order_id: 'pmh-entry-1',
+        legs: [{ id: 'stop-1', type: 'stop', status: 'canceled' }],
+      }),
+      getPosition: async () => ({ qty: '5' }),
+      submitMarketExit: async () => {
+        exitSubmissions += 1;
+        const error = new Error('definitive broker rejection');
+        error.alpacaStatus = 422;
+        throw error;
+      },
+      beforeProtectiveStop: async () => {
+        reservedRescue = true;
+      },
+      submitProtectiveStop: async () => {
+        assert.strictEqual(reservedRescue, true);
+        rescueSubmissions += 1;
+        throw new Error('rescue response timed out');
+      },
+      isOwned: (order, expected) => order.client_order_id === expected,
+      isDefinitiveExitFailure: error => error.alpacaStatus === 422,
+    },
+  });
+  assert.strictEqual(result.action, 'exit_failed');
+  assert.strictEqual(exitSubmissions, 1);
+  assert.strictEqual(rescueSubmissions, 1);
+  assert.strictEqual(reservedRescue, true);
+  assert.match(result.rescueError, /timed out/);
+});
+test('a terminal partial runner exit protects only residual runner shares', () => {
+  const terminal = summarizePmhTerminalExit({
+    runnerQty: 5,
+    filledQty: 2,
+    filledAvgPrice: 11,
+    entryPrice: 10,
+    accountPositionQty: 8,
+  });
+  assert.strictEqual(terminal.confirmedFilledQty, 2);
+  assert.strictEqual(terminal.remainingRunnerQty, 3);
+  assert.strictEqual(terminal.protectionQty, 3);
+  assert.strictEqual(terminal.realizedPnl, 2);
+  const independentlyProtectedPartialQty = 5;
+  assert(terminal.protectionQty + independentlyProtectedPartialQty <= terminal.availablePositionQty);
+});
+
+(async () => {
+  for (const { name, fn } of tests) {
+    try {
+      await fn();
+      console.log(`  ✓ ${name}`);
+      passed++;
+    } catch (error) {
+      console.error(`  ✗ ${name}\n    ${error.message}`);
+      failed++;
+    }
+  }
+  if (failed) process.exitCode = 1;
+  console.log(`\n${passed} passed, ${failed} failed`);
+})();

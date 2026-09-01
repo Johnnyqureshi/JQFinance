@@ -127,6 +127,11 @@ const {
   DEFAULT_PMH_CONFIG,
   evaluatePmhBreak,
   evaluatePmhRunnerExit,
+  pmhRegularSessionOpenAt,
+  calculatePmhBoundedEntry,
+  reservePmhEntryIntent,
+  summarizePmhTerminalExit,
+  managePmhRunnerExit,
 } = require('./lib/opening-momentum-pmh');
 const { createPaperShadow } = require('./lib/paper-shadow');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
@@ -5649,7 +5654,7 @@ async function buildPmhCandidate(userId, symbol, config = DEFAULT_PMH_CONFIG) {
   // A PMH is immutable only once the entire pre-market session has ended. Do
   // not write an early 04:00–09:29 reading, or a later pre-market high would
   // be silently ignored and create a false breakout level.
-  if (!frozen && premarketBars.length && (etNow?.minutes || 0) >= 570) {
+  if (!frozen && premarketBars.length && pmhRegularSessionOpenAt(now)) {
     frozen = {
       user_id: userId, symbol: sym, session_date: sessionDate,
       pmh_high: Math.max(...premarketBars.map(b => b.h)),
@@ -5810,6 +5815,8 @@ function pmhError(message, status, extra) {
 }
 
 async function executePmhEntry(userId, symbol, source = 'manual') {
+  const normalizedSymbol = String(symbol || '').toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+  if (!normalizedSymbol) throw pmhError('Invalid PMH symbol.', 400);
   if (!isBotEnabled(userId, 'pmh')) throw pmhError('Opening Momentum automation is disabled.', 409);
   const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
   if (!pmhSetting?.enabled) throw pmhError('Opening Momentum strategy is disabled in its persisted settings.', 409);
@@ -5824,38 +5831,33 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
   let submittedOrders = [];
   try {
     if (!isMarketOpen()) throw pmhError('Market is closed for regular-session PMH entries.', 400);
-    await assertAlpacaTradableEquity(userId, symbol, { fresh: true, scope: 'pmh' });
+    await assertAlpacaTradableEquity(userId, normalizedSymbol, { fresh: true, scope: 'pmh' });
     const slots = await getOpenSlots(userId, 'PMH', 'pmh');
     // A PMH setup submits two independently protected BUY parents (partial +
     // runner), so reserve both shared entry units before either reaches Alpaca.
     if (!canReserveEntryUnits(slots, 2)) throw pmhError('PMH needs two available entry slots for its protected partial and runner lots.', 409);
-    if (slots.positions.some(p => p.symbol === symbol) ||
-        slots.openOrders.some(o => o.symbol === symbol)) throw pmhError(`${symbol} already has a position or pending order.`, 409);
-    const allSymbolOrders = await alpacaFetchFor(userId, 'pmh', `/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`);
-    if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) throw pmhError(`${symbol} already has a broker-open order.`, 409);
+    if (slots.positions.some(p => p.symbol === normalizedSymbol) ||
+        slots.openOrders.some(o => o.symbol === normalizedSymbol)) throw pmhError(`${normalizedSymbol} already has a position or pending order.`, 409);
+    const allSymbolOrders = await alpacaFetchFor(userId, 'pmh', `/v2/orders?status=open&symbols=${encodeURIComponent(normalizedSymbol)}`);
+    if (Array.isArray(allSymbolOrders) && allSymbolOrders.length) throw pmhError(`${normalizedSymbol} already has a broker-open order.`, 409);
     const config = settings.config;
-    const candidate = await buildPmhCandidate(userId, symbol, config);
+    const candidate = await buildPmhCandidate(userId, normalizedSymbol, config);
     if (!candidate.eligible) throw pmhError('Trade is not eligible.', 400, { candidate });
     // Calculate risk from a fresh executable quote, not a 2-minute candle
     // close. A marketable limit bounds upward slippage; without a usable ask,
     // the trade is blocked rather than sized optimistically.
-    const freshSnapshot = await alpacaSnapshotFetch(userId, symbol, 'pmh');
-    const executableAsk = Number(freshSnapshot?.[symbol]?.latestQuote?.ap);
-    const executableQuoteAt = freshSnapshot?.[symbol]?.latestQuote?.t;
-    if (!(executableAsk > 0) || !pmhFresh(executableQuoteAt, 15 * 1000)) {
-      throw pmhError('Fresh executable Alpaca ask is unavailable; PMH order blocked.', 400);
+    const freshSnapshot = await alpacaSnapshotFetch(userId, normalizedSymbol, 'pmh');
+    const bounded = calculatePmhBoundedEntry({
+      ask: freshSnapshot?.[normalizedSymbol]?.latestQuote?.ap,
+      quoteAt: freshSnapshot?.[normalizedSymbol]?.latestQuote?.t,
+      stop: candidate.levels.stop,
+      resistance: candidate.levels.resistance,
+      config,
+      maxTradePrice: MAX_TRADE_PRICE,
+    });
+    if (!bounded.eligible) {
+      throw pmhError(bounded.reasons[0] || 'Fresh quote invalidates PMH risk controls.', 400);
     }
-    const slippageCap = 0.0025; // 25 bps maximum accepted entry drift
-    const boundedEntry = +(executableAsk * (1 + slippageCap)).toFixed(2);
-    const stop = Number(candidate.levels.stop);
-    const boundedRisk = boundedEntry - stop;
-    const boundedRiskPct = boundedRisk / boundedEntry * 100;
-    if (!(boundedRisk > 0) || boundedRiskPct > config.maxRiskPerSharePct ||
-        !Number.isFinite(candidate.levels.resistance) ||
-        candidate.levels.resistance - boundedEntry < boundedRisk * config.minRoomRiskMultiple) {
-      throw pmhError('Fresh quote invalidates the configured stop or resistance-risk gate.', 400);
-    }
-    if (boundedEntry > MAX_TRADE_PRICE) throw pmhError(`PMH preserves the account-wide $${MAX_TRADE_PRICE} maximum trade price.`, 400);
     const daily = db.prepare(`SELECT COUNT(DISTINCT COALESCE(entry_client_order_id, CAST(id AS TEXT))) AS trades,
       COALESCE(SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END), 0) AS losses
       FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
@@ -5863,19 +5865,22 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
     if (Number(daily.trades) >= config.maxTradesPerDay) throw pmhError('PMH daily trade limit reached.', 409);
     if (Number(daily.losses) >= config.maxDailyLoss) throw pmhError('PMH daily loss limit reached.', 409);
     const mode = getAlpacaCreds(userId, 'pmh')?.mode || 'paper';
-    const riskShares = Math.floor(config.maxRiskDollars / boundedRisk);
-    const positionShares = Math.floor(config.maxPositionDollars / boundedEntry);
-    const shares = Math.min(riskShares, positionShares);
-    if (!Number.isInteger(shares) || shares < 1) throw pmhError('Risk sizing produced less than one whole share.', 400);
-    const entry = boundedEntry;
+    const shares = bounded.shares;
+    const entry = bounded.entry;
+    const stop = bounded.stop;
+    const boundedRisk = bounded.riskPerShare;
     const target = Number((entry + boundedRisk * config.partialTargetR).toFixed(2));
     const sessionDate = pmhEtParts(new Date())?.date;
     if (!sessionDate) throw pmhError('Trading session date is unavailable.', 400);
     try {
-      db.prepare(`INSERT INTO pmh_entry_intents (user_id,symbol,session_date,status,detail) VALUES (?,?,?,?,?)`)
-        .run(userId, symbol, sessionDate, 'pending', `PMH broker submission reserved (${source})`);
+      reservePmhEntryIntent(db, {
+        userId,
+        symbol: normalizedSymbol,
+        sessionDate,
+        detail: `PMH broker submission reserved (${source})`,
+      });
     } catch (e) {
-      throw pmhError(`${symbol} already has a PMH entry intent for this session.`, 409);
+      throw pmhError(`${normalizedSymbol} already has a PMH entry intent for this session.`, 409);
     }
     // Use two broker-protected lots: a bracket lot realizes the configured
     // partial target, while an OTO lot is the independent EMA-managed runner.
@@ -5889,21 +5894,21 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
     const runnerQty = shares - partialQty;
     const orders = submittedOrders;
     const submitLot = async (qty, kind) => {
-      const clientId = `pmh_${sessionDate.replaceAll('-','')}_${userId}_${symbol}_${kind}`.slice(0, 48);
+      const clientId = `pmh_${sessionDate.replaceAll('-','')}_${userId}_${normalizedSymbol}_${kind}`.slice(0, 48);
       clientOrderId = clientId;
       const existing = db.prepare('SELECT id FROM bot_trade_log WHERE user_id=? AND entry_client_order_id=?').get(userId, clientId);
       if (existing) throw new Error('This PMH entry lot is already recorded.');
       const strategy = kind === 'partial' ? 'opening-momentum-pmh-partial' : 'opening-momentum-pmh-runner';
       const trade = db.prepare(`INSERT INTO bot_trade_log
         (user_id,symbol,entry_price,shares,mode,status,stop_price,take_profit_rsi,entry_order_id,entry_client_order_id,strategy)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(userId, symbol, entry, qty, mode, 'pending_entry', stop, config.partialTargetR, clientId, clientId, strategy);
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(userId, normalizedSymbol, entry, qty, mode, 'pending_entry', stop, config.partialTargetR, clientId, clientId, strategy);
       // Record the broker submission attempt before issuing POST. A network
       // timeout is ambiguous: Alpaca may accept it, so reconciliation must use
       // this durable client ID even when no broker order ID comes back.
       const submitted = { kind, order: null, tradeId: trade.lastInsertRowid, qty, clientOrderId: clientId };
       orders.push(submitted);
       const orderBody = {
-        symbol, qty: String(qty), side: 'buy', type: 'limit', limit_price: entry.toFixed(2), time_in_force: 'day', client_order_id: clientId,
+        symbol: normalizedSymbol, qty: String(qty), side: 'buy', type: 'limit', limit_price: entry.toFixed(2), time_in_force: 'day', client_order_id: clientId,
         ...(kind === 'partial'
           ? { order_class: 'bracket', take_profit: { limit_price: target.toFixed(2) }, stop_loss: { stop_price: stop.toFixed(2) } }
           : { order_class: 'oto', stop_loss: { stop_price: stop.toFixed(2) } }),
@@ -5916,7 +5921,7 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
       submitted.order = order;
     };
     if (partialQty) await submitLot(partialQty, 'partial');
-    await submitLot(runnerQty, 'runner');
+    if (runnerQty > 0) await submitLot(runnerQty, 'runner');
     db.prepare(`UPDATE pmh_entry_intents SET status='submitted',detail=? WHERE user_id=? AND symbol=? AND session_date=?`)
       .run(`Submitted ${orders.length} protected PMH lot(s)`, userId, symbol, sessionDate);
     return { ok: true, strategy: 'opening-momentum-pmh-v1', mode, orders, target, stop, candidate };
@@ -5926,7 +5931,7 @@ async function executePmhEntry(userId, symbol, source = 'manual') {
       .run(
         submittedOrders.length ? 'partial_submission_pending_reconciliation' : 'error',
         String(error.message || 'Broker submission failed').slice(0, 240),
-        userId, symbol, sessionDate,
+        userId, normalizedSymbol, sessionDate,
       );
     error.clientOrderId = clientOrderId;
     error.reconciliationRequired = submittedOrders.length > 0;
@@ -5949,12 +5954,61 @@ app.get('/api/opening-momentum/trades', requireAuth, (req, res) => {
 // open; it never manufactures a fill price, exit, or P&L from a quote.
 async function reconcilePmhTrades(userId) {
   const pmhFetch = (path, opts = {}) => alpacaFetchFor(userId, 'pmh', path, opts);
+  const pmhMutation = async (path, opts) => {
+    beginAlpacaOrderRequest(userId);
+    try {
+      if (isAlpacaFlattening(userId)) {
+        throw new Error('Emergency flatten is in progress; PMH order changes are blocked.');
+      }
+      return await pmhFetch(path, opts);
+    } finally {
+      endAlpacaOrderRequest(userId);
+    }
+  };
+  const restorePmhRunnerStop = async (trade, reason, maxRunnerQty = trade.shares) => {
+    const rescueClientId = trade.rescue_stop_client_order_id
+      || `pmhr_${userId}_${trade.id}_${trade.symbol}`.slice(0, 48);
+    db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',
+      rescue_stop_client_order_id=?,pending_exit_reason=? WHERE id=?`)
+      .run(rescueClientId, reason, trade.id);
+    let rescueOrder = null;
+    try {
+      rescueOrder = await pmhFetch(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(rescueClientId)}`);
+      if (!brokerOrderMatchesIntent(rescueOrder, rescueClientId)) {
+        throw new Error('Broker response does not match the PMH rescue-stop intent.');
+      }
+    } catch (error) {
+      if (error.alpacaStatus !== 404) throw error;
+    }
+    if (!rescueOrder) {
+      const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
+      const rescueQty = Math.min(Number(position?.qty), Number(maxRunnerQty));
+      if (!(rescueQty > 0) || !(Number(trade.stop_price) > 0)) return null;
+      rescueOrder = await pmhMutation('/v2/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbol: trade.symbol,
+          qty: String(rescueQty),
+          side: 'sell',
+          type: 'stop',
+          time_in_force: 'day',
+          stop_price: Number(trade.stop_price).toFixed(2),
+          client_order_id: rescueClientId,
+        }),
+      });
+    }
+    db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure',
+      rescue_stop_order_id=?,rescue_stop_client_order_id=?,
+      pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=?
+      WHERE id=?`).run(rescueOrder.id || rescueClientId, rescueClientId, reason, trade.id);
+    return rescueOrder;
+  };
   const pmhConfig = pmhConfigFor(userId).config;
   const open = db.prepare(`SELECT * FROM bot_trade_log WHERE user_id=? AND strategy LIKE 'opening-momentum-pmh%'
-    AND status IN ('pending_entry','open','pending_exit','exit_reserving') ORDER BY id`).all(userId);
+    AND status IN ('pending_entry','open','pending_exit','exit_reserving','stop_cancel_unknown',
+      'protected_after_exit_failure','protection_unresolved') ORDER BY id`).all(userId);
   const reconciled = [];
   for (const trade of open) {
-    let runnerStopCancelled = false;
     try {
       if (trade.status === 'pending_entry') {
         const order = trade.entry_order_id === trade.entry_client_order_id
@@ -5973,6 +6027,102 @@ async function reconcilePmhTrades(userId) {
           reconciled.push({ id: trade.id, status: 'void', event: `entry ${order.status}` });
         }
         continue;
+      }
+      if (trade.status === 'protected_after_exit_failure' || trade.status === 'protection_unresolved') {
+        if (!trade.rescue_stop_order_id && !trade.rescue_stop_client_order_id) {
+          reconciled.push({ id: trade.id, status: 'protection_unresolved', event: 'runner has no owned protective-stop intent; manual reconciliation required' });
+          continue;
+        }
+        const rescuePath = trade.rescue_stop_order_id
+          ? `/v2/orders/${encodeURIComponent(trade.rescue_stop_order_id)}`
+          : `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.rescue_stop_client_order_id)}`;
+        const rescueOrder = await pmhFetch(rescuePath);
+        const expectedRescueClientId = trade.rescue_stop_client_order_id
+          || String(rescueOrder?.client_order_id || '');
+        if (!expectedRescueClientId.startsWith(`pmhr_${userId}_`)
+            || !brokerOrderMatchesIntent(rescueOrder, expectedRescueClientId)) {
+          throw new Error('Broker response does not match the PMH rescue-stop intent.');
+        }
+        const rescueStatus = String(rescueOrder.status || '').toLowerCase();
+        if (rescueStatus === 'filled' && Number(rescueOrder.filled_qty) > 0
+            && Number(rescueOrder.filled_avg_price) > 0) {
+          const filledQty = Number(rescueOrder.filled_qty);
+          const exitPrice = Number(rescueOrder.filled_avg_price);
+          const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
+          const priorPnl = Number(trade.pnl) || 0;
+          const totalPnl = +(priorPnl + pnl).toFixed(6);
+          db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,pnl=?,
+            exit_reason='Replacement protective stop broker fill',closed_at=datetime('now')
+            WHERE id=?`).run(exitPrice, totalPnl, trade.id);
+          reconciled.push({ id: trade.id, status: 'closed', event: 'replacement protective stop fill confirmed' });
+        } else if (['canceled', 'cancelled', 'rejected', 'expired'].includes(rescueStatus)) {
+          db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',pending_exit_reason=? WHERE id=?`)
+            .run(`Replacement protective stop ${rescueStatus}; manual broker protection required`, trade.id);
+          reconciled.push({ id: trade.id, status: 'protection_unresolved', event: `replacement protective stop ${rescueStatus}; manual reconciliation required` });
+        }
+        continue;
+      }
+      if (trade.status === 'exit_reserving' && trade.pending_exit_client_order_id) {
+        let reservedExit = null;
+        try {
+          reservedExit = await pmhFetch(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(trade.pending_exit_client_order_id)}`);
+        } catch (error) {
+          if (error.alpacaStatus !== 404) throw error;
+        }
+        if (reservedExit) {
+          if (!brokerOrderMatchesIntent(reservedExit, trade.pending_exit_client_order_id)) {
+            throw new Error('Broker response does not match the reserved PMH exit intent.');
+          }
+          const reservedStatus = String(reservedExit.status || '').toLowerCase();
+          if (reservedStatus === 'filled' && Number(reservedExit.filled_qty) > 0
+              && Number(reservedExit.filled_avg_price) > 0) {
+            const filledQty = Number(reservedExit.filled_qty);
+            const exitPrice = Number(reservedExit.filled_avg_price);
+            const pnl = +((exitPrice - Number(trade.entry_price)) * filledQty).toFixed(6);
+            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,shares=?,pnl=?,exit_reason=?,
+              pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,
+              closed_at=datetime('now') WHERE id=?`)
+              .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
+            reconciled.push({ id: trade.id, status: 'closed', event: 'reserved exit fill confirmed' });
+            continue;
+          }
+          if (!['canceled', 'cancelled', 'rejected', 'expired'].includes(reservedStatus)) {
+            db.prepare(`UPDATE bot_trade_log SET status='pending_exit',pending_exit_order_id=? WHERE id=?`)
+              .run(reservedExit.id || trade.pending_exit_client_order_id, trade.id);
+            reconciled.push({ id: trade.id, status: 'pending_exit', event: 'reserved exit found at broker' });
+            continue;
+          }
+          const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
+          const terminal = summarizePmhTerminalExit({
+            runnerQty: trade.shares,
+            filledQty: reservedExit.filled_qty,
+            filledAvgPrice: reservedExit.filled_avg_price,
+            entryPrice: trade.entry_price,
+            accountPositionQty: position?.qty,
+          });
+          if (terminal.confirmedFilledQty > 0) {
+            db.prepare(`UPDATE bot_trade_log SET shares=?,pnl=COALESCE(pnl,0)+? WHERE id=?`)
+              .run(terminal.remainingRunnerQty, terminal.realizedPnl, trade.id);
+          }
+          if (!(terminal.remainingRunnerQty > 0)) {
+            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,exit_reason=?,
+              closed_at=datetime('now') WHERE id=?`)
+              .run(Number(reservedExit.filled_avg_price) || null, `Runner exit ${reservedStatus} after complete fill`, trade.id);
+            reconciled.push({ id: trade.id, status: 'closed', event: 'terminal runner exit fully reconciled' });
+            continue;
+          }
+          const restored = await restorePmhRunnerStop(
+            { ...trade, shares: terminal.remainingRunnerQty },
+            `Runner exit ${reservedStatus}; replacement stop submitted`,
+            terminal.protectionQty,
+          );
+          reconciled.push({
+            id: trade.id,
+            status: restored ? 'protected_after_exit_failure' : 'protection_unresolved',
+            event: restored ? 'terminal runner exit restored stop protection' : 'terminal runner exit has no remaining position to protect',
+          });
+          continue;
+        }
       }
       if (trade.status === 'pending_exit' && trade.pending_exit_order_id) {
         const order = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.pending_exit_order_id)}`);
@@ -6001,6 +6151,36 @@ async function reconcilePmhTrades(userId) {
             pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=NULL,closed_at=datetime('now') WHERE id=?`)
             .run(exitPrice, filledQty, pnl, trade.pending_exit_reason || 'PMH runner exit', trade.id);
           reconciled.push({ id: trade.id, status: 'closed', event: 'exit fill confirmed' });
+        } else if (['canceled', 'cancelled', 'rejected', 'expired'].includes(String(order.status || '').toLowerCase())) {
+          const position = await pmhFetch(`/v2/positions/${encodeURIComponent(trade.symbol)}`);
+          const terminal = summarizePmhTerminalExit({
+            runnerQty: trade.shares,
+            filledQty: order.filled_qty,
+            filledAvgPrice: order.filled_avg_price,
+            entryPrice: trade.entry_price,
+            accountPositionQty: position?.qty,
+          });
+          if (terminal.confirmedFilledQty > 0) {
+            db.prepare(`UPDATE bot_trade_log SET shares=?,pnl=COALESCE(pnl,0)+? WHERE id=?`)
+              .run(terminal.remainingRunnerQty, terminal.realizedPnl, trade.id);
+          }
+          if (!(terminal.remainingRunnerQty > 0)) {
+            db.prepare(`UPDATE bot_trade_log SET status='closed',exit_price=?,exit_reason=?,
+              closed_at=datetime('now') WHERE id=?`)
+              .run(Number(order.filled_avg_price) || null, `Runner exit ${String(order.status).toLowerCase()} after complete fill`, trade.id);
+            reconciled.push({ id: trade.id, status: 'closed', event: 'terminal runner exit fully reconciled' });
+            continue;
+          }
+          const restored = await restorePmhRunnerStop(
+            { ...trade, shares: terminal.remainingRunnerQty },
+            `Runner exit ${String(order.status).toLowerCase()}; replacement stop submitted`,
+            terminal.protectionQty,
+          );
+          reconciled.push({
+            id: trade.id,
+            status: restored ? 'protected_after_exit_failure' : 'protection_unresolved',
+            event: restored ? 'failed runner exit restored stop protection' : 'failed runner exit has no remaining position to protect',
+          });
         }
         continue;
       }
@@ -6025,6 +6205,46 @@ async function reconcilePmhTrades(userId) {
       // The partial lot has a native Alpaca bracket. It never uses the runner
       // manager or a browser-estimated partial sell.
       if (trade.strategy === 'opening-momentum-pmh-partial') continue;
+      if (trade.status === 'stop_cancel_unknown') {
+        const stopLegs = (parent?.legs || []).filter(leg =>
+          ['stop', 'stop_limit', 'stop_loss'].includes(String(leg?.type || '').toLowerCase())
+        );
+        const activeStop = stopLegs.some(leg =>
+          ['new', 'accepted', 'pending_new'].includes(String(leg.status || '').toLowerCase())
+        );
+        const unsettledStop = stopLegs.some(leg =>
+          ['pending_cancel', 'pending_replace'].includes(String(leg.status || '').toLowerCase())
+        );
+        if (activeStop) {
+          db.prepare(`UPDATE bot_trade_log SET status='open',pending_exit_client_order_id=NULL,
+            pending_exit_reason=NULL WHERE id=?`).run(trade.id);
+          reconciled.push({ id: trade.id, status: 'open', event: 'runner stop remains active; canceled exit reservation cleared' });
+          continue;
+        }
+        if (unsettledStop) {
+          reconciled.push({ id: trade.id, status: 'stop_cancel_unknown', event: 'runner stop cancellation remains unsettled; no sell submitted' });
+          continue;
+        }
+        const terminalWithoutFill = stopLegs.length > 0 && stopLegs.every(leg =>
+          ['canceled', 'cancelled', 'rejected', 'expired'].includes(String(leg.status || '').toLowerCase())
+        );
+        if (terminalWithoutFill) {
+          const restored = await restorePmhRunnerStop(
+            trade,
+            'Runner stop cancellation completed without an exit; replacement stop submitted',
+          );
+          reconciled.push({
+            id: trade.id,
+            status: restored ? 'protected_after_exit_failure' : 'stop_cancel_unknown',
+            event: restored ? 'cancellation race restored runner stop protection' : 'cancellation race has no remaining position to protect',
+          });
+          continue;
+        }
+        db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',pending_exit_reason=? WHERE id=?`)
+          .run('Runner stop state is missing after cancellation; manual broker protection required', trade.id);
+        reconciled.push({ id: trade.id, status: 'protection_unresolved', event: 'runner stop state is missing; manual reconciliation required' });
+        continue;
+      }
       // An earlier cycle acquired the exit reservation but could not finish.
       // It may still reconcile a broker leg above, but it must never submit a
       // second discretionary sell without operator review.
@@ -6054,95 +6274,86 @@ async function reconcilePmhTrades(userId) {
         pending_exit_reason=?,pending_exit_client_order_id=?
         WHERE id=? AND user_id=? AND status='open'`).run(runner.reason, exitClientId, trade.id, userId);
       if (claimed.changes !== 1) continue;
-      const position = await pmhFetch(`/v2/positions/${trade.symbol}`);
-      const qty = Math.min(Number(position?.qty), Number(trade.shares));
-      if (!(qty > 0)) continue; // Preserve journal until broker evidence explains the disappearance.
-      // Cancel only this runner's own OTO stop child. The partial bracket stays
-      // in force and continues to protect/target its separate lot.
-      let stopCancelAmbiguous = false;
-      for (const leg of (parent.legs || [])) {
-        if (leg.status === 'new' || leg.status === 'accepted' || leg.status === 'pending_new') {
-          await pmhFetch(`/v2/orders/${leg.id}`, { method: 'DELETE' });
-          const settledLeg = await pmhFetch(`/v2/orders/${leg.id}`);
-          if (!['canceled', 'cancelled'].includes(String(settledLeg?.status || '').toLowerCase())) {
-            stopCancelAmbiguous = true;
-          } else {
-            runnerStopCancelled = true;
-          }
-        }
-      }
-      // A stop may fill while the cancel request is in flight. In that
-      // ambiguous state, do not submit a discretionary sell; reconcile the
-      // terminal broker state on the next cycle instead.
-      const afterCancel = await pmhFetch(`/v2/orders/${encodeURIComponent(trade.entry_order_id)}?nested=true`);
-      if (!brokerOrderMatchesIntent(afterCancel, trade.entry_client_order_id)) {
-        throw new Error('Broker response does not match the PMH journal owner after cancellation.');
-      }
-      const stopFilledDuringCancel = (afterCancel?.legs || []).some(leg => leg.status === 'filled');
-      if (stopCancelAmbiguous || stopFilledDuringCancel) {
-        reconciled.push({ id: trade.id, status: 'open', event: 'runner stop cancellation unsettled; no discretionary sell submitted' });
+      const rescueClientId = `pmhr_${userId}_${trade.id}_${trade.symbol}`.slice(0, 48);
+      const lifecycle = await managePmhRunnerExit({
+        symbol: trade.symbol,
+        entryOrderId: trade.entry_order_id,
+        entryClientOrderId: trade.entry_client_order_id,
+        exitClientOrderId: exitClientId,
+        maxQty: trade.shares,
+        stopPrice: trade.stop_price,
+        parent,
+        broker: {
+          cancelOrder: orderId => pmhMutation(`/v2/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' }),
+          getOrder: orderId => pmhFetch(`/v2/orders/${encodeURIComponent(orderId)}`),
+          getNestedOrder: orderId => pmhFetch(`/v2/orders/${encodeURIComponent(orderId)}?nested=true`),
+          getPosition: exitSymbol => pmhFetch(`/v2/positions/${encodeURIComponent(exitSymbol)}`),
+          isOwned: (order, expectedClientId) => brokerOrderMatchesIntent(order, expectedClientId),
+          isDefinitiveExitFailure: error => Number(error?.alpacaStatus) >= 400
+            && Number(error?.alpacaStatus) < 500
+            && ![408, 409, 429].includes(Number(error?.alpacaStatus)),
+          beforeProtectiveStop: () => {
+            db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',
+              rescue_stop_client_order_id=?,pending_exit_reason=? WHERE id=?`)
+              .run(rescueClientId, 'Replacement runner stop submission requires broker reconciliation', trade.id);
+          },
+          submitMarketExit: body => pmhMutation('/v2/orders', {
+            method: 'POST',
+            body: JSON.stringify(body),
+          }),
+          submitProtectiveStop: body => pmhMutation('/v2/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+              ...body,
+              client_order_id: rescueClientId,
+            }),
+          }),
+        },
+      });
+      if (lifecycle.action === 'reconcile_only') {
+        db.prepare(`UPDATE bot_trade_log SET status='stop_cancel_unknown',pending_exit_reason=? WHERE id=?`)
+          .run(lifecycle.reason, trade.id);
+        reconciled.push({ id: trade.id, status: 'stop_cancel_unknown', event: lifecycle.reason });
         continue;
       }
-      const currentPosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
-      const remainingRunnerQty = Math.min(Number(currentPosition?.qty), Number(trade.shares));
-      if (!(remainingRunnerQty > 0)) continue;
-      beginAlpacaOrderRequest(userId);
-      let exitOrder;
-      try {
-        exitOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
-          symbol: trade.symbol, qty: String(remainingRunnerQty), side: 'sell', type: 'market', time_in_force: 'day', client_order_id: exitClientId,
-        }) });
-      } catch (exitError) {
-        // We deliberately canceled the old OTO stop before this market exit.
-        // If the broker did not accept the exit, immediately try to restore a
-        // protective stop for the broker-confirmed remaining runner quantity.
-        try {
-          const rescuePosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
-          const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
-          if (rescueQty > 0 && Number(trade.stop_price) > 0) {
-            const rescueOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
-              symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
-              stop_price: Number(trade.stop_price).toFixed(2),
-              client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
-            }) });
-            db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
-              pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=? WHERE id=?`)
-              .run(rescueOrder.id, 'Runner exit failed; replacement stop submitted', trade.id);
-          }
-        } catch (_) {}
-        throw exitError;
-      } finally { endAlpacaOrderRequest(userId); }
+      if (lifecycle.action === 'protected_after_exit_failure') {
+        db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure',
+          rescue_stop_order_id=?,rescue_stop_client_order_id=?,
+          pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=? WHERE id=?`)
+          .run(lifecycle.rescueOrder.id, rescueClientId, 'Runner exit failed; replacement stop submitted', trade.id);
+        reconciled.push({ id: trade.id, status: 'protected_after_exit_failure', event: 'Runner exit failed; replacement stop submitted' });
+        continue;
+      }
+      if (lifecycle.action === 'exit_unknown') {
+        reconciled.push({
+          id: trade.id,
+          status: 'exit_reserving',
+          error: lifecycle.exitError,
+          event: 'Runner exit submission is ambiguous; client-order reconciliation required before any protection change',
+        });
+        continue;
+      }
+      if (lifecycle.action === 'exit_failed') {
+        db.prepare(`UPDATE bot_trade_log SET status='protection_unresolved',
+          rescue_stop_client_order_id=?,pending_exit_reason=? WHERE id=?`)
+          .run(
+            rescueClientId,
+            lifecycle.rescueError || lifecycle.exitError || 'Replacement runner stop requires reconciliation',
+            trade.id,
+          );
+        reconciled.push({
+          id: trade.id,
+          status: 'protection_unresolved',
+          error: lifecycle.rescueError || lifecycle.exitError,
+          event: 'Runner exit failed and protection could not be restored; reconciliation required',
+        });
+        continue;
+      }
+      const exitOrder = lifecycle.exitOrder;
       db.prepare(`UPDATE bot_trade_log SET status='pending_exit', pending_exit_order_id=?, pending_exit_reason=? WHERE id=?`)
         .run(exitOrder?.id || exitClientId, runner.reason, trade.id);
       reconciled.push({ id: trade.id, status: 'pending_exit', event: runner.reason });
     } catch (error) {
-      // Any failure after the original runner stop was terminally canceled must
-      // leave the runner protected or reserved for manual broker resolution.
-      // Never return it to `open`, which could submit a second discretionary
-      // sell on a later polling cycle.
-      if (runnerStopCancelled) {
-        try {
-          const latest = db.prepare('SELECT rescue_stop_order_id FROM bot_trade_log WHERE id=?').get(trade.id);
-          if (!latest?.rescue_stop_order_id) {
-            const rescuePosition = await pmhFetch(`/v2/positions/${trade.symbol}`);
-            const rescueQty = Math.min(Number(rescuePosition?.qty), Number(trade.shares));
-            if (rescueQty > 0 && Number(trade.stop_price) > 0) {
-              beginAlpacaOrderRequest(userId);
-              let rescueOrder;
-              try {
-                rescueOrder = await pmhFetch('/v2/orders', { method: 'POST', body: JSON.stringify({
-                  symbol: trade.symbol, qty: String(rescueQty), side: 'sell', type: 'stop', time_in_force: 'day',
-                  stop_price: Number(trade.stop_price).toFixed(2),
-                  client_order_id: `pmhr_${userId}_${trade.symbol}_${Date.now()}`.slice(0, 48),
-                }) });
-              } finally { endAlpacaOrderRequest(userId); }
-              db.prepare(`UPDATE bot_trade_log SET status='protected_after_exit_failure', rescue_stop_order_id=?,
-                pending_exit_order_id=NULL,pending_exit_client_order_id=NULL,pending_exit_reason=? WHERE id=?`)
-                .run(rescueOrder.id, 'Runner reconciliation failed; replacement stop submitted', trade.id);
-            }
-          }
-        } catch (_) {}
-      }
       reconciled.push({ id: trade.id, status: trade.status, error: error.message });
     }
   }

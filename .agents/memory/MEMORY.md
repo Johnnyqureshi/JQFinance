@@ -6,6 +6,7 @@
 - [Broker entry capacity](broker-entry-capacity.md) — shared long-entry capacity counts every pending buy parent; multi-lot PMH reserves both units and ambiguous posts reconcile by client ID.
 - [Broker catalog coverage](broker-catalog-coverage.md) — bounded scans rotate a stable per-account Alpaca catalog snapshot; changing movers must never reshuffle catalog coverage.
 - [Shared production authentication](shared-production-auth.md) — PostgreSQL owns identities/sessions; retain a single VM until all trading state leaves SQLite.
+- [PostgreSQL pool resilience](postgres-pool-resilience.md) — managed database restarts require pool error handling and retryable auth initialization
 - [Momentum price-action execution](momentum-price-action-execution.md) — automated Momentum entries use a dedicated server-owned route with completed-bar freshness and structural-stop enforcement.
 - [Bot Alpaca account isolation](bot-alpaca-account-isolation.md) — automated strategies use separate broker credentials; live arming resets after every broker identity change.
 - [Historical forecast evidence](historical-forecast-evidence.md) — historical pattern guidance must purge overlapping outcome windows and withhold probabilities for weak samples.

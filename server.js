@@ -1121,14 +1121,43 @@ const authStore = createPostgresAuthStore({
   sessionTtlMs: 90 * 24 * 60 * 60 * 1000,
 });
 let authStoreInitError = null;
-const authStoreReady = authStore.init(db)
-  .then(() => authStore.retireLegacyUsername(
-    bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
-  ))
-  .catch(error => {
-    authStoreInitError = error;
-    console.error('[Auth] Shared authentication store failed to initialize:', error.message);
-  });
+let authStoreInitialized = false;
+let authStoreReady = null;
+let authStoreRetryAfter = 0;
+const AUTH_STORE_RETRY_DELAY_MS = 5_000;
+
+// Database restarts are transient in managed environments. Do not permanently
+// disable sign-in because the first connection attempt happened during one.
+function ensureAuthStoreReady() {
+  if (authStoreInitialized) return Promise.resolve();
+  if (authStoreReady) return authStoreReady;
+  if (authStoreInitError && Date.now() < authStoreRetryAfter) {
+    return Promise.reject(authStoreInitError);
+  }
+
+  authStoreReady = authStore.init(db)
+    .then(() => authStore.retireLegacyUsername(
+      bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
+    ))
+    .then(() => {
+      authStoreInitialized = true;
+      authStoreInitError = null;
+    })
+    .catch(error => {
+      authStoreInitError = error;
+      authStoreRetryAfter = Date.now() + AUTH_STORE_RETRY_DELAY_MS;
+      console.error('[Auth] Shared authentication store failed to initialize:', error.message);
+      throw error;
+    })
+    .finally(() => {
+      authStoreReady = null;
+    });
+  return authStoreReady;
+}
+
+// Warm the store during startup without making a transient database outage
+// fatal. Requests will retry after the short backoff above.
+ensureAuthStoreReady().catch(() => {});
 
 // Broker credentials are attached only through the authenticated per-user
 // settings flow. Never assign environment credentials to a fixed user ID.
@@ -1202,8 +1231,9 @@ app.get('/', (req, res) => {
 });
 
 async function requireAuthStore(req, res, next) {
-  await authStoreReady;
-  if (authStoreInitError) {
+  try {
+    await ensureAuthStoreReady();
+  } catch (_) {
     return res.status(503).json({ error: 'Authentication service is temporarily unavailable. Please try again shortly.' });
   }
   next();
@@ -1225,8 +1255,7 @@ async function ensureSessionUserInTradingStore(req) {
   if (!Number.isSafeInteger(sessionUserId) || sessionUserId <= 0) {
     throw new Error('Authenticated session has no valid user identity.');
   }
-  await authStoreReady;
-  if (authStoreInitError) throw authStoreInitError;
+  await ensureAuthStoreReady();
   const user = await authStore.findUserById(sessionUserId);
   if (!user) throw new Error('Authenticated user was not found.');
   authStore.syncSqliteUser(db, user);

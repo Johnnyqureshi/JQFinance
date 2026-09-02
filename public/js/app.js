@@ -281,6 +281,7 @@ function updateMarketStatus() {
 function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=false) {
   if (!canvas || !bars?.length) return;
   const ctx = canvas.getContext('2d');
+  const isLight = document.documentElement.dataset.theme === 'light';
   const w = canvas.clientWidth || canvas.offsetWidth || canvas.parentElement?.clientWidth - 40 || 640;
   const cleanBars = bars.filter(bar => [bar?.h, bar?.l, bar?.c].every(value => Number.isFinite(Number(value))));
   if (!cleanBars.length) return;
@@ -338,9 +339,9 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
 
   // Give the price and volume panes distinct surfaces so the chart reads as a
   // composed panel instead of a collection of floating lines.
-  ctx.fillStyle = 'rgba(5, 14, 28, .72)';
+  ctx.fillStyle = isLight ? 'rgba(255,255,255,.96)' : 'rgba(5, 14, 28, .72)';
   ctx.fillRect(pad.l, pad.t, cw, ch);
-  ctx.fillStyle = 'rgba(2, 8, 18, .58)';
+  ctx.fillStyle = isLight ? 'rgba(238,243,248,.96)' : 'rgba(2, 8, 18, .58)';
   ctx.fillRect(pad.l, priceBottom + volumeGap, cw, volumeHeight);
 
   // Grid and price axis.
@@ -353,7 +354,7 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     ctx.moveTo(pad.l, y);
     ctx.lineTo(w - pad.r, y);
     ctx.stroke();
-    ctx.fillStyle = '#91a5c4';
+    ctx.fillStyle = isLight ? '#475467' : '#91a5c4';
     ctx.font = '600 10px Inter';
     ctx.textAlign = 'right';
     ctx.fillText('$' + fmt(value), pad.l - 10, y + 3);
@@ -404,14 +405,16 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     }
     if (labelY > bottom - 19 && zoneHeight >= 20) labelY = Math.max(pad.t + 3, bottom - 19);
     previousLabelBottom = labelY + 17;
-    ctx.fillStyle = demand ? 'rgba(1,46,40,.96)' : 'rgba(72,10,28,.96)';
+    ctx.fillStyle = isLight
+      ? (demand ? 'rgba(236,253,245,.96)' : 'rgba(255,241,242,.96)')
+      : (demand ? 'rgba(1,46,40,.96)' : 'rgba(72,10,28,.96)');
     ctx.strokeStyle = demand ? 'rgba(0,245,173,.6)' : 'rgba(255,63,95,.6)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect(pad.l + 8, labelY, labelWidth, 17, 4);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = isLight ? (demand ? '#05603f' : '#b42318') : '#ffffff';
     ctx.fillText(zoneText, pad.l + 15, labelY + 12);
     ctx.restore();
   });
@@ -453,7 +456,7 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
       ctx.font = '800 9px Inter';
       const textWidth = ctx.measureText(label).width;
       const boxX = w - pad.r - textWidth - 12;
-      ctx.fillStyle = 'rgba(5, 12, 25, .88)';
+      ctx.fillStyle = isLight ? 'rgba(255,255,255,.96)' : 'rgba(5, 12, 25, .88)';
       ctx.beginPath();
       ctx.roundRect(boxX, labelY - 9, textWidth + 10, 15, 4);
       ctx.fill();
@@ -489,7 +492,7 @@ function drawChart(canvas, bars, color, h=300, smartMoney=null, showAllZones=fal
     ctx.fillStyle = Number(bar.c) >= Number(bar.o ?? bar.c) ? 'rgba(29,214,163,.32)' : 'rgba(232,69,69,.32)';
     ctx.fillRect(Math.max(pad.l, x - Math.max(1, sx * 0.28)), h - pad.b - barHeight, Math.max(2, sx * 0.56), barHeight);
   });
-  ctx.fillStyle = '#91a5c4';
+  ctx.fillStyle = isLight ? '#475467' : '#91a5c4';
   ctx.font = '600 9px Inter';
   ctx.textAlign = 'left';
   ctx.fillText('VOLUME', pad.l, h - pad.b + 16);
@@ -835,6 +838,7 @@ function drawForecastPath(canvas, data) {
     ...(data.paths.bearish?.lower || []), ...(data.paths.bearish?.upper || [])].filter(Number.isFinite);
   if (!allValues.length) return;
   const ctx = canvas.getContext('2d');
+  const isLight = document.documentElement.dataset.theme === 'light';
   const width = Math.max(280, canvas.parentElement?.clientWidth || canvas.offsetWidth || 600);
   const height = 230;
   canvas.width = width * devicePixelRatio;
@@ -875,7 +879,7 @@ function drawForecastPath(canvas, data) {
   band(data.paths.bullish, 'rgba(29,214,163,.10)');
   band(data.paths.bearish, 'rgba(232,69,69,.10)');
 
-  ctx.strokeStyle = '#d7e3f4'; ctx.lineWidth = 2.5;
+  ctx.strokeStyle = isLight ? '#344054' : '#d7e3f4'; ctx.lineWidth = 2.5;
   ctx.beginPath();
   current.forEach((value, index) => index ? ctx.lineTo(currentX(index), y(value)) : ctx.moveTo(currentX(index), y(value)));
   ctx.stroke();
@@ -885,7 +889,7 @@ function drawForecastPath(canvas, data) {
     line.values.forEach((value, index) => index ? ctx.lineTo(forwardX(index), y(value)) : ctx.moveTo(forwardX(index), y(value)));
     ctx.stroke();
   });
-  ctx.fillStyle = '#93a6c6'; ctx.font = '10px Inter, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = isLight ? '#475467' : '#93a6c6'; ctx.font = '10px Inter, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('Current pattern', pad.left, height - 9);
   ctx.fillText(`${horizon} sessions forward`, dividerX + 8, height - 9);
   ctx.textAlign = 'right';

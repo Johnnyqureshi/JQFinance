@@ -2125,12 +2125,12 @@ html[data-theme="light"] .search-verdict-top{box-shadow:0 6px 18px rgba(15,23,42
 /* ── Light theme ─────────────────────────────────────────────────────────── */
 html[data-theme="light"] {
   color-scheme:light;
-  --bg:        #f4f7fb;
-  --bg2:       #eaf0f7;
+  --bg:        #f7f9fc;
+  --bg2:       #eef3f8;
   --card:      #ffffff;
-  --card2:     #f7f9fc;
-  --border:    #d7e0eb;
-  --border2:   #bdcadb;
+  --card2:     #f8fafc;
+  --border:    #dbe3ec;
+  --border2:   #c4d0dd;
 
   --teal:      #078a70;
   --teal-dim:  rgba(7,138,112,.10);
@@ -2144,9 +2144,9 @@ html[data-theme="light"] {
   --green-dim: rgba(7,138,112,.10);
   --red:       #c9343f;
   --red-dim:   rgba(201,52,63,.10);
-  --t1:        #17253a;
-  --t2:        #52657e;
-  --t3:        #8493a7;
+  --t1:        #101828;
+  --t2:        #475467;
+  --t3:        #667085;
 }
 
 html[data-theme="light"] body { background:var(--bg); }
@@ -10951,3 +10951,210 @@ html[data-theme="light"] .mi-market-card,html[data-theme="light"] .mi-indicator,
 html[data-theme="light"] .mp-page{--mp-ink:#1d2630;--mp-muted:#64717b;--mp-line:rgba(105,78,26,.19);background:radial-gradient(ellipse 70% 45% at 80% 0%,rgba(196,148,55,.12),transparent 68%)}html[data-theme="light"] .mp-hero,html[data-theme="light"] .mp-panel{background:linear-gradient(145deg,#fcfaf3,#f4f0e4)}html[data-theme="light"] .mp-detail,html[data-theme="light"] .mp-input-wrap{background:rgba(255,255,255,.55)}html[data-theme="light"] .mp-score{background:#d9d4c8}
 @media(max-width:800px){.mp-page{padding:14px 12px 92px}.mp-hero-main{align-items:flex-start;flex-direction:column}.mp-statusline{flex-wrap:wrap}.mp-statusline .mp-refresh{margin-left:0}.mp-overview,.mp-lower{grid-template-columns:1fr}.mp-control-grid{grid-template-columns:1fr}.mp-detail-levels{grid-template-columns:1fr 1fr}.mp-reasons ul{columns:1}}
 @media(prefers-reduced-motion:reduce){.mp-status-dot,.mp-skeleton,.mp-loading-row span{animation:none}}
+
+/* ── Final light-theme normalization ───────────────────────────────────────
+   A number of dense modules were added after the original theme bridge and
+   still carry fixed dark surfaces. Keep the light mode consistently paper
+   white/slate without changing signal colors or trading behavior. */
+html[data-theme="light"] body,
+html[data-theme="light"] .page,
+html[data-theme="light"] #page-scanner,
+html[data-theme="light"] .sc-page-wrap,
+html[data-theme="light"] .trd-page,
+html[data-theme="light"] .mt-page,
+html[data-theme="light"] .at-page,
+html[data-theme="light"] .nsc-page,
+html[data-theme="light"] .ct-page,
+html[data-theme="light"] .msc-page,
+html[data-theme="light"] .ve-page,
+html[data-theme="light"] .ee-page,
+html[data-theme="light"] .pmh-page,
+html[data-theme="light"] .mp-page {
+  background: var(--bg) !important;
+  color: var(--t1) !important;
+}
+
+html[data-theme="light"] .mp-page {
+  --mp-ink: var(--t1);
+  --mp-muted: var(--t2);
+  --mp-line: var(--border);
+  --mp-gold: #9a6700;
+  --mp-gold-dim: rgba(154,103,0,.10);
+  --mp-mint: var(--teal);
+  --mp-red: var(--red);
+}
+
+/* Shared module shells. This catches both old and newer panel/card naming
+   conventions, including panels nested inside Search and Realtime Trader. */
+html[data-theme="light"] [class*="-panel"],
+html[data-theme="light"] [class*="-card"] {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--t1);
+}
+
+html[data-theme="light"] .nav,
+html[data-theme="light"] .mobile-nav,
+html[data-theme="light"] .sc-header,
+html[data-theme="light"] .sc-presets-bar,
+html[data-theme="light"] .sc-filter-bar,
+html[data-theme="light"] .sc-status-bar,
+html[data-theme="light"] .rt-console-head,
+html[data-theme="light"] .si-section-head,
+html[data-theme="light"] .gp-header,
+html[data-theme="light"] .mt-bot-bar,
+html[data-theme="light"] .mt-scan-filters,
+html[data-theme="light"] .at-topbar,
+html[data-theme="light"] .trd-header {
+  background: var(--bg2) !important;
+  border-color: var(--border) !important;
+}
+
+html[data-theme="light"] .chart-card,
+html[data-theme="light"] .chart-canvas-wrap,
+html[data-theme="light"] .chart-card-head,
+html[data-theme="light"] .chart-smart-legend,
+html[data-theme="light"] .rt-vp-panel,
+html[data-theme="light"] .rt-pred-panel,
+html[data-theme="light"] .rt-patterns-strip,
+html[data-theme="light"] .si-intraday,
+html[data-theme="light"] .gp-evidence,
+html[data-theme="light"] .gp-volume-signal,
+html[data-theme="light"] .gp-volume-metrics > div,
+html[data-theme="light"] .gp-volume-reasons,
+html[data-theme="light"] .gp-evidence-item,
+html[data-theme="light"] .gp-scen,
+html[data-theme="light"] .gp-analog,
+html[data-theme="light"] .gp-vcell {
+  background: var(--card2) !important;
+  border-color: var(--border) !important;
+}
+
+html[data-theme="light"] .chart-canvas-wrap,
+html[data-theme="light"] .rt-vp-canvas-wrap {
+  background: var(--card2) !important;
+}
+
+/* Inputs, selects, tables, and their sticky headers should use the same
+   readable contrast as the rest of the light interface. */
+html[data-theme="light"] input:not([type="checkbox"]):not([type="radio"]),
+html[data-theme="light"] select,
+html[data-theme="light"] textarea,
+html[data-theme="light"] .sc-sel,
+html[data-theme="light"] .sc-inp,
+html[data-theme="light"] .rt-search-wrap,
+html[data-theme="light"] .trd-amount-wrap,
+html[data-theme="light"] .mp-input-wrap {
+  background: #ffffff !important;
+  color: var(--t1) !important;
+  border-color: var(--border2) !important;
+}
+
+html[data-theme="light"] option {
+  background: #ffffff !important;
+  color: var(--t1) !important;
+}
+
+html[data-theme="light"] table,
+html[data-theme="light"] .sc-table,
+html[data-theme="light"] .mt-table,
+html[data-theme="light"] .nsc-table,
+html[data-theme="light"] .ct-table,
+html[data-theme="light"] .ve-table,
+html[data-theme="light"] .at-sim-trades-table {
+  background: var(--card) !important;
+  color: var(--t1) !important;
+}
+
+html[data-theme="light"] th,
+html[data-theme="light"] .sc-th,
+html[data-theme="light"] .mt-table thead th,
+html[data-theme="light"] .nsc-table .nsc-th,
+html[data-theme="light"] .mp-table th {
+  background: var(--bg2) !important;
+  color: var(--t2) !important;
+  border-color: var(--border) !important;
+}
+
+html[data-theme="light"] td,
+html[data-theme="light"] .sc-td,
+html[data-theme="light"] .mt-table td,
+html[data-theme="light"] .nsc-table td,
+html[data-theme="light"] .ct-table td,
+html[data-theme="light"] .ve-td,
+html[data-theme="light"] .mp-table td {
+  border-color: var(--border) !important;
+}
+
+html[data-theme="light"] tr:hover,
+html[data-theme="light"] .sc-row:hover,
+html[data-theme="light"] .mt-table tbody tr:hover,
+html[data-theme="light"] .nsc-table tbody tr:hover td,
+html[data-theme="light"] .at-sim-trades-table tr:hover td,
+html[data-theme="light"] .mp-table tbody tr:hover {
+  background: #f1f5f9 !important;
+}
+
+/* Common text roles in the dense modules. Intentional BUY/SELL, warning, and
+   status classes remain more specific and keep their semantic colors. */
+html[data-theme="light"] .rt-title,
+html[data-theme="light"] .rt-m-val,
+html[data-theme="light"] .rt-pred-target-val,
+html[data-theme="light"] .mt-panel-title,
+html[data-theme="light"] .mt-detail-sym,
+html[data-theme="light"] .mt-score-center .mt-score-num,
+html[data-theme="light"] .at-bot-name,
+html[data-theme="light"] .at-bt-title,
+html[data-theme="light"] .trd-header-title,
+html[data-theme="light"] .trd-setup-title,
+html[data-theme="light"] .sc-title,
+html[data-theme="light"] .gp-title,
+html[data-theme="light"] .si-section-head h3,
+html[data-theme="light"] .mp-hero h1,
+html[data-theme="light"] .mp-panel h2 {
+  color: var(--t1) !important;
+}
+
+html[data-theme="light"] .rt-m-label,
+html[data-theme="light"] .rt-m-sub,
+html[data-theme="light"] .rt-pred-target-lbl,
+html[data-theme="light"] .mt-panel-sub,
+html[data-theme="light"] .mt-sym-name,
+html[data-theme="light"] .mt-trade-hint,
+html[data-theme="light"] .at-bot-desc,
+html[data-theme="light"] .at-bots-sub,
+html[data-theme="light"] .trd-header-sub,
+html[data-theme="light"] .sc-subtitle,
+html[data-theme="light"] .gp-subtitle,
+html[data-theme="light"] .si-refresh-note,
+html[data-theme="light"] .mp-hero p,
+html[data-theme="light"] .mp-table td,
+html[data-theme="light"] .mp-table small {
+  color: var(--t2) !important;
+}
+
+/* Remove the last dark-only fills from compact controls and auxiliary
+   surfaces while retaining colored action buttons. */
+html[data-theme="light"] .sc-loading-ov {
+  background: rgba(255,255,255,.86) !important;
+}
+html[data-theme="light"] .sc-modal-bg,
+html[data-theme="light"] .trd-modal-bg {
+  background: rgba(16,24,40,.28) !important;
+}
+html[data-theme="light"] .sc-modal,
+html[data-theme="light"] .trd-modal-card,
+html[data-theme="light"] .cpw-modal {
+  background: #ffffff !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 20px 60px rgba(37,57,82,.20) !important;
+}
+html[data-theme="light"] .rt-patterns-strip {
+  border-top-color: var(--border) !important;
+}
+html[data-theme="light"] .mp-hero,
+html[data-theme="light"] .mp-panel,
+html[data-theme="light"] .mp-detail,
+html[data-theme="light"] .mp-input-wrap {
+  background: #ffffff !important;
+}

@@ -11158,3 +11158,61 @@ html[data-theme="light"] .mp-detail,
 html[data-theme="light"] .mp-input-wrap {
   background: #ffffff !important;
 }
+
+/* Search Trade Plan: the level reference card has its own legacy dark
+   gradients, so it needs an explicit light treatment rather than only the
+   shared palette variables. */
+html[data-theme="light"] .trade-reference,
+html[data-theme="light"] .search-decision-levels-top {
+  background: #ffffff !important;
+  border-color: #b9c9d9 !important;
+  box-shadow: 0 10px 26px rgba(37,57,82,.10) !important;
+}
+
+html[data-theme="light"] .trade-reference-kicker,
+html[data-theme="light"] .trade-reference-science > span {
+  color: #52657e !important;
+}
+
+html[data-theme="light"] .trade-reference-head strong,
+html[data-theme="light"] .trade-reference-level > strong {
+  color: var(--t1) !important;
+}
+
+html[data-theme="light"] .trade-reference-level.buy {
+  background: linear-gradient(115deg, #ecfdf5, #f7fffb) !important;
+  border-color: rgba(7,138,112,.42) !important;
+}
+
+html[data-theme="light"] .trade-reference-level.sell {
+  background: linear-gradient(115deg, #fff1f2, #fff9f9) !important;
+  border-color: rgba(201,52,63,.42) !important;
+}
+
+html[data-theme="light"] .trade-reference-level.buy > strong {
+  color: #087f68 !important;
+}
+
+html[data-theme="light"] .trade-reference-level.sell > strong {
+  color: #c5303d !important;
+}
+
+html[data-theme="light"] .trade-reference-label,
+html[data-theme="light"] .trade-reference-level small {
+  color: var(--t2) !important;
+}
+
+html[data-theme="light"] .trade-reference-level em,
+html[data-theme="light"] .trade-reference-note {
+  color: var(--t3) !important;
+}
+
+html[data-theme="light"] .trade-reference-science {
+  border-top-color: var(--border) !important;
+}
+
+html[data-theme="light"] .trade-reference-science i {
+  background: #f0f8ff !important;
+  border-color: #b8d8ee !important;
+  color: #24526f !important;
+}

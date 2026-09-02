@@ -824,6 +824,11 @@ function renderHistoricalMatches(data) {
   </details>`;
 }
 
+function forecastCalibrationPct(value) {
+  return value != null && Number.isFinite(Number(value))
+    ? `${(Number(value) * 100).toFixed(0)}%`
+    : '—';
+}
 function drawForecastPath(canvas, data) {
   if (!canvas || !data?.paths?.current?.length) return;
   const current = data.paths.current;
@@ -915,6 +920,7 @@ function renderForecastPanel(data, symbol) {
     panel.innerHTML = `<div class="hf-card hf-${status.cls}">
       <div class="hf-head"><div><span class="hf-kicker">Historical Forecast</span><h3>Historical conditional probability</h3></div>${controls}</div>
       <div class="hf-empty"><span class="hf-status-icon">${status.icon}</span><div><strong>${status.label}</strong><p>${status.detail}</p><small>Historical outcomes are withheld rather than estimated from an unreliable sample.</small></div></div>
+      ${renderForecastCalibration(data?.validation)}
       <details class="hf-method"><summary>How calculated?</summary><p>Uses clean, split-adjusted daily OHLCV history to compare normalized price paths, returns, volatility, momentum, and drawdown. Candidate windows are separated and their future outcomes are measured only after the comparison date.</p></details>
     </div>`;
     bindForecastControls(symbol);
@@ -949,6 +955,7 @@ function renderForecastPanel(data, symbol) {
       <div><span>Closest analog</span><strong>${(Number(closest.similarity || 0) * 100).toFixed(0)}% similar</strong><small>${escapeHtml(closest.date || '—')} · ${pct(closest.forwardReturn)} forward</small></div>
       <div><span>Historical range</span><strong class="up">${pct(closest.maxRise)}</strong><small class="down">Worst path: ${pct(closest.maxDrawdown)}</small></div>
     </div>
+    ${renderForecastCalibration(data.validation)}
     <p class="hf-explain">${escapeHtml(data.explanation || '')}</p>
     ${renderHistoricalMatches(data)}
     <details class="hf-method"><summary>How calculated?</summary><p>Each comparison uses the selected normalized price path plus return correlation, volatility, momentum, and drawdown. A match’s influence is its similarity cubed. Bullish and bearish require a move beyond ±${Number(data.thresholdPct || 2).toFixed(1)}% over ${horizon} sessions. Future candles are used only to measure historical outcomes, never to select a match.</p><p>Historical outcomes among comparable patterns are not guarantees of future performance. This panel is read-only and does not change trading signals or place orders.</p></details>
@@ -2329,3 +2336,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupHeroSearch();
   setupWatchlistPage();
 });
+
+function renderForecastCalibration(validation) {
+  if (!validation) return '';
+  const group = validation.group;
+  const status = validation.status || group?.status || 'INSUFFICIENT_SAMPLE';
+  const presentation = status === 'POOR_CALIBRATION'
+    ? { cls: 'bad', label: 'Calibration warning' }
+    : status === 'OK'
+      ? { cls: 'good', label: 'Held up on unseen history' }
+      : { cls: 'limited', label: 'Too little unseen evidence' };
+  const independent = Number(group?.independentEvaluatedCalls || 0);
+  const rows = [
+    ['Bullish', 'bull'],
+    ['Neutral', 'neutral'],
+    ['Bearish', 'bear'],
+  ].map(([label, key]) => {
+    const range = group?.predictedProbabilityRanges?.[key];
+    const rangeText = range
+      ? `${forecastCalibrationPct(range.min)}–${forecastCalibrationPct(range.max)} predicted range`
+      : 'No displayable probability range';
+    return `<div class="hf-validation-item">
+      <span>${label}</span>
+      <strong>${forecastCalibrationPct(group?.meanPredictedProbabilities?.[key])} predicted</strong>
+      <small>${forecastCalibrationPct(group?.realizedOutcomeRates?.[key])} realized · ${rangeText}</small>
+    </div>`;
+  }).join('');
+  const warning = group?.warnings?.[0]?.message || validation.explanation
+    || 'Calibration evidence is unavailable.';
+  const period = validation.period?.firstForecastDate && validation.period?.lastOutcomeDate
+    ? `${escapeHtml(validation.period.firstForecastDate)} through ${escapeHtml(validation.period.lastOutcomeDate)}`
+    : 'No complete unseen period';
+  return `<section class="hf-validation hf-validation-${presentation.cls}" aria-label="Walk-forward forecast calibration">
+    <div class="hf-validation-head">
+      <div><span>Walk-forward check</span><strong>${presentation.label}</strong></div>
+      <b>${independent} independent call${independent === 1 ? '' : 's'}</b>
+    </div>
+    <div class="hf-validation-grid">${rows}</div>
+    <p>${escapeHtml(warning)}</p>
+    <small>Point-in-time period: ${period}. Outcome windows are non-overlapping. This evidence is read-only and cannot change automated trading.</small>
+  </section>`;
+}

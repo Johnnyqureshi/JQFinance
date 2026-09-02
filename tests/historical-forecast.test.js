@@ -1,7 +1,11 @@
 'use strict';
 
 const assert = require('assert');
-const { buildHistoricalForecast, validateBars } = require('../lib/historical-forecast');
+const {
+  buildHistoricalForecast,
+  buildWalkForwardValidationReport,
+  validateBars,
+} = require('../lib/historical-forecast');
 
 let passed = 0;
 function test(name, fn) {
@@ -30,6 +34,23 @@ function buildHistory(cycles = 16) {
     for (let i = 1; i <= 30; i++) add(pattern.at(-1) * (1 + (bullish ? 1 : -1) * i * 0.0018));
   }
   pattern.forEach(value => add(value));
+  return bars;
+}
+
+function buildRegimeHistory(trainingCycles = 20, unseenCycles = 10) {
+  const bars = [];
+  const start = Date.UTC(2000, 0, 3);
+  let day = 0;
+  const add = close => {
+    const date = new Date(start + day++ * 86400000).toISOString().slice(0, 10);
+    bars.push({ t: date, o: close * 0.998, h: close * 1.012, l: close * 0.987, c: close, v: 1_000_000 });
+  };
+  const pattern = Array.from({ length: 90 }, (_, i) => 100 + Math.sin(i / 8) * 3 + i * 0.045);
+  for (let cycle = 0; cycle < trainingCycles + unseenCycles; cycle++) {
+    pattern.forEach(value => add(value));
+    const bullish = cycle < trainingCycles;
+    for (let i = 1; i <= 30; i++) add(pattern.at(-1) * (1 + (bullish ? 1 : -1) * i * 0.0018));
+  }
   return bars;
 }
 
@@ -123,6 +144,116 @@ test('caps weak evidence and avoids a directional display for too few separated 
   assert.equal(result.displayable, false);
   assert.equal(result.probabilities, null);
   assert.ok(result.robustness <= 3);
+});
+
+test('builds a deterministic read-only walk-forward report by lookback and horizon', () => {
+  const input = {
+    ticker: 'TEST',
+    bars: buildHistory(),
+    lookbacks: [90],
+    horizons: [30],
+    step: 30,
+  };
+  const first = buildWalkForwardValidationReport(input);
+  const second = buildWalkForwardValidationReport(input);
+  assert.deepStrictEqual(first, second);
+  assert.equal(first.available, true);
+  assert.equal(first.mode, 'READ_ONLY');
+  assert.equal(first.liveExecutionAllowed, false);
+  assert.equal(first.automationChanged, false);
+  assert.equal(first.groups.length, 1);
+  assert.equal(first.groups[0].lookback, 90);
+  assert.equal(first.groups[0].horizon, 30);
+  assert.ok(first.groups[0].evaluatedCalls >= 10);
+  assert.equal(first.groups[0].overlappingCallsExcluded, 0);
+  assert.ok(Number.isFinite(first.groups[0].brierScore));
+  assert.ok(first.groups[0].predictedProbabilityRanges.bull);
+  assert.ok(first.groups[0].reliability.bear.length > 0);
+  assert.ok(first.calls.every(call =>
+    call.futureDataUsedByForecast === false
+    && call.forecastUsedBarsThrough === call.asOf
+    && call.outcomeDate > call.asOf));
+});
+
+test('keeps future outcome bars out of the historical forecast call', () => {
+  const bars = buildHistory();
+  const asOfIndex = bars.length - 31;
+  const options = {
+    ticker: 'TEST',
+    lookbacks: [90],
+    horizons: [30],
+    startIndex: asOfIndex,
+    endIndex: asOfIndex,
+    step: 1,
+    minSample: 1,
+  };
+  const original = buildWalkForwardValidationReport({ ...options, bars });
+  const changedFuture = bars.map((bar, index) => {
+    if (index <= asOfIndex) return { ...bar };
+    const close = bar.c * 0.7;
+    return { ...bar, o: close * 0.998, h: close * 1.012, l: close * 0.987, c: close };
+  });
+  const changed = buildWalkForwardValidationReport({ ...options, bars: changedFuture });
+  assert.equal(original.calls.length, 1);
+  assert.equal(changed.calls.length, 1);
+  assert.deepStrictEqual(original.calls[0].probabilities, changed.calls[0].probabilities);
+  assert.deepStrictEqual(original.calls[0].probabilityIntervals, changed.calls[0].probabilityIntervals);
+  assert.notEqual(original.calls[0].realizedReturn, changed.calls[0].realizedReturn);
+});
+
+test('flags too-small point-in-time calibration samples', () => {
+  const bars = buildHistory();
+  const report = buildWalkForwardValidationReport({
+    bars,
+    lookbacks: [90],
+    horizons: [30],
+    startIndex: bars.length - 31,
+    endIndex: bars.length - 31,
+    step: 1,
+    minSample: 10,
+  });
+  assert.equal(report.status, 'INSUFFICIENT_SAMPLE');
+  assert.equal(report.groups[0].status, 'INSUFFICIENT_SAMPLE');
+  assert.ok(report.flags.some(flag => flag.code === 'TOO_SMALL_SAMPLE'));
+});
+
+test('does not count overlapping outcome windows as independent calibration evidence', () => {
+  const trainingCycles = 20;
+  const bars = buildRegimeHistory(trainingCycles, 2);
+  const firstUnseenForecast = trainingCycles * 120 + 89;
+  const report = buildWalkForwardValidationReport({
+    bars,
+    lookbacks: [90],
+    horizons: [30],
+    startIndex: firstUnseenForecast,
+    endIndex: firstUnseenForecast + 25,
+    step: 5,
+    minSample: 2,
+  });
+  assert.ok(report.groups[0].displayableCalls >= 2);
+  assert.equal(report.groups[0].independentEvaluatedCalls, 1);
+  assert.ok(report.groups[0].overlappingCallsExcluded >= 1);
+  assert.equal(report.groups[0].status, 'INSUFFICIENT_SAMPLE');
+  assert.ok(report.flags.some(flag => flag.code === 'TOO_SMALL_SAMPLE'));
+});
+
+test('flags overconfident probabilities that fail on a later unseen regime', () => {
+  const trainingCycles = 20;
+  const bars = buildRegimeHistory(trainingCycles, 10);
+  const firstUnseenForecast = trainingCycles * 120 + 89;
+  const report = buildWalkForwardValidationReport({
+    bars,
+    lookbacks: [90],
+    horizons: [30],
+    startIndex: firstUnseenForecast,
+    step: 120,
+    minSample: 10,
+  });
+  assert.equal(report.groups[0].evaluatedCalls, 10);
+  assert.equal(report.status, 'POOR_CALIBRATION');
+  assert.equal(report.groups[0].status, 'POOR_CALIBRATION');
+  assert.ok(report.flags.some(flag => flag.code === 'POOR_CALIBRATION'));
+  assert.ok(report.groups[0].realizedOutcomeRates.bear > report.groups[0].meanPredictedProbabilities.bear);
 });
 
 if (!process.exitCode) console.log(`\nResults: ${passed} passed, 0 failed`);

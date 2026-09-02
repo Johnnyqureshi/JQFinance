@@ -65,6 +65,7 @@ const {
   LOOKBACKS: FORECAST_LOOKBACKS,
   HORIZONS: FORECAST_HORIZONS,
   buildHistoricalForecast,
+  buildWalkForwardValidationReport,
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const { regularSessionWindow } = require('./lib/intraday-vwap');
@@ -2324,6 +2325,45 @@ async function getForecastDaily(symbol, years) {
   return request;
 }
 
+function compactForecastValidation(report) {
+  const group = report.groups?.[0] || null;
+  const displayableCalls = report.calls?.filter(call => call.evaluable) || [];
+  return {
+    available: report.available,
+    status: report.status,
+    contractVersion: report.contractVersion,
+    mode: report.mode,
+    pointInTime: report.pointInTime,
+    liveExecutionAllowed: report.liveExecutionAllowed,
+    automationChanged: report.automationChanged,
+    summary: report.summary,
+    group: group ? {
+      lookback: group.lookback,
+      horizon: group.horizon,
+      displayableCalls: group.displayableCalls,
+      independentEvaluatedCalls: group.independentEvaluatedCalls,
+      overlappingCallsExcluded: group.overlappingCallsExcluded,
+      withheldCalls: group.withheldCalls,
+      predictedProbabilityRanges: group.predictedProbabilityRanges,
+      realizedOutcomeRates: group.realizedOutcomeRates,
+      meanPredictedProbabilities: group.meanPredictedProbabilities,
+      calibrationError: group.calibrationError,
+      maxCalibrationError: group.maxCalibrationError,
+      brierScore: group.brierScore,
+      reliability: group.reliability,
+      status: group.status,
+      warnings: group.warnings,
+    } : null,
+    period: {
+      firstForecastDate: displayableCalls[0]?.asOf || null,
+      lastForecastDate: displayableCalls.at(-1)?.asOf || null,
+      lastOutcomeDate: displayableCalls.at(-1)?.outcomeDate || null,
+    },
+    flags: report.flags,
+    explanation: report.explanation,
+  };
+}
+
 app.get('/api/forecast/:symbol', requireAuth, async (req, res) => {
   const symbol = String(req.params.symbol || '').toUpperCase().replace(/[^A-Z0-9.^-]/g, '');
   if (!symbol || symbol.length > 12) return res.status(400).json({ error: 'Invalid symbol.' });
@@ -2344,7 +2384,24 @@ app.get('/api/forecast/:symbol', requireAuth, async (req, res) => {
   try {
     const bars = await getForecastDaily(symbol, years);
     const data = buildHistoricalForecast({ ticker: symbol, bars, lookback, horizon });
-    const payload = { ...data, provider: 'Yahoo Finance chart API', adjustedCloseUsed: true, years };
+    // Keep the request bounded to at most 30 non-overlapping historical calls.
+    // Each call receives only its as-of prefix; later bars label its outcome.
+    const validationStartIndex = Math.max(0, (bars?.length || 0) - horizon * 30 - 1);
+    const validation = compactForecastValidation(buildWalkForwardValidationReport({
+      ticker: symbol,
+      bars,
+      lookbacks: [lookback],
+      horizons: [horizon],
+      startIndex: validationStartIndex,
+      step: horizon,
+    }));
+    const payload = {
+      ...data,
+      validation,
+      provider: 'Yahoo Finance chart API',
+      adjustedCloseUsed: true,
+      years,
+    };
     _forecastCache.set(cacheKey, { at: Date.now(), data: payload });
     if (_forecastCache.size > 200) _forecastCache.delete(_forecastCache.keys().next().value);
     res.json(payload);

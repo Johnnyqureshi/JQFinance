@@ -8,7 +8,10 @@ const YahooFinance = require('yahoo-finance2').default;
 const Database     = require('better-sqlite3');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
-const { createPostgresAuthStore } = require('./lib/postgres-auth-store');
+const {
+  createPostgresAuthStore,
+  isPostgresConnectivityError,
+} = require('./lib/postgres-auth-store');
 const { retireLegacyAccount } = require('./lib/legacy-account-retirement');
 const {
   boundedManagedExitQuantity,
@@ -1209,7 +1212,7 @@ app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
 const PostgresSessionStore = authStore.createSessionStore(session);
-app.use(session({
+const sessionMiddleware = session({
   store:             new PostgresSessionStore(),
   secret:            SESSION_SECRET,
   resave:            false,
@@ -1221,7 +1224,27 @@ app.use(session({
     sameSite: 'lax',
     maxAge:   90 * 24 * 60 * 60 * 1000,  // 90 days
   },
-}));
+});
+// A session lookup happens before the homepage is served. If the managed
+// database briefly drops an idle connection, keep the public shell available
+// and let its API calls report a clean temporary-auth outage instead of
+// rendering Express's raw stack trace.
+app.use((req, res, next) => {
+  try {
+    sessionMiddleware(req, res, error => {
+      if (!error) return next();
+      const publicShellRequest = ['GET', 'HEAD'].includes(req.method)
+        && !req.path.startsWith('/api/');
+      if (publicShellRequest && isPostgresConnectivityError(error)) {
+        console.warn('[Session] PostgreSQL unavailable; serving public shell without a session.');
+        return next();
+      }
+      next(error);
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 // The application shell lives at the project root while its CSS/JS assets
 // live under public/. Serve both paths so the published app and custom domain
@@ -13527,6 +13550,36 @@ setInterval(async () => {
     optionsSchedulerRunning = false;
   }
 }, 2 * 60 * 1000);
+
+// Never expose database, broker, or internal stack traces to visitors. Session
+// and API failures remain explicit and retryable while the homepage gets a
+// small, safe maintenance response for unexpected server errors.
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  const databaseError = isPostgresConnectivityError(error);
+  const status = databaseError ? 503 : 500;
+  if (databaseError) {
+    console.warn(`[HTTP] ${req.method} ${req.originalUrl} temporarily unavailable: ${error.message}`);
+  } else {
+    console.error(`[HTTP] ${req.method} ${req.originalUrl} failed: ${error.message}`);
+  }
+  if (req.path.startsWith('/api/')) {
+    return res.status(status).json({
+      error: databaseError
+        ? 'This service is temporarily unavailable. Please try again shortly.'
+        : 'The request could not be completed. Please try again shortly.',
+    });
+  }
+  return res.status(status).type('html').send(`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><title>Qureshi Finance</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e7edf7;
+    display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
+    main{max-width:460px}h1{font-size:1.5rem}p{color:#aebbd0;line-height:1.6}</style>
+    </head><body><main><h1>Qureshi Finance is temporarily unavailable</h1>
+    <p>Please refresh in a moment. Your account and trading records were not changed.</p>
+    </main></body></html>`);
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);

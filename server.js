@@ -12560,7 +12560,14 @@ function groupDailyToWeekly(dailyBars) {
 
 // ── The Money Printer ─────────────────────────────────────────────────────────
 const MONEY_PRINTER_UNIVERSE = Object.freeze([
-  'SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU',
+  'DAMD', 'MSTZ', 'CORD', 'RGTZ', 'PLTD', 'SMCZ', 'AVS', 'QQQD', 'ORCZ',
+  'NVD', 'GLL', 'ERY', 'TSXD', 'TSLZ', 'NVDQ', 'TSDD',
+  'GPRO', 'NOK', 'CRMG', 'NVTX', 'INTW', 'HODU', 'SKHL', 'SNDC', 'TSLG', 'PATX',
+  'SNXX', 'SKHX', 'SPCH', 'ORCU', 'SOFX', 'KEEL', 'CIFG', 'AFRU', 'IRE', 'AMAU',
+  'NVDL', 'SMCX', 'SMCL', 'PLTG', 'MULL', 'ADBG', 'OKLL', 'NOWL', 'VYX', 'UECG',
+  'NUVB', 'NVDY', 'TSLL', 'SATL', 'RDWU', 'BABO', 'KMLI',
+  'CRDU', 'ACHR', 'POET', 'CLF', 'LDI', 'LAC',
+  'CDTG', 'USAS', 'EXK', 'MTA', 'BTG', 'DNN', 'CRML', 'TMQ', 'ASM', 'PLG',
 ]);
 
 function moneyPrinterSettingsFor(userId) {

@@ -5751,16 +5751,29 @@ async function resolvePaperMarketRegime() {
 
 // ── Bounce 2.0 Scanner Universe ───────────────────────────────────────────────
 // ── Master scan universe — all 4 bots use this list ───────────────────────────
-// Symbols transcribed from the user's portfolio screenshots. Keep this list
-// explicit so it is easy to audit when the shared bot library changes.
-const SCREENSHOT_STOCK_LIBRARY = [
+// User-selected symbols shared by the stock scanners. Keep these lists explicit
+// so additions remain easy to audit without changing any strategy rules.
+const ADDITIONAL_USER_STOCK_LIBRARY = Object.freeze([
+  'AAL','PCG','AES','PLUG','ACHR','ACVA','AEG','ABCL','ABUS','ABSI',
+  'ABTC','AEVA','AEHR','ALMS','AMZD','AMC','BBAI','BB','BCE','BITF',
+  'BTBT','BTDR','CDE','CENX','CHPT','CIFR','CLSK','CMCSA','CLOV','CNH',
+  'COTY','CRDO','CRGY','CTRA','CURR','DNA','DNN','DVAX','ENVX','EOSE',
+  'EVGO','FCEL','FUBO','GEVO','GPRO','GRAB','HIMS','HL','HMY','HOOD',
+  'IONQ','JOBY','KGC','LCID','LUMN','LYFT','MARA','MPW','MPLN','MVST',
+  'NFE','NKLA','NOK','NU','OPEN','OPK','ORGN','PACB','PLTR','POET',
+  'QS','RIG','RIOT','RKLB','RXRX','SABR','SIRI','SLDP','SNDL','SOFI',
+  'SPCE','SOUN','TELL','TMC','TUP','UAA','UAVS','VALE','VFC','VNET',
+  'WBD','WOOF','WULF','XPEV','ZIM','ALTO','AMPY','ACCO','ACEL',
+]);
+const SCREENSHOT_STOCK_LIBRARY = [...new Set([
   'OKLL','SKHL','AVS','SPCH','SNDC','MSTZ','RGTZ','RAM','APRE','CDTG',
   'INTW','HODU','TSLG','PATX','MUU','SNXX','SKHX','GLL','TSXD','TSLZ',
   'NVDQ','TSDD','CORD','DAMD','PLTD','SMCZ','QQQD','ORCZ','NVD','ORCU',
   'SOFX','KEEL','CIFG','AFRU','IRE','AMAU','NVDL','SMCX','PLTG','ADBG',
   'NOWL','VYX','UECG','NUVB','NVDY','TSLL','SATL','USAS','EXK','MTA',
   'BTG','DNN','CRML','TMQ','ASM','PLG','IAUX',
-];
+  ...ADDITIONAL_USER_STOCK_LIBRARY,
+])];
 // PMH's default scan universe — shared by the manual scan endpoint and the
 // always-on server-side scheduler so both consider the same symbols.
 const PMH_DEFAULT_SYMBOLS = [
@@ -12559,7 +12572,7 @@ function groupDailyToWeekly(dailyBars) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── The Money Printer ─────────────────────────────────────────────────────────
-const MONEY_PRINTER_UNIVERSE = Object.freeze([
+const MONEY_PRINTER_UNIVERSE = Object.freeze([...new Set([
   'DAMD', 'MSTZ', 'CORD', 'RGTZ', 'PLTD', 'SMCZ', 'AVS', 'QQQD', 'ORCZ',
   'NVD', 'GLL', 'ERY', 'TSXD', 'TSLZ', 'NVDQ', 'TSDD',
   'GPRO', 'NOK', 'CRMG', 'NVTX', 'INTW', 'HODU', 'SKHL', 'SNDC', 'TSLG', 'PATX',
@@ -12568,7 +12581,8 @@ const MONEY_PRINTER_UNIVERSE = Object.freeze([
   'NUVB', 'NVDY', 'TSLL', 'SATL', 'RDWU', 'BABO', 'KMLI',
   'CRDU', 'ACHR', 'POET', 'CLF', 'LDI', 'LAC',
   'CDTG', 'USAS', 'EXK', 'MTA', 'BTG', 'DNN', 'CRML', 'TMQ', 'ASM', 'PLG',
-]);
+  ...ADDITIONAL_USER_STOCK_LIBRARY,
+])]);
 
 function moneyPrinterSettingsFor(userId) {
   const row = db.prepare(`SELECT enabled,live_armed,max_position_dollars,take_profit_pct,stop_loss_pct,revision

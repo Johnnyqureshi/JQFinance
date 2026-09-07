@@ -382,6 +382,84 @@ const gamePlan = (() => {
     </section>`;
   }
 
+  function volatilityValue(value, suffix = '', decimals = 2) {
+    return value == null || !Number.isFinite(Number(value))
+      ? 'UNAVAILABLE'
+      : `${fmt(Number(value), decimals)}${suffix}`;
+  }
+
+  function volatilityMetric(label, value, suffix = '', decimals = 2, note = '') {
+    const display = typeof value === 'string'
+      ? (value || 'UNAVAILABLE')
+      : volatilityValue(value, suffix, decimals);
+    return `<div class="vol-intel-metric"><span>${esc(label)}</span><b>${esc(display)}</b>${note ? `<small>${esc(note)}</small>` : ''}</div>`;
+  }
+
+  function volatilityState(value) {
+    return value == null || value === '' ? 'UNAVAILABLE' : String(value).toUpperCase();
+  }
+
+  function volatilityIntelligenceHtml(data) {
+    if (!data?.enabled) return '';
+    const market = data.market || {};
+    const stock = data.stock || {};
+    const modeled = data.modeled || {};
+    const scores = data.scores || {};
+    const adjustment = data.confidenceAdjustment || {};
+    const quality = data.dataQuality || {};
+    const vix = market.vix || {};
+    const vvix = market.vvix || {};
+    const term = market.termStructure || {};
+    const futures = market.futuresCurve || {};
+    const ivTerm = market.spxIvTermStructure || {};
+    const gamma = market.gamma || {};
+    const stale = String(data.status || '').toUpperCase().includes('STALE')
+      || String(quality.status || '').toUpperCase().includes('STALE');
+    const status = volatilityState(data.status || (data.available === false ? 'UNAVAILABLE' : 'AVAILABLE'));
+    const freshness = data.generatedAt ? dateLabel(data.generatedAt) : 'UNAVAILABLE';
+    const completeness = quality.completeness ?? quality.score ?? quality.coverage;
+    const row = (label, value, suffix = '', decimals = 2, note = '') => volatilityMetric(label, value, suffix, decimals, note);
+    const unavailableCopy = data.available === false
+      ? 'UNAVAILABLE — volatility inputs were not available for this snapshot.'
+      : stale
+        ? 'STALE — values are shown for reference and should not be treated as current.'
+        : 'Numerical volatility context only; it does not create or replace the Search verdict.';
+    return `<section class="vol-intel ${stale ? 'is-stale' : ''} ${data.available === false ? 'is-unavailable' : ''}" aria-label="Volatility Intelligence">
+      <div class="vol-intel-head">
+        <div><span class="gp-sec-title">Volatility Intelligence</span><span class="gp-sec-note">market regime, implied risk, realized range, and confidence audit</span></div>
+        <div class="vol-intel-status"><b>${esc(status)}</b><small>${esc(data.source || 'SOURCE UNAVAILABLE')}</small></div>
+      </div>
+      <div class="vol-intel-notice">${esc(unavailableCopy)}</div>
+      <div class="vol-intel-meta"><span>Generated <b>${esc(freshness)}</b></span><span>Source <b>${esc(data.source || 'UNAVAILABLE')}</b></span><span>Source age <b>${quality.sourceAgeMs == null ? 'UNAVAILABLE' : `${Math.round(quality.sourceAgeMs / 60000)} min`}</b></span><span>Completeness <b>${completeness == null ? 'UNAVAILABLE' : volatilityValue(completeness, '%', 1)}</b></span></div>
+      <div class="vol-intel-grid">
+        <div class="vol-intel-block"><h4>Market volatility</h4><div class="vol-intel-metrics">
+          ${row('VIX level', vix.level)}${row('VIX percentile · 252d', vix.percentile252, '%', 1)}${row('VIX 1d change', vix.change1d, '%', 2)}${row('Realized vol · 20d', vix.realizedVol20, '%', 2)}
+          ${row('VVIX level', vvix.level)}${row('VVIX percentile', vvix.percentile, '%', 1)}
+        </div></div>
+        <div class="vol-intel-block"><h4>Curve &amp; positioning</h4><div class="vol-intel-metrics">
+          ${row('Term structure', volatilityState(term.state), '', 2, `Score ${volatilityValue(term.score, '/100', 1)} · Spot to 3M ${volatilityValue(term.spotTo3mPct, '%', 2)}`)}
+          ${row('Futures curve', volatilityState(futures.state), '', 2, `Score ${volatilityValue(futures.score, '/100', 1)}`)}
+          ${row('SPX IV term structure', volatilityState(ivTerm.state), '', 2, `Slope ${volatilityValue(ivTerm.slope, '%', 2)}`)}
+          ${row('Net gamma', gamma.netGamma, '', 2)}${row('Gamma flip', gamma.gammaFlip)}${row('Distance to flip', gamma.distanceToGammaFlipPercent, '%', 2)}
+          ${row('Gamma regime', volatilityState(gamma.regime), '', 2, `Total absolute gamma ${volatilityValue(gamma.totalAbsoluteGamma)} · Assumption ${volatilityState(gamma.assumption)}`)}
+        </div></div>
+        <div class="vol-intel-block"><h4>Stock volatility</h4><div class="vol-intel-metrics">
+          ${row('Realized vol · 20d', stock.realizedVol20, '%', 2)}${row('Realized vol · 30d', stock.realizedVol30, '%', 2)}${row('Realized vol · 60d', stock.realizedVol60, '%', 2)}
+          ${row('ATR percentile', stock.atrPercentile, '%', 1)}${row('Beta', stock.beta)}${row('Correlation · SPY', stock.correlationSpy)}
+          ${row('Relative vol score', stock.relativeVolatilityScore, '/100', 1)}${row('Current IV', stock.currentIv, '%', 2)}${row('IV rank', stock.ivRank, '%', 1)}${row('IV percentile', stock.ivPercentile, '%', 1)}
+          ${row('Expected move', stock.expectedMove)}${row('Expected move', stock.expectedMovePercent, '%', 2)}${row('Expected range low', stock.expectedRangeLow)}${row('Expected range high', stock.expectedRangeHigh)}
+        </div></div>
+        <div class="vol-intel-block"><h4>Model &amp; confidence adjustment</h4><div class="vol-intel-metrics">
+          ${row('Modeled volatility', modeled.volatility, '%', 2)}${row('Modeled percentile', modeled.percentile, '%', 1)}${row('Modeled trend', volatilityState(modeled.trend))}${row('Model confidence', modeled.confidence, '/100', 1)}
+          ${row('Regime score', scores.regime, '/100', 1)}${row('Shock score', scores.shock, '/100', 1)}${row('Gamma score', scores.gamma, '/100', 1)}
+          ${row('Technical score', adjustment.technicalScore, '/100', 1)}${row('Volatility score', adjustment.volatilityScore, '/100', 1)}${row('Gamma score', adjustment.gammaScore, '/100', 1)}
+          ${row('Volatility points', adjustment.volatilityPoints, ' pts', 1)}${row('Gamma points', adjustment.gammaPoints, ' pts', 1)}${row('Final confidence', adjustment.finalConfidence, '/100', 1)}
+        </div></div>
+      </div>
+      <div class="vol-intel-explain"><b>Gamma positioning inference</b><span>${esc(gamma.assumption || 'UNAVAILABLE — no gamma positioning assumption supplied.')}</span><small>Gamma fields describe the model’s inferred positioning; they are not observed order flow and are not a standalone trade instruction.</small></div>
+    </section>`;
+  }
+
   function tradeReferenceHtml(data) {
     const buy = data?.buy || null;
     const sell = data?.sell || null;
@@ -600,6 +678,7 @@ const gamePlan = (() => {
 
        ${tradeReferenceHtml(tradeLevels)}
        ${searchSignalHtml(searchSignal)}
+       ${volatilityIntelligenceHtml(d.volatility)}
 
        <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
 

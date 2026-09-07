@@ -23,3 +23,4 @@
 - [Search Smart Money maps](search-smart-money-maps.md) — supporting zones use canonical completed periods and deterministic multi-timeframe confluence; they never become a second verdict.
 - [Money Printer automation](money-printer-automation.md) — Search science drives server-scheduled long/short brackets through an isolated, pinned Alpaca account and fail-closed reconciliation.
 - [Custom-domain TLS routing](custom-domain-tls-routing.md) — keep the apex behind Cloudflare’s active Universal SSL while preserving the verified Replit origin.
+- [Search volatility intelligence](search-volatility-intelligence.md) — volatility is feature-flagged, provenance-aware context; stale or incomplete inputs have zero influence and never create a verdict.

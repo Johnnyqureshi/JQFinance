@@ -46,6 +46,7 @@ const {
   buildSearchMarketContext,
   classifySearchMarketRegime,
 } = require('./lib/search-market-regime');
+const { buildVolatilitySnapshot } = require('./lib/volatility/orchestrator');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
@@ -3330,7 +3331,16 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
 
   const cached = _gpCache.get(sym);
   if (cached && Date.now() - cached.at < GP_CACHE_MS && !force) {
-    return { ...cached.data, cached: true };
+    // A cached feature-on result must not leak fields when the flag is toggled
+    // off: the pre-feature response shape remains exact.
+    if (process.env.VOLATILITY_INTELLIGENCE_ENABLED !== 'true') {
+      const { volatility, ...legacy } = cached.data;
+      const { volatility: volatilityProvenance, ...legacyProvenance } = legacy.provenance || {};
+      return { ...legacy, provenance: legacyProvenance, cached: true };
+    }
+    // If the flag was enabled after this cache entry was built, regenerate
+    // rather than serving a feature-on response without volatility evidence.
+    if (cached.data.volatility) return { ...cached.data, cached: true };
   }
 
   // Coalesce: if a generation for this symbol is already running, share its result
@@ -3340,7 +3350,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
   }
 
   const job = (async () => {
-    const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw, spyDaily] = await Promise.all([
+    const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw, spyDaily, stockOptions, marketOptions] = await Promise.all([
       fetchLiveQuote(sym, userId, quoteScope).catch(() => null),
       gpFetchDaily(sym, '2y'),
       gpFetchIntraday5m(sym),
@@ -3352,6 +3362,14 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
       gpFetchDaily('SPY', '2y'),
+      // Yahoo options are a fallback source only and are fetched only behind
+      // the feature flag; historical IV is not fabricated from this snapshot.
+      process.env.VOLATILITY_INTELLIGENCE_ENABLED === 'true'
+        ? yf.options(sym).catch(() => null)
+        : Promise.resolve(null),
+      process.env.VOLATILITY_INTELLIGENCE_ENABLED === 'true'
+        ? yf.options('SPY').catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     if (!quote?.price || !daily?.length) {
@@ -3681,13 +3699,49 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       sectorEtf: market.sectorEtf,
       profile,
     });
+    let volatility = null;
+    if (process.env.VOLATILITY_INTELLIGENCE_ENABLED === 'true') {
+      // This layer has its own timeout/circuit-style shared cache and always
+      // resolves an unavailable snapshot rather than failing Search.
+      const normalizeOptionChain = payload => {
+        const firstChain = payload?.options?.[0] || payload?.[0] || {};
+        return ['calls', 'puts'].flatMap(side => (firstChain[side] || []).map(contract => ({
+          ...contract,
+          type: side === 'puts' ? 'put' : 'call',
+          dte: firstChain.expirationDate
+            ? Math.max(0, Math.ceil((new Date(firstChain.expirationDate).getTime() - Date.now()) / 86400000))
+            : null,
+        })));
+      };
+      const optionChain = normalizeOptionChain(stockOptions);
+      const marketOptionChain = normalizeOptionChain(marketOptions);
+      volatility = await buildVolatilitySnapshot({
+        symbol: sym,
+        price,
+        dailyBars: daily,
+        spyDailyBars: spyDaily,
+        optionChain,
+        marketOptionChain,
+      });
+    }
     const finalSearchSignal = applySearchMarketRegime({
       searchSignal,
       spyRegime: marketContext.spy,
       sector: marketContext.sector,
       relativeStrength: marketContext.relativeStrength,
       sensitivity: marketContext.sensitivity,
+      volatility,
     });
+    if (volatility) {
+      volatility.confidenceAdjustment = {
+        technicalScore: searchSignal.confidence ?? null,
+        volatilityScore: volatility.scores?.regime ?? null,
+        gammaScore: volatility.scores?.gamma ?? null,
+        volatilityPoints: finalSearchSignal.confidenceBreakdown?.volatility ?? 0,
+        gammaPoints: finalSearchSignal.confidenceBreakdown?.gamma ?? 0,
+        finalConfidence: finalSearchSignal.confidence ?? null,
+      };
+    }
     const tradeLevels = buildSearchTradeLevels({
       currentPrice: levelPrice,
       levels,
@@ -3790,6 +3844,13 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
         intraday: { provider: 'Yahoo Finance chart API', intervals: ['1m', '5m', '15m', '1h'] },
         daily: { provider: 'Yahoo Finance chart API' },
         news: [...new Set(news.map(item => item.provider).filter(Boolean))],
+        ...(volatility ? { volatility: {
+          source: volatility.source,
+          timestamp: volatility.timestamp,
+          ageMs: volatility.ageMs,
+          completeness: volatility.completeness,
+          status: volatility.status,
+        } } : {}),
       },
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
       selloff, oversold,
@@ -3797,6 +3858,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
       probabilities, confluence, searchSignal: finalSearchSignal, marketContext, tradeLevels,
+      ...(volatility ? { volatility } : {}),
       confidence: { overall, parts },
       ai,
     };

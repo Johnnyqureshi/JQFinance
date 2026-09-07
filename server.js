@@ -189,6 +189,7 @@ const {
   DEFAULT_SETTINGS: MONEY_PRINTER_DEFAULTS,
   sanitizeMoneyPrinterSettings,
   evaluateMoneyPrinterPlan,
+  buildMoneyPrinterDecisionAudit,
   executablePrice: moneyPrinterExecutablePrice,
   buildMoneyPrinterBracket,
   moneyPrinterClientOrderId,
@@ -12782,6 +12783,7 @@ async function buildMoneyPrinterCandidate(userId, symbol, force = false) {
     new Promise((_, reject) => setTimeout(() => reject(new Error('Search evaluation timed out.')), 20000)),
   ]);
   const gate = evaluateMoneyPrinterPlan(plan);
+  const decisionAudit = buildMoneyPrinterDecisionAudit(plan);
   const display = plan?.displayLevels || {};
   const support = Array.isArray(display.support) ? display.support : [];
   const resistance = Array.isArray(display.resistance) ? display.resistance : [];
@@ -12791,6 +12793,7 @@ async function buildMoneyPrinterCandidate(userId, symbol, force = false) {
     status: gate.eligible ? 'ELIGIBLE' : 'REJECTED',
     blockers: gate.blockers, reasons: gate.blockers, generatedAt: plan?.generatedAt || null,
     confidence: plan?.searchSignal?.confidence ?? null,
+    confidenceBreakdown: plan?.searchSignal?.confidenceBreakdown || null,
     signal: plan?.searchSignal?.signal || null,
     tradeLevels: plan?.tradeLevels || null,
     support: support[0]?.price ?? plan?.levels?.support?.[0]?.price ?? null,
@@ -12800,6 +12803,7 @@ async function buildMoneyPrinterCandidate(userId, symbol, force = false) {
     evidenceSummary: Array.isArray(plan?.tradeLevels?.considered)
       ? plan.tradeLevels.considered.join(' · ')
       : null,
+    decisionAudit,
   };
   db.prepare(`INSERT INTO money_printer_candidates(user_id,symbol,payload_json,evaluated_at)
     VALUES (?,?,?,datetime('now')) ON CONFLICT(user_id,symbol) DO UPDATE SET
@@ -12873,7 +12877,14 @@ async function executeMoneyPrinterCandidate(userId, symbol) {
       VALUES (?,?,?,?,?,'entry_intent',?,?,?,?,?,?)`).run(
       userId, symbol, candidate.executionDirection, creds.mode, creds.account_id, bracket.qty,
       bracket.entryPrice, bracket.targetPrice, bracket.stopPrice, clientOrderId,
-      JSON.stringify({ generatedAt: candidate.generatedAt, signal: candidate.signal, tradeLevels: candidate.tradeLevels }),
+       JSON.stringify({
+         generatedAt: candidate.generatedAt,
+         signal: candidate.signal,
+         confidence: candidate.confidence,
+         confidenceBreakdown: candidate.confidenceBreakdown,
+         tradeLevels: candidate.tradeLevels,
+         decisionAudit: candidate.decisionAudit,
+       }),
     ).lastInsertRowid;
   } catch (error) {
     if (error.code?.startsWith('SQLITE_CONSTRAINT')) throw new Error('A deterministic entry intent already exists for this symbol or cycle.');
@@ -12967,9 +12978,12 @@ app.get('/api/money-printer/readiness', requireAuth, async (req, res) => {
       lastCycleStatus: runtime.last_cycle_status || null,
       lastCycleReason: runtime.last_cycle_reason || null,
       triggerCriteria: [
-        'Confirmed Search BUY or SELL with fresh complete volume evidence',
+        'Exact final Search BUY or SELL verdict with fresh same-time volume evidence',
         'Verified Search Trade Plan and completed-session support and resistance',
         'Technical confluence, patterns, Fibonacci, Smart Money, gaps, catalysts, SPY and sector context',
+        process.env.VOLATILITY_INTELLIGENCE_ENABLED === 'true'
+          ? 'The same bounded volatility and gamma confidence adjustment shown in Search'
+          : 'Volatility intelligence is disabled for both Search and Money Printer',
         'Fresh executable Alpaca quote, tradable asset, buying power, capacity and duplicate-position checks',
       ],
     });

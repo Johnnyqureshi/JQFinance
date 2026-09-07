@@ -2,6 +2,7 @@
 const assert = require('assert');
 const {
   DEFAULT_SETTINGS, sanitizeMoneyPrinterSettings, evaluateMoneyPrinterPlan,
+  buildMoneyPrinterDecisionAudit,
   executablePrice, buildMoneyPrinterBracket, moneyPrinterClientOrderId,
   finalMoneyPrinterAuthorization, ownedBracketProtection,
 } = require('../lib/money-printer-policy');
@@ -9,7 +10,17 @@ const {
 const now = Date.parse('2026-08-28T15:00:00Z');
 const basePlan = {
   ok: true, generatedAt: new Date(now).toISOString(),
-  searchSignal: { signal: { label: 'SELL', stage: 'CONFIRMED' } },
+  symbol: 'SPY',
+  searchSignal: {
+    signal: { label: 'SELL', direction: 'BEARISH', stage: 'CONFIRMED' },
+    confidence: 78,
+    confidenceBreakdown: { overall: 78 },
+    dataQuality: {
+      volumeBaselineAvailable: true,
+      currentVolumeFresh: true,
+      accelerationAvailable: true,
+    },
+  },
   confluence: { dataQuality: { entryEligible: true, fresh: true } },
   tradeLevels: { status: 'VERIFIED' },
   levels: {}, patternAnalysis: {}, fibonacci: {}, smartMoney: {},
@@ -21,6 +32,42 @@ assert.throws(() => sanitizeMoneyPrinterSettings({ stopLossPct: Infinity }), /fi
 assert.deepStrictEqual(sanitizeMoneyPrinterSettings({}, DEFAULT_SETTINGS), DEFAULT_SETTINGS);
 assert.deepStrictEqual(evaluateMoneyPrinterPlan(basePlan, now), { eligible: true, direction: 'SHORT', blockers: [] });
 assert.strictEqual(evaluateMoneyPrinterPlan({ ...basePlan, generatedAt: new Date(now - 7 * 60000).toISOString() }, now).eligible, false);
+assert.strictEqual(evaluateMoneyPrinterPlan({
+  ...basePlan,
+  searchSignal: {
+    ...basePlan.searchSignal,
+    signal: { ...basePlan.searchSignal.signal, direction: 'BULLISH' },
+  },
+}, now).eligible, false, 'the visible Search label and direction must agree');
+assert.strictEqual(evaluateMoneyPrinterPlan({
+  ...basePlan,
+  searchSignal: {
+    ...basePlan.searchSignal,
+    dataQuality: { ...basePlan.searchSignal.dataQuality, currentVolumeFresh: false },
+  },
+}, now).eligible, false, 'stale Search volume cannot automate an entry');
+assert.strictEqual(evaluateMoneyPrinterPlan({
+  ...basePlan,
+  volatility: {
+    confidenceAdjustment: { finalConfidence: 60 },
+  },
+}, now).eligible, false, 'Money Printer must use the exact final Search confidence');
+const audit = buildMoneyPrinterDecisionAudit({
+  ...basePlan,
+  volatility: {
+    enabled: true,
+    available: true,
+    status: 'FALLBACK',
+    source: 'test fixture',
+    timestamp: new Date(now).toISOString(),
+    completeness: 1,
+    scores: { regime: 58, gamma: 75 },
+    confidenceAdjustment: { finalConfidence: 78, volatilityPoints: -2, gammaPoints: 1 },
+  },
+});
+assert.strictEqual(audit.verdict.label, 'SELL');
+assert.strictEqual(audit.evidence.volatility.confidencePoints, -2);
+assert.strictEqual(audit.fingerprint.length, 24);
 assert.strictEqual(executablePrice({ latestQuote: { ap: 10.1, bp: 9.9, t: new Date(now).toISOString() } }, 'LONG', now), 10.1);
 assert.strictEqual(executablePrice({ latestQuote: { ap: 10.1, bp: 9.9, t: new Date(now).toISOString() } }, 'SHORT', now), 9.9);
 assert.throws(

@@ -1,0 +1,1148 @@
+Upgrade the existing Qureshi Finance SEARCH PAGE with a professional Cboe-based volatility intelligence layer.
+
+CRITICAL REQUIREMENT:
+DO NOT BREAK ANY EXISTING SEARCH PAGE FUNCTIONS, SIGNALS, API ROUTES, UI COMPONENTS, filters, stock rankings, technical indicators, support/resistance calculations, entry/exit logic, authentication, database behavior, or existing automation.
+
+This is an additive upgrade.
+
+Before changing anything:
+
+1. Inspect the current search page architecture.
+2. Identify all existing volatility, market-regime, technical-score, entry-score, exit-score, SPY, options, and macro calculations.
+3. Reuse existing infrastructure wherever possible.
+4. Do NOT duplicate existing calculations.
+5. Create a clear separation between data acquisition, calculations, scoring, and UI presentation.
+6. Make all new functionality backward compatible.
+7. If a new Cboe data source is unavailable, the existing search page MUST continue functioning normally.
+8. Never allow a failed volatility-data request to break stock search.
+
+==================================================
+OBJECTIVE
+
+Build a VOLATILITY INTELLIGENCE ENGINE that uses Cboe market data to improve timing of stock entries and exits.
+
+The engine should measure:
+
+A. VIX LEVEL
+B. VIX MOMENTUM
+C. VIX REALIZED VOLATILITY
+D. VOLATILITY-OF-VOLATILITY
+E. VIX TERM STRUCTURE
+F. SPX IMPLIED-VOLATILITY TERM STRUCTURE
+G. DEALER GAMMA EXPOSURE
+H. GAMMA-ADJUSTED VOLATILITY REGIME
+I. MODELED EXPECTED VOLATILITY
+J. IV RANK / IV PERCENTILE
+K. FINAL VOLATILITY REGIME SCORE
+
+The system should NOT use these metrics independently.
+
+Combine them into a single quantitative volatility regime that modifies existing stock entry and exit confidence.
+
+==================================================
+
+1. CBOE DATA LAYER
+    ==================================================
+
+Create a dedicated Cboe volatility data service.
+
+Primary data sources should include, where available:
+
+* VIX
+* VIX9D
+* VIX3M
+* VIX6M
+* VIX1Y
+* VVIX
+* VIX futures
+* VIX futures expiration prices
+* VIX futures volume
+* VIX futures open interest
+* SPX implied volatility data
+* SPX option chain data
+* SPX option open interest
+* SPX option volume
+* SPX option bid/ask
+* SPX option strike
+* SPX option expiration
+
+Use official Cboe data wherever licensing/API access permits.
+
+Do NOT scrape Cboe pages in a way that violates Cboe terms.
+
+Build the data layer so that the source can be replaced by an approved Cboe API/data feed without changing the calculation engine.
+
+Store timestamps for every data point.
+
+All volatility calculations must use synchronized timestamps.
+
+==================================================
+2. VIX LEVEL ENGINE
+
+Calculate:
+
+vixLevel
+
+vix1dChange
+
+vix5dChange
+
+vix20dChange
+
+vixPercentile252
+
+vixPercentile63
+
+vixZScore252
+
+vixDistanceFrom20DMA
+
+vixDistanceFrom50DMA
+
+vixDistanceFrom200DMA
+
+Classify the VIX quantitatively:
+
+VIX LOW
+VIX NORMAL
+VIX ELEVATED
+VIX HIGH
+VIX EXTREME
+
+Do not hard-code these regimes solely from arbitrary VIX numbers.
+
+Use historical percentile as the primary classification.
+
+Example:
+
+0-20th percentile = LOW
+
+20-50th percentile = NORMAL
+
+50-75th percentile = ELEVATED
+
+75-95th percentile = HIGH
+
+95-100th percentile = EXTREME
+
+Make thresholds configurable.
+
+==================================================
+3. VIX VOLATILITY ENGINE
+
+Do NOT confuse VIX with volatility of VIX.
+
+Calculate volatility of the VIX itself.
+
+Use:
+
+VIX 5-day realized volatility
+VIX 10-day realized volatility
+VIX 20-day realized volatility
+VIX 30-day realized volatility
+VIX 60-day realized volatility
+
+Calculate:
+
+VIX_Return_t = ln(VIX_t / VIX_(t-1))
+
+RealizedVol_N =
+sqrt(annualizationFactor * variance(VIX_Returns over N periods))
+
+Use appropriate trading-day annualization.
+
+Also calculate:
+
+VIXVolAcceleration =
+shortTermVIXVol / longTermVIXVol
+
+VIXVolShock =
+current VIX realized volatility percentile
+
+VIXVolTrend =
+change in realized VIX volatility
+
+==================================================
+4. VVIX / VOLATILITY-OF-VOLATILITY
+
+If VVIX data is available, incorporate it directly.
+
+Track:
+
+VVIX level
+VVIX percentile
+VVIX 5D change
+VVIX 20D change
+VVIX/VIX ratio
+
+Create:
+
+VolOfVolScore
+
+A rising VVIX combined with rising VIX should increase the volatility-risk score significantly.
+
+A falling VVIX combined with falling VIX should reduce volatility stress.
+
+Do not use VVIX alone to generate a stock trade.
+
+==================================================
+5. TERM STRUCTURE ENGINE
+
+Build the complete VIX term structure.
+
+Track:
+
+VIX9D
+VIX
+VIX3M
+VIX6M
+VIX1Y
+
+Calculate:
+
+VIX9D - VIX
+
+VIX - VIX3M
+
+VIX3M - VIX6M
+
+VIX6M - VIX1Y
+
+Also calculate normalized slopes:
+
+(VIX3M / VIX) - 1
+
+(VIX6M / VIX3M) - 1
+
+(VIX1Y / VIX6M) - 1
+
+Calculate a TERM STRUCTURE SCORE.
+
+Identify:
+
+CONTANGO
+
+FLAT
+
+BACKWARDATION
+
+STEEP CONTANGO
+
+STEEP BACKWARDATION
+
+Use historical percentile of the slope rather than fixed thresholds whenever sufficient history exists.
+
+==================================================
+6. VIX FUTURES TERM STRUCTURE
+
+Pull available VIX futures contracts.
+
+For every contract capture:
+
+expiration
+
+daysToExpiration
+
+lastPrice
+
+change
+
+volume
+
+openInterest
+
+Calculate:
+
+frontMonth
+
+secondMonth
+
+thirdMonth
+
+frontMonthPremiumToSpot
+
+frontMonthSecondMonthSpread
+
+secondMonthThirdMonthSpread
+
+futuresSlope
+
+futuresCurvePercentile
+
+futuresCurveAcceleration
+
+Detect:
+
+CONTANGO
+
+BACKWARDATION
+
+CURVE FLATTENING
+
+CURVE STEEPENING
+
+SPOT/FUTURES DIVERGENCE
+
+IMPORTANT:
+
+VIX futures are expectations of future VIX levels, not direct forecasts of future SPX returns.
+
+Use them as a volatility-regime input rather than a directional stock signal.
+
+==================================================
+7. SPX IMPLIED VOLATILITY TERM STRUCTURE
+
+Use Cboe’s SPX volatility term structure where available.
+
+Track the market’s implied volatility across multiple maturities.
+
+Calculate:
+
+shortTermIV
+
+30DayIV
+
+3MonthIV
+
+6MonthIV
+
+1YearIV
+
+Calculate:
+
+IVTermSlope
+
+IVTermCurvature
+
+IVFrontPremium
+
+IVBackPremium
+
+IVTermStructurePercentile
+
+This should complement the VIX futures curve rather than replace it.
+
+==================================================
+8. DEALER GAMMA EXPOSURE ENGINE
+
+Build a SPX/SPXW dealer gamma exposure model using available option-chain information.
+
+Required inputs:
+
+strike
+
+expiration
+
+call open interest
+
+put open interest
+
+call volume
+
+put volume
+
+implied volatility
+
+spot price
+
+days to expiration
+
+option delta
+
+option gamma
+
+contract multiplier
+
+Use standard Black-Scholes gamma calculations where appropriate.
+
+Calculate gamma exposure by strike.
+
+Aggregate:
+
+Call Gamma Exposure
+
+Put Gamma Exposure
+
+Net Gamma Exposure
+
+Total Absolute Gamma Exposure
+
+Gamma Exposure by Expiration
+
+Gamma Exposure by Strike
+
+Gamma Exposure near spot
+
+Gamma Exposure above spot
+
+Gamma Exposure below spot
+
+Use a documented dealer-position assumption.
+
+IMPORTANT:
+
+Dealer gamma positioning is an inferred model, not an official Cboe published dealer-position number.
+
+Make the dealer-position assumption configurable.
+
+Do not present inferred gamma as confirmed dealer positioning.
+
+==================================================
+9. GAMMA FLIP
+
+Calculate the approximate:
+
+GAMMA FLIP LEVEL
+
+This is the underlying SPX level where modeled net gamma changes sign.
+
+Calculate:
+
+distanceToGammaFlip
+
+distanceToGammaFlipPercent
+
+spotAboveGammaFlip
+
+spotBelowGammaFlip
+
+Create:
+
+Positive Gamma Regime
+
+Negative Gamma Regime
+
+Near Gamma Flip
+
+Use a configurable proximity threshold.
+
+==================================================
+10. POSITIVE GAMMA VOLATILITY MODEL
+
+When modeled net gamma is strongly positive:
+
+Expect lower realized volatility relative to comparable negative-gamma conditions.
+
+When modeled gamma becomes negative:
+
+Increase expected volatility.
+
+When spot is close to the gamma flip:
+
+Increase sensitivity to directional movement and volatility changes.
+
+Create:
+
+GammaVolatilityAdjustment
+
+Example architecture:
+
+BaseExpectedVolatility
++
+VIXAdjustment
++
+VVIXAdjustment
++
+TermStructureAdjustment
++
+GammaAdjustment
++
+RealizedVolAdjustment
+
+=
+
+ModeledExpectedVolatility
+
+Do NOT blindly add percentages.
+
+Normalize every component first.
+
+==================================================
+11. MODELED VOLATILITY
+
+Create a unified:
+
+MODELED_EXPECTED_VOLATILITY
+
+Use a weighted model.
+
+Suggested starting weights:
+
+30% VIX/implied volatility
+
+20% realized volatility
+
+15% VIX volatility / VVIX
+
+15% term structure
+
+20% gamma regime
+
+Make all weights configurable through environment/configuration.
+
+Do not hard-code them throughout the application.
+
+Normalize all components to comparable scales before combining.
+
+Produce:
+
+modeledVolatility
+
+modeledVolatilityPercentile
+
+modeledVolatilityTrend
+
+modeledVolatilityAcceleration
+
+volatilityConfidence
+
+==================================================
+12. IV RANK
+
+For individual stocks with options data:
+
+Calculate:
+
+IV Rank
+
+IV Percentile
+
+Current IV
+
+1-year IV high
+
+1-year IV low
+
+1-year IV percentile
+
+Formula:
+
+IV Rank =
+(Current IV - 1Y IV Low) /
+(1Y IV High - 1Y IV Low) * 100
+
+Clamp between 0 and 100.
+
+If insufficient historical IV data exists:
+
+Do NOT fabricate IV Rank.
+
+Return:
+
+IV Rank unavailable
+
+and continue using other available volatility inputs.
+
+==================================================
+13. STOCK-SPECIFIC VOLATILITY
+
+For every searched stock calculate, when data is available:
+
+Historical volatility
+
+20D realized volatility
+
+30D realized volatility
+
+60D realized volatility
+
+ATR
+
+ATR percentile
+
+Current IV
+
+IV Rank
+
+IV Percentile
+
+Expected move
+
+Expected move versus ATR
+
+Expected move versus historical volatility
+
+Beta versus SPY
+
+Correlation versus SPY
+
+Stock volatility relative to SPY volatility
+
+Calculate:
+
+RelativeVolatilityScore
+
+==================================================
+14. EXPECTED MOVE
+
+For options-enabled stocks calculate expected move.
+
+Use:
+
+ExpectedMove =
+UnderlyingPrice × IV × sqrt(DTE / 365)
+
+Display:
+
+Expected Move
+
+Expected Move %
+
+Upper Expected Range
+
+Lower Expected Range
+
+Compare expected move to:
+
+ATR
+
+historical volatility
+
+SPY expected move
+
+VIX-derived SPX expected range
+
+==================================================
+15. VOLATILITY REGIME SCORE
+
+Create a normalized score from 0-100:
+
+VOLATILITY REGIME SCORE
+
+Components:
+
+VIX Level
+VIX Momentum
+VIX Realized Volatility
+VVIX
+VIX Term Structure
+VIX Futures Curve
+SPX IV Term Structure
+Dealer Gamma
+Distance From Gamma Flip
+Modeled Volatility
+Stock Relative Volatility
+
+Score should represent the current volatility environment.
+
+DO NOT let this score independently generate a BUY or SELL.
+
+It modifies the existing trading signal.
+
+==================================================
+16. ENTRY ADJUSTMENT
+
+Integrate the volatility regime with the EXISTING entry score.
+
+Do not replace the current entry algorithm.
+
+Instead create:
+
+VolatilityEntryAdjustment
+
+Positive gamma + declining/falling volatility:
+
+Increase confidence in technically confirmed entries.
+
+Negative gamma + rapidly rising volatility:
+
+Require stronger technical confirmation before assigning high confidence.
+
+Near gamma flip:
+
+Increase sensitivity to breakouts and breakdowns.
+
+Low volatility + compressed range + improving momentum:
+
+Flag potential volatility expansion setup.
+
+High volatility + extended price movement:
+
+Increase profit-taking sensitivity.
+
+IMPORTANT:
+
+Do not create vague language.
+
+Use numerical confidence scores.
+
+Example:
+
+Technical Entry Score: 84
+
+Volatility Regime Score: 78
+
+Gamma Score: 71
+
+Final Entry Confidence: 86%
+
+==================================================
+17. EXIT INTELLIGENCE
+
+Add volatility-aware exit logic to the existing exit engine.
+
+Monitor:
+
+VIX acceleration
+
+VVIX acceleration
+
+negative gamma transition
+
+gamma flip proximity
+
+term structure inversion
+
+modeled volatility acceleration
+
+IV expansion
+
+realized volatility expansion
+
+ATR expansion
+
+When volatility expands rapidly against an existing position, increase exit urgency.
+
+When volatility contracts and price reaches an existing take-profit zone, increase profit-taking confidence.
+
+Do NOT override hard stops or risk controls.
+
+Existing stop-loss and risk-management systems always remain authoritative.
+
+==================================================
+18. VOLATILITY SHOCK DETECTION
+
+Create a:
+
+VOLATILITY SHOCK SCORE
+
+Detect:
+
+VIX rapid acceleration
+
+VVIX acceleration
+
+VIX futures curve inversion
+
+SPX IV expansion
+
+negative gamma transition
+
+large movement toward gamma flip
+
+realized volatility expansion
+
+Create a 0-100 score.
+
+Also detect:
+
+VOLATILITY COMPRESSION
+
+when:
+
+VIX falling
+
+VVIX falling
+
+realized volatility falling
+
+positive gamma
+
+narrowing ATR
+
+compressed term structure
+
+This can identify conditions where volatility expansion becomes increasingly important.
+
+==================================================
+19. SEARCH PAGE DISPLAY
+
+Add a compact VOLATILITY INTELLIGENCE section to the existing search page.
+
+Display:
+
+VIX
+VIX Percentile
+VVIX
+VIX Term Structure
+VIX Futures Curve
+SPX IV Term Structure
+Dealer Gamma
+Gamma Flip
+Distance to Gamma Flip
+Modeled Volatility
+IV Rank
+Volatility Regime Score
+Volatility Shock Score
+
+Use simple numerical presentation.
+
+Example:
+
+VOLATILITY REGIME
+Score: 73/100
+
+VIX: 18.4
+VIX Percentile: 67%
+VVIX: 102
+Gamma: +$X.XB
+Gamma Flip: 5,420
+Distance: +1.2%
+Modeled Volatility: 21.7%
+IV Rank: 74%
+
+==================================================
+20. SIGNAL INTEGRATION
+
+Add the following to the existing search result:
+
+Technical Score
+Momentum Score
+Volume Score
+Relative Strength Score
+Support/Resistance Score
+Options Score
+Macro Score
+Volatility Score
+Gamma Score
+
+Then calculate:
+
+FINAL SIGNAL CONFIDENCE
+
+The volatility engine must improve timing without dominating the entire model.
+
+Use configurable maximum influence.
+
+Default maximum volatility contribution:
+
+15%
+
+Default maximum gamma contribution:
+
+10%
+
+Make these values configurable.
+
+==================================================
+21. HISTORICAL BACKTESTING
+
+Create an internal backtesting framework for the volatility layer.
+
+Test whether:
+
+Positive gamma + declining VIX
+
+Positive gamma + declining realized volatility
+
+Negative gamma + rising VIX
+
+VIX term-structure inversion
+
+VIX acceleration
+
+VVIX acceleration
+
+Gamma flip crossings
+
+Modeled volatility acceleration
+
+actually improve entry/exit timing.
+
+Measure:
+
+Win rate
+
+Average return
+
+Maximum drawdown
+
+Profit factor
+
+Sharpe ratio
+
+Average favorable excursion
+
+Average adverse excursion
+
+False signal rate
+
+Do not claim the model improves performance until historical testing demonstrates it.
+
+==================================================
+22. DATA QUALITY
+
+Every volatility calculation must contain:
+
+timestamp
+
+source
+
+data age
+
+data completeness
+
+calculation status
+
+If data is stale:
+
+mark it stale.
+
+If data is missing:
+
+exclude it from the model and redistribute weights proportionally.
+
+Never substitute zero for missing volatility data.
+
+Never fabricate values.
+
+==================================================
+23. PERFORMANCE
+
+Do not request Cboe data separately for every stock.
+
+Market-wide volatility data should be cached.
+
+Use a shared volatility snapshot.
+
+Suggested cache:
+
+15-30 seconds for live market data
+
+Longer cache for historical calculations.
+
+Stock-specific options data should be cached separately.
+
+Prevent API request storms.
+
+Implement:
+
+timeouts
+
+retry limits
+
+rate-limit handling
+
+circuit breakers
+
+graceful fallback
+
+==================================================
+24. API ARCHITECTURE
+
+Create modular services such as:
+
+/services/volatility/cboeDataService
+
+/services/volatility/vixEngine
+
+/services/volatility/termStructureEngine
+
+/services/volatility/gammaExposureEngine
+
+/services/volatility/modeledVolatilityEngine
+
+/services/volatility/ivRankEngine
+
+/services/volatility/volatilityRegimeEngine
+
+Do not duplicate logic inside React components.
+
+The frontend should consume a clean volatility snapshot.
+
+==================================================
+25. DATABASE / STORAGE
+
+If persistence is already available:
+
+Store historical volatility snapshots.
+
+Recommended fields:
+
+timestamp
+
+vix
+
+vixPercentile
+
+vvix
+
+vix9d
+
+vix3m
+
+vix6m
+
+vix1y
+
+futuresSlope
+
+ivTermSlope
+
+netGamma
+
+gammaFlip
+
+distanceToGammaFlip
+
+realizedVol20
+
+realizedVol30
+
+modeledVolatility
+
+volatilityRegimeScore
+
+volatilityShockScore
+
+dataQuality
+
+Do not modify existing tables destructively.
+
+Use migrations.
+
+Never delete existing data.
+
+==================================================
+26. UI SAFETY
+
+Do not redesign the existing search page.
+
+Add the new volatility section using the current design system.
+
+Preserve:
+
+existing navigation
+
+existing cards
+
+existing search
+
+existing filters
+
+existing charts
+
+existing stock rankings
+
+existing signal calculations
+
+existing support/resistance
+
+existing authentication
+
+existing API behavior
+
+==================================================
+27. LANGUAGE
+
+Use decisive numerical language.
+
+Do not use vague labels such as:
+
+“maybe”
+
+“possibly”
+
+“hold”
+
+“wait”
+
+“speculative”
+
+“uncertain”
+
+Instead use measurable values.
+
+Examples:
+
+“Entry Confidence: 87%”
+
+“Volatility Risk: 72/100”
+
+“Gamma Support: 81/100”
+
+“Volatility Expansion Probability: 76%”
+
+“Exit Pressure: 68/100”
+
+These numbers must come from actual model calculations.
+
+Do not manufacture confidence values.
+
+==================================================
+28. TESTING / NON-BREAKING REQUIREMENT
+
+Before deployment:
+
+1. Run existing unit tests.
+2. Run existing integration tests.
+3. Test the search page.
+4. Test stock search.
+5. Test authentication.
+6. Test existing entry signals.
+7. Test existing exit signals.
+8. Test support/resistance.
+9. Test options data.
+10. Test API failures.
+11. Test Cboe API timeout.
+12. Test missing Cboe data.
+13. Test stale Cboe data.
+14. Test rate limiting.
+15. Test empty option chains.
+16. Test gamma calculation with known option-chain fixtures.
+17. Test gamma flip calculation.
+18. Test IV Rank with known historical values.
+19. Test term-structure calculations.
+20. Test that the search page still functions when ALL new volatility services are disabled.
+
+The existing application must remain functional if the entire new volatility engine is unavailable.
+
+==================================================
+29. FEATURE FLAG
+
+Put the entire feature behind:
+
+VOLATILITY_INTELLIGENCE_ENABLED=true
+
+If false:
+
+The existing application behaves exactly as it did before this upgrade.
+
+Default deployment behavior must NOT break the existing system.
+
+==================================================
+30. FINAL IMPLEMENTATION REQUIREMENT
+
+Do not rewrite unrelated parts of the application.
+
+Do not remove working code.
+
+Do not replace existing entry/exit algorithms.
+
+Do not change existing database schemas destructively.
+
+Do not change authentication.
+
+Do not change broker integrations.
+
+Do not change existing stock search behavior.
+
+Implement the volatility system as a modular additive layer.
+
+After implementation, provide:
+
+1. Files changed
+2. New files created
+3. APIs/data sources used
+4. New environment variables
+5. Database migrations
+6. New calculations
+7. How volatility affects entry confidence
+8. How volatility affects exit confidence
+9. How gamma affects the model
+10. How IV Rank is calculated
+11. How term structure is calculated
+12. Test results
+13. Confirmation that existing functionality remains intact
+
+Do not declare the implementation complete until the existing search page passes its regression tests.

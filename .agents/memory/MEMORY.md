@@ -24,3 +24,4 @@
 - [Money Printer automation](money-printer-automation.md) — Search science drives server-scheduled long/short brackets through an isolated, pinned Alpaca account and fail-closed reconciliation.
 - [Custom-domain TLS routing](custom-domain-tls-routing.md) — keep the apex behind Cloudflare’s active Universal SSL while preserving the verified Replit origin.
 - [Search volatility intelligence](search-volatility-intelligence.md) — volatility is feature-flagged, provenance-aware context; stale or incomplete inputs have zero influence and never create a verdict.
+- [RRG-style sector context](rrg-style-sector-context.md) — derived rotation context is read-only and clearly labeled; never claim official RRG data or let it drive trades.

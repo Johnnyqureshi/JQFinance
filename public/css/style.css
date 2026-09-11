@@ -3078,6 +3078,20 @@ option { background: var(--card); }
 .sr-tile-signal.sig-in      { background: var(--green-dim); color: var(--green); }
 .sr-tile-signal.sig-out     { background: var(--red-dim);   color: var(--red);   }
 .sr-tile-signal.sig-neutral { background: var(--bg2);       color: var(--t3);    }
+.sr-tile-rrg {
+  font-size: 0.61rem;
+  color: var(--t3);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.sr-tile-rrg.rrg-leading  { color: var(--green); }
+.sr-tile-rrg.rrg-improving { color: #58a6ff; }
+.sr-tile-rrg.rrg-weakening { color: #f59e0b; }
+.sr-tile-rrg.rrg-lagging  { color: var(--red); }
+.sr-tile-rrg.rrg-unavailable { color: var(--t3); opacity: 0.7; }
 
 /* intensity glow bar along the bottom edge */
 .sr-tile-bar {

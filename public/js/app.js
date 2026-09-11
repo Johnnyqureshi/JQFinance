@@ -1877,13 +1877,24 @@ async function loadSectorHeatmap() {
   if (summary) summary.innerHTML = '';
 
   const syms  = SECTORS.map(s => s.sym);
-  const snaps = await api.snapshots(syms);
+  const [snaps, ...barPayloads] = await Promise.all([
+    api.snapshots(syms),
+    ...[...syms, 'SPY'].map(sym => api.bars(sym, '1Day', 80)),
+  ]);
+  const benchmarkBars = barPayloads.at(-1)?.bars || [];
+  const rrgBySym = Object.fromEntries(SECTORS.map((sector, index) => [
+    sector.sym,
+    window.RRGStyle?.calculateRrgStyle(barPayloads[index]?.bars || [], benchmarkBars) || {
+      available: false,
+      reason: 'RRG_STYLE_UNAVAILABLE',
+    },
+  ]));
 
   // Build enriched list sorted by % change desc
   const data = SECTORS.map(s => {
     const q   = snaps[s.sym] || {};
     const pct = q.changesPercentage ?? null;
-    return { ...s, q, pct };
+    return { ...s, q, pct, rrg: rrgBySym[s.sym] };
   }).sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
 
   const inCount  = data.filter(d => d.pct != null && d.pct > 0.25).length;
@@ -1941,6 +1952,19 @@ async function loadSectorHeatmap() {
     sigEl.className = `sr-tile-signal ${signalCls}`;
     sigEl.textContent = signalTxt;
 
+    const rrgEl = document.createElement('span');
+    const rrg = d.rrg;
+    const rrgClass = rrg?.available
+      ? `rrg-${String(rrg.quadrant).toLowerCase()}`
+      : 'rrg-unavailable';
+    rrgEl.className = `sr-tile-rrg ${rrgClass}`;
+    rrgEl.textContent = rrg?.available
+      ? `RRG-style ${rrg.quadrant} · RS ${rrg.rsRatio.toFixed(1)} / Mom ${rrg.rsMomentum.toFixed(1)}`
+      : 'RRG-style unavailable';
+    rrgEl.title = rrg?.available
+      ? `${rrg.method}; completed ${rrg.asOf} close`
+      : 'RRG-style context requires matching completed daily bars.';
+
     const barEl = document.createElement('div');
     barEl.className = 'sr-tile-bar';
     barEl.style.background = srBarColor(pct);
@@ -1951,6 +1975,7 @@ async function loadSectorHeatmap() {
     tile.appendChild(pctEl);
     tile.appendChild(priceEl);
     tile.appendChild(sigEl);
+    tile.appendChild(rrgEl);
     tile.appendChild(barEl);
 
     // Click to open the sector ETF

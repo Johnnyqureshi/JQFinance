@@ -5,6 +5,7 @@ const {
   buildSearchVolumeSignal,
   newsCatalystScore,
   selectCompletedDailyBar,
+  structureForBars,
   timeOfDayRelativeVolume,
   volumeAcceleration,
 } = require('../lib/search-volume-signal');
@@ -47,6 +48,32 @@ function session(date, {
   });
 }
 
+function structuredSession(date, {
+  highStructure = 'HH',
+  lowStructure = 'HL',
+  volumes = acceleratingVolumes,
+  breakout = false,
+} = {}) {
+  const bars = session(date, { start: 100, step: 0.2, volumes });
+  const firstHigh = highStructure === 'HH' ? 102 : 103;
+  const secondHigh = highStructure === 'HH' ? 103 : 102.5;
+  const firstLow = 98;
+  const secondLow = lowStructure === 'HL' ? 99 : 97;
+  bars.forEach((bar, index) => {
+    bar.h = 101;
+    bar.l = 100;
+    if (index === 2) bar.h = firstHigh;
+    if (index === 4) bar.l = firstLow;
+    if (index === 6) bar.h = secondHigh;
+    if (index === 8) bar.l = secondLow;
+  });
+  if (breakout) {
+    bars[10].c = secondHigh + 0.3;
+    bars[11].c = secondHigh + 0.5;
+  }
+  return bars;
+}
+
 const history = [
   ...session('2026-01-02'),
   ...session('2026-01-03'),
@@ -56,7 +83,7 @@ const acceleratingVolumes = [...Array(9).fill(120), ...Array(3).fill(300)];
 const nowMs = timestamp('2026-01-05', 630);
 
 function build({
-  current = session('2026-01-05', { volumes: acceleratingVolumes }),
+  current = structuredSession('2026-01-05'),
   historical = history,
   levels = {
     support: [{ price: 99, label: 'Support' }],
@@ -167,7 +194,7 @@ test('issues SELL only for a high-volume structural support breakdown', () => {
   assert(result.bearishVolumeScore > result.bullishVolumeScore);
 });
 
-test('does not SELL from elevated RSI, resistance, or high volume alone', () => {
+test('does not allow a bullish signal from elevated RSI, resistance, or high volume alone', () => {
   const current = session('2026-01-05', {
     start: 100,
     step: 0,
@@ -183,9 +210,9 @@ test('does not SELL from elevated RSI, resistance, or high volume alone', () => 
     indicators: { rsi14: 88, vwap: 100, macd: { value: 0, signal: 0 } },
     market: { trend: 'NEUTRAL' },
   });
-  assert.strictEqual(result.signal.label, 'BUY');
+  assert.strictEqual(result.signal.label, 'SELL');
   assert.strictEqual(result.signal.stage, 'PROVISIONAL');
-  assert.strictEqual(result.signal.direction, 'BULLISH');
+  assert.strictEqual(result.signal.direction, 'BEARISH');
 });
 
 test('uses the documented weighted confidence and keeps it bounded', () => {
@@ -308,11 +335,7 @@ test('does not confirm a breakout from a forming 5-minute candle', () => {
 });
 
 test('weights late-breaking positive news only when price and volume corroborate it', () => {
-  const current = session('2026-01-05', {
-    start: 100,
-    step: 0.2,
-    volumes: acceleratingVolumes,
-  });
+  const current = structuredSession('2026-01-05');
   const result = build({
     current,
     price: 100,
@@ -327,6 +350,68 @@ test('weights late-breaking positive news only when price and volume corroborate
   assert(result.newsImpact.bullishScore > result.newsImpact.bearishScore);
   assert.strictEqual(result.newsImpact.freshCatalystCount, 1);
   assert.strictEqual(result.newsImpact.appliedDirection, 'BULLISH');
+});
+
+test('classifies confirmed HH and HL pivots as bullish structure', () => {
+  const structure = structureForBars(structuredSession('2026-01-05'));
+  assert.strictEqual(structure.highStructure, 'HH');
+  assert.strictEqual(structure.lowStructure, 'HL');
+  assert.strictEqual(structure.structuralBias, 'BULLISH');
+});
+
+test('classifies confirmed LH and LL pivots as bearish structure', () => {
+  const structure = structureForBars(structuredSession('2026-01-05', {
+    highStructure: 'LH',
+    lowStructure: 'LL',
+  }));
+  assert.strictEqual(structure.highStructure, 'LH');
+  assert.strictEqual(structure.lowStructure, 'LL');
+  assert.strictEqual(structure.structuralBias, 'BEARISH');
+});
+
+test('treats LH and HL as mixed until the lower high is broken and held', () => {
+  const structure = structureForBars(structuredSession('2026-01-05', {
+    highStructure: 'LH',
+    lowStructure: 'HL',
+  }));
+  assert.strictEqual(structure.structuralBias, 'MIXED');
+  assert.strictEqual(structure.breakoutConfirmed, false);
+});
+
+test('confirms bullish transition only after two closes hold above the lower high', () => {
+  const structure = structureForBars(structuredSession('2026-01-05', {
+    highStructure: 'LH',
+    lowStructure: 'HL',
+    breakout: true,
+  }));
+  assert.strictEqual(structure.structuralBreakLevel, 102.5);
+  assert.strictEqual(structure.breakoutConfirmed, true);
+  assert.strictEqual(structure.structuralBias, 'BULLISH');
+});
+
+test('reports insufficient structure when confirmed pivots are unavailable', () => {
+  const structure = structureForBars(session('2026-01-05'));
+  assert.strictEqual(structure.highStructure, 'INSUFFICIENT');
+  assert.strictEqual(structure.lowStructure, 'INSUFFICIENT');
+  assert.strictEqual(structure.structuralBias, 'INSUFFICIENT');
+});
+
+test('prohibits BUY from higher lows alone while lower highs remain intact', () => {
+  const current = structuredSession('2026-01-05', {
+    highStructure: 'LH',
+    lowStructure: 'HL',
+  });
+  const result = build({
+    current,
+    price: current.at(-1).c,
+    indicators: { rsi14: 62, vwap: 99, macd: { value: 2, signal: 1 } },
+    market: { trend: 'BULLISH' },
+    news: [{ headline: 'Company beats estimates and raises guidance', publishedAt: '2026-01-05T09:45:00.000Z' }],
+  });
+  assert.strictEqual(result.signal.label, 'SELL');
+  assert.strictEqual(result.structure.structuralBias, 'MIXED');
+  assert(result.reasons.some(reason => /lower highs remain intact/i.test(reason)));
+  assert(!result.reasons.includes('Higher lows are developing'));
 });
 
 test('weights late-breaking negative news only when price and volume corroborate it', () => {

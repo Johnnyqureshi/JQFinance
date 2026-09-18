@@ -3,6 +3,8 @@ const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
 const { mountB2 } = require('./lib/b2-service');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
+const { evaluateLiquidity, DEFAULT_LIQUIDITY_POLICY } = require('./lib/liquidity-policy');
+const { evaluateYahooLiquidity, evaluateAlpacaLiquidity } = require('./lib/liquidity-providers');
 const { evaluateSessionVwapContext } = require('./lib/session-vwap-context');
 const { brokerOrderMatchesIntent } = require('./lib/broker-order-ownership');
 const { barsFromBrokerResponse, easternDateKey, completedDailyBars, completedWeeklyBars } = require('./lib/market-bars');
@@ -1926,7 +1928,9 @@ app.post('/api/scanner-batch', async (req, res) => {
   const symbols = (req.body.symbols || [])
     .map(s => String(s).toUpperCase().replace(/[^A-Z0-9.\-]/g, '').trim())
     .filter(Boolean).slice(0, 100); // increased from 50 → 100 for full-market scan
-  if (!symbols.length) return res.json({ results: [] });
+  if (!symbols.length) return res.json({
+    results: [], rejected: [], liquidityPolicy: DEFAULT_LIQUIDITY_POLICY,
+  });
 
   const BATCH = 5;
   const out   = [];
@@ -1934,26 +1938,33 @@ app.post('/api/scanner-batch', async (req, res) => {
     const chunk   = symbols.slice(i, i + BATCH);
     const settled = await Promise.allSettled(chunk.map(async sym => {
       try {
+        const evaluatedAt = Date.now();
         const [quote, bars, fundamentals] = await Promise.all([
           yf.quote(sym, {}, { validateResult: false }).catch(() => null),
           fetchOHLCV(sym, 70).catch(() => null),
           _fetchFloatData(sym),
         ]);
-        if (!quote) return null;
-        const price = quote.regularMarketPrice;
-        if (!price || !isFinite(price) || price <= 0) return null;
+        const price = Number.isFinite(Number(quote?.regularMarketPrice))
+          ? Number(quote.regularMarketPrice) : null;
 
-        const change    = quote.regularMarketChangePercent ?? 0;
-        const volume    = quote.regularMarketVolume ?? 0;
-        const avgVol    = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? 0;
+        const change    = Number.isFinite(Number(quote?.regularMarketChangePercent))
+          ? Number(quote.regularMarketChangePercent) : null;
+        const volume    = Number.isFinite(Number(quote?.regularMarketVolume))
+          ? Number(quote.regularMarketVolume) : null;
+        const bid       = Number.isFinite(Number(quote?.bid)) ? Number(quote.bid) : null;
+        const ask       = Number.isFinite(Number(quote?.ask)) ? Number(quote.ask) : null;
+        const liquidity = evaluateYahooLiquidity(quote, {
+          now: evaluatedAt, marketState: currentMarketState(),
+        });
+        const avgVol    = quote?.averageDailyVolume3Month ?? quote?.averageDailyVolume10Day ?? 0;
         const relVol    = avgVol > 0 ? +(volume / avgVol).toFixed(2) : null;
-        const marketCap = quote.marketCap ?? null;
+        const marketCap = quote?.marketCap ?? null;
         // Prefer quoteSummary's floatShares, then sharesOutstanding, then the
         // quote endpoint's optional floatShares field as a final fallback.
         const floatFields = scannerFloatFields(fundamentals, quote);
-        const w52High   = quote.fiftyTwoWeekHigh ?? null;
-        const w52Dist   = w52High ? +((price - w52High) / w52High * 100).toFixed(2) : null;
-        const name      = quote.shortName ?? quote.longName ?? sym;
+        const w52High   = quote?.fiftyTwoWeekHigh ?? null;
+        const w52Dist   = w52High && price != null ? +((price - w52High) / w52High * 100).toFixed(2) : null;
+        const name      = quote?.shortName ?? quote?.longName ?? sym;
 
         let atr14 = null, rsi14 = null;
         if (bars && bars.length >= 20) {
@@ -1963,15 +1974,27 @@ app.post('/api/scanner-batch', async (req, res) => {
         }
 
         return {
-          sym, name, price, change: +change.toFixed(2), volume, relVol, atr14, rsi14,
+          sym, name, price, change: change == null ? null : +change.toFixed(2), volume,
+          bid, ask, liquidity, relVol, atr14, rsi14,
           ...floatFields,
           marketCap, w52Dist,
         };
-      } catch { return null; }
+      } catch {
+        const liquidity = evaluateLiquidity({});
+        return {
+          sym, name: sym, price: null, change: null, volume: null, bid: null, ask: null,
+          liquidity, relVol: null, atr14: null, rsi14: null, float: null,
+          floatSource: null, sharesOutstanding: null, marketCap: null, w52Dist: null,
+        };
+      }
     }));
     out.push(...settled.map(r => r.value).filter(Boolean));
   }
-  res.json({ results: out });
+  res.json({
+    results: out.filter(row => row.liquidity.eligible),
+    rejected: out.filter(row => !row.liquidity.eligible),
+    liquidityPolicy: DEFAULT_LIQUIDITY_POLICY,
+  });
 });
 
 // ── GET /api/signal/:symbol (scanner intelligence panel signal) ────────────────
@@ -4340,22 +4363,52 @@ function bciPrepareArticles(articles) {
 async function bciEnrichMarkets(articles, dataGaps) {
   const symbols = [...new Set(articles.map(a => a.symbol))].slice(0, 28);
   const marketBySymbol = new Map();
+  const rejectedBySymbol = new Map();
   for (let i = 0; i < symbols.length; i += 6) {
     const chunk = symbols.slice(i, i + 6);
     const settled = await Promise.allSettled(chunk.map(async symbol => {
-      const quote = await yf.quote(symbol, {}, { validateResult: false });
-      const price = quote?.regularMarketPrice;
+      let quote;
+      try {
+        quote = await yf.quote(symbol, {}, { validateResult: false });
+      } catch (_) {
+        return {
+          rejected: {
+            symbol, company: symbol, price: null, changePct: null, volume: null,
+            bid: null, ask: null, liquidity: evaluateLiquidity({}),
+          },
+        };
+      }
+      const evaluatedAt = Date.now();
+      const price = Number.isFinite(Number(quote?.regularMarketPrice)) ? Number(quote.regularMarketPrice) : null;
+      const volume = Number.isFinite(Number(quote?.regularMarketVolume)) ? Number(quote.regularMarketVolume) : null;
+      const bid = Number.isFinite(Number(quote?.bid)) ? Number(quote.bid) : null;
+      const ask = Number.isFinite(Number(quote?.ask)) ? Number(quote.ask) : null;
+      const changePct = Number.isFinite(Number(quote?.regularMarketChangePercent))
+        ? Number(quote.regularMarketChangePercent) : null;
+      const liquidity = evaluateYahooLiquidity(quote, {
+        now: evaluatedAt, marketState: currentMarketState(),
+      });
+      const base = {
+        symbol,
+        company: quote?.shortName || quote?.longName || symbol,
+        price,
+        changePct: changePct == null ? null : +changePct.toFixed(2),
+        volume,
+        bid,
+        ask,
+        liquidity,
+      };
+      if (!liquidity.eligible) return { rejected: base };
       if (!Number.isFinite(price) || price < 0.5 || price > 20) return null;
       const marketCap = Number.isFinite(quote.marketCap) ? quote.marketCap : null;
       if (marketCap != null && (marketCap < 20e6 || marketCap > 1e9)) return null;
       const floatData = await _fetchFloatData(symbol);
       const avgVol = quote.averageDailyVolume3Month ?? quote.averageDailyVolume10Day ?? null;
-      const volume = quote.regularMarketVolume ?? null;
       return {
+        ...base,
         symbol,
         company: quote.shortName || quote.longName || symbol,
         price,
-        changePct: Number.isFinite(quote.regularMarketChangePercent) ? +quote.regularMarketChangePercent.toFixed(2) : null,
         volume,
         relVol: volume != null && avgVol ? +(volume / avgVol).toFixed(2) : null,
         marketCap,
@@ -4364,13 +4417,15 @@ async function bciEnrichMarkets(articles, dataGaps) {
       };
     }));
     for (const result of settled) {
-      if (result.status === 'fulfilled' && result.value) {
+      if (result.status === 'fulfilled' && result.value?.rejected) {
+        rejectedBySymbol.set(result.value.rejected.symbol, result.value.rejected);
+      } else if (result.status === 'fulfilled' && result.value) {
         marketBySymbol.set(result.value.symbol, result.value);
       }
     }
   }
   if (!marketBySymbol.size && articles.length) dataGaps.push('Market-data enrichment returned no qualifying $20M–$1B, $0.50–$20 symbols');
-  return marketBySymbol;
+  return { marketBySymbol, rejected: [...rejectedBySymbol.values()] };
 }
 
 async function bciGeneratePayload() {
@@ -4393,7 +4448,7 @@ async function bciGeneratePayload() {
   // syndicated version so they can retain the strongest canonical source and
   // preserve an honest duplicate count.
   const articles = bciPrepareArticles(providerResults.flat());
-  const marketBySymbol = await bciEnrichMarkets(articles, dataGaps);
+  const { marketBySymbol, rejected: liquidityRejected } = await bciEnrichMarkets(articles, dataGaps);
   const now = Date.now();
   const events = dedupeEvents(
     articles
@@ -4407,6 +4462,8 @@ async function bciGeneratePayload() {
   return {
     ok: true,
     events,
+    liquidityRejected,
+    liquidityPolicy: DEFAULT_LIQUIDITY_POLICY,
     updatedAt: new Date(now).toISOString(),
     marketState: currentMarketState(),
     cached: false,
@@ -5645,14 +5702,20 @@ async function optionsUnderlyingQuote(userId, symbol) {
   const bid = Number(quote?.bp);
   const ask = Number(quote?.ap);
   const timestamp = Date.parse(quote?.t || '');
-  if (!(bid > 0) || !(ask > bid) || !Number.isFinite(timestamp)
-      || Date.now() - timestamp > OPTIONS_QUOTE_MAX_AGE_MS) {
-    throw new Error(`${symbol} does not have a fresh, uncrossed Alpaca quote.`);
+  if (!Number.isFinite(timestamp) || Date.now() - timestamp > OPTIONS_QUOTE_MAX_AGE_MS
+      || timestamp - Date.now() > 5000) {
+    throw new Error(`${symbol} does not have a fresh Alpaca quote.`);
   }
-  if ((ask - bid) / ((ask + bid) / 2) > 0.02) {
-    throw new Error(`${symbol} underlying spread is too wide.`);
-  }
-  return { bid, ask, mid: (bid + ask) / 2, timestamp, raw: quote };
+  const tradePrice = Number(snapshot?.latestTrade?.p);
+  const mid = bid > 0 && ask >= bid ? (bid + ask) / 2
+    : Number.isFinite(tradePrice) && tradePrice > 0 ? tradePrice : null;
+  const volume = Number(snapshot?.dailyBar?.v);
+  const previousClose = Number(snapshot?.prevDailyBar?.c);
+  const changePct = mid > 0 && previousClose > 0 ? (mid / previousClose - 1) * 100 : null;
+  return {
+    bid, ask, mid, volume: Number.isFinite(volume) ? volume : null,
+    changePct, timestamp, raw: quote, snapshot,
+  };
 }
 
 async function discoverOptionsContracts(userId, symbol) {
@@ -5696,6 +5759,18 @@ async function optionsLatestQuote(userId, contractSymbol) {
 async function buildOptionsCandidate(userId, symbol, { includeContract = true } = {}) {
   const sym = String(symbol || '').trim().toUpperCase();
   if (!LEAP_UNDERLYINGS.includes(sym)) throw new Error('Only QQQ, TQQQ, and SOXL are eligible.');
+  const underlying = await optionsUnderlyingQuote(userId, sym);
+  const liquidity = evaluateAlpacaLiquidity(underlying.snapshot, {
+    now: Date.now(), marketState: currentMarketState(),
+  });
+  if (!liquidity.eligible) {
+    return {
+      strategy: 'leap-options-v1', symbol: sym, direction: 'LONG_CALL', eligible: false,
+      status: 'LIQUIDITY REJECTED', score: 0, reasons: liquidity.reasons,
+      liquidity, evidence: null, contract: null, signalBarAt: null,
+      evaluatedAt: new Date().toISOString(),
+    };
+  }
   const { weeklyBars } = await loadOptionsWeeklyBars(userId, sym);
   const signal = evaluateLeapOptionsSignal({
     symbol: sym,
@@ -5709,10 +5784,10 @@ async function buildOptionsCandidate(userId, symbol, { includeContract = true } 
     signalBarAt: weeklyBars.at(-1)?.completedAt || weeklyBars.at(-1)?.t || null,
     lastCompletedWeek: weeklyBars.at(-1)?.t || null,
     evaluatedAt: new Date().toISOString(),
+    liquidity,
     contract: null,
   };
   if (!signal.eligible || !includeContract) return candidate;
-  const underlying = await optionsUnderlyingQuote(userId, sym);
   const contracts = await discoverOptionsContracts(userId, sym);
   const contract = selectLeapContract(contracts, {
     symbol: sym, underlyingPrice: underlying.mid, now: Date.now(), minDte: 360,

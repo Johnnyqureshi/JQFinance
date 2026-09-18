@@ -669,6 +669,10 @@
       <button class="nsc-reset-btn" id="nscResetFilters">Reset</button>
     </div>
 
+    <div class="nsc-statusbar" aria-label="Scanner liquidity requirements">
+      <strong id="nscLiquidityPolicy">Loading shared liquidity policy…</strong>
+    </div>
+
     <!-- Loading overlay -->
     <div class="nsc-loading" id="nscLoading" style="display:none">
       <div class="nsc-spinner"></div>
@@ -705,6 +709,12 @@
       <span class="nsc-legend"><span class="nsc-leg nsc-leg-ob"></span>RSI Overbought &gt;70</span>
       <span class="nsc-status-txt" id="nscStatus"></span>
     </div>
+
+    <details class="nsc-rejected-section" id="nscRejectedSection" hidden>
+      <summary id="nscRejectedSummary">0 candidates excluded by shared liquidity policy</summary>
+      <p>Excluded candidates are shown for transparency only and are never ranked as actionable scanner results.</p>
+      <ul id="nscRejectedList"></ul>
+    </details>
 
     <!-- Macro context is deliberately isolated from scanner rankings and execution tools. -->
     <section class="macro-context" id="macroContext" aria-labelledby="macroContextTitle" aria-live="polite">
@@ -745,6 +755,11 @@
       <div class="bci-grid" id="bciGrid">
         <div class="bci-empty">Catalyst intelligence will load with the scanner.</div>
       </div>
+      <details class="bci-detail" id="bciLiquidityRejected" hidden>
+        <summary>Catalyst events excluded by shared liquidity policy</summary>
+        <p>Research-only rejected events are not ranked with eligible catalysts.</p>
+        <ul id="bciLiquidityRejectedList"></ul>
+      </details>
       <div class="bci-context">Review-only research context. Verify the source, timing, liquidity, and dilution risk independently before making a trade. This module does not place orders.</div>
     </section>
 

@@ -25,3 +25,4 @@
 - [Scheduler readiness semantics](scheduler-readiness-semantics.md) — broker connection and automation authorization are not proof that a server entry can run; persist blockers and expose current eligibility separately.
 - [Search liquidity truthfulness](search-liquidity-truthfulness.md) — venue-limited top-of-book is partial context, never Level 2, walls, absorption, aggressor flow, or liquidity support.
 - [Verified macro context](verified-macro-context.md) — sourced macro scores remain research-only; missing inputs suppress the score and unmeasured geopolitics never means low risk.
+- [Shared entry liquidity policy](shared-entry-liquidity.md) — keep scanner and bot thresholds centralized; entry rejection must never suppress exit or protection decisions.

@@ -1,0 +1,7 @@
+{
+  "minDollarVolume": 1000000,
+  "minShareVolume": 100000,
+  "maxSpreadPct": 1,
+  "pumpChangePct": 30,
+  "pumpMinDollarVolume": 10000000
+}

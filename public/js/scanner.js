@@ -16,6 +16,8 @@
   let cdInterval  = null;
   let initialized = false;
   let filters     = { minPrice: null, maxPrice: null, minRelVol: null, minChg: null };
+  let rejectedData = [];
+  let liquidityPolicy = null;
   let bciEvents = [], bciView = 'top', bciTimer = null, bciLoading = false, bciInitialized = false;
 
   /* ── helpers ──────────────────────────────────────────────────────────────── */
@@ -52,6 +54,58 @@
     if (!value) return 'Time unavailable';
     const d = new Date(value);
     return isNaN(d.getTime()) ? bciEsc(value) : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+  }
+  function liquidityReasons(row) {
+    const liquidity = row && row.liquidity;
+    const reasons = Array.isArray(liquidity?.reasons) ? liquidity.reasons
+      : Array.isArray(row?.reasons) ? row.reasons : [];
+    return reasons.length ? reasons : ['Liquidity requirements were not met.'];
+  }
+  function spreadText(liquidity) {
+    if (liquidity?.spreadPct == null || !Number.isFinite(Number(liquidity.spreadPct))) {
+      return 'Spread unavailable';
+    }
+    return `Spread ${Number(liquidity.spreadPct).toFixed(2)}%`;
+  }
+  function renderLiquidityPolicy() {
+    const el = $('nscLiquidityPolicy');
+    if (!el) return;
+    if (!liquidityPolicy) {
+      el.textContent = 'Shared liquidity policy unavailable';
+      return;
+    }
+    el.textContent = [
+      `Shared liquidity policy: ≥ ${fmtVol(liquidityPolicy.minShareVolume)} shares/session`,
+      `≥ ${fmtPrice(liquidityPolicy.minDollarVolume)} estimated dollar volume/session`,
+      `≤ ${bciVal(liquidityPolicy.maxSpreadPct, '%')} spread`,
+    ].join(' · ');
+  }
+  function renderRejected() {
+    const section = $('nscRejectedSection');
+    const summary = $('nscRejectedSummary');
+    const list = $('nscRejectedList');
+    if (!section || !summary || !list) return;
+    section.hidden = rejectedData.length === 0;
+    summary.textContent = `${rejectedData.length} candidate${rejectedData.length === 1 ? '' : 's'} excluded by shared liquidity policy`;
+    list.innerHTML = rejectedData.map(row => {
+      const liquidity = row?.liquidity || {};
+      const metrics = [
+        `Share volume: ${fmtVol(liquidity.shareVolume)}`,
+        `Est. dollar volume: ${liquidity.dollarVolume == null ? 'Unavailable' : fmtPrice(liquidity.dollarVolume)}`,
+        spreadText(liquidity),
+      ].join(' · ');
+      return `<li class="nsc-rejected-item"><strong>${bciEsc(row?.sym || row?.symbol || 'Unavailable')}</strong><span>${bciEsc(liquidityReasons(row).join(' · '))}</span><small>${bciEsc(metrics)}</small></li>`;
+    }).join('');
+  }
+  function renderBciLiquidityRejected(rows) {
+    const section = $('bciLiquidityRejected');
+    const list = $('bciLiquidityRejectedList');
+    if (!section || !list) return;
+    const rejected = Array.isArray(rows) ? rows : [];
+    section.hidden = rejected.length === 0;
+    list.innerHTML = rejected.map(row =>
+      `<li><strong>${bciEsc(row?.symbol || row?.sym || 'Unavailable')}</strong><span>${bciEsc(liquidityReasons(row).join(' · '))}</span></li>`
+    ).join('');
   }
   function bciSafeHref(value) {
     try {
@@ -127,7 +181,9 @@
       if (!resp.ok) throw new Error(resp.status === 429 ? 'Provider rate limit; retry shortly.' : 'Catalyst provider unavailable.');
       const data = await resp.json();
       if (!data.ok && data.error) throw new Error(data.error);
-      window._bciPayload = data; bciEvents = Array.isArray(data.events) ? data.events : []; renderBci();
+      window._bciPayload = data; bciEvents = Array.isArray(data.events) ? data.events : [];
+      renderBci();
+      renderBciLiquidityRejected(data.liquidityRejected);
       if (stateEl) stateEl.textContent = data.stale ? 'Showing stale feed' : `Updated ${bciTime(data.updatedAt)}`;
     } catch (err) {
       if (bciEvents.length) {
@@ -224,11 +280,17 @@
         ? (r.rsi14 < 30 ? 'nsc-rsi-os' : r.rsi14 > 70 ? 'nsc-rsi-ob' : '')
         : '';
       const nearHigh = r.w52Dist != null && r.w52Dist >= -3;
-      const safeName = (r.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const safeName = bciEsc(r.name || '');
+      const liquidity = r.liquidity || {};
+      const liquidityInfo = [
+        `Est. $ vol ${liquidity.dollarVolume == null ? 'Unavailable' : fmtPrice(liquidity.dollarVolume)}`,
+        spreadText(liquidity),
+      ].join(' · ');
       return `<tr class="${surge ? 'nsc-surge' : ''}">
         <td class="nsc-sym-cell">
-          <span class="nsc-sym">${r.sym}</span>
+          <span class="nsc-sym">${bciEsc(r.sym || r.symbol || 'Unavailable')}</span>
           <span class="nsc-name-small">${safeName}</span>
+          <span class="nsc-name-small nsc-liquidity-info">${bciEsc(liquidityInfo)}</span>
         </td>
         <td class="nsc-r">${fmtPrice(r.price)}</td>
         <td class="nsc-r ${chgCls}">${r.change != null ? chgSign + r.change.toFixed(2) + '%' : '--'}</td>
@@ -261,7 +323,11 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       scanData = data.results || [];
+      rejectedData = Array.isArray(data.rejected) ? data.rejected : [];
+      liquidityPolicy = data.liquidityPolicy || null;
       renderTable();
+      renderLiquidityPolicy();
+      renderRejected();
       if (statusEl) statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
     } catch (err) {
       if (statusEl) statusEl.textContent = 'Error: ' + err.message;

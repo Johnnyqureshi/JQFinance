@@ -38,6 +38,29 @@ function base(closes, extra = {}) {
 
 console.log('\nCompatible price-action setups\n');
 
+test('research liquidity blocks an otherwise confirmed breakout before review', () => {
+  const now = Date.parse('2026-09-14T15:00:00Z');
+  const evidence = {
+    now, marketState: 'REGULAR', priceTimestamp: now - 1000,
+    volumeTimestamp: now - 1000, quoteTimestamp: now - 1000,
+  };
+  const closes = Array.from({ length: 20 }, (_, i) => 10 + i * 0.02).concat([10.55]);
+  const bars = barsFrom(closes, Array(20).fill(1000).concat([2000]));
+  const research = base(closes, { bars, liquidity: { ...evidence, volume: 100, bid: 10.54, ask: 10.56 } });
+  const blocked = evaluatePriceActionSetup(research);
+  assert.strictEqual(blocked.eligible, false);
+  assert.strictEqual(blocked.setup, null);
+  assert(blocked.noTradeReasons.some(reason => /dollar volume/.test(reason)));
+  const missingSpread = evaluatePriceActionSetup({ ...research, liquidity: { ...evidence, volume: 1000000 } });
+  assert.strictEqual(missingSpread.eligible, false);
+  assert.strictEqual(missingSpread.evidence.liquidity.spreadStatus, 'unavailable');
+  const eligible = evaluatePriceActionSetup({ ...research, liquidity: { ...evidence, volume: 1000000, bid: 10.54, ask: 10.56 } });
+  assert.strictEqual(eligible.eligible, true);
+  const pumpLike = evaluatePriceActionSetup({ ...research, liquidity: { ...evidence, volume: 100000, bid: 10.54, ask: 10.56, changePct: 30 } });
+  assert.strictEqual(pumpLike.eligible, false);
+  assert(pumpLike.noTradeReasons.some(reason => /Pump-like risk/.test(reason)));
+});
+
 test('recognizes a volume-backed long breakout', () => {
   const closes = Array.from({ length: 20 }, (_, i) => 10 + i * 0.02).concat([10.55]);
   const volumes = Array(20).fill(1_000).concat([2_000]);

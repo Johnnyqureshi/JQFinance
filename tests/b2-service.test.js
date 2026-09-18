@@ -52,6 +52,8 @@ function fixture(options = {}) {
       symbol: 'AAA', eligible: world.eligible,
       latestQuote: world.missingQuote ? null : { ap: 10, bp: 9.99, as: 100, bs: 100, t: new Date(world.time - (world.staleQuote ? 120000 : 0)).toISOString() },
       latestTrade: { p: 10, t: new Date(world.time).toISOString() },
+      dailyBar: { t: new Date(world.time).toISOString(), o: 9.8, h: 10.1, l: 9.7, c: 10, v: 1000000 },
+      prevDailyBar: { t: new Date(world.time - 86400000).toISOString(), o: 9.7, h: 10, l: 9.6, c: 9.9, v: 1000000 },
     };
   }
   async function fakeFetch(url, init) {
@@ -257,6 +259,37 @@ test('broker failures do not write credential material to operational logs', asy
     console.error = originalError;
     f.close();
   }
+});
+
+test('shared liquidity blocks entries without current session volume but never suppresses EXIT', async () => {
+  const f = fixture();
+  try {
+    await f.connect();
+    f.world.customSnapshot = {
+      symbol: 'AAA',
+      latestQuote: {
+        ap: 10, bp: 9.99, as: 100, bs: 100,
+        t: new Date(f.world.time).toISOString(),
+      },
+      latestTrade: { p: 10, t: new Date(f.world.time).toISOString() },
+      prevDailyBar: { c: 9.9, v: 1000000 },
+      // Deliberately no dailyBar: completed historical volume is not a
+      // substitute for current-session liquidity evidence.
+    };
+    let scan = await f.service.scan(1);
+    assert(scan.candidates.every(candidate => candidate.signal === 'WAIT'));
+    assert(scan.candidates.every(candidate =>
+      candidate.liquidity?.codes?.includes('SHARE_VOLUME_UNAVAILABLE')));
+    assert.equal(f.buys().length, 0);
+
+    f.world.bearishDates.add(LAST);
+    scan = await f.service.scan(1);
+    const exits = scan.candidates.filter(candidate => candidate.crossover === 'BEARISH');
+    assert.equal(exits.length, 2);
+    assert(exits.every(candidate => candidate.signal === 'EXIT'));
+    assert(exits.every(candidate => candidate.liquidity?.eligible === false));
+    assert.equal(f.buys().length, 0);
+  } finally { f.close(); }
 });
 
 test('scheduler records a blocked cycle when its selected broker account is missing', async () => {

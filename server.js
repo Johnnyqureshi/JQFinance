@@ -3017,6 +3017,10 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       patternAnalysis,
       fibonacci,
       sessionMode: cryptoSymbol ? 'continuous' : 'regular',
+      assetClass: cryptoSymbol ? 'crypto' : 'stock',
+      // The current aggregate crypto bars do not distinguish organic spot
+      // participation from derivatives/liquidation activity.
+      spotVolumeConfirmed: cryptoSymbol ? false : null,
       timezone: cryptoSymbol ? 'UTC' : 'America/New_York',
       nowMs: generationNow,
     });

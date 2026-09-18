@@ -65,6 +65,35 @@ test('requires multiple confirmations before calling a bullish setup confirmed',
   assert(result.audit.bullishFactors.length >= 4);
 });
 
+test('does not call bullish structure at nearby resistance a confirmed entry', () => {
+  const price = bullishIntra.at(-1).c;
+  const result = buildTechnicalConfluence({
+    price,
+    dailyBars: bullishDaily,
+    intradayBars: bullishIntra,
+    indicators: {
+      rsi14: 63, ema9: price - 0.4, ema20: price - 0.8, sma50: price - 4, sma200: price - 12,
+      macd: { value: 1.2, signal: 0.8, histogram: 0.4 },
+    },
+    levels: {
+      support: [{ price: price - 3, label: 'Support', confirmations: 3 }],
+      resistance: [{ price: price * 1.005, label: 'Range high', confirmations: 3 }],
+    },
+    relVol: 2.1,
+    dayChangePct: 3,
+    market: { trend: 'BULLISH', sectorTrend: 'BULLISH', spy: 0.5, sectorChangePct: 0.7 },
+    freshness: freshSources(),
+    timeframes: {
+      oneMinute: bullishIntra, fiveMinute: bullishIntra, fifteenMinute: bullishIntra,
+      hourly: bullishIntra, daily: bullishDaily,
+    },
+  });
+  assert.equal(result.signal.stage, 'WATCH');
+  assert.equal(result.signal.label, 'BULLISH STRUCTURE — RESISTANCE TEST');
+  assert.equal(result.signal.breakoutConfirmed, false);
+  assert(result.scores.setupQuality <= 55);
+});
+
 test('does not treat oversold RSI as a buy without confluence', () => {
   const result = buildTechnicalConfluence({
     price: bearishIntra.at(-1).c,

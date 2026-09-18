@@ -69,6 +69,39 @@ test('downgrades a bullish stock against a bearish SPY regime', () => {
   assert(result.confidence < bullishSignal.confidence);
 });
 
+test('never lets market alignment inflate a caution-zone BUY above its entry-location cap', () => {
+  const result = applySearchMarketRegime({
+    searchSignal: {
+      ...bullishSignal,
+      confidence: 62,
+      entryQuality: {
+        breakoutState: 'BREAKOUT WATCH',
+        distanceToResistancePct: 2,
+        rangePosition: 0.82,
+      },
+    },
+    spyRegime: { available: true, regime: 'STRONG BULLISH', direction: 'BULLISH' },
+    sector: { label: 'BULLISH', direction: 'BULLISH' },
+    relativeStrength: { label: 'STRONG', score: 10 },
+    sensitivity: { high: false },
+  });
+  assert.equal(result.signal.label, 'BUY');
+  assert.equal(result.confidence, 60);
+  assert.equal(result.confidenceBreakdown.entryLocationCap, 60);
+});
+
+test('caps a bullish counter-trend entry when SPY is strongly bearish', () => {
+  const result = applySearchMarketRegime({
+    searchSignal: { ...bullishSignal, confidence: 95 },
+    spyRegime: { available: true, regime: 'STRONG BEARISH', direction: 'BEARISH' },
+    sector: { label: 'NEUTRAL', direction: 'NEUTRAL' },
+    relativeStrength: { label: 'NEUTRAL', score: 0 },
+    sensitivity: { high: false },
+  });
+  assert.equal(result.signal.label, 'BUY');
+  assert.equal(result.confidence, 60);
+});
+
 test('keeps the existing sell label when SPY and the stock are bearish', () => {
   const result = applySearchMarketRegime({
     searchSignal: { ...bullishSignal, signal: { label: 'SELL', direction: 'BEARISH', stage: 'CONFIRMED' }, confidence: 80 },

@@ -149,16 +149,50 @@ test('calculates acceleration independently for 1m, 5m, and 15m evidence', () =>
   assert.strictEqual(result.byTimeframe.fifteenMinute.state, 'ACCELERATING');
 });
 
-test('classifies bullish pressure near resistance as a provisional BUY', () => {
+test('keeps bullish structure near resistance as a breakout watch, not a BUY', () => {
   const result = build({});
-  assert.strictEqual(result.signal.label, 'BUY');
-  assert.strictEqual(result.signal.setup, 'BREAKOUT WATCH');
-  assert.strictEqual(result.signal.stage, 'PROVISIONAL');
-  assert.strictEqual(result.signal.direction, 'BULLISH');
+  assert.strictEqual(result.signal.label, 'WAIT');
+  assert.strictEqual(result.signal.setup, 'BULLISH STRUCTURE — RESISTANCE TEST');
+  assert.strictEqual(result.signal.stage, 'WAITING');
+  assert.strictEqual(result.signal.direction, 'NEUTRAL');
+  assert.strictEqual(result.entryQuality.trendBias, 'BULLISH');
+  assert.strictEqual(result.entryQuality.entryAllowed, false);
+  assert(result.confidence < 70);
   assert(result.relativeVolume.value >= 1.5);
   assert(result.volumeAcceleration.ratio > 1.1);
   assert(result.bullishVolumeScore > result.bearishVolumeScore);
   assert(result.pumpPressure >= 50);
+});
+
+test('blocks a bullish BUY when immediate resistance offers poor risk/reward', () => {
+  const result = build({
+    levels: {
+      support: [{ price: 99 }],
+      resistance: [{ price: 102.3 }],
+    },
+    price: 102.2,
+  });
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.setup, 'BULLISH STRUCTURE — RESISTANCE TEST');
+  assert(result.entryQuality.distanceToResistancePct < 0.5);
+  assert(result.entryQuality.blockedReasons.includes('UNCONFIRMED_RESISTANCE_TEST'));
+  assert(result.reasons.some(reason => /directly beneath resistance/i.test(reason)));
+});
+
+test('detects a failed breakout as a bull trap instead of returning BUY', () => {
+  const current = structuredSession('2026-01-05');
+  current[10].h = 103.2;
+  current[10].c = 102.8;
+  current[11].c = 102.2;
+  const result = build({
+    current,
+    price: 102.2,
+    levels: { support: [{ price: 99 }], resistance: [{ price: 102.5 }] },
+  });
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.setup, 'BULL TRAP');
+  assert.equal(result.entryQuality.breakoutState, 'BULL TRAP');
+  assert(result.reasons.some(reason => /failed to hold/i.test(reason)));
 });
 
 test('requires a level break, volume expansion, and follow-through for confirmation', () => {
@@ -173,6 +207,27 @@ test('requires a level break, volume expansion, and follow-through for confirmat
   assert.strictEqual(result.signal.stage, 'CONFIRMED');
   assert.strictEqual(result.levels.resistance.broken, true);
   assert.strictEqual(result.levels.resistance.followThrough, true);
+});
+
+test('does not confirm a crypto breakout from aggregate volume without verified spot participation', () => {
+  const current = structuredSession('2026-01-05', { breakout: true });
+  const result = buildSearchVolumeSignal({
+    price: current.at(-1).c,
+    intradayBars: current,
+    volumeHistory5m: history,
+    barsByInterval: { oneMinute: current, fiveMinute: current, fifteenMinute: current },
+    levels: { support: [{ price: 99 }], resistance: [{ price: 101.5 }] },
+    indicators: { rsi14: 62, vwap: 101, macd: { value: 1.2, signal: 0.8 } },
+    nowMs,
+    timezone: 'UTC',
+    sessionMode: 'continuous',
+    assetClass: 'crypto',
+    spotVolumeConfirmed: false,
+  });
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.setup, 'BULLISH PRICE ACTION — SQUEEZE-DRIVEN BREAKOUT NOT CONFIRMED');
+  assert.equal(result.entryQuality.volumeOrigin, 'SPOT/FUTURES PARTICIPATION UNVERIFIED');
+  assert(result.entryQuality.blockedReasons.includes('ORGANIC_SPOT_VOLUME_UNVERIFIED'));
 });
 
 test('waits when a support breakdown lacks confirmed bearish swing structure', () => {

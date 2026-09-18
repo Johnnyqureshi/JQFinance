@@ -35,8 +35,8 @@ function fixture(options = {}) {
     cancelAmbiguous: false, rejectExit: false, stopReplacementUnknown: false,
     missingQuote: false, staleQuote: false, missingBars: false, paginate: false, pages: [],
     buyHttpReject: false, sellHttpReject: false, staleOpenOrders: false,
-    weakStop: false, sipDenied: false, acceptedDuplicate422: false,
-    customBars: null, customSnapshot: null, fillPrice: '9.50', nextClose: null,
+    weakStop: false, sipDenied: false, dataStatus: null, malformedProbe: false, timeoutProbe: false,
+    customBars: null, customSnapshot: null, iexSnapshot: null, fillPrice: '9.50', nextClose: null,
     partialExit: false,
     restoreAcceptedThenThrow: false, hideRestores: false,
     bearishDates: new Set(), eligible: true,
@@ -62,8 +62,12 @@ function fixture(options = {}) {
     const call = { url, path: parsed.pathname, query: parsed.searchParams, method: init.method, body, key };
     world.calls.push(call);
     if (world.before) await world.before(call);
+    if (world.timeoutProbe && parsed.hostname === 'data.alpaca.markets' && parsed.pathname.includes('/snapshot') &&
+        parsed.searchParams.get('feed') === 'sip') await new Promise(resolve => setTimeout(resolve, 100));
     if (world.fail?.(call)) throw new Error('UPSTREAM-CONTAINS-SECRET-MUST-NOT-LEAK');
-    if (world.sipDenied && parsed.hostname === 'data.alpaca.markets') return response({}, 403);
+    if (world.dataStatus && parsed.hostname === 'data.alpaca.markets' &&
+        parsed.searchParams.get('feed') === world.dataStatus.feed) return response({}, world.dataStatus.status);
+    if (world.sipDenied && parsed.hostname === 'data.alpaca.markets' && parsed.searchParams.get('feed') === 'sip') return response({}, 403);
     const path = parsed.pathname;
     if (path === '/v2/account') return response({ id: state.id, status: 'ACTIVE', buying_power: '10000' });
     if (path === '/v2/clock') return response({ is_open: world.clockOpen ?? world.open, timestamp: new Date(world.time + (world.clockOffset || 0)).toISOString(),
@@ -90,7 +94,11 @@ function fixture(options = {}) {
       return response({ bars, next_page_token: null });
     }
     if (path === '/v2/stocks/snapshots') return response(Object.fromEntries(parsed.searchParams.get('symbols').split(',').map(s => [s, snapshot()])));
-    if (/\/v2\/stocks\/.*\/snapshot$/.test(path)) return response(snapshot());
+    if (/\/v2\/stocks\/.*\/snapshot$/.test(path)) {
+      if (world.malformedProbe && parsed.searchParams.get('feed') === 'sip') return response({});
+      if (world.iexSnapshot && parsed.searchParams.get('feed') === 'iex') return response(clone(world.iexSnapshot));
+      return response(snapshot());
+    }
     if (path === '/v2/orders:by_client_order_id') {
       const order = [...state.orders.values()].find(o => o.client_order_id === parsed.searchParams.get('client_order_id'));
       if (world.hideRestores && order?.type === 'stop' && !order.child) return response({}, 404);
@@ -1070,20 +1078,120 @@ test('candidate freshness expires and coverage resets on each new complete-unive
   } finally { f.close(); }
 });
 
-test('SIP entitlement failure is explicit, blocks entries, and never silently falls back to IEX', async () => {
+test('Paper SIP entitlement failure selects IEX and proceeds without mixing feeds', async () => {
   const f = fixture();
   try {
     await f.connect();
     await f.service.setAutomation(1, { action: 'resume' });
     f.world.sipDenied = true;
     await f.service.runCycle(1);
-    assert.equal(f.buys().length, 0);
-    assert(f.service.status(1).blockers.some(b => /SIP market data entitlement/.test(b)));
-    assert(f.world.calls.filter(c => c.url.includes('data.alpaca')).every(c => c.query.get('feed') === 'sip'));
-    f.world.sipDenied = false;
+    assert.equal(f.buys().length, 2);
+    assert.equal(f.service.status(1).dataFeed, 'iex');
+    const strategyCalls = f.world.calls.filter(c => c.url.includes('data.alpaca') && c.query.has('feed'));
+    assert(strategyCalls.some(c => c.query.get('feed') === 'sip'));
+    assert(strategyCalls.filter(c => c.query.get('feed') !== 'sip').every(c => c.query.get('feed') === 'iex'));
     await f.service.scan(1);
-    assert(!f.service.status(1).blockers.some(b => /SIP market data entitlement/.test(b)));
+    assert(f.world.calls.filter(c => c.url.includes('data.alpaca') && c.query.has('feed')).slice(-4)
+      .every(c => c.query.get('feed') === 'iex'));
   } finally { f.close(); }
+});
+
+test('Live SIP 403 blocks strategy data and never probes IEX', async () => {
+  const f = fixture();
+  try {
+    await f.connect(1, 'live1', 'live', true);
+    f.world.dataStatus = { feed: 'sip', status: 403 };
+    await f.service.runCycle(1);
+    assert.equal(f.buys().length, 0);
+    assert.equal(f.service.status(1).dataFeed, 'sip');
+    assert(f.world.calls.filter(c => c.url.includes('data.alpaca')).every(c => c.query.get('feed') !== 'iex'));
+  } finally { f.close(); }
+});
+
+test('Paper non-entitlement SIP failures and malformed probes remain fail-closed', async () => {
+  for (const setup of [
+    world => { world.dataStatus = { feed: 'sip', status: 401 }; },
+    world => { world.dataStatus = { feed: 'sip', status: 422 }; },
+    world => { world.timeoutProbe = true; },
+    world => { world.malformedProbe = true; },
+  ]) {
+    const f = fixture();
+    try {
+      await f.connect();
+      setup(f.world);
+      await f.service.runCycle(1);
+      assert.equal(f.buys().length, 0);
+      assert.equal(f.service.status(1).dataFeed, 'sip');
+      assert(f.world.calls.filter(c => c.url.includes('data.alpaca')).every(c => c.query.get('feed') !== 'iex'));
+    } finally { f.close(); }
+  }
+});
+
+test('Paper 403 persists IEX only after a valid IEX probe', async () => {
+  const f = fixture();
+  try {
+    await f.connect();
+    f.world.sipDenied = true;
+    f.world.dataStatus = { feed: 'iex', status: 403 };
+    await f.service.runCycle(1);
+    assert.equal(f.buys().length, 0);
+    assert.equal(f.service.status(1).dataFeed, 'sip');
+    assert(f.world.calls.some(c => c.query.get('feed') === 'iex'));
+  } finally { f.close(); }
+});
+
+test('Reconnect resets a cached IEX selection and retries SIP entitlement', async () => {
+  const f = fixture();
+  try {
+    await f.connect();
+    f.world.sipDenied = true;
+    await f.service.scan(1);
+    assert.equal(f.service.status(1).dataFeed, 'iex');
+    f.world.sipDenied = false;
+    await f.connect(1, 'paper1', 'paper');
+    assert.equal(f.service.status(1).dataFeed, 'sip');
+    const before = f.world.calls.length;
+    await f.service.runCycle(1);
+    assert(f.world.calls.slice(before).some(c => c.query.get('feed') === 'sip'));
+  } finally { f.close(); }
+});
+
+test('Restarted Live mode discards stale persisted IEX and remains SIP-only', async () => {
+  const f = fixture();
+  try {
+    await f.connect(1, 'live1', 'live', true);
+    f.db.prepare("UPDATE b2_settings SET data_feed='iex' WHERE user_id=1").run();
+    f.restart();
+    f.world.dataStatus = { feed: 'sip', status: 403 };
+    await f.service.runCycle(1);
+    assert.equal(f.buys().length, 0);
+    assert.equal(f.service.status(1).dataFeed, 'sip');
+    assert(f.world.calls.filter(c => c.url.includes('data.alpaca')).every(c => c.query.get('feed') !== 'iex'));
+  } finally { f.close(); }
+});
+
+test('IEX probe rejects empty, crossed, undersized, stale, future and invalid quotes', async () => {
+  const now = new Date(TODAY).toISOString();
+  const cases = [
+    {},
+    { bp: 0, ap: 10, bs: 100, as: 100, t: now },
+    { bp: 10, ap: 9, bs: 100, as: 100, t: now },
+    { bp: 9, ap: 10, bs: 0, as: 100, t: now },
+    { bp: 9, ap: 10, bs: 100, as: 100, t: new Date(TODAY - 61000).toISOString() },
+    { bp: 9, ap: 10, bs: 100, as: 100, t: new Date(TODAY + 1000).toISOString() },
+    { bp: 9, ap: 10, bs: 100, as: 100, t: 'not-a-time' },
+  ];
+  for (const quote of cases) {
+    const f = fixture();
+    try {
+      await f.connect();
+      f.world.sipDenied = true;
+      f.world.iexSnapshot = { latestQuote: quote };
+      await f.service.runCycle(1);
+      assert.equal(f.buys().length, 0);
+      assert.equal(f.service.status(1).dataFeed, 'sip');
+    } finally { f.close(); }
+  }
 });
 
 test('final portfolio and clock refresh observe changes after historical data awaits', async () => {

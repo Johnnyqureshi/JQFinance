@@ -17,7 +17,7 @@ Johnny Qureshi Finance is a real-time stock market dashboard with a fully automa
 - `lib/b2-strategy.js`: completed-daily SMA20/SMA50 crossover, live price/RVOL/gain/liquidity and trend gates.
 - `lib/b2-service.js`: dedicated broker credentials, persisted full Alpaca equity catalog rotation, order intents, reconciliation, and server scheduling.
 - API prefix `/api/b2`; UI `public/js/b2.js` and `public/css/b2.css`.
-- Uses consolidated SIP data; unavailable entitlements/data block trading rather than falling back to incomplete exchange volume.
+- Live uses consolidated SIP data and blocks without entitlement. Paper prefers SIP but may switch to Alpaca IEX only after a SIP HTTP 403 and a valid fresh IEX quote probe; each evaluation uses one feed consistently.
 - Long-only protected orders; 5% initial stop, persistent crossover reservations, and independent bearish-crossover exits.
 - Server-managed fills and protection continue when new entries are paused.
 - Position dollars is the only editable strategy setting; emergency pause/resume are separate authorization actions. Pausing revokes entries immediately without invalidating in-flight protective reconciliation.

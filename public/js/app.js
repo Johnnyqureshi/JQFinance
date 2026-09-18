@@ -245,7 +245,7 @@ function renderStockHeader(sym, snap) {
   $('sPrice').textContent = displayPrice ? '$' + fmt(displayPrice) : '--';
   const sc = $('sChange');
   sc.textContent = displayPrice && prev
-    ? `${displayUp ? '+' : ''}${fmt(displayChg)} (${displayUp ? '+' : ''}${fmt(displayPct)}%)`
+    ? `${displayUp ? '+' : ''}${fmt(displayChg)} (${displayUp ? '+' : ''}${fmt(displayPct)}%)${snap?.changeWindow === '24H' ? ' · 24H' : ''}`
     : '';
   sc.className = 's-change ' + (displayUp ? 'up' : 'down');
 
@@ -676,6 +676,7 @@ async function openStock(sym, snap, { intelligenceQuery = null } = {}) {
     volume: analysis.snapshot.volume,
     avgVolume: analysis.snapshot.avgVolume,
     marketState: analysis.snapshot.marketState,
+     changeWindow: analysis.snapshot.changeWindow,
   } : snap;
   state.snap = authoritativeSnap;
   renderStockHeader(sym, authoritativeSnap);

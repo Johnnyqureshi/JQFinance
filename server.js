@@ -30,7 +30,9 @@ const {
 } = require('./lib/catalyst-intel');
 const { selectMarketAlerts } = require('./lib/market-alerts');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
-const { buildSearchVolumeSignal } = require('./lib/search-volume-signal');
+const {
+  buildSearchVolumeSignal, selectCrypto24hReference, canonicalCrypto5mSeries, crypto24hStats,
+} = require('./lib/search-volume-signal');
 const { buildSearchLevels } = require('./lib/search-levels');
 const {
   applySearchMarketRegime,
@@ -2358,6 +2360,7 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
 const _gpCache = new Map();    // sym → { at, data }
 const _gpInflight = new Map(); // sym → Promise (coalesces concurrent generations)
 const _gpForceAt = new Map();  // userId:sym → last forced-regeneration time
+const gpCacheKey = (userId, quoteScope, sym) => `${userId || 'anon'}:${quoteScope || 'manual'}:${sym}`;
 const GP_CACHE_MS = 60 * 1000;
 const GP_FORCE_COOLDOWN_MS = 30 * 1000;
 
@@ -2521,20 +2524,20 @@ function completedFiveMinuteBars(bars, nowMs = Date.now()) {
   });
 }
 
-function completedFiveMinuteFreshness(bars, maxAgeMs = 16 * 60_000) {
+function completedFiveMinuteFreshness(bars, maxAgeMs = 16 * 60_000, nowMs = Date.now()) {
   const last = bars.at(-1);
   const startedAt = gpTimestampMs(last?.t);
   const completedAt = Number.isFinite(startedAt) ? startedAt + 5 * 60_000 : NaN;
   return {
-    fresh: Number.isFinite(completedAt) && Date.now() - completedAt >= 0 && Date.now() - completedAt <= maxAgeMs,
+    fresh: Number.isFinite(completedAt) && nowMs - completedAt >= 0 && nowMs - completedAt <= maxAgeMs,
     sourceTimestamp: last?.t || null,
   };
 }
 
-function gpSourceFreshness({ quote, daily, oneMinute, fiveMinute, fifteenMinute, hourly }) {
+function gpSourceFreshness({ quote, daily, oneMinute, fiveMinute, fifteenMinute, hourly, nowMs = Date.now() }) {
   const ageOf = value => {
     const timestamp = gpTimestampMs(value);
-    return timestamp == null ? null : Math.max(0, Date.now() - timestamp);
+    return timestamp == null ? null : Math.max(0, nowMs - timestamp);
   };
   const latestBar = bars => Array.isArray(bars) && bars.length ? bars.at(-1)?.t : null;
   const sources = {
@@ -2584,7 +2587,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
   // Forced refreshes are bounded per user and symbol.
   let force = !!requestedForce;
   if (force) {
-    const fKey = `${userId}:${sym}`;
+    const fKey = gpCacheKey(userId, quoteScope, sym);
     const lastForce = _gpForceAt.get(fKey) || 0;
     if (Date.now() - lastForce < GP_FORCE_COOLDOWN_MS) force = false;
     else {
@@ -2593,7 +2596,8 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     }
   }
 
-  const cached = _gpCache.get(sym);
+  const cacheKey = gpCacheKey(userId, quoteScope, sym);
+  const cached = _gpCache.get(cacheKey);
   if (cached && Date.now() - cached.at < GP_CACHE_MS && !force) {
     // A cached feature-on result must not leak fields when the flag is toggled
     // off: the pre-feature response shape remains exact.
@@ -2608,12 +2612,14 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
   }
 
   // Coalesce: if a generation for this symbol is already running, share its result
-  const inflight = _gpInflight.get(sym);
+  const inflight = _gpInflight.get(cacheKey);
   if (inflight) {
     return inflight;
   }
 
   const job = (async () => {
+    const generationNow = Date.now();
+    const cryptoSymbol = isLikelyCryptoSymbol(sym);
     const [quote, daily, intra, volumeHistory5m, analogHistory5m, intra1m, intra15m, intra1h, profile, mktRaw, spyDaily, stockOptions, marketOptions] = await Promise.all([
       fetchLiveQuote(sym, userId, quoteScope).catch(() => null),
       gpFetchDaily(sym, '2y'),
@@ -2636,28 +2642,50 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
         : Promise.resolve(null),
     ]);
 
-    if (!quote?.price || !daily?.length) {
+    if ((!cryptoSymbol && !quote?.price) || !daily?.length) {
       return { ok: false, unavailable: true, symbol: sym, error: 'REAL-TIME DATA UNAVAILABLE' };
     }
 
     const dataGaps = [];
-    const price  = quote.price;
+    // For crypto, keep spot, 24H reference, and volume signal anchored to the
+    // same Yahoo chart generation rather than mixing an equity quote snapshot.
+    const cryptoBars = cryptoSymbol
+      ? canonicalCrypto5mSeries(volumeHistory5m, intra, generationNow)
+      : [];
+    const cryptoStats = crypto24hStats(cryptoBars);
+    const yahooCryptoPrice = cryptoStats.latest?.c ?? null;
+    const price  = cryptoSymbol && Number.isFinite(Number(yahooCryptoPrice))
+      ? Number(yahooCryptoPrice)
+      : cryptoSymbol ? null : quote.price;
+    if (cryptoSymbol && price == null) {
+      return { ok: false, unavailable: true, symbol: sym, error: 'COMPLETED CRYPTO PRICE UNAVAILABLE' };
+    }
+    const cryptoReference = cryptoSymbol
+      ? selectCrypto24hReference(cryptoBars, cryptoStats.latest?.timestampMs)
+      : null;
+    const snapshotPrevClose = cryptoSymbol
+      ? (Number.isFinite(Number(cryptoReference?.c)) && Number(cryptoReference.c) > 0
+        ? Number(cryptoReference.c) : null)
+      : quote.previousClose;
+    const snapshotChangePct = snapshotPrevClose
+      ? +(((price - snapshotPrevClose) / snapshotPrevClose) * 100).toFixed(1)
+      : null;
     // Completed-session levels must be anchored to the last regular-session
     // close outside regular hours. Comparing them with a pre/post-market quote
     // can place every real support level on the wrong side of the price.
-    const levelPrice = quote.marketState === 'REGULAR'
+    const levelPrice = cryptoSymbol || quote?.marketState === 'REGULAR'
       ? price
-      : (Number.isFinite(Number(quote.regularClose)) ? Number(quote.regularClose) : price);
+      : (Number.isFinite(Number(quote?.regularClose)) ? Number(quote.regularClose) : price);
     const closes = daily.map(b => b.c);
     const searchLevelAnalysis = buildSearchLevels({
       dailyBars: daily,
       currentPrice: levelPrice,
-      marketState: quote.marketState,
+      marketState: cryptoSymbol ? '24/7' : quote?.marketState,
     });
     const atr    = searchLevelAnalysis.atr;
-    const vwap   = gpVWAP(intra);
+    const vwap   = cryptoSymbol ? cryptoStats.vwap : gpVWAP(intra);
     if (!intra?.length) dataGaps.push('Intraday 5-min data unavailable');
-    if (vwap == null)   dataGaps.push('VWAP unavailable (no regular-session volume yet)');
+    if (vwap == null)   dataGaps.push(cryptoSymbol ? '24H VWAP unavailable' : 'VWAP unavailable (no regular-session volume yet)');
 
     // Premarket
     const preBars = (intra || []).filter(b => b.session === 'pre');
@@ -2686,14 +2714,20 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       macd: gpMACD(closes),
       distVwapPct: vwap ? +(((price - vwap) / vwap) * 100).toFixed(1) : null,
     };
+    if (cryptoSymbol) {
+      indicators.vwap = cryptoStats.vwap != null ? +cryptoStats.vwap.toFixed(2) : null;
+      indicators.distVwapPct = cryptoStats.vwap
+        ? +(((price - cryptoStats.vwap) / cryptoStats.vwap) * 100).toFixed(1) : null;
+    }
     if (indicators.sma200 == null) dataGaps.push('SMA 200 unavailable (insufficient history)');
 
     // Sell-off stats
     const chgN = n => closes.length > n ? +(((price - closes.at(-1 - n)) / closes.at(-1 - n)) * 100).toFixed(1) : null;
     const high20 = Math.max(...daily.slice(-20).map(b => b.h));
-    const relVol = quote.volume && quote.avgVolume ? +(quote.volume / quote.avgVolume).toFixed(1) : null;
-    const gapPct = quote.open && quote.previousClose ? +(((quote.open - quote.previousClose) / quote.previousClose) * 100).toFixed(1) : null;
-    const chg1d = quote.previousClose ? +(((price - quote.previousClose) / quote.previousClose) * 100).toFixed(1) : null;
+    const relVol = cryptoSymbol ? null : (quote.volume && quote.avgVolume
+      ? +(quote.volume / quote.avgVolume).toFixed(1) : null);
+    const gapPct = !cryptoSymbol && quote.open && quote.previousClose ? +(((quote.open - quote.previousClose) / quote.previousClose) * 100).toFixed(1) : null;
+    const chg1d = snapshotChangePct;
     const selloffClass = [];
     if (chg1d != null && indicators.atrPct != null) {
       const mag = Math.abs(chg1d) / Math.max(indicators.atrPct, 0.5);
@@ -2743,7 +2777,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     // Historical analogs — threshold picked from current move size
     // The time anchor and drop magnitude must come from the same latest
     // regular-session snapshot. Never reuse a stale close during extended hours.
-    const currentAnalog = selectCurrentRegularSnapshot(intra, quote.previousClose, {
+    const currentAnalog = cryptoSymbol ? null : selectCurrentRegularSnapshot(intra, quote.previousClose, {
       marketState: quote.marketState,
     });
     const dropMag = currentAnalog?.dropMagnitudePct ?? null;
@@ -2786,7 +2820,10 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       else if (Math.abs(mktMove) >= 1) attribution = 'MARKET-DRIVEN';
       else attribution = 'COMBINATION';
     }
-    const market = {
+    const market = cryptoSymbol ? {
+      spy: null, qqq: null, iwm: null, sector: null, sectorEtf: null,
+      sectorChangePct: null, trend: null, sectorTrend: null, attribution: 'UNKNOWN',
+    } : {
       spy: mkt.SPY ?? null, qqq: mkt.QQQ ?? null, iwm: mkt.IWM ?? null,
       sector: sectorName, sectorEtf, sectorChangePct: sectorChg,
       trend: mkt.SPY == null ? null : mkt.SPY >= 0.3 ? 'BULLISH' : mkt.SPY <= -0.3 ? 'BEARISH' : 'NEUTRAL',
@@ -2874,6 +2911,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const sourceFreshness = gpSourceFreshness({
       quote, daily, oneMinute: intra1m, fiveMinute: intra,
       fifteenMinute: intra15m, hourly: intra1h,
+      nowMs: generationNow,
     });
     const smartMoneyMaps = buildSmartMoneyTimeframes({
       hourly: intra1h,
@@ -2908,8 +2946,8 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     // Compatible SMB-style context is an additional deterministic gate. The
     // existing confluence engine remains authoritative for its own score and
     // data-quality contract; this does not replace it or use score alone.
-    const completedIntra5m = completedFiveMinuteBars(intra);
-    const patternAnalysis = summarizePatternAnalysis({
+    const completedIntra5m = completedFiveMinuteBars(intra, generationNow);
+    const patternAnalysis = cryptoSymbol ? null : summarizePatternAnalysis({
       daily: detectCandlePatterns(searchLevelAnalysis.completedBars.slice(-60)).all,
       intraday: detectCandlePatterns(completedIntra5m.slice(-60)).all,
     });
@@ -2921,8 +2959,8 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       support: confluence.levels?.criticalSupport,
       resistance: confluence.levels?.criticalResistance,
       market,
-      relativeStrength: stockVsSpy == null ? null : stockVsSpy >= 1,
-      freshness: completedFiveMinuteFreshness(completedIntra5m),
+      relativeStrength: cryptoSymbol ? null : (stockVsSpy == null ? null : stockVsSpy >= 1),
+      freshness: completedFiveMinuteFreshness(completedIntra5m, 16 * 60_000, generationNow),
     });
     if (!intra1m?.length) dataGaps.push('1-minute timeframe unavailable');
     if (!intra15m?.length) dataGaps.push('15-minute timeframe unavailable');
@@ -2931,31 +2969,44 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     // Search-page-only volume signal. Keep the existing confluence object
     // untouched because automated bots and their execution contracts must not
     // inherit search-page signal semantics.
+    const cryptoFiveMinuteFreshness = cryptoStats.latest ? {
+      fresh: generationNow - cryptoStats.latest.timestampMs <= 16 * 60_000,
+      sourceTimestamp: new Date(cryptoStats.latest.timestampMs).toISOString(),
+      maxAgeMs: 16 * 60_000,
+    } : { fresh: false, sourceTimestamp: null, maxAgeMs: 16 * 60_000 };
     const searchSignal = buildSearchVolumeSignal({
       price,
-      intradayBars: intra,
-      volumeHistory5m,
-      barsByInterval: { oneMinute: intra1m, fiveMinute: intra, fifteenMinute: intra15m },
+      intradayBars: cryptoSymbol ? cryptoBars : intra,
+      volumeHistory5m: cryptoSymbol ? cryptoBars : volumeHistory5m,
+      barsByInterval: cryptoSymbol
+        ? { fiveMinute: cryptoBars }
+        : { oneMinute: intra1m, fiveMinute: intra, fifteenMinute: intra15m },
       levels,
-      indicators,
-      market,
+      indicators: cryptoSymbol ? { ...indicators, vwap: cryptoStats.vwap } : indicators,
+      market: cryptoSymbol ? {} : market,
       dayChangePct: chg1d,
-      relativeDailyVolume: relVol,
-      dayRangePosition: quote.dayHigh > quote.dayLow
+      relativeDailyVolume: cryptoSymbol ? null : relVol,
+      dayRangePosition: cryptoSymbol
+        ? cryptoStats.rangePosition
+        : quote?.dayHigh > quote?.dayLow
         ? (price - quote.dayLow) / (quote.dayHigh - quote.dayLow)
         : null,
       news,
-      freshness: sourceFreshness,
+      freshness: cryptoSymbol ? { fiveMinute: cryptoFiveMinuteFreshness } : sourceFreshness,
       patternAnalysis,
       fibonacci,
+      sessionMode: cryptoSymbol ? 'continuous' : 'regular',
+      timezone: cryptoSymbol ? 'UTC' : 'America/New_York',
+      nowMs: generationNow,
     });
+    if (cryptoSymbol) searchSignal.changeWindow = '24H';
     const marketContext = buildSearchMarketContext({
       symbol: sym,
       quote: spyQuote,
       stockQuote: quote,
       spyDailyBars: spyDaily,
       stockDailyBars: daily,
-      stockMarketState: quote.marketState,
+      stockMarketState: cryptoSymbol ? '24/7' : quote?.marketState,
       spyMarketState: spyQuote?.marketState,
       stockSignal: searchSignal,
       sectorTrend: market.sectorTrend,
@@ -2988,7 +3039,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
         marketOptionChain,
       });
     }
-    const finalSearchSignal = applySearchMarketRegime({
+    const finalSearchSignal = cryptoSymbol ? searchSignal : applySearchMarketRegime({
       searchSignal,
       spyRegime: marketContext.spy,
       sector: marketContext.sector,
@@ -3033,21 +3084,26 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     };
 
     // Confidence breakdown
+    const displayRelVol = cryptoSymbol ? searchSignal.relativeVolume?.value ?? null : relVol;
     const parts = {
       technical: Math.min(100, 40 + (indicators.rsi14 != null ? 15 : 0) + (vwap != null ? 15 : 0) + (indicators.macd ? 15 : 0) + (atr != null ? 15 : 0)),
       historical: analogs ? (analogs.lowConfidence ? 35 : Math.min(90, 40 + analogs.sampleSize * 2)) : 15,
       market: mkt.SPY != null ? 75 : 20,
       sector: sectorChg != null ? 75 : 25,
       catalyst: news.length ? 65 : 30,
-      volume: relVol != null ? (relVol >= 1.5 ? 80 : 60) : 25,
+      volume: displayRelVol != null ? (displayRelVol >= 1.5 ? 80 : 60) : 25,
     };
     const overall = Math.round(Object.values(parts).reduce((a, b) => a + b, 0) / Object.keys(parts).length);
 
     const snapshot = {
-      price: +price.toFixed(2), prevClose: quote.previousClose, open: quote.open,
-      high: quote.dayHigh, low: quote.dayLow, volume: quote.volume, avgVolume: quote.avgVolume,
-      relVol, marketCap: quote.marketCap, wk52High: quote.yearHigh, wk52Low: quote.yearLow,
-      marketState: quote.marketState, premarket, changePct: chg1d,
+      price: +price.toFixed(2), prevClose: snapshotPrevClose, open: cryptoSymbol ? null : quote?.open,
+      high: cryptoSymbol ? cryptoStats.high : quote?.dayHigh,
+      low: cryptoSymbol ? cryptoStats.low : quote?.dayLow,
+      volume: cryptoSymbol ? cryptoStats.volume : quote?.volume,
+      avgVolume: cryptoSymbol ? null : quote?.avgVolume,
+      relVol: displayRelVol, marketCap: quote?.marketCap ?? null, wk52High: quote?.yearHigh ?? null, wk52Low: quote?.yearLow ?? null,
+      marketState: cryptoSymbol ? '24/7' : quote?.marketState, premarket: cryptoSymbol ? null : premarket, changePct: chg1d,
+      ...(cryptoSymbol ? { changeWindow: '24H' } : {}),
     };
 
     // ── AI narrative (facts in → narrative out; numbers stay deterministic) ──
@@ -3104,7 +3160,12 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const out = {
       ok: true, symbol: sym, generatedAt, freshness: { generatedAt, maxAgeMs: GP_CACHE_MS }, dataGaps,
       provenance: {
-        quote: { provider: quote.source || 'Yahoo Finance', asOf: quote.asOf || generatedAt },
+        quote: {
+          provider: cryptoSymbol ? 'Yahoo Finance chart API' : (quote?.source || 'Yahoo Finance'),
+          asOf: cryptoSymbol && cryptoStats.latest
+            ? new Date(cryptoStats.latest.timestampMs).toISOString()
+            : quote?.asOf || generatedAt,
+        },
         intraday: { provider: 'Yahoo Finance chart API', intervals: ['1m', '5m', '15m', '1h'] },
         daily: { provider: 'Yahoo Finance chart API' },
         news: [...new Set(news.map(item => item.provider).filter(Boolean))],
@@ -3130,16 +3191,16 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     for (const [mapTimeframe, data] of Object.entries(smartMoneyMaps)) {
       if (data.available) _smartMoneyCache.set(`${sym}:${mapTimeframe}`, { at: Date.now(), data });
     }
-    _gpCache.set(sym, { at: Date.now(), data: out });
+    _gpCache.set(cacheKey, { at: Date.now(), data: out });
     if (_gpCache.size > 50) _gpCache.delete(_gpCache.keys().next().value);
     return out;
   })();
 
-  _gpInflight.set(sym, job);
+  _gpInflight.set(cacheKey, job);
   try {
     return await job;
   } finally {
-    _gpInflight.delete(sym);
+    _gpInflight.delete(cacheKey);
   }
 }
 

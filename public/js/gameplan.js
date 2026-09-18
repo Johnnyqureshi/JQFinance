@@ -332,7 +332,7 @@ const gamePlan = (() => {
       <div class="gp-evidence-head">
         <div>
           <span class="gp-sec-title">Evidence for ${direction}</span>
-          <span class="gp-sec-note">One stock direction based on price, structure, and volume</span>
+           <span class="gp-sec-note">${signal?.changeWindow === '24H' ? '24H crypto direction based on price, structure, and volume' : 'One stock direction based on price, structure, and volume'}</span>
         </div>
         <div class="gp-signal-strength">
           <span>Signal strength</span>
@@ -352,7 +352,7 @@ const gamePlan = (() => {
           <small>Opposing volume ${display(opposingVolume)}/100</small>
         </div>
         <div class="gp-evidence-item">
-          <span>Participation</span>
+          <span>${signal?.changeWindow === '24H' ? 'UTC RVOL' : 'Participation'}</span>
           <b>${volume.value == null ? 'Unavailable' : fmt(volume.value, 2) + '× RVOL'}</b>
           <small>${acceleration.percent == null ? 'Acceleration unavailable' : (acceleration.percent >= 0 ? '+' : '') + fmt(acceleration.percent, 1) + '% volume acceleration'}</small>
         </div>
@@ -669,11 +669,11 @@ const gamePlan = (() => {
       <!-- Verdict strip -->
       <div class="gp-verdict-strip">
         <div class="gp-vcell"><span>Price</span><b>$${fmt(s.price)}</b></div>
-        <div class="gp-vcell"><span>Day</span><b class="${chgCls}">${s.changePct != null ? (s.changePct >= 0 ? '+' : '') + fmt(s.changePct, 1) + '%' : '--'}</b></div>
+         <div class="gp-vcell"><span>${s.changeWindow === '24H' ? '24H' : 'Day'}</span><b class="${chgCls}">${s.changePct != null ? (s.changePct >= 0 ? '+' : '') + fmt(s.changePct, 1) + '%' : '--'}</b></div>
         <div class="gp-vcell"><span>RSI 14</span><b>${fmt(ind.rsi14, 0)}</b></div>
-        <div class="gp-vcell"><span>Rel Vol</span><b>${s.relVol != null ? fmt(s.relVol, 1) + 'x' : '--'}</b></div>
-        <div class="gp-vcell"><span>vs VWAP</span><b>${ind.distVwapPct != null ? (ind.distVwapPct >= 0 ? '+' : '') + fmt(ind.distVwapPct, 1) + '%' : '--'}</b></div>
-        <div class="gp-vcell"><span>Day range</span><b>${dayRangePct == null ? '--' : fmt(dayRangePct, 0) + '%'}</b><small>${s.low != null && s.high != null ? '$' + fmt(s.low) + '–$' + fmt(s.high) : 'Unavailable'}</small></div>
+        <div class="gp-vcell"><span>${s.changeWindow === '24H' ? 'UTC RVOL' : 'Rel Vol'}</span><b>${s.relVol != null ? fmt(s.relVol, 1) + 'x' : '--'}</b></div>
+        <div class="gp-vcell"><span>${s.changeWindow === '24H' ? '24H VWAP' : 'vs VWAP'}</span><b>${ind.distVwapPct != null ? (ind.distVwapPct >= 0 ? '+' : '') + fmt(ind.distVwapPct, 1) + '%' : '--'}</b></div>
+        <div class="gp-vcell"><span>${s.changeWindow === '24H' ? '24H range' : 'Day range'}</span><b>${dayRangePct == null ? '--' : fmt(dayRangePct, 0) + '%'}</b><small>${s.low != null && s.high != null ? '$' + fmt(s.low) + '–$' + fmt(s.high) : 'Unavailable'}</small></div>
       </div>
 
        ${tradeReferenceHtml(tradeLevels)}

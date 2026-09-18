@@ -8,6 +8,9 @@ const {
   structureForBars,
   timeOfDayRelativeVolume,
   volumeAcceleration,
+  selectCrypto24hReference,
+  canonicalCrypto5mSeries,
+  crypto24hStats,
 } = require('../lib/search-volume-signal');
 
 let passed = 0;
@@ -527,6 +530,78 @@ test('uses the latest completed daily bar for pivots without skipping closed ses
     timezone: 'UTC',
   });
   assert.strictEqual(forming.t, '2026-01-02');
+});
+
+test('selects an exact and near-24h crypto reference, but rejects stale or malformed closes', () => {
+  const target = timestamp('2026-01-05', 1200);
+  assert.strictEqual(selectCrypto24hReference([{ t: target - 24 * 60 * 60 * 1000, c: 100 }], target).c, 100);
+  assert.strictEqual(selectCrypto24hReference([{ t: target - 24 * 60 * 60 * 1000 + 10 * 60 * 1000, c: 101 }], target).c, 101);
+  assert.strictEqual(selectCrypto24hReference([{ t: target - 24 * 60 * 60 * 1000 - 16 * 60 * 1000, c: 100 }], target), null);
+  assert.strictEqual(selectCrypto24hReference([{ t: target - 24 * 60 * 60 * 1000, c: 0 }], target), null);
+  assert.strictEqual(selectCrypto24hReference([{ t: target - 24 * 60 * 60 * 1000, c: 'bad' }], target), null);
+});
+
+test('canonical crypto series sorts bars, excludes forming/malformed rows, and computes 24H stats', () => {
+  const now = timestamp('2026-01-05', 120);
+  const bars = [
+    { t: now - 5 * 60_000, o: 11, h: 13, l: 10, c: 12, v: 5 },
+    { t: now - 15 * 60_000, o: 9, h: 10, l: 8, c: 9, v: 3 },
+    { t: now + 5 * 60_000, o: 20, h: 21, l: 19, c: 20, v: 9 },
+    { t: now - 10 * 60_000, o: 10, h: 11, l: 9, c: null, v: 4 },
+  ];
+  const canonical = canonicalCrypto5mSeries(bars, [{ t: now - 30 * 60_000, o: 1, h: 1, l: 1, c: 1, v: 1 }], now);
+  assert.deepStrictEqual(canonical.map(bar => bar.c), [9, 12]);
+  const stats = crypto24hStats(canonical);
+  assert.strictEqual(stats.high, 13);
+  assert.strictEqual(stats.low, 8);
+  assert.strictEqual(stats.volume, 8);
+  assert.strictEqual(stats.vwap, (9 * 3 + 12 * 5) / 8);
+});
+
+test('continuous mode includes overnight bars in structure, UTC-day RVOL, and acceleration', () => {
+  const makeBars = (date, startMinute, count, volume = 100) => Array.from({ length: count }, (_, i) => ({
+    t: timestamp(date, startMinute + i * 5),
+    o: 100 + i * 0.1, h: 100.3 + i * 0.1, l: 99.8 + i * 0.1, c: 100 + i * 0.1, v: volume,
+  }));
+  const overnight = makeBars('2026-01-05', 60, 18, 200);
+  const history = [
+    ...makeBars('2026-01-02', 60, 18, 100),
+    ...makeBars('2026-01-03', 60, 18, 100),
+    ...makeBars('2026-01-04', 60, 18, 100),
+  ];
+  const result = buildSearchVolumeSignal({
+    price: 100.5,
+    intradayBars: overnight,
+    volumeHistory5m: history,
+    barsByInterval: { oneMinute: overnight, fiveMinute: overnight, fifteenMinute: overnight },
+    nowMs: timestamp('2026-01-05', 155),
+    timezone: 'UTC',
+    sessionMode: 'continuous',
+    minimumVolumeSessions: 3,
+  });
+  assert.strictEqual(result.sessionMode, 'continuous');
+  assert.strictEqual(result.relativeVolume.available, true);
+  assert(result.relativeVolume.reason.includes('UTC-day RVOL'));
+  assert.strictEqual(result.volumeAcceleration.available, true);
+  assert.strictEqual(result.structure.priceRising, true);
+  assert(!result.reasons.some(reason => /regular session|time-of-day/i.test(reason)));
+});
+
+test('regular mode retains session filtering and never admits overnight bars', () => {
+  const overnight = Array.from({ length: 6 }, (_, i) => ({
+    t: timestamp('2026-01-05', 60 + i * 5), session: 'post',
+    o: 100, h: 101, l: 99, c: 100 + i, v: 100,
+  }));
+  const result = buildSearchVolumeSignal({
+    price: 105,
+    intradayBars: overnight,
+    volumeHistory5m: overnight,
+    barsByInterval: { oneMinute: overnight, fiveMinute: overnight, fifteenMinute: overnight },
+    nowMs: timestamp('2026-01-05', 95),
+    timezone: 'UTC',
+  });
+  assert.strictEqual(result.relativeVolume.available, false);
+  assert.strictEqual(result.structure.highStructure, 'INSUFFICIENT');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

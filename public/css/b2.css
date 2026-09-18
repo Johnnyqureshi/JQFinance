@@ -1,3 +1,17 @@
+/* Signal Grid skin */
+.b2-shell {
+  --ink: #e5f2ff; --muted: #8da8c8; --dim: #526b8d;
+  --line: #1a3150; --panel: #0c1629; --panel2: #101d34;
+  --mint: #20e6d1; --amber: #ffd64a; --danger: #ff547d;
+  font-family: 'Space Grotesk', sans-serif;
+}
+.b2-hero h1, .b2-head h2, .b2-command h2 { font-family: 'Space Grotesk', sans-serif; }
+.b2-hero em { color: #ff5bd6; }
+.b2-panel, .b2-command { box-shadow: 0 12px 28px rgba(0,0,0,.18), inset 0 1px rgba(255,255,255,.025); }
+.b2-command { background: linear-gradient(110deg, rgba(32,230,209,.12), var(--panel) 72%); border-color: rgba(32,230,209,.35); }
+.b2-button:not(.b2-quiet) { background: linear-gradient(100deg, #14cdbd, #168ee9); border-color: transparent; color: #03101a; }
+.b2-button:hover:not(:disabled) { box-shadow: 0 8px 22px rgba(32,230,209,.18); }
+.b2-table tbody tr:hover td { background: rgba(32,230,209,.055); }
 /* B2: disciplined research ledger, aligned to the Qureshi Finance theme. */
 .b2-auto-label {
   border: 1px solid var(--border);

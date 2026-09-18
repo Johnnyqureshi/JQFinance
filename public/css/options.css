@@ -65,3 +65,27 @@ html[data-theme="light"] .op-field input {
 .op-list{padding:7px 19px}.op-list-row{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--op-line)}.op-list-row:last-child{border:0}.op-list-row b{display:block;color:var(--op-ink);font:600 11px 'DM Mono',monospace}.op-list-row small{display:block;color:var(--op-muted);font-size:10px;margin-top:3px}.op-list-row strong{color:var(--op-teal);font:600 11px 'DM Mono',monospace}.op-empty{color:var(--op-dim);font-size:11px;line-height:1.6;padding:11px 0;margin:0}.op-lower{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}.op-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--op-line);margin:18px}.op-statbox{background:var(--op-panel2);padding:15px}.op-statbox span{display:block;color:var(--op-dim);font-size:9px;text-transform:uppercase;letter-spacing:.08em}.op-statbox strong{display:block;color:var(--op-ink);font:600 16px 'DM Mono',monospace;margin-top:8px}.op-quality{padding:8px 19px 18px}.op-check{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--op-line);font-size:11px;color:var(--op-muted)}.op-check b{margin-left:auto;font:700 10px 'DM Mono',monospace}.op-check.pass b{color:var(--op-teal)}.op-check.fail b{color:var(--op-red)}.op-check.insufficient b{color:var(--op-copper)}
 @media(max-width:950px){.op-status{grid-template-columns:repeat(3,1fr)}.op-layout{grid-template-columns:1fr}.op-rail{grid-template-columns:1fr 1fr}.op-settings{grid-row:span 2}.op-lower{grid-template-columns:1fr}}
 @media(max-width:640px){.options-shell{padding:20px 14px 55px}.op-hero{align-items:flex-start;flex-direction:column}.op-actions{width:100%}.op-actions .op-btn{flex:1}.op-status{grid-template-columns:1fr 1fr}.op-command{align-items:flex-start;flex-direction:column}.op-rail{grid-template-columns:1fr}.op-settings{grid-row:auto}.op-candidate{grid-template-columns:58px minmax(0,1fr) 48px}.op-candidate .op-badge{grid-column:2;justify-self:start;margin-top:-7px}.op-grid{grid-template-columns:1fr 1fr}.op-contract-grid{grid-template-columns:repeat(3,1fr)}.op-stats{grid-template-columns:1fr}}
+
+/* Signal Grid skin — options keeps its own semantic tokens, but inherits the
+   same electric cyan / magenta workstation language as the main terminal. */
+.options-shell {
+  --op-ink: #e5f2ff;
+  --op-muted: #8da8c8;
+  --op-dim: #526b8d;
+  --op-line: #1a3150;
+  --op-panel: #0c1629;
+  --op-panel2: #101d34;
+  --op-copper: #ffd64a;
+  --op-teal: #20e6d1;
+  --op-red: #ff547d;
+  font-family: 'Space Grotesk', sans-serif;
+}
+.op-hero h1, .op-command h2, .op-panel h2 { font-family: 'Space Grotesk', sans-serif; }
+.op-hero h1 span, .op-score, .op-notice { color: #ff5bd6; }
+.op-panel, .op-command { box-shadow: 0 12px 28px rgba(0,0,0,.18), inset 0 1px rgba(255,255,255,.025); }
+.op-command { background: linear-gradient(105deg, rgba(32,230,209,.12), #0c1629 72%); border-color: rgba(32,230,209,.35); }
+.op-btn:not(.op-btn-quiet) { background: linear-gradient(100deg, #14cdbd, #168ee9); border-color: transparent; color: #03101a; }
+.op-btn:hover:not(:disabled) { box-shadow: 0 8px 22px rgba(32,230,209,.18); }
+.op-candidate:hover, .op-candidate.is-selected { border-color: rgba(32,230,209,.38); background: #142641; }
+.op-contract { background: rgba(32,230,209,.08); border-color: rgba(32,230,209,.35); }
+.op-field input:focus { border-color: #20e6d1; box-shadow: 0 0 0 3px rgba(32,230,209,.08); }

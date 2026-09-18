@@ -1,6 +1,7 @@
 const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
+const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { mountB2 } = require('./lib/b2-service');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -6372,6 +6373,16 @@ function optionsTradeRows(userId) {
     pnl,created_at AS createdAt,closed_at AS closedAt
     FROM options_trades WHERE user_id=? ORDER BY id DESC LIMIT 100`).all(userId);
 }
+
+app.get('/api/strategy-comparison/day-trading', requireAuth, (_req, res) => {
+  try {
+    const evidencePath = path.join(__dirname, 'reports', 'day-trading-comparison-evidence.json');
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+    res.set('Cache-Control', 'no-store').json(buildDayTradingComparison({ evidence }));
+  } catch (error) {
+    res.status(503).json({ error: `Day-trading comparison evidence is unavailable: ${error.message}` });
+  }
+});
 
 app.get('/api/options/settings', requireAuth, async (req, res) => {
   try {

@@ -44,8 +44,11 @@
     $('b2Connection').textContent = connected ? String(status.mode || 'paper').toUpperCase() + ' CONNECTED' : 'DISCONNECTED';
     $('b2Account').textContent = status.accountId ? `Account ${status.accountId} · ${(status.dataFeed || 'checking').toUpperCase()} data` : (status.blockers || []).join(' · ') || 'Dedicated B2 account required';
     const authorized = connected && status.enabled && (!live || status.liveArmed);
-    $('b2Execution').textContent = !connected ? 'NOT CONNECTED' : !authorized ? 'PAUSED' : !status.ready ? 'BLOCKED' : status.marketOpen === false ? 'MARKET CLOSED' : status.marketOpen === true ? 'AUTOMATIC' : 'AWAITING CHECK';
-    $('b2ExecutionNote').textContent = authorized ? 'Scanning, entries, stops and exits are server-run' : connected ? 'New entries paused; existing trades still managed' : 'Connect Paper or authorize Live to start';
+    const entryReadyNow = status.entryReadyNow === true;
+    $('b2Execution').textContent = !connected ? 'NOT CONNECTED' : !authorized ? 'PAUSED' : !entryReadyNow ? 'STANDING ASIDE' : 'AUTOMATIC';
+    $('b2ExecutionNote').textContent = entryReadyNow
+      ? 'Scanning, entries, stops and exits are server-run'
+      : (status.schedulerEligibilityReason || (connected ? 'New entries are withheld; existing trades remain managed.' : 'Connect Paper or authorize Live to start'));
     $('b2Scheduler').textContent = String(scheduler.status || 'IDLE').toUpperCase();
     $('b2SchedulerNote').textContent = scheduler.reason || (scheduler.lastCycleAt ? `Last cycle ${new Date(scheduler.lastCycleAt).toLocaleTimeString()}` : 'No completed cycle yet');
     $('b2Coverage').textContent = coverage.total == null ? '—' : `${coverage.scanned || 0} / ${coverage.total}`;
@@ -53,9 +56,11 @@
     $('b2CoverageNote').title = coverage.minimumPassCycles
       ? `${coverage.batchSize} symbols per cycle; at least ${coverage.minimumPassCycles} cycles per complete pass. Cycles are scheduled every minute; broker latency and account load can extend this. The catalog is not scanned simultaneously.`
       : 'The full catalog is scanned in rotating batches, not simultaneously. Fixed entry filters still apply to every ticker.';
-    $('b2Mandate').textContent = !connected ? 'Connect an account to begin' : authorized ? 'B2 manages the complete trade automatically' : 'New entries are paused';
-    $('b2MandateCopy').textContent = authorized ? 'Runs without an open browser. Only verified completed-day crossovers that pass every current filter can enter. Bearish crossovers and protective stops manage exits.' : connected ? 'Existing B2 positions remain under reconciliation and protection. Resume when you are ready for new automatic entries.' : 'Paper starts automatically after verification. Live requires your explicit authorization. Set your position size before connecting.';
-    $('b2Blockers').textContent = connected ? (status.blockers || []).join(' · ') : '';
+    $('b2Mandate').textContent = !connected ? 'Connect an account to begin' : entryReadyNow ? 'B2 manages the complete trade automatically' : 'B2 is standing aside';
+    $('b2MandateCopy').textContent = entryReadyNow
+      ? 'Runs without an open browser. Only verified completed-day crossovers that pass every current filter can enter. Bearish crossovers and protective stops manage exits.'
+      : connected ? 'Existing B2 positions remain under reconciliation and protection. New entries stay withheld until the server reports eligibility.' : 'Paper starts automatically after verification. Live requires your explicit authorization. Set your position size before connecting.';
+    $('b2Blockers').textContent = connected ? [status.schedulerEligibilityReason, ...(status.blockers || [])].filter(Boolean).filter((reason, index, all) => all.indexOf(reason) === index).join(' · ') : '';
     $('b2Automation').disabled = changing;
     $('b2Automation').textContent = !connected ? 'Connect Alpaca' : authorized ? 'Pause new entries' : 'Resume automatic trading';
     for (const mode of ['paper', 'live']) {

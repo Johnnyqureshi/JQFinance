@@ -259,6 +259,35 @@ test('broker failures do not write credential material to operational logs', asy
   }
 });
 
+test('scheduler records a blocked cycle when its selected broker account is missing', async () => {
+  const f = fixture();
+  try {
+    const result = await f.service.runCycle(1);
+    assert.deepEqual(result.status, 'blocked');
+    const status = f.service.status(1);
+    assert.equal(status.scheduler.status, 'blocked');
+    assert.match(status.scheduler.reason, /dedicated B2 broker account is connected/);
+    assert.equal(status.entryReadyNow, false);
+    assert.equal(status.readiness.connected, false);
+  } finally { f.close(); }
+});
+
+test('scan failures leave bounded per-symbol error outcomes and fail closed', async () => {
+  const f = fixture();
+  try {
+    await f.connect();
+    await f.service.scan(1);
+    f.world.fail = () => { throw new Error('upstream failure'); };
+    await assert.rejects(f.service.scan(1), /Broker connection or response failed/);
+    const failed = f.service.candidates(1).candidates.filter(candidate => candidate.outcome === 'error');
+    assert.equal(failed.length, 2, JSON.stringify(f.service.candidates(1).candidates));
+    assert(failed.every(candidate => candidate.eligible === false && candidate.signal === 'WAIT'));
+    assert(failed.every(candidate => candidate.reasonCode === 'broker_error'));
+    assert(failed.every(candidate => candidate.reasons[0].includes('withheld')));
+    assert.equal(f.service.status(1).dataFeed, 'sip');
+  } finally { f.close(); }
+});
+
 test('quarantine rejects connection and blocks existing authorization', async () => {
   const f = fixture();
   try {

@@ -419,6 +419,7 @@ html[data-theme="light"] .theme-toggle-thumb { transform:translateX(18px); backg
 .main { margin-top:var(--nav-h); }
 .page { display:none; min-height:calc(100vh - var(--nav-h)); }
 .page.active { display:block; }
+
 .inner { max-width:var(--max); margin:0 auto; padding:0 32px; }
 
 /* ── HOME PAGE ─────────────────────────────────────────────────────────────── */

@@ -590,6 +590,29 @@ const gamePlan = (() => {
       snapshot: s, indicators: ind, confidence, dataGaps, searchSignal,
       levels, displayLevels, gapAnalysis, analogs, probabilities, tradeLevels,
     } = d;
+    const liquidity = d.liquidity || {};
+    const liquiditySummary = d.liquiditySummary || {};
+    const liquidityState = liquiditySummary.state === 'BULLISH_PRESSURE' ? 'BULLISH'
+      : liquiditySummary.state === 'BEARISH_PRESSURE' ? 'BEARISH' : 'NEUTRAL';
+    const liquiditySupport = liquiditySummary.support == null ? 'Unavailable' : '$' + fmt(liquiditySummary.support);
+    const liquidityResistance = liquiditySummary.resistance == null ? 'Unavailable' : '$' + fmt(liquiditySummary.resistance);
+    const liquidityImbalance = liquidity.imbalance?.percent == null ? 'Unavailable' : `${fmt(liquidity.imbalance.percent, 1)}% bid-side`;
+    const liquidityTrend = liquidity.shift?.available
+      ? String(liquidity.shift.direction || 'MIXED').replaceAll('_', ' ')
+      : 'Unavailable';
+    const absorption = liquidity.absorption?.available ? esc(liquidity.absorption.status || 'Detected') : 'Not measurable';
+    const liquidityGameplanHtml = `<section class="gp-liquidity-summary ${liquidity.available ? '' : 'unavailable'}">
+      <div class="gp-sec-title">HEATMAP INPUT TO GAME PLAN</div>
+      <div class="gp-liquidity-grid">
+        <div><span>Heatmap</span><b>${esc(liquidity.available ? liquidityState : 'UNAVAILABLE')}</b></div>
+        <div><span>Liquidity support</span><b>${liquiditySupport}</b></div>
+        <div><span>Liquidity resistance</span><b>${liquidityResistance}</b></div>
+        <div><span>Top quote-size imbalance</span><b>${liquidityImbalance}</b></div>
+        <div><span>Absorption</span><b>${absorption}</b></div>
+        <div><span>Liquidity trend</span><b>${esc(liquidityTrend)}</b></div>
+      </div>
+      <p>${esc(liquiditySummary.summary || 'Heatmap data unavailable from current market-data provider.')} This is supporting context only and cannot override the verified Search signal.</p>
+    </section>`;
     const generatedAt = d.generatedAt;
     const snapshotPrice = Number(s?.price);
     const watchedLevels = [
@@ -672,6 +695,7 @@ const gamePlan = (() => {
       </div>`;
 
     c.innerHTML = `
+      ${liquidityGameplanHtml}
       <!-- Verdict strip -->
       <div class="gp-verdict-strip">
         <div class="gp-vcell"><span>Price</span><b>$${fmt(s.price)}</b></div>
@@ -710,7 +734,12 @@ const gamePlan = (() => {
     try {
       const payload = suppliedAnalysis || window.searchContext.load(sym, { force });
       if (tok !== reqToken || sym !== currentSym) return;  // superseded by a newer request/symbol
-      render(await payload);
+      const resolved = await payload;
+      if (tok !== reqToken || sym !== currentSym) return;
+      if (typeof window.liquidityHeatmap?.render === 'function' && tok === reqToken && sym === currentSym) {
+        window.liquidityHeatmap.render(resolved?.data?.liquidity || resolved?.liquidity, sym);
+      }
+      render(resolved);
     } catch {
       if (tok === reqToken && sym === currentSym) {
         render({ ok: false, error: 'Game plan request failed — will retry on next refresh.' });

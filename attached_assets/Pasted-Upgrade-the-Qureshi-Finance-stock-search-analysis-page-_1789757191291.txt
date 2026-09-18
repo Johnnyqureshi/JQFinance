@@ -1,0 +1,398 @@
+Upgrade the Qureshi Finance stock search/analysis page by integrating a real-time market heatmap/order-flow visualization that helps users understand potential price direction.
+
+IMPORTANT:
+Do not remove or break any existing scanner, stock analysis, game-plan, technical indicator, news, catalyst, or trading functionality. Add this as an additional analysis layer.
+
+1. HEATMAP INTEGRATION
+
+On the stock search/detail page, add a prominent section called:
+
+“🔥 Liquidity & Direction Heatmap”
+
+The heatmap should visualize available market liquidity/order-book pressure around the current price.
+
+Display, when the connected market-data provider supports it:
+
+* Current price
+* Bid/ask levels
+* Bid liquidity
+* Ask liquidity
+* Large liquidity walls
+* Support liquidity zones
+* Resistance liquidity zones
+* Recent trades/order flow if available
+* Volume concentration
+* Price levels with unusually high liquidity
+* Changes in liquidity over time
+
+Use a dark, professional trading-terminal style.
+
+The heatmap must update automatically using the fastest reliable data available.
+
+2. DO NOT FAKE DATA
+
+Never fabricate heatmap, order-book, liquidity, volume, or directional data.
+
+If the current API/provider does not provide the required data, clearly display:
+
+“Heatmap data unavailable from current market-data provider.”
+
+Then show whatever legitimate data is available.
+
+Do not substitute simulated numbers for real market data.
+
+3. DIRECTION ENGINE
+
+Create a “Heatmap Direction” analysis directly underneath the heatmap.
+
+Analyze:
+
+* Bid vs ask liquidity
+* Liquidity imbalance
+* Large bid walls
+* Large ask walls
+* Whether liquidity is moving closer to or farther from price
+* Whether large walls are being absorbed
+* Volume concentration
+* Price movement relative to liquidity
+* Recent aggressive buying/selling, if available
+* Short-term momentum
+* VWAP
+* Relative volume
+* RSI
+* MACD
+* Support/resistance
+* ATR/volatility
+
+Produce three possible states:
+
+🟢 BULLISH PRESSURE
+🔴 BEARISH PRESSURE
+🟡 NEUTRAL / MIXED
+
+IMPORTANT:
+The heatmap should NOT independently determine direction.
+
+Combine heatmap information with the existing technical-analysis engine.
+
+4. HEATMAP + TECHNICAL CONFLUENCE
+
+Create a confluence calculation.
+
+Example:
+
+Heatmap:
+Bullish
+
+Relative Volume:
+Bullish
+
+Price vs VWAP:
+Bullish
+
+RSI:
+Neutral
+
+Momentum:
+Bullish
+
+Overall:
+“BULLISH PRESSURE — 4/5 signals aligned”
+
+Do NOT present this as a guaranteed prediction.
+
+Use wording such as:
+
+“Current market structure suggests bullish pressure.”
+
+“Liquidity currently favors the upside.”
+
+“Signals are mixed; directional conviction is low.”
+
+“Large resistance liquidity is currently limiting upside.”
+
+5. LIQUIDITY WALL DETECTION
+
+Automatically identify unusually large liquidity concentrations.
+
+For example:
+
+“Large bid wall detected near $80,500”
+
+“Large ask wall detected near $81,200”
+
+Then explain what that could mean:
+
+“Bid liquidity may provide short-term support if it remains in place.”
+
+“Ask liquidity may act as near-term resistance if sellers continue defending the level.”
+
+IMPORTANT:
+Do not assume a wall will hold.
+
+Detect whether the wall is:
+
+* Newly appearing
+* Increasing
+* Decreasing
+* Being consumed
+* Moving
+* Cancelled
+
+This distinction is critical because liquidity can disappear.
+
+6. ABSORPTION DETECTION
+
+Add detection for possible absorption.
+
+Examples:
+
+Heavy buying + price fails to move higher
+→ possible seller absorption
+
+Heavy selling + price refuses to move lower
+→ possible buyer absorption
+
+Display:
+
+“⚠️ Possible seller absorption near resistance”
+
+or
+
+“🟢 Possible buyer absorption near support”
+
+Only display this when supported by actual available data.
+
+7. LIQUIDITY SHIFT
+
+Track changes in the heatmap.
+
+For example:
+
+Previous:
+Bid liquidity $8.2M
+Ask liquidity $11.5M
+
+Current:
+Bid liquidity $12.4M
+Ask liquidity $9.1M
+
+Then show:
+
+“Liquidity shifted toward buyers.”
+
+This should update dynamically.
+
+8. DIRECTION HISTORY
+
+Add a small timeline showing how the directional state has changed.
+
+Example:
+
+10:30 — 🟢 Bullish
+10:35 — 🟢 Bullish
+10:40 — 🟡 Neutral
+10:45 — 🔴 Bearish
+10:50 — 🔴 Bearish
+
+This allows users to see whether bullish/bearish pressure is strengthening or weakening instead of relying on one snapshot.
+
+9. HEATMAP WARNING SYSTEM
+
+Add warnings for potentially misleading conditions.
+
+Examples:
+
+“⚠️ Large liquidity wall detected but price is approaching it rapidly.”
+
+“⚠️ Liquidity is disappearing — directional signal reliability reduced.”
+
+“⚠️ Heavy buying detected without price expansion — possible absorption.”
+
+“⚠️ Low volume — heatmap signal may be unreliable.”
+
+“⚠️ Conflicting technical and liquidity signals.”
+
+10. INTEGRATE WITH GAME PLAN
+
+The existing Game Plan should automatically receive the heatmap analysis.
+
+Add:
+
+HEATMAP:
+Bullish / Bearish / Neutral
+
+LIQUIDITY SUPPORT:
+$____
+
+LIQUIDITY RESISTANCE:
+$____
+
+BUYER/SELLER IMBALANCE:
+____%
+
+ABSORPTION:
+Detected / Not detected
+
+LIQUIDITY TREND:
+Increasing / Decreasing / Mixed
+
+Then incorporate these findings into the existing:
+
+* Bull case
+* Bear case
+* Key levels
+* Entry considerations
+* Stop/invalidation level
+* Profit targets
+* Risk warnings
+
+Do not allow the heatmap to override stronger conflicting evidence without explaining the conflict.
+
+11. SEARCH PAGE
+
+When a user searches for a ticker, immediately load:
+
+1. Current price
+2. Chart
+3. Heatmap
+4. Liquidity analysis
+5. Technical indicators
+6. Relative volume
+7. News/catalysts
+8. Game Plan
+9. Direction assessment
+
+Make the heatmap easily accessible without requiring the user to navigate to another page.
+
+12. DATA ARCHITECTURE
+
+First inspect the existing Qureshi Finance codebase.
+
+Determine:
+
+* Current market-data provider
+* Existing WebSocket connections
+* Existing REST APIs
+* Existing quote/order-book endpoints
+* Existing chart implementation
+* Existing stock-analysis engine
+* Existing Game Plan implementation
+
+Reuse existing infrastructure wherever possible.
+
+Do NOT create duplicate API connections if an existing WebSocket/data stream can provide the information.
+
+If the current provider does not provide Level 2/order-book/market-depth data, implement the integration layer so another supported provider can be added later.
+
+Keep the heatmap module modular:
+
+HeatmapDataProvider
+→ HeatmapProcessor
+→ LiquidityAnalyzer
+→ DirectionEngine
+→ GamePlan
+
+13. PERFORMANCE
+
+The heatmap must not slow down the stock search page.
+
+Use:
+
+* WebSockets where available
+* Efficient state updates
+* Debouncing/throttling
+* Incremental rendering
+* Cached historical heatmap data where appropriate
+
+Do not repeatedly reload the entire page.
+
+14. MOBILE RESPONSIVENESS
+
+The heatmap must work on desktop and mobile.
+
+On mobile:
+
+* Allow horizontal scrolling/zooming where necessary
+* Keep current price visible
+* Keep direction status visible
+* Keep support/resistance levels readable
+* Do not make the heatmap so large that users cannot access the Game Plan.
+
+15. DIRECTION SCORE
+
+Create a transparent directional score from the available signals.
+
+Example:
+
+Heatmap: +2
+Liquidity imbalance: +2
+Relative volume: +1
+VWAP: +1
+Momentum: +1
+RSI: 0
+
+Total: +7
+
+Then map it to:
+
++5 to +10 = Bullish pressure
+-4 to +4 = Neutral/mixed
+-5 to -10 = Bearish pressure
+
+BUT:
+Do not hide the individual components.
+
+Users must be able to see WHY the system reached the directional assessment.
+
+Do not claim the score predicts the future price.
+
+16. IMPORTANT MARKET MICROSTRUCTURE RULE
+
+The system must understand that an order-book wall is NOT automatically support or resistance.
+
+Liquidity can:
+
+* Move
+* Cancel
+* Be spoofed
+* Be absorbed
+* Be replenished
+* Be consumed
+
+Therefore, weight actual executed volume/trades and price reaction more heavily than simply seeing a large resting order.
+
+17. TESTING
+
+After implementation, test:
+
+* Fast-moving stocks
+* High-volume stocks
+* Low-volume stocks
+* Stocks with wide spreads
+* Stocks with thin order books
+* Market open
+* Midday
+* Market close
+* Rapid liquidity changes
+* WebSocket disconnect/reconnect
+* Missing market-depth data
+* API rate limits
+
+Make sure a data outage does not cause the system to display a false bullish or bearish signal.
+
+FINAL DELIVERABLE
+
+After implementing this, show me:
+
+1. Files changed
+2. Data provider being used
+3. Heatmap data source
+4. Direction calculation
+5. How liquidity walls are detected
+6. How absorption is detected
+7. How heatmap information feeds the Game Plan
+8. Tests performed
+9. Any market-data limitations
+
+Do not simply create a visual heatmap. The objective is to make the heatmap a genuine market-structure input that helps the user understand WHY price may be encountering support, resistance, buying pressure, selling pressure, or a potential liquidity trap.

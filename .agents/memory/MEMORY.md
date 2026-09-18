@@ -22,3 +22,4 @@
 - [Retiring monolithic strategies](retiring-monolithic-strategies.md) — disable legacy API and schema paths before deleting local strategy storage; preserve broker state by avoiding broker mutations.
 - [B2 broker protection constraints](b2-broker-protection.md) — daily confirmation and GTC protection are deliberate; OTO child replacement/partial fills need broker-specific handling.
 - [Scheduler readiness semantics](scheduler-readiness-semantics.md) — broker connection and automation authorization are not proof that a server entry can run; persist blockers and expose current eligibility separately.
+- [Search liquidity truthfulness](search-liquidity-truthfulness.md) — venue-limited top-of-book is partial context, never Level 2, walls, absorption, aggressor flow, or liquidity support.

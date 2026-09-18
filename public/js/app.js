@@ -128,7 +128,10 @@ window.searchContext = (() => {
     }).then(async response => {
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) throw new Error(data?.error || 'Verified Search data unavailable');
-      cache.set(sym, { at: Date.now(), data });
+      // Preserve the server generation age. A newly opened tab must not grant
+      // an already-cached market snapshot a fresh client-side TTL.
+      const generatedAt = Date.parse(data.generatedAt);
+      cache.set(sym, { at: Number.isFinite(generatedAt) ? generatedAt : Date.now(), data });
       return data;
     }).finally(() => inflight.delete(sym));
     inflight.set(sym, request);
@@ -639,6 +642,9 @@ async function openStock(sym, snap, { intelligenceQuery = null } = {}) {
 
   $('homeEmpty').style.display = 'none';
   $('homeWorkspace').style.display = '';
+  if (typeof window.liquidityHeatmap?.render === 'function') {
+    window.liquidityHeatmap.render({ available: false, summary: 'Loading verified liquidity snapshot.' }, sym);
+  }
   const topVerdict = $('searchVerdictTop');
   if (topVerdict) topVerdict.style.display = 'none';
 

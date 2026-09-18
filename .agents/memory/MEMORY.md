@@ -11,7 +11,7 @@
 - [Broker credential vault](broker-credential-vault.md) — broker keys are encrypted at rest, migrated lazily, and never used as cache keys or response data.
 - [Paused bot reconciliation](paused-bot-reconciliation.md) — disabling new entries must never stop reconciliation or protection of existing broker positions.
 - [Search signal isolation](search-signal-isolation.md) — search-page volume signals are read-only, require completed fresh multi-timeframe bars, and must never alter bot strategy or execution
-- [Search page change boundary](search-page-change-boundary.md) — keep Search UI and BUY/SELL labels unchanged; market context belongs in existing confidence only
+- [Search verdict boundary](search-page-change-boundary.md) — Search may show decisive zone bias, but execution still requires the verified evidence engine.
 - [Search gaps and patterns](search-gaps-patterns.md) — Search gap rates use completed-session history; chart patterns may influence direction but never confirm a trade alone.
 - [Search Fibonacci confluence](search-fibonacci-confluence.md) — Fibonacci uses confirmed completed-session swings and may assist direction, but never confirms a trade without volume.
 - [Search prediction-market integrity](search-prediction-market-integrity.md) — discover Kalshi through official series metadata; show only relevant measured probabilities and fail closed when unavailable.

@@ -1,10 +1,10 @@
 ---
-name: Search page change boundary
-description: Durable scope rule for Search-page market-context work
+name: Search verdict boundary
+description: Durable separation between decisive Search guidance and automated execution
 ---
 
-Market context, especially SPY, may adjust confidence for an existing directional Search signal, but must not create a direction, new cards, warnings, hierarchy, or layout changes. Preserve confidence presentation, Support & Resistance, gap analysis, tabs, and navigation. BUY/SELL require complete matching evidence; WAIT is the neutral no-trade result when evidence is incomplete or inconclusive. External providers may supply raw data, but our own evidence engines must own verdicts, levels, confidence, and strategies. Support & Resistance must always show immediate and next levels in order, and the Trade Plan must use the same immediate support/resistance prices.
+The existing Search header should give a decisive BUY or SELL zone bias whenever validated support/resistance or a validated bias level is available. This is display-only guidance: it must be labeled as zone bias and must not relax the verified evidence, entry-quality, volume, or broker safeguards used by automated trading. Preserve Support & Resistance, gap analysis, tabs, navigation, and the existing layout. External providers may supply raw data, but our own evidence engines must own levels and strategies. Support & Resistance must always show immediate and next levels in order, and the Trade Plan must use the same immediate support/resistance prices.
 
-**Why:** The Search page's compact structure and binary signal presentation are intentional; expanding market context into a second visible decision system obscures critical levels and changes the user's workflow. Provider dependence in the decision layer would also make the product a passive data aggregator instead of its own decision machine.
+**Why:** The user explicitly prefers decisive Search guidance over a neutral or uncertain headline, but does not want that presentation preference to weaken the engine or automated-trading safety.
 
-**How to apply:** For future Search intelligence changes, modify the existing signal/confidence path first. Add visible UI only when explicitly requested, and keep it inside the existing structure.
+**How to apply:** Keep the decisive label in the existing Search verdict surface and derive it only from validated internal zones. Continue treating the underlying verified signal as authoritative for automation and broker actions.

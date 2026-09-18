@@ -33,6 +33,49 @@ const gamePlan = (() => {
     return 'neut';
   }
 
+  function zoneVerdict(price, source) {
+    const current = Number(price);
+    const supports = (source?.support || [])
+      .map(level => Number(level?.price ?? level))
+      .filter(level => Number.isFinite(level) && level > 0 && level < current)
+      .sort((a, b) => b - a);
+    const resistances = (source?.resistance || [])
+      .map(level => Number(level?.price ?? level))
+      .filter(level => Number.isFinite(level) && level > current)
+      .sort((a, b) => a - b);
+    const support = supports[0];
+    const resistance = resistances[0];
+    const bias = Number(source?.bias?.price ?? source?.bias);
+
+    if (!Number.isFinite(current) || current <= 0) return null;
+    if (Number.isFinite(support) && Number.isFinite(resistance) && resistance > support) {
+      const supportDistance = current - support;
+      const resistanceDistance = resistance - current;
+      const buy = supportDistance <= resistanceDistance;
+      const range = resistance - support;
+      const edgeStrength = Math.abs(resistanceDistance - supportDistance) / range;
+      return {
+        verdict: buy ? 'BUY' : 'SELL',
+        direction: buy ? 'BULLISH' : 'BEARISH',
+        confidence: Math.round(55 + Math.min(30, edgeStrength * 45)),
+        reason: buy
+          ? `Price is closer to validated support at $${fmt(support)} than resistance at $${fmt(resistance)}.`
+          : `Price is closer to validated resistance at $${fmt(resistance)} than support at $${fmt(support)}.`,
+      };
+    }
+    if (Number.isFinite(bias) && bias > 0) {
+      const buy = current >= bias;
+      const distancePct = Math.abs(current - bias) / bias * 100;
+      return {
+        verdict: buy ? 'BUY' : 'SELL',
+        direction: buy ? 'BULLISH' : 'BEARISH',
+        confidence: Math.round(55 + Math.min(25, distancePct * 5)),
+        reason: `Price is ${buy ? 'above' : 'below'} the validated bias level at $${fmt(bias)}.`,
+      };
+    }
+    return null;
+  }
+
   function probBar(label, val, inverse) {
     if (val == null) return '';
     const cls = inverse ? (val >= 50 ? 'bear' : 'neut') : (val >= 60 ? 'bull' : val >= 40 ? 'neut' : 'bear');
@@ -654,14 +697,19 @@ const gamePlan = (() => {
     };
 
     // Header badge
-    const verdict = searchSignal?.signal?.state || searchSignal?.signal?.label || 'UNAVAILABLE';
-    const direction = searchSignal?.signal?.direction
+    const decisiveZone = zoneVerdict(snapshotPrice, displayLevels || levels);
+    const verdict = decisiveZone?.verdict
+      || searchSignal?.signal?.state
+      || searchSignal?.signal?.label
+      || 'UNAVAILABLE';
+    const direction = decisiveZone?.direction
+      || searchSignal?.signal?.direction
       || searchSignal?.entryQuality?.trendBias
       || (verdict.includes('SELL') ? 'BEARISH' : verdict.includes('BUY') ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);
-    const verdictStage = searchSignal?.signal?.stage || (verdict === 'WAIT' ? 'WAITING' : 'PROVISIONAL');
-    const verdictConfidence = Number(searchSignal?.confidence);
+    const verdictStage = decisiveZone ? 'ZONE BIAS' : searchSignal?.signal?.stage || (verdict === 'WAIT' ? 'WAITING' : 'PROVISIONAL');
+    const verdictConfidence = Number(decisiveZone?.confidence ?? searchSignal?.confidence);
     const signalReasons = Array.isArray(searchSignal?.reasons)
       ? searchSignal.reasons.filter(Boolean).slice(0, 2)
       : [];
@@ -674,14 +722,14 @@ const gamePlan = (() => {
     setSafe('searchVerdictStage', el => el.textContent = verdictStage);
     setSafe('searchVerdictSymbol', el => el.textContent = d.symbol || '--');
     setSafe('searchVerdictDirection', el => el.textContent = direction);
-    setSafe('searchVerdictConfidence', el => el.textContent = `${searchSignal?.confidence ?? '--'}%`);
+    setSafe('searchVerdictConfidence', el => el.textContent = `${Number.isFinite(verdictConfidence) ? verdictConfidence : '--'}%`);
     setSafe('searchVerdictMeter', el => {
       el.style.width = `${Number.isFinite(verdictConfidence) ? Math.max(0, Math.min(100, verdictConfidence)) : 0}%`;
     });
     setSafe('searchVerdictReason', el => {
-      el.textContent = signalReasons.length
+      el.textContent = decisiveZone?.reason || (signalReasons.length
         ? signalReasons.join(' · ')
-        : 'Using all available verified Search evidence; missing inputs remain provisional.';
+        : 'Using all available verified Search evidence; missing inputs remain provisional.');
     });
     setSafe('searchDecisionLevelsTop', el => {
       el.innerHTML = decisionLevelsHtml(displayLevels || levels, gapAnalysis);

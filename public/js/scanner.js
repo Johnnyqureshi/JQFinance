@@ -314,6 +314,8 @@
     fetchData();
     startCountdown();
     initBci();
+    window.macroContext?.init();
+    window.macroContext?.resume();
 
     /* sortable column headers */
     document.querySelectorAll('.nsc-table .nsc-th[data-col]').forEach(th => {
@@ -349,6 +351,7 @@
         fetchData();
         startCountdown();
         if (bciCanFetch()) fetchBci(false);
+        window.macroContext?.resume();
       }
     });
   }
@@ -359,6 +362,7 @@
     cdInterval = null;
     clearInterval(bciTimer);
     bciTimer = null;
+    window.macroContext?.pause();
   }
 
   /* resume: refresh immediately + restart countdown */
@@ -368,6 +372,7 @@
     startCountdown();
     fetchBci(false);
     startBciTimer();
+    window.macroContext?.resume();
   }
 
   window.stockScanner = { init, refresh: fetchData, pause, resume };

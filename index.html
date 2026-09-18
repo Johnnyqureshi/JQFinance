@@ -706,6 +706,24 @@
       <span class="nsc-status-txt" id="nscStatus"></span>
     </div>
 
+    <!-- Macro context is deliberately isolated from scanner rankings and execution tools. -->
+    <section class="macro-context" id="macroContext" aria-labelledby="macroContextTitle" aria-live="polite">
+      <div class="macro-context-head">
+        <div>
+          <div class="macro-kicker">VERIFIED MACRO CONTEXT / REVIEW ONLY</div>
+          <h2 id="macroContextTitle">Macro conditions</h2>
+          <p>Source-backed observations for research. This does not change scanner results, bot behavior, or execution.</p>
+        </div>
+        <div class="macro-actions">
+          <span class="macro-checked" id="macroChecked">Not checked yet</span>
+          <button class="macro-refresh" id="macroRefresh" type="button">Refresh context</button>
+        </div>
+      </div>
+      <div class="macro-content" id="macroContent">
+        <div class="macro-skeleton"><i></i><i></i><i></i></div>
+      </div>
+    </section>
+
     <section class="bci-module" id="bciModule" aria-label="Microcap and biotech catalyst intelligence">
       <div class="bci-head">
         <div class="bci-head-main">
@@ -783,6 +801,7 @@
 <script src="/js/search-intelligence.js"></script>
 <script src="/js/realtimetrader.js"></script>
 <script src="/js/gameplan.js"></script>
+<script src="/js/macro-context.js"></script>
 <script src="/js/scanner.js"></script>
 
 <script src="/js/alpacatrader.js"></script>

@@ -30,6 +30,9 @@ const {
 } = require('./lib/catalyst-intel');
 const { selectMarketAlerts } = require('./lib/market-alerts');
 const { buildTechnicalConfluence } = require('./lib/technical-probability-engine');
+const { fetchMacroProviders } = require('./lib/macro-providers');
+const { createMacroContextService } = require('./lib/verified-macro-context');
+const getVerifiedMacroContext = createMacroContextService({ loadProviders: fetchMacroProviders });
 const {
   buildSearchVolumeSignal, selectCrypto24hReference, canonicalCrypto5mSeries, crypto24hStats,
 } = require('./lib/search-volume-signal');
@@ -4458,6 +4461,13 @@ const WHALE_RADAR_SYMBOLS = [
 app.get('/api/macro-context', requireAuth, (req, res) => {
   try { res.json(computeSeasonalContext()); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Separate from seasonal context and every bot/technical decision path.
+app.get('/api/verified-macro-context', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await getVerifiedMacroContext()); }
+  catch (_) { res.status(503).json({ error: 'Verified macro context unavailable' }); }
 });
 
 app.get('/api/whale/scan', requireAuth, async (req, res) => {

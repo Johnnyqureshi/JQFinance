@@ -675,7 +675,7 @@ test('API rejects unauthenticated access, invalid identities and legacy settings
     assert.equal((await invoke(automationRoute, { action: 'pause' }, { userId: 1 })).body.enabled, false);
     assert.equal((await invoke(automationRoute, { action: 'resume' }, { userId: 1 })).body.enabled, true);
     const live = await invoke(connectRoute, { mode: 'live', apiKey: 'live1', apiSecret: 'secret-live1', authorizeLive: true }, { userId: 1 });
-    assert.equal(live.body.liveArmed, true);
+    assert.equal(live.body.liveArmed, false);
     const modeRoute = routes.find(route => route.path.endsWith('/mode'));
     const unarmed = await invoke(modeRoute, { mode: 'live' }, { userId: 1 });
     assert.equal(unarmed.code, 200);
@@ -693,6 +693,8 @@ test('saved connection map is secret-free and mode selection freshly authorizes 
     });
     await f.connect();
     await f.connect(1, 'live1', 'live', true);
+    assert.equal(f.service.status(1).liveArmed, false);
+    await f.service.setAutomation(1, { action: 'resume', authorizeLive: true });
     assert.equal(f.service.status(1).liveArmed, true);
     const connections = {
       paper: { connected: true, accountId: 'account-paper1' },
@@ -707,6 +709,9 @@ test('saved connection map is secret-free and mode selection freshly authorizes 
     assert.equal(f.service.status(1).enabled, false);
     assert.equal(f.service.status(1).liveArmed, false);
     await f.service.setMode(1, { mode: 'live', authorizeLive: true });
+    assert.equal(f.service.status(1).enabled, false);
+    assert.equal(f.service.status(1).liveArmed, false);
+    await f.service.setAutomation(1, { action: 'resume', authorizeLive: true });
     assert.equal(f.service.status(1).enabled, true);
     assert.equal(f.service.status(1).liveArmed, true);
     await f.service.setMode(1, { mode: 'live' });
@@ -717,7 +722,7 @@ test('saved connection map is secret-free and mode selection freshly authorizes 
     assert.equal(f.service.status(1).liveArmed, false);
     await f.connect(1, 'live2', 'live', true);
     assert.equal(f.service.status(1).accountId, 'account-live2');
-    assert.equal(f.service.status(1).liveArmed, true);
+    assert.equal(f.service.status(1).liveArmed, false);
     await f.connect(1, 'live3', 'live');
     assert.equal(f.service.status(1).enabled, false);
     assert.equal(f.service.status(1).liveArmed, false);
@@ -830,6 +835,7 @@ test('persisted automation survives database reopen without activating dormant c
     await f.connect(2, 'dormant-paper');
     f.db.prepare('INSERT INTO users(id) VALUES (3),(4)').run();
     await f.connect(3, 'active-live', 'live', true);
+    await f.service.setAutomation(3, { action: 'resume', authorizeLive: true });
     await f.connect(4, 'dormant-live', 'live');
     // Simulate a preexisting dormant connection, not an explicit new connect.
     f.db.prepare('UPDATE b2_settings SET enabled=0,live_armed=0 WHERE user_id=2').run();

@@ -32,7 +32,7 @@
       <section class="b2-command"><div><span class="b2-eyebrow">AUTOMATIC ENTRY & EXIT</span><h2 id="b2Mandate">Connect an account to begin</h2><p id="b2MandateCopy">Paper starts automatically after verification. Live requires your explicit authorization.</p><p id="b2Blockers" class="b2-blockers"></p></div><button class="b2-button b2-quiet" id="b2Automation" disabled>Checking account</button></section>
       <section class="b2-layout"><main class="b2-main"><article class="b2-panel"><div class="b2-head"><div><span class="b2-eyebrow">CANDIDATE LEDGER</span><h2>Completed crossover evidence</h2></div><span id="b2CandidateMeta">Loading</span></div><div class="b2-table-wrap"><table class="b2-table"><thead><tr><th>Symbol / event</th><th>20 / 50 SMA</th><th>Price</th><th>Volume</th><th>Session gain</th><th>Decision</th></tr></thead><tbody id="b2Candidates"><tr><td colspan="6">Loading broker-confirmed evidence…</td></tr></tbody></table></div></article>
       <article class="b2-panel b2-method"><div class="b2-head"><div><span class="b2-eyebrow">METHOD</span><h2>What B2 will and will not infer</h2></div></div><div><p><b>First:</b> the crossover must exist on completed daily bars: 20-day SMA crossing the 50-day SMA. Partial daily bars never qualify.</p><p><b>Then:</b> current-session price, relative volume (current volume ÷ prior 20 completed sessions), and daily-gain filters must be fresh and pass. Live requires consolidated SIP data. Paper prefers SIP and can use Alpaca IEX when SIP is unavailable; one consistent feed is used for each evaluation. Missing or stale broker data is a no-trade decision.</p><p><b>Protection:</b> each entry starts with a broker-held stop 5% below its entry limit, conservatively cent-rounded. It is reconciled to the actual average fill, or an existing tighter stop is retained when Alpaca cannot safely replace an OTO leg.</p><div class="b2-rules"><b>Fixed rules</b><span>Price $1–$20 · RVOL ≥2× · gain ≥10% · volume ≥500k · spread ≤1% · max 2 positions · higher highs/lows · whipsaw filter</span><small>Paper IEX covers fewer exchanges than SIP, so qualifying volume and signals may differ. Signals are evidence, not a guarantee of performance.</small></div></div></article></main>
-       <aside class="b2-rail"><article class="b2-panel b2-broker"><div class="b2-head"><div><span class="b2-eyebrow">DEDICATED BROKER</span><h2>Alpaca accounts</h2></div></div><div class="b2-account-row"><div><b>Paper</b><small id="b2PaperState">Checking</small></div><button class="b2-button b2-quiet" id="b2PaperConnect">Connect</button></div><div class="b2-account-row"><div><b>Live</b><small id="b2LiveState">Checking</small></div><button class="b2-button b2-quiet" id="b2LiveConnect">Connect</button></div><p class="b2-account-note">One active account at a time. Paper can use IEX if SIP is unavailable; Live requires SIP. Paper uses simulated capital; Live uses real money.</p></article>
+       <aside class="b2-rail"><article class="b2-panel b2-broker"><div class="b2-head"><div><span class="b2-eyebrow">DEDICATED BROKER</span><h2>Alpaca accounts</h2></div></div><div class="b2-account-row"><div><b>Paper</b><small id="b2PaperState">Checking</small></div><button class="b2-button b2-quiet" id="b2PaperConnect">Connect</button></div><div class="b2-account-row"><div><b>Live</b><small id="b2LiveState">Checking</small></div><button class="b2-button b2-quiet" id="b2LiveConnect">Connect</button></div><p class="b2-account-note">Paper bots on separate accounts may run side by side. Only one strategy can be Live-armed per user. Paper can use IEX if SIP is unavailable; Live requires SIP.</p></article>
        <article class="b2-panel b2-sizing"><div class="b2-head"><div><span class="b2-eyebrow">ONLY STRATEGY SETTING</span><h2>Position size</h2></div></div><label class="b2-field" for="b2Max">Maximum dollars per position<input id="b2Max" type="number" min="1" max="100000000" step="0.01" inputmode="decimal"><small>New entries only. Buying power and fixed risk limits can reduce the order size. Changing this never resizes an existing position.</small></label><button class="b2-button b2-save" id="b2Save">Save position size</button></article>
       <article class="b2-panel"><div class="b2-head"><div><span class="b2-eyebrow">BROKER JOURNAL</span><h2>Trades & protection</h2></div></div><div class="b2-list" id="b2Trades">Loading trades…</div></article>
       <article class="b2-panel"><div class="b2-head"><div><span class="b2-eyebrow">RISK DESK</span><h2>Alerts</h2></div></div><div class="b2-list" id="b2Alerts">Loading alerts…</div></article></aside></section>
@@ -45,7 +45,7 @@
     $('b2Account').textContent = status.accountId ? `Account ${status.accountId} · ${(status.dataFeed || 'checking').toUpperCase()} data` : (status.blockers || []).join(' · ') || 'Dedicated B2 account required';
     const authorized = connected && status.enabled && (!live || status.liveArmed);
     const entryReadyNow = status.entryReadyNow === true;
-    $('b2Execution').textContent = !connected ? 'NOT CONNECTED' : !authorized ? 'PAUSED' : !entryReadyNow ? 'STANDING ASIDE' : 'AUTOMATIC';
+    $('b2Execution').textContent = !connected ? 'NOT CONNECTED' : status.posture === 'shadowing' ? 'SHADOWING' : !authorized ? 'PAUSED' : !entryReadyNow ? 'STANDING ASIDE' : status.posture === 'live-armed' ? 'LIVE-ARMED' : 'AUTOMATIC';
     $('b2ExecutionNote').textContent = entryReadyNow
       ? 'Scanning, entries, stops and exits are server-run'
       : (status.schedulerEligibilityReason || (connected ? 'New entries are withheld; existing trades remain managed.' : 'Connect Paper or authorize Live to start'));
@@ -66,7 +66,7 @@
     for (const mode of ['paper', 'live']) {
       const prefix = mode === 'paper' ? 'b2Paper' : 'b2Live';
       const saved = !!status.connections?.[mode]?.connected;
-      $(prefix + 'State').textContent = saved ? status.mode === mode ? 'Connected · selected' : 'Connected · inactive' : 'Not connected';
+      $(prefix + 'State').textContent = saved ? status.mode === mode ? `Connected · ${status.posture || 'selected'}` : 'Connected · inactive' : 'Not connected';
       $(prefix + 'Connect').textContent = saved ? 'Manage' : 'Connect';
     }
     if (!sizingDirty) $('b2Max').value = status.maxPositionDollars ?? '';
@@ -163,7 +163,8 @@
       const input = saved ? { mode, authorizeLive } : { apiKey: $('b2Key').value, apiSecret: $('b2Secret').value, mode, authorizeLive };
       setBusy(true);
       try {
-        status = await api(saved ? '/api/b2/mode' : '/api/b2/credentials', { method: saved ? 'POST' : 'PUT', body: JSON.stringify(input) });
+        status = await api(saved ? '/api/b2/mode' : '/api/b2/credentials', { method: saved ? 'POST' : 'PUT', body: JSON.stringify({ ...input, authorizeLive: false }) });
+        if (mode === 'live' && authorizeLive) status = await api('/api/b2/automation', { method: 'POST', body: JSON.stringify({ action: 'resume', authorizeLive: true }) });
         setBusy(false); close(); renderStatus();
         notice(`${mode === 'live' ? 'Live authorized' : 'Paper connected'}. B2 runs automatically on the server; market hours, data and safety checks still apply.`);
         refresh();

@@ -3,6 +3,7 @@ const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { mountB2 } = require('./lib/b2-service');
+const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
 const { evaluateLiquidity, DEFAULT_LIQUIDITY_POLICY } = require('./lib/liquidity-policy');
@@ -164,6 +165,7 @@ db.exec(`
     user_id INTEGER PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
     live_armed INTEGER NOT NULL DEFAULT 0,
+    activation_revision INTEGER NOT NULL DEFAULT 0,
     max_position_dollars REAL NOT NULL DEFAULT 1000,
     last_cycle_at TEXT,
     last_cycle_status TEXT,
@@ -286,6 +288,7 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+try { db.prepare('ALTER TABLE options_settings ADD COLUMN activation_revision INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
 
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
 [
@@ -352,6 +355,7 @@ db.exec(`
   );
 `);
 retireRemovedStrategies(db);
+const automaticBotSettings = createAutomaticBotSettings(db);
 
 for (const seed of [
   `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
@@ -3666,7 +3670,7 @@ function autoEnablePaperStrategy(userId, scope, mode) {
   const settings = optionsConfigFor(userId);
   db.prepare(`INSERT INTO options_settings (user_id,enabled,live_armed,max_position_dollars,updated_at)
     VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
-    enabled=1,live_armed=0,updated_at=datetime('now')`).run(userId, settings.maxPositionDollars);
+    enabled=1,live_armed=0,activation_revision=activation_revision+1,updated_at=datetime('now')`).run(userId, settings.maxPositionDollars);
   return true;
 }
 
@@ -3715,7 +3719,10 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         api_secret_enc=excluded.api_secret_enc,account_id=excluded.account_id`)
         .run(uid, mode, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, accountId);
       db.prepare(`INSERT OR REPLACE INTO ${active} (user_id,mode) VALUES (?,?)`).run(uid, mode);
-      if (scope === 'options') db.prepare('UPDATE options_settings SET live_armed=0 WHERE user_id=?').run(uid);
+      if (scope === 'options') {
+        db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
+        automaticBotSettings.revoke(uid, 'options');
+      }
       autoEnablePaperStrategy(uid, scope, mode);
       if (previousAccountId && previousAccountId !== accountId) releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
     })();
@@ -3737,7 +3744,10 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
       VALUES (?,?,?,?,NULL,NULL,NULL) ON CONFLICT(user_id,mode) DO UPDATE SET
       api_key=excluded.api_key,api_secret=excluded.api_secret,api_key_enc=NULL,api_secret_enc=NULL,account_id=NULL`)
       .run(uid, mode, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
-    if (scope === 'options') db.prepare('UPDATE options_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    if (scope === 'options') {
+      db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
+      automaticBotSettings.revoke(uid, 'options');
+    }
     releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
   })();
   res.json({ ok: true, connection: scope });
@@ -3763,7 +3773,10 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
   if (!_alpacaCredsExist(uid, mode, scope)) return res.status(400).json({ error: 'Connect a verified, isolated account for this mode first.' });
   db.transaction(() => {
     db.prepare(`INSERT OR REPLACE INTO ${active} (user_id,mode) VALUES (?,?)`).run(uid, mode);
-    if (scope === 'options') db.prepare('UPDATE options_settings SET live_armed=0 WHERE user_id=?').run(uid);
+    if (scope === 'options') {
+      db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
+      automaticBotSettings.revoke(uid, 'options');
+    }
     autoEnablePaperStrategy(uid, scope, mode);
   })();
   res.json({ ok: true, mode, connection: scope, automationEnabled: scope === 'options' && mode === 'paper', liveArmed: false });
@@ -5591,7 +5604,7 @@ const OPTIONS_QUOTE_MAX_AGE_MS = 60 * 1000;
 const OPTIONS_MAX_SPREAD_FRACTION = 0.15;
 
 function optionsConfigFor(userId) {
-  const row = db.prepare(`SELECT enabled,live_armed,max_position_dollars,last_cycle_at,
+  const row = db.prepare(`SELECT enabled,live_armed,activation_revision,max_position_dollars,last_cycle_at,
     last_cycle_status,last_cycle_reason,last_scan_at,updated_at
     FROM options_settings WHERE user_id=?`).get(userId);
   const maxPositionDollars = Math.min(
@@ -5601,6 +5614,7 @@ function optionsConfigFor(userId) {
   return {
     enabled: !!row?.enabled,
     liveArmed: !!row?.live_armed,
+    activationRevision: Number(row?.activation_revision || 0),
     maxPositionDollars,
     runtime: {
       settingsUpdatedAt: row?.updated_at || null,
@@ -5938,6 +5952,9 @@ async function executeOptionsEntry(userId, symbol, source = 'manual', leaseToken
   if (!settings.enabled) throw new Error('LEAP Options automation is disabled in persisted settings.');
   if (!creds) throw new Error('Connect the dedicated LEAP Options Alpaca account first.');
   if (creds.mode === 'live' && !settings.liveArmed) throw new Error('Live LEAP option orders are not explicitly armed.');
+  if (creds.mode === 'live' && automaticBotSettings.owner(userId)?.strategy !== 'options') {
+    throw new Error('Another strategy owns this user’s Live authorization.');
+  }
   if (!isMarketOpen()) throw new Error('LEAP option entries are submitted only during the regular session.');
   let candidate = await buildOptionsCandidate(userId, symbol);
   saveOptionsCandidates(userId, [candidate]);
@@ -5982,7 +5999,8 @@ async function executeOptionsEntry(userId, symbol, source = 'manual', leaseToken
   if (!(quantity >= 1)) throw new Error('The 5% equity and maximum-dollar caps cannot afford one contract.');
   settings = optionsConfigFor(userId);
   creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-  if (!settings.enabled || !creds || (creds.mode === 'live' && !settings.liveArmed)
+  if (!settings.enabled || !creds || (creds.mode === 'live' && (!settings.liveArmed
+        || automaticBotSettings.owner(userId)?.strategy !== 'options'))
       || `${creds.mode}:${creds.account_id}` !== brokerIdentity) {
     throw new Error('LEAP authorization or broker identity changed during final preflight.');
   }
@@ -6398,11 +6416,13 @@ app.get('/api/options/settings', requireAuth, async (req, res) => {
 app.put('/api/options/settings', requireAuth, async (req, res) => {
   try {
     const userId = await ensureSessionUserInTradingStore(req);
+    db.prepare('INSERT OR IGNORE INTO options_settings(user_id) VALUES (?)').run(userId);
     const prior = optionsConfigFor(userId);
     const maxPositionDollars = Math.min(OPTIONS_MAX_POSITION_DOLLARS,
       Math.max(1, Number(req.body?.maxPositionDollars ?? prior.maxPositionDollars)));
     if (!Number.isFinite(maxPositionDollars)) return res.status(400).json({ error: 'Maximum position dollars must be finite.' });
     const creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
+    const expectedBrokerIdentity = creds ? `${creds.mode}:${creds.account_id}` : null;
     let liveArmed = false;
     if (req.body?.liveArmed === true) {
       if (creds?.mode !== 'live') return res.status(400).json({ error: 'Select the dedicated Live Options account before arming.' });
@@ -6413,13 +6433,41 @@ app.put('/api/options/settings', requireAuth, async (req, res) => {
       liveArmed = true;
     }
     const enabled = req.body?.enabled === true;
-    db.prepare(`INSERT INTO options_settings
-      (user_id,enabled,live_armed,max_position_dollars,updated_at) VALUES (?,?,?,?,datetime('now'))
-      ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled,live_armed=excluded.live_armed,
-        max_position_dollars=excluded.max_position_dollars,updated_at=datetime('now')`)
-      .run(userId, enabled ? 1 : 0, liveArmed ? 1 : 0, maxPositionDollars);
-    res.json({ ok: true, enabled, liveArmed, maxPositionDollars });
-  } catch (error) { res.status(503).json({ error: `Options settings could not be saved: ${error.message}` }); }
+    if (!enabled) liveArmed = false;
+    const activationIsCurrent = () => {
+      const current = optionsConfigFor(userId);
+      const currentCreds = getAlpacaCreds(userId, OPTIONS_SCOPE);
+      const currentBrokerIdentity = currentCreds ? `${currentCreds.mode}:${currentCreds.account_id}` : null;
+      return current.activationRevision === prior.activationRevision
+        && currentBrokerIdentity === expectedBrokerIdentity;
+    };
+    const persist = () => {
+      const saved = db.prepare(`UPDATE options_settings SET enabled=?,live_armed=?,max_position_dollars=?,
+        activation_revision=activation_revision+1,updated_at=datetime('now')
+        WHERE user_id=? AND activation_revision=?`).run(
+        enabled ? 1 : 0, liveArmed ? 1 : 0, maxPositionDollars, userId, prior.activationRevision
+      );
+      if (saved.changes !== 1) {
+        const error = new Error('Options authorization changed while broker verification was pending.');
+        error.status = 409;
+        throw error;
+      }
+    };
+    if (liveArmed && enabled) automaticBotSettings.arm(userId, 'options', persist, activationIsCurrent);
+    else {
+      if (!activationIsCurrent()) {
+        const error = new Error('Options settings changed in another browser tab. Refresh and retry.');
+        error.status = 409;
+        throw error;
+      }
+      persist();
+      automaticBotSettings.revoke(userId, 'options');
+    }
+    const fleet = automaticBotSettings.status(userId, 'options', {
+      mode: creds?.mode || 'paper', enabled, liveArmed,
+    });
+    res.json({ ok: true, enabled, liveArmed, maxPositionDollars, ...fleet });
+  } catch (error) { res.status(error.status || 503).json({ error: `Options settings could not be saved: ${error.message}` }); }
 });
 
 app.get('/api/options/readiness', requireAuth, async (req, res) => {
@@ -6445,6 +6493,12 @@ app.get('/api/options/readiness', requireAuth, async (req, res) => {
     }
     if (!settings.enabled) blockers.push('LEAP Options automation is paused.');
     if (creds?.mode === 'live' && !settings.liveArmed) blockers.push('Live LEAP option orders are not explicitly armed.');
+    const fleet = automaticBotSettings.status(userId, 'options', {
+      mode: creds?.mode || 'paper', enabled: settings.enabled, liveArmed: settings.liveArmed,
+    });
+    if (creds?.mode === 'live' && settings.liveArmed && fleet.liveOwner !== 'options') {
+      blockers.push('Another strategy owns this user’s Live authorization.');
+    }
     if (!isMarketOpen()) blockers.push('New entries wait for the next regular-session window.');
     res.set('Cache-Control', 'no-store').json({
       connected: !!creds,
@@ -6452,10 +6506,12 @@ app.get('/api/options/readiness', requireAuth, async (req, res) => {
       mode: creds?.mode || 'paper',
       enabled: settings.enabled,
       liveArmed: settings.liveArmed,
-      ready: brokerReady && settings.enabled && (creds?.mode !== 'live' || settings.liveArmed),
+      posture: fleet.posture,
+      liveOwner: fleet.liveOwner,
+      ready: brokerReady && settings.enabled && (creds?.mode !== 'live' || (settings.liveArmed && fleet.liveOwner === 'options')),
       reconciliationReady: !!creds && !!account && approval.active && !approval.blocked,
       entryReadyNow: brokerReady && settings.enabled && isMarketOpen()
-        && (creds?.mode !== 'live' || settings.liveArmed),
+        && (creds?.mode !== 'live' || (settings.liveArmed && fleet.liveOwner === 'options')),
       optionsApproval: approval.label,
       optionsApprovedLevel: approval.approvedLevel,
       optionsTradingLevel: approval.tradingLevel,
@@ -6639,6 +6695,10 @@ async function runOptionsCycle(userId, source = 'server-scheduler') {
       status: 'reconciled_live_unarmed',
       reason: 'Live entries are unarmed; existing option positions and exits were still reconciled.',
     });
+    if (creds.mode === 'live' && automaticBotSettings.owner(userId)?.strategy !== 'options') return finish({
+      status: 'reconciled_live_shadowing',
+      reason: 'Another strategy owns Live authorization; existing option positions and exits were still reconciled.',
+    });
     if (!isMarketOpen()) return finish({ status: 'market_closed', reason: 'New option entries wait for the regular session.' });
     const lastScan = Date.parse(settings.runtime.lastScanAt || '');
     if (Number.isFinite(lastScan) && Date.now() - lastScan < 6 * 60 * 60 * 1000) {
@@ -6732,7 +6792,7 @@ setInterval(async () => {
 // small, safe maintenance response for unexpected server errors.
 const b2Service = mountB2({
   app, db, requireAuth, ensureSessionUserInTradingStore,
-  vault: credentialVault, fetch, getAutomaticBotContext,
+  vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
 });
 
 app.use((error, req, res, next) => {

@@ -32,8 +32,8 @@ function installMock() {
       } else s.maxPositionDollars = body.maxPositionDollars;
     } else if (url.endsWith('/credentials') && method === 'PUT') {
       s.connected = true; s.mode = body.mode; s.accountId = `mock-${body.mode}`;
-      s.enabled = body.mode === 'paper' || body.authorizeLive === true;
-      s.liveArmed = body.mode === 'live' && body.authorizeLive === true;
+      s.enabled = body.mode === 'paper';
+      s.liveArmed = false;
       s.connections[body.mode] = { connected: true, accountId: s.accountId };
     } else if (url.endsWith('/credentials') && method === 'DELETE') {
       s.connected = s.enabled = s.liveArmed = false; s.accountId = null;
@@ -41,11 +41,11 @@ function installMock() {
     } else if (url.endsWith('/mode')) {
       s.mode = body.mode; s.connected = s.connections[body.mode].connected;
       s.accountId = s.connections[body.mode].accountId;
-      s.enabled = body.mode === 'paper' || body.authorizeLive === true;
-      s.liveArmed = body.mode === 'live' && body.authorizeLive === true;
+      s.enabled = body.mode === 'paper';
+      s.liveArmed = false;
     } else if (url.endsWith('/automation')) {
       s.enabled = body.action === 'resume';
-      if (!s.enabled) s.liveArmed = false;
+      s.liveArmed = s.enabled && s.mode === 'live' && body.authorizeLive === true;
     } else if (url.endsWith('/candidates')) output = { candidates: [], coverage: s.coverage };
     else if (url.endsWith('/trades')) output = { trades: [] };
     else if (url.endsWith('/alerts')) output = { alerts: [] };
@@ -121,7 +121,7 @@ async function main() {
     await js(`document.querySelector('#b2PaperConnect').click()`);
     assert.equal(await js(`document.querySelector('#b2LiveConsent').hidden`), true);
     await js(`document.querySelector('#b2Key').value='MOCK_ONLY'; document.querySelector('#b2Secret').value='MOCK_ONLY'; document.querySelector('#b2Form').requestSubmit()`);
-    await wait(`!document.querySelector('#b2Modal') && document.querySelector('#b2Execution').textContent === 'MARKET CLOSED'`);
+    await wait(`!document.querySelector('#b2Modal') && document.querySelector('#b2Execution').textContent === 'STANDING ASIDE'`);
     assert.equal(await js(`__b2Mock.enabled`), true);
     await js(`document.querySelector('#b2Automation').click()`);
     await wait(`document.querySelector('#b2Execution').textContent === 'PAUSED'`);

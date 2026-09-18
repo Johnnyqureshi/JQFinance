@@ -9,7 +9,7 @@
     "test:gameplan-analogs": "node tests/gameplan-analogs.test.js",
     "test:historical-forecast": "node tests/historical-forecast.test.js",
     "test": "node tests/liquidity-analyzer.test.js && node tests/liquidity-ui-smoke.cjs && node tests/scanner-float.test.js && node tests/price-patterns.test.js && node tests/session-vwap-context.test.js && node tests/retired-strategies.test.js && node tests/day-trading-comparison.test.js && node tests/catalyst-intel.test.js && node tests/emergency-flatten.test.js && node tests/technical-probability-engine.test.js && node tests/search-volume-signal.test.js && node tests/search-trade-levels.test.js && node tests/search-market-regime.test.js && node tests/market-alerts.test.js && node tests/historical-forecast.test.js && node tests/price-action-setups.test.js && node tests/intraday-vwap.test.js && node tests/rrg-style.test.js && node tests/leap-options-strategy.test.js && node tests/leap-options-execution-policy.test.js && node tests/leap-options-reconciliation.test.js && node tests/leap-options-order-lifecycle.test.js && node tests/broker-account-isolation.test.js && node tests/sqlite-session-store.test.js && node tests/postgres-auth-store.test.js && node tests/legacy-account-retirement.test.js && node tests/broker-universe.test.js && node tests/broker-order-ownership.test.js && node tests/credential-vault.test.js",
-    "test:b2": "node tests/b2-strategy.test.js && node tests/b2-service.test.js",
+    "test:b2": "node tests/b2-strategy.test.js && node tests/automatic-bot-settings.test.js && node tests/b2-service.test.js",
     "test:b2-ui": "node tests/b2-ui-smoke.cjs",
     "posttest": "npm run test:b2",
     "validate:strategy": "node tests/leap-options-strategy.test.js && node tests/b2-strategy.test.js"

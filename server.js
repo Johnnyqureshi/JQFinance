@@ -2,6 +2,7 @@ const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
 const { mountB2 } = require('./lib/b2-service');
+const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
 const { evaluateLiquidity, DEFAULT_LIQUIDITY_POLICY } = require('./lib/liquidity-policy');
 const { evaluateYahooLiquidity, evaluateAlpacaLiquidity } = require('./lib/liquidity-providers');
@@ -4543,7 +4544,36 @@ app.get('/api/macro-context', requireAuth, (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Separate from seasonal context and every bot/technical decision path.
+async function getAutomaticBotContext({ strategy = 'advisory' } = {}) {
+  const now = Date.now();
+  const seasonal = computeSeasonalContext();
+  let verifiedMacro = null;
+  try { verifiedMacro = await getVerifiedMacroContext(); } catch (_) { /* normalized below */ }
+  const macroAvailable = verifiedMacro?.score?.value != null;
+  const context = buildAutomaticBotContext({
+    seasonality: { data: seasonal, asOf: seasonal.date, maxAgeMs: 24 * 60 * 60 * 1000 },
+    federalReserve: {
+      data: macroAvailable ? verifiedMacro.inputs?.fed || null : null,
+      asOf: verifiedMacro?.generatedAt, maxAgeMs: 6 * 60 * 60 * 1000,
+      reason: 'Fresh verified Federal Reserve context is unavailable.',
+    },
+    macro: {
+      data: macroAvailable ? verifiedMacro : null,
+      asOf: verifiedMacro?.generatedAt, maxAgeMs: 6 * 60 * 60 * 1000,
+      reason: 'Complete verified macro context is unavailable.',
+    },
+  }, { now });
+  return consumeAutomaticBotContext(context, { name: `${strategy}-advisory`, requiredSources: [] });
+}
+
+app.get('/api/automatic-bot-context', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await getAutomaticBotContext()); }
+  catch (_) { res.status(503).json({ error: 'Automatic bot context is temporarily unavailable.' }); }
+});
+
+// Verified observations remain read-only. The automatic-bot context publishes
+// them as advisory evidence; each strategy retains authority over every rule.
 app.get('/api/verified-macro-context', requireAuth, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json(await getVerifiedMacroContext()); }
@@ -5865,15 +5895,16 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-async function scanOptionsUniverse(userId) {
+async function scanOptionsUniverse(userId, sharedContext = null) {
+  const context = sharedContext || await getAutomaticBotContext({ userId, strategy: 'leap-options-v1' });
   const results = await mapWithConcurrency(LEAP_UNDERLYINGS, 3, async symbol => {
-    try { return await buildOptionsCandidate(userId, symbol); }
+    try { return { ...(await buildOptionsCandidate(userId, symbol)), sharedContext: context }; }
     catch (error) {
       return {
         strategy: 'leap-options-v1', symbol, direction: 'LONG_CALL', eligible: false,
         status: 'DATA UNAVAILABLE', score: 0,
         reasons: [`Required verified evidence is unavailable: ${error.message}`],
-        evidence: null, contract: null, evaluatedAt: new Date().toISOString(),
+        evidence: null, contract: null, evaluatedAt: new Date().toISOString(), sharedContext: context,
       };
     }
   });
@@ -6602,7 +6633,8 @@ async function runOptionsCycle(userId, source = 'server-scheduler') {
     if (Number.isFinite(lastScan) && Date.now() - lastScan < 6 * 60 * 60 * 1000) {
       return finish({ status: 'reconciled', reason: 'Existing LEAP lifecycles reconciled; the next fixed-universe scan is not due.' });
     }
-    const scan = await scanOptionsUniverse(userId);
+    const sharedContext = await getAutomaticBotContext({ userId, strategy: 'leap-options-v1' });
+    const scan = await scanOptionsUniverse(userId, sharedContext);
     const eligible = scan.results.filter(row => row.eligible);
     if (!eligible.length) return finish({
       status: 'no_entry', reason: 'No QQQ, TQQQ, or SOXL completed-week signal currently qualifies.',
@@ -6689,7 +6721,7 @@ setInterval(async () => {
 // small, safe maintenance response for unexpected server errors.
 const b2Service = mountB2({
   app, db, requireAuth, ensureSessionUserInTradingStore,
-  vault: credentialVault, fetch,
+  vault: credentialVault, fetch, getAutomaticBotContext,
 });
 
 app.use((error, req, res, next) => {

@@ -1,0 +1,538 @@
+UPGRADE THE SEARCH SIGNAL / TRADE SIGNAL ENGINE — DO NOT REDESIGN THE EXISTING UI
+
+The current signal logic is misleading because it can issue a BUY signal after a stock has already made a large move higher, simply because price structure, momentum, and volume are bullish.
+
+Example:
+MSTR can be up +15% in one session, trading near resistance, RSI overbought, and significantly extended from moving averages, yet the system currently says:
+BUY — 60% confidence.
+
+That is NOT acceptable.
+
+Keep the existing Qureshi Finance design, layout, cards, colors, support/resistance section, gap section, and all existing functionality. ONLY upgrade the underlying signal/entry logic.
+
+NEW CORE PRINCIPLE:
+
+Separate:
+1. TREND DIRECTION
+2. MOMENTUM
+3. ENTRY QUALITY
+4. RESISTANCE/OVERHEAD SUPPLY
+5. VOLUME CONFIRMATION
+6. EXTENSION / CHASE RISK
+7. MARKET/MACRO CONTEXT
+
+A bullish trend does NOT automatically mean BUY NOW.
+
+==================================================
+1. TREND ≠ ENTRY
+==================================================
+
+The engine must distinguish between:
+
+BULLISH TREND:
+Price structure is bullish, higher highs/higher lows, moving averages aligned bullishly, etc.
+
+BUYABLE ENTRY:
+The current price still offers a technically favorable entry.
+
+A stock can be:
+BULLISH + STRONG MOMENTUM + POOR ENTRY
+
+In that situation, DO NOT issue a high-confidence BUY.
+
+The signal must evaluate whether the current price is already extended.
+
+==================================================
+2. ADD AN "ENTRY QUALITY" ENGINE
+==================================================
+
+Calculate an Entry Quality Score independently from the Trend Score.
+
+Evaluate:
+
+- Distance from nearest support
+- Distance from nearest resistance
+- Distance from 20 SMA
+- Distance from 50 SMA
+- Distance from 200 SMA
+- ATR-based extension
+- Percentage gain today
+- Percentage gain over 3 sessions
+- Percentage gain over 5 sessions
+- RSI
+- Volume expansion
+- Relative volume
+- Distance from recent breakout level
+- Whether price has already broken out significantly
+- Whether price is retesting a breakout
+- Whether price is directly underneath resistance
+
+Do NOT allow bullish trend alone to create a BUY.
+
+==================================================
+3. PENALIZE CHASING
+==================================================
+
+Add a strong "CHASE RISK" calculation.
+
+When a stock has made an abnormal move upward in a short period, reduce BUY confidence.
+
+Examples:
+
++8% or more in one session:
+Begin reducing entry quality.
+
++12% or more:
+Significant chase-risk penalty.
+
++15% or more:
+Strong chase-risk penalty unless there is a confirmed breakout with exceptional sustained volume and adequate room to the next resistance.
+
+Also calculate:
+
+distance_from_20SMA
+distance_from_50SMA
+distance_from_200SMA
+ATR_extension
+
+If price is unusually far above these averages, the engine should recognize that the trend may be bullish while the immediate entry is poor.
+
+IMPORTANT:
+
+Do NOT automatically label the stock bearish just because it is extended.
+
+The correct interpretation is:
+
+TREND = BULLISH
+ENTRY = EXTENDED
+
+==================================================
+4. RESISTANCE MUST MATTER
+==================================================
+
+The closer price gets to meaningful resistance, the more the system should reduce immediate BUY confidence.
+
+Calculate:
+
+distance_to_resistance_percent
+
+If price is:
+
+>10% below resistance:
+Normal.
+
+5–10% below:
+Caution.
+
+2–5% below:
+Reduce entry quality.
+
+<2% below:
+Major resistance proximity penalty.
+
+At/above resistance:
+The system must determine whether this is a TRUE BREAKOUT or simply a rejection risk.
+
+Never issue a high-confidence BUY merely because price is bullish while sitting directly underneath major resistance.
+
+==================================================
+5. BREAKOUT LOGIC
+==================================================
+
+A breakout should require multiple confirmations.
+
+A TRUE BULLISH BREAKOUT requires:
+
+- Price above resistance
+- Meaningful volume expansion
+- Relative volume confirmation
+- Candle closes above resistance
+- No immediate rejection back below resistance
+- Preferably sustained trading above the breakout level
+- Adequate room toward the next resistance
+
+Do NOT classify an intraday spike above resistance as a confirmed breakout.
+
+If price briefly trades above resistance but falls back underneath it:
+
+BREAKOUT = FAILED / UNCONFIRMED
+
+and reduce BUY confidence.
+
+==================================================
+6. VOLUME LOGIC
+==================================================
+
+Volume must be interpreted correctly.
+
+High volume by itself does NOT equal BUY.
+
+Determine whether volume is:
+
+A. Confirming the move
+B. Exhaustion volume
+C. Selling/distribution volume
+D. Breakout volume
+E. Fading volume
+
+Example:
+
+Stock +15%
+Volume +100%
+Price approaching resistance
+RSI >75
+Price far above 20 SMA
+
+This should NOT automatically produce BUY.
+
+The system should recognize:
+
+STRONG MOMENTUM + HIGH VOLUME + HIGH EXTENSION = POSSIBLE EXHAUSTION / CHASE RISK
+
+Volume should increase confidence only when it confirms a technically favorable setup.
+
+==================================================
+7. RSI / OVERBOUGHT LOGIC
+==================================================
+
+Do NOT use RSI as a simplistic sell indicator.
+
+Instead:
+
+RSI 50–70:
+Healthy bullish momentum.
+
+RSI 70–75:
+Strong momentum but increasingly extended.
+
+RSI 75–80:
+Major extension penalty for NEW entries.
+
+RSI >80:
+Severe entry-extension penalty.
+
+An overbought stock can continue higher.
+
+Therefore:
+
+OVERBOUGHT ≠ BEARISH
+
+Instead:
+
+OVERBOUGHT = REDUCED NEW-ENTRY QUALITY
+
+==================================================
+8. MOVING AVERAGE EXTENSION
+==================================================
+
+Calculate percentage distance from:
+
+20 SMA
+50 SMA
+200 SMA
+
+The farther price becomes from its moving averages, the more the system should reduce immediate entry quality.
+
+Do not interpret this as bearish.
+
+Example:
+
+Price > 20 SMA > 50 SMA > 200 SMA
+
+Trend = bullish.
+
+But if price is dramatically extended above 20 SMA:
+
+Entry quality = reduced.
+
+==================================================
+9. SUPPORT / RESISTANCE QUALITY
+==================================================
+
+Do NOT invent precise-looking levels without explaining their source.
+
+Every support/resistance level must have a methodology.
+
+Possible sources:
+
+- Recent swing highs/lows
+- Major pivots
+- Previous breakout levels
+- High-volume price areas
+- Moving averages
+- Previous daily highs/lows
+- Significant gap boundaries
+- Multi-touch levels
+
+Store the source/type of each level.
+
+Example:
+
+$161.73
+Resistance
+Source: previous swing high + volume structure
+
+NOT simply:
+
+$161.73 Resistance
+
+if the system cannot explain where it came from.
+
+==================================================
+10. GAP LOGIC
+==================================================
+
+Only call something an "OPEN DAILY PRICE GAP" if it is actually an unfilled historical gap based on the underlying OHLC data.
+
+For every gap calculate:
+
+- Gap range
+- Gap date
+- Direction
+- Distance from current price
+- Historical fill rate
+- Sample size
+
+Do not display a fill percentage unless it was actually calculated from historical data.
+
+Always display:
+
+"Historical fill rate — not a prediction"
+
+Do not treat gap-fill probability as a guaranteed future outcome.
+
+==================================================
+11. CONFIDENCE SCORE
+==================================================
+
+The current 60% BUY confidence is too easy to generate.
+
+Confidence must represent the quality of the CURRENT SETUP, not simply how bullish the trend is.
+
+Example:
+
+TREND SCORE = 90/100
+MOMENTUM SCORE = 95/100
+ENTRY QUALITY = 45/100
+CHASE RISK = HIGH
+RESISTANCE PROXIMITY = HIGH
+
+Final signal should NOT be 90% BUY.
+
+It should reflect the poor entry.
+
+Use weighted scoring:
+
+Trend: 25%
+Momentum: 15%
+Volume: 15%
+Entry Quality: 20%
+Support/Resistance: 10%
+Extension/Chase Risk: 10%
+Market/Macro Context: 5%
+
+The final confidence must be mathematically derived from these components.
+
+==================================================
+12. ADD SIGNAL STATES
+==================================================
+
+Use these states:
+
+STRONG BUY
+BUY
+BULLISH — EXTENDED
+BREAKOUT WATCH
+NEUTRAL
+BEARISH
+STRONG SELL
+
+Most importantly:
+
+"BULLISH — EXTENDED"
+
+should be available when:
+
+- Overall trend is bullish
+- Momentum is strong
+- But price is too extended for a favorable new entry
+
+This is preferable to falsely calling the stock a BUY.
+
+Example:
+
+MSTR
+BULLISH — EXTENDED
+Trend: Bullish
+Momentum: Strong
+Volume: Confirming
+Entry Quality: Low
+Chase Risk: High
+Resistance: $161.73
+Current Price: $152.76
+
+This tells the user what is actually happening.
+
+==================================================
+13. DO NOT HIDE THE REASON
+==================================================
+
+Every signal must explain BOTH sides.
+
+Example:
+
+"Bullish trend and strong volume support upside, but price is extended +15% today and is approaching major resistance. Immediate entry quality is reduced."
+
+Do not only show:
+
+"Price structure and volume direction support buyers."
+
+That is incomplete and misleading.
+
+==================================================
+14. MACRO / MARKET CONTEXT
+==================================================
+
+Preserve the existing macro engine.
+
+Continue considering:
+
+- SPY
+- QQQ
+- BTC when relevant
+- VIX
+- Treasury yields
+- Fed expectations
+- Inflation
+- Oil
+- Geopolitical risk
+- Major economic events
+
+If the broader market is bearish/risk-off, this must reduce confidence in individual long setups.
+
+A stock can remain technically bullish while having elevated market risk.
+
+==================================================
+15. NEVER OVERRIDE MARKET STRUCTURE JUST BECAUSE OF MOMENTUM
+==================================================
+
+Do NOT use language implying:
+
+"Strong momentum = BUY"
+
+Instead:
+
+"Strong momentum supports the trend, but entry quality depends on location."
+
+This distinction is mandatory throughout the signal engine.
+
+==================================================
+16. ADD A SIGNAL AUDIT PANEL TO THE EXISTING SIGNAL DATA
+==================================================
+
+Keep it compact.
+
+Show:
+
+TREND
+MOMENTUM
+VOLUME
+ENTRY QUALITY
+RESISTANCE DISTANCE
+SUPPORT DISTANCE
+RSI
+20 SMA DISTANCE
+50 SMA DISTANCE
+200 SMA DISTANCE
+CHASE RISK
+BREAKOUT STATUS
+MARKET CONTEXT
+
+Then calculate the final signal.
+
+==================================================
+17. IMPORTANT EDGE CASE
+==================================================
+
+For a stock that is:
+
++10–20% today
+High relative volume
+RSI >75
+Far above 20 SMA
+Near major resistance
+
+The system should generally NOT output a high-confidence immediate BUY unless there is clear confirmed breakout structure with sustained volume and sufficient upside room.
+
+Instead output:
+
+BULLISH — EXTENDED
+
+or
+
+BREAKOUT WATCH
+
+depending on the exact structure.
+
+==================================================
+18. DO NOT CHANGE THE UI DESIGN
+==================================================
+
+This is a LOGIC upgrade.
+
+Do not redesign the page.
+
+Do not remove:
+
+- Search
+- Signal card
+- Support & Resistance
+- Open Daily Price Gaps
+- Existing market information
+- Existing chart
+- Existing functionality
+
+Do not change the overall visual identity.
+
+Only add the necessary data fields if required to communicate the improved signal logic.
+
+==================================================
+19. DATA INTEGRITY
+==================================================
+
+Never fabricate:
+
+- Support
+- Resistance
+- Volume
+- RSI
+- Moving averages
+- Gap statistics
+- Historical fill rates
+- Breakout status
+- Market data
+- Macro data
+
+If a calculation cannot be reliably performed from available data, explicitly mark that specific metric as unavailable rather than inventing a value.
+
+Do NOT make up precision.
+
+==================================================
+FINAL OBJECTIVE
+==================================================
+
+The purpose of this upgrade is to prevent Qureshi Finance from telling users to BUY a stock simply because it is already pumping.
+
+The engine must answer two separate questions:
+
+"Is this asset bullish?"
+
+AND
+
+"Is NOW a technically favorable place to enter?"
+
+Those are NOT the same question.
+
+A stock can be extremely bullish and still be a bad immediate entry because it is extended, overbought, approaching resistance, or experiencing potential exhaustion.
+
+Implement this logic without breaking any existing functionality.

@@ -196,3 +196,115 @@ test('preserves an explicit WAIT verdict without market or sector directional pe
   assert.equal(result.confidenceBreakdown.marketAlignment, 0);
   assert.equal(result.confidenceBreakdown.sectorAlignment, 0);
 });
+
+test('recomputes the requested weighted audit with verified macro pressure', () => {
+  const weights = {
+    trend: 0.25,
+    momentum: 0.15,
+    volume: 0.15,
+    entryQuality: 0.20,
+    supportResistance: 0.10,
+    extensionChase: 0.10,
+    marketMacro: 0.05,
+  };
+  const parts = {
+    trend: 80,
+    momentum: 80,
+    volume: 80,
+    entryQuality: 80,
+    supportResistance: 80,
+    extensionChase: 80,
+    marketMacro: 50,
+  };
+  const result = applySearchMarketRegime({
+    searchSignal: {
+      ...bullishSignal,
+      confidence: 78,
+      confidenceBreakdown: { weights, parts },
+    },
+    spyRegime: { available: false, regime: 'UNAVAILABLE', direction: null },
+    sector: { label: 'UNAVAILABLE', direction: null },
+    relativeStrength: { label: 'UNAVAILABLE', score: 0 },
+    macroPressure: [
+      { key: 'rates', state: 'BEARISH' },
+      { key: 'risk', state: 'BEARISH' },
+    ],
+  });
+  assert.equal(result.confidenceBreakdown.parts.marketMacro, 34);
+  assert.equal(result.confidence, 78);
+  assert.equal(result.dataQuality.macroContextAvailable, true);
+});
+
+test('orients the same verified macro evidence to bullish and bearish signals correctly', () => {
+  const weights = {
+    trend: 0.25,
+    momentum: 0.15,
+    volume: 0.15,
+    entryQuality: 0.20,
+    supportResistance: 0.10,
+    extensionChase: 0.10,
+    marketMacro: 0.05,
+  };
+  const parts = Object.fromEntries(Object.keys(weights).map(key => [key, 80]));
+  const common = {
+    spyRegime: { available: false, regime: 'UNAVAILABLE', direction: null },
+    sector: { label: 'UNAVAILABLE', direction: null },
+    relativeStrength: { label: 'UNAVAILABLE', score: 0 },
+  };
+  const bearishAligned = applySearchMarketRegime({
+    ...common,
+    searchSignal: {
+      ...bullishSignal,
+      signal: { label: 'SELL', direction: 'BEARISH', stage: 'CONFIRMED' },
+      confidenceBreakdown: { weights, parts },
+    },
+    macroPressure: [{ state: 'BEARISH' }],
+  });
+  const bearishConflicted = applySearchMarketRegime({
+    ...common,
+    searchSignal: {
+      ...bullishSignal,
+      signal: { label: 'SELL', direction: 'BEARISH', stage: 'CONFIRMED' },
+      confidenceBreakdown: { weights, parts },
+    },
+    macroPressure: [{ state: 'BULLISH' }],
+  });
+  assert.equal(bearishAligned.confidenceBreakdown.parts.marketMacro, 58);
+  assert.equal(bearishConflicted.confidenceBreakdown.parts.marketMacro, 42);
+  assert(bearishAligned.confidence > bearishConflicted.confidence);
+});
+
+test('keeps the market macro component at zero when every context source is unavailable', () => {
+  const weights = {
+    trend: 0.25,
+    momentum: 0.15,
+    volume: 0.15,
+    entryQuality: 0.20,
+    supportResistance: 0.10,
+    extensionChase: 0.10,
+    marketMacro: 0.05,
+  };
+  const parts = {
+    trend: 80,
+    momentum: 80,
+    volume: 80,
+    entryQuality: 80,
+    supportResistance: 80,
+    extensionChase: 80,
+    marketMacro: 0,
+  };
+  const result = applySearchMarketRegime({
+    searchSignal: {
+      ...bullishSignal,
+      confidence: 76,
+      confidenceBreakdown: { weights, parts },
+    },
+    spyRegime: { available: false, regime: 'UNAVAILABLE', direction: null },
+    sector: { label: 'UNAVAILABLE', direction: null },
+    relativeStrength: { label: 'UNAVAILABLE', score: 0 },
+    macroPressure: [],
+  });
+  assert.equal(result.confidenceBreakdown.parts.marketMacro, 0);
+  assert.equal(result.confidence, 76);
+  assert.equal(result.dataQuality.macroContextAvailable, false);
+});

@@ -311,9 +311,12 @@ const gamePlan = (() => {
       : newsImpact.freshCatalystCount
         ? 'Recent headlines were not confirmed by matching price and volume'
         : 'No directional catalyst found in the last 24h';
+    const trendBias = signal.entryQuality?.trendBias;
     const direction = signal.signal?.direction === 'BEARISH'
       ? 'BEARISH'
-      : signal.signal?.direction === 'BULLISH' ? 'BULLISH' : 'NEUTRAL';
+      : signal.signal?.direction === 'BULLISH' ? 'BULLISH'
+        : trendBias === 'BULLISH' ? 'BULLISH'
+          : trendBias === 'BEARISH' ? 'BEARISH' : 'NEUTRAL';
     const signalClass = direction === 'BEARISH' ? 'bear' : direction === 'BULLISH' ? 'bull' : 'neut';
     const structureText = direction === 'BULLISH'
       ? (signal.structure?.higherLows ? 'Higher lows are developing' : 'Price and volume favor buyers')
@@ -334,6 +337,25 @@ const gamePlan = (() => {
         : direction === 'BEARISH'
           ? `${activeLevel.broken ? 'Trading below' : 'Testing'} support at $${fmt(activeLevel.price)}`
           : 'No directional level is active';
+    const entry = signal.entryQuality || {};
+    const audit = signal.confidenceBreakdown?.parts || {};
+    const pct = value => value == null ? 'Unavailable' : `${value >= 0 ? '+' : ''}${fmt(value, 1)}%`;
+    const auditItem = (label, value, note = '') => `<div class="gp-evidence-item"><span>${esc(label)}</span><b>${esc(value)}</b>${note ? `<small>${esc(note)}</small>` : ''}</div>`;
+    const signalAudit = `<div class="gp-evidence-reasons"><span>SIGNAL AUDIT · ${esc(signal.signal?.state || signal.signal?.label || 'NEUTRAL')}</span></div>
+      <div class="gp-evidence-grid">
+        ${auditItem('Trend', entry.trendBias || 'Unavailable', audit.trend == null ? 'Score unavailable' : `${fmt(audit.trend, 0)}/100`)}
+        ${auditItem('Momentum', audit.momentum == null ? 'Unavailable' : `${fmt(audit.momentum, 0)}/100`, entry.rsi == null ? 'RSI unavailable' : `RSI ${fmt(entry.rsi, 1)}`)}
+        ${auditItem('Volume', audit.volume == null ? 'Unavailable' : `${fmt(audit.volume, 0)}/100`, entry.exhaustionRisk ? 'Possible exhaustion volume' : 'Evaluated with entry location')}
+        ${auditItem('Entry quality', entry.score == null ? 'Unavailable' : `${fmt(entry.score, 0)}/100`, entry.entryAllowed ? 'Immediate entry allowed' : 'Immediate entry not confirmed')}
+        ${auditItem('Resistance distance', pct(entry.distanceToResistancePct))}
+        ${auditItem('Support distance', pct(entry.distanceToSupportPct))}
+        ${auditItem('20 SMA distance', pct(entry.distanceFromSma20Pct))}
+        ${auditItem('50 SMA distance', pct(entry.distanceFromSma50Pct))}
+        ${auditItem('200 SMA distance', pct(entry.distanceFromSma200Pct))}
+        ${auditItem('Chase risk', entry.chaseRiskLabel || 'Unavailable', entry.chaseRisk == null ? '' : `${fmt(entry.chaseRisk, 0)}/100`)}
+        ${auditItem('Breakout status', entry.breakoutState || 'Unavailable')}
+        ${auditItem('Market context', quality.macroContextAvailable === false ? 'Unavailable' : signal.marketContext?.spy?.regime || 'Unavailable', quality.macroContextAvailable === false || audit.marketMacro == null ? 'Macro score unavailable' : `${fmt(audit.marketMacro, 0)}/100 macro component`)}
+      </div>`;
     return `<section class="gp-evidence ${signalClass}">
       <div class="gp-evidence-head">
         <div>
@@ -383,6 +405,7 @@ const gamePlan = (() => {
           <small>${esc(fibonacci.available ? fibonacci.setup : fibonacci.reason || 'No completed swing available')}</small>
         </div>
       </div>
+      ${signalAudit}
       ${quality.missing?.length ? `<div class="gp-engine-notrade">PROVISIONAL — confidence capped: ${quality.missing.map(esc).join(' · ')}</div>` : ''}
       <div class="gp-evidence-reasons"><span>Evidence details</span><ul>${reasons}</ul></div>
     </section>`;
@@ -631,8 +654,9 @@ const gamePlan = (() => {
     };
 
     // Header badge
-    const verdict = searchSignal?.signal?.label || 'UNAVAILABLE';
+    const verdict = searchSignal?.signal?.state || searchSignal?.signal?.label || 'UNAVAILABLE';
     const direction = searchSignal?.signal?.direction
+      || searchSignal?.entryQuality?.trendBias
       || (verdict.includes('SELL') ? 'BEARISH' : verdict.includes('BUY') ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);

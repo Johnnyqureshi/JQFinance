@@ -99,6 +99,10 @@ function build({
   news = [],
   dayChangePct = null,
   fibonacci = null,
+  dailyBars = [],
+  relativeDailyVolume = null,
+  dayRangePosition = null,
+  macroPressure = [],
 } = {}) {
   return buildSearchVolumeSignal({
     price,
@@ -110,6 +114,10 @@ function build({
     market,
     news,
     dayChangePct,
+    relativeDailyVolume,
+    dayRangePosition,
+    dailyBars,
+    macroPressure,
     nowMs,
     timezone: 'UTC',
     freshness,
@@ -199,8 +207,21 @@ test('requires a level break, volume expansion, and follow-through for confirmat
   const result = build({
     levels: {
       support: [{ price: 99 }],
-      resistance: [{ price: 101.5 }],
+      resistance: [{ price: 101.5 }, { price: 110 }],
     },
+    dayChangePct: 2,
+    dayRangePosition: 0.65,
+    dailyBars: [96, 97, 98, 99, 100].map(c => ({ c })),
+    indicators: {
+      rsi14: 62,
+      vwap: 101,
+      sma20: 99,
+      sma50: 96,
+      sma200: 90,
+      atr: 2,
+      macd: { value: 1.2, signal: 0.8 },
+    },
+    macroPressure: [{ key: 'market', state: 'BULLISH' }],
   });
   assert.strictEqual(result.signal.label, 'BUY');
   assert.strictEqual(result.signal.setup, 'BREAKOUT CONFIRMED');
@@ -280,12 +301,49 @@ test('uses the documented weighted confidence and keeps it bounded', () => {
   const totalWeight = Object.values(result.weights).reduce((sum, value) => sum + value, 0);
   assert.strictEqual(+totalWeight.toFixed(2), 1);
   assert(result.confidence >= 0 && result.confidence <= 100);
-  assert.strictEqual(result.weights.volumeFlow, 0.25);
-  assert.strictEqual(result.weights.structureMomentum, 0.25);
-  assert.strictEqual(result.weights.supportResistance, 0.20);
-  assert.strictEqual(result.weights.trend, 0.15);
-  assert.strictEqual(result.weights.rsi, 0.10);
-  assert.strictEqual(result.weights.other, 0.05);
+  assert.strictEqual(result.weights.trend, 0.25);
+  assert.strictEqual(result.weights.momentum, 0.15);
+  assert.strictEqual(result.weights.volume, 0.15);
+  assert.strictEqual(result.weights.entryQuality, 0.20);
+  assert.strictEqual(result.weights.supportResistance, 0.10);
+  assert.strictEqual(result.weights.extensionChase, 0.10);
+  assert.strictEqual(result.weights.marketMacro, 0.05);
+});
+
+test('classifies a MSTR-style +15% overbought extension near resistance as bullish but not buyable', () => {
+  const result = build({
+    price: 102.2,
+    dayChangePct: 15,
+    relativeDailyVolume: 2.2,
+    dayRangePosition: 0.92,
+    dailyBars: [80, 84, 89, 95, 100].map(c => ({ c })),
+    levels: {
+      support: [{ price: 95, label: 'Completed-session support' }],
+      resistance: [{ price: 103, label: 'Multi-touch resistance' }],
+    },
+    indicators: {
+      rsi14: 79,
+      vwap: 98,
+      sma20: 92,
+      sma50: 82,
+      sma200: 60,
+      atr: 2,
+      macd: { value: 1.5, signal: 0.8 },
+    },
+    macroPressure: [
+      { key: 'rates', state: 'BEARISH' },
+      { key: 'risk', state: 'BEARISH' },
+    ],
+  });
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.state, 'BULLISH — EXTENDED');
+  assert.equal(result.entryQuality.trendBias, 'BULLISH');
+  assert.equal(result.entryQuality.entryAllowed, false);
+  assert.equal(result.entryQuality.chaseRiskLabel, 'HIGH');
+  assert(result.entryQuality.score < 50);
+  assert(result.confidence < 60);
+  assert(result.reasons.some(reason => /Bullish trend and momentum remain intact/i.test(reason)));
+  assert(result.confidenceBreakdown.parts.marketMacro < 50);
 });
 
 test('lets Fibonacci add bounded confluence without confirming a trade', () => {
@@ -420,7 +478,19 @@ test('weights late-breaking positive news only when price and volume corroborate
     current,
     price: 100,
     market: { trend: 'NEUTRAL' },
-    indicators: { rsi14: 50, vwap: 100, macd: { value: 0, signal: 0 } },
+    indicators: {
+      rsi14: 50,
+      vwap: 100,
+      sma20: 99,
+      sma50: 96,
+      sma200: 90,
+      atr: 2,
+      macd: { value: 0, signal: 0 },
+    },
+    dayChangePct: 1,
+    dayRangePosition: 0.5,
+    dailyBars: [96, 97, 98, 99, 99.5].map(c => ({ c })),
+    macroPressure: [{ key: 'market', state: 'NEUTRAL' }],
     news: [{
       headline: 'Company beats estimates and raises guidance after record revenue',
       publishedAt: '2026-01-05T09:45:00.000Z',
@@ -430,6 +500,79 @@ test('weights late-breaking positive news only when price and volume corroborate
   assert(result.newsImpact.bullishScore > result.newsImpact.bearishScore);
   assert.strictEqual(result.newsImpact.freshCatalystCount, 1);
   assert.strictEqual(result.newsImpact.appliedDirection, 'BULLISH');
+});
+
+test('does not let breakout confirmation bypass severe extension and chase controls', () => {
+  const result = build({
+    levels: {
+      support: [{ price: 99 }],
+      resistance: [{ price: 101.5 }, { price: 112 }],
+    },
+    dayChangePct: 15,
+    dayRangePosition: 0.95,
+    dailyBars: [82, 86, 91, 96, 100].map(c => ({ c })),
+    relativeDailyVolume: 2.5,
+    indicators: {
+      rsi14: 82,
+      vwap: 98,
+      sma20: 88,
+      sma50: 78,
+      sma200: 55,
+      atr: 2,
+      macd: { value: 2, signal: 1 },
+    },
+    macroPressure: [{ key: 'market', state: 'BULLISH' }],
+  });
+  assert.equal(result.signal.setup, 'BREAKOUT CONFIRMED');
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.state, 'BULLISH — EXTENDED');
+  assert.equal(result.entryQuality.entryAllowed, false);
+  assert(result.entryQuality.chaseRisk >= 50);
+});
+
+test('keeps a confirmed breakout on watch when measured upside room and risk reward are insufficient', () => {
+  const result = build({
+    levels: {
+      support: [{ price: 99 }],
+      resistance: [{ price: 101.5 }, { price: 103.7 }],
+    },
+    dayChangePct: 2,
+    dayRangePosition: 0.7,
+    dailyBars: [96, 97, 98, 99, 100].map(c => ({ c })),
+    indicators: {
+      rsi14: 62,
+      vwap: 101,
+      sma20: 99,
+      sma50: 96,
+      sma200: 90,
+      atr: 2,
+      macd: { value: 1.2, signal: 0.8 },
+    },
+    macroPressure: [{ key: 'market', state: 'BULLISH' }],
+  });
+  assert.equal(result.signal.setup, 'BREAKOUT CONFIRMED');
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.state, 'BREAKOUT WATCH');
+  assert.equal(result.entryQuality.entryAllowed, false);
+  assert(result.entryQuality.distanceToResistancePct < 2);
+  assert(result.entryQuality.riskRewardToFirstResistance < 1.5);
+});
+
+test('scores missing entry inputs as unavailable instead of favorable evidence', () => {
+  const result = build({
+    indicators: { rsi14: 62, vwap: 101 },
+    dayChangePct: null,
+    dailyBars: [],
+    dayRangePosition: null,
+    macroPressure: [],
+  });
+  assert.equal(result.confidenceBreakdown.parts.trend, 0);
+  assert.equal(result.confidenceBreakdown.parts.entryQuality, 0);
+  assert.equal(result.confidenceBreakdown.parts.extensionChase, 0);
+  assert.equal(result.confidenceBreakdown.parts.marketMacro, 0);
+  assert.equal(result.entryQuality.score, null);
+  assert(result.dataQuality.missing.includes('20 SMA'));
+  assert(result.dataQuality.missing.includes('Verified market/macro pressure'));
 });
 
 test('classifies confirmed HH and HL pivots as bullish structure', () => {

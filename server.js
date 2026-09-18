@@ -714,6 +714,14 @@ const SEARCH_MACRO_SYMBOLS = {
   usd: 'DX-Y.NYB',
   bitcoin: 'BTC-USD',
 };
+let _latestSearchMacroIndicators = null;
+const SEARCH_MACRO_SIGNAL_MAX_AGE_MS = 15 * 60 * 1000;
+
+function cachedSearchMacroIndicators(nowMs = Date.now()) {
+  if (!_latestSearchMacroIndicators
+    || nowMs - _latestSearchMacroIndicators.at > SEARCH_MACRO_SIGNAL_MAX_AGE_MS) return {};
+  return _latestSearchMacroIndicators.indicators || {};
+}
 
 function normalizeIntelligenceQuote(key, quote, generatedAt) {
   if (!quote || !Number.isFinite(Number(quote.regularMarketPrice))) return null;
@@ -745,6 +753,7 @@ async function fetchSearchMacroIndicators() {
     for (const [key, symbol] of Object.entries(SEARCH_MACRO_SYMBOLS)) {
       indicators[key] = normalizeIntelligenceQuote(key, bySymbol.get(symbol), generatedAt);
     }
+    _latestSearchMacroIndicators = { at: Date.now(), indicators };
     return { indicators, status: 'live', updatedAt: generatedAt, source: 'Yahoo Finance' };
   } catch (error) {
     return {
@@ -2943,6 +2952,17 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       currentPrice: price,
     });
     const smartMoney = smartMoneyMaps['1D'];
+    // Reuse already-fetched SPY/QQQ observations so macro context modifies
+    // entry confidence without putting the independent macro feed on the
+    // latency-critical Game Plan path. Missing inputs remain unavailable.
+    const macroPressure = buildMacroPressure({
+      ...cachedSearchMacroIndicators(generationNow),
+      spy: { changePct: mkt.SPY },
+      qqq: { changePct: mkt.QQQ },
+    }, {
+      symbol: sym,
+      sector: profile?.assetProfile?.sector || null,
+    });
 
     // Technical probability / confluence engine. This is deterministic and uses
     // only the supplied price, volume, and market-context observations. It never
@@ -3019,6 +3039,8 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       freshness: cryptoSymbol ? { fiveMinute: cryptoFiveMinuteFreshness } : sourceFreshness,
       patternAnalysis,
       fibonacci,
+      dailyBars: searchLevelAnalysis.completedBars,
+      macroPressure,
       sessionMode: cryptoSymbol ? 'continuous' : 'regular',
       assetClass: cryptoSymbol ? 'crypto' : 'stock',
       // The current aggregate crypto bars do not distinguish organic spot
@@ -3074,6 +3096,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       relativeStrength: marketContext.relativeStrength,
       sensitivity: marketContext.sensitivity,
       volatility,
+      macroPressure,
     });
     if (volatility) {
       volatility.confidenceAdjustment = {

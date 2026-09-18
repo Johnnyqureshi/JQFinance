@@ -18,6 +18,7 @@
 - [Search Smart Money maps](search-smart-money-maps.md) — supporting zones use canonical completed periods and deterministic multi-timeframe confluence; they never become a second verdict.
 - [Custom-domain TLS routing](custom-domain-tls-routing.md) — keep the apex behind Cloudflare’s active Universal SSL while preserving the verified Replit origin.
 - [Search volatility intelligence](search-volatility-intelligence.md) — volatility is feature-flagged, provenance-aware context; stale or incomplete inputs have zero influence and never create a verdict.
+- [Search entry-quality gating](search-entry-quality-gating.md) — strong trend or breakout confirmation never overrides measured chase risk, entry location, or missing-input safeguards.
 - [RRG-style sector context](rrg-style-sector-context.md) — derived rotation context is read-only and clearly labeled; never claim official RRG data or let it drive trades.
 - [Retiring monolithic strategies](retiring-monolithic-strategies.md) — disable legacy API and schema paths before deleting local strategy storage; preserve broker state by avoiding broker mutations.
 - [B2 broker protection constraints](b2-broker-protection.md) — daily confirmation and GTC protection are deliberate; OTO child replacement/partial fills need broker-specific handling.

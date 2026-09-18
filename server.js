@@ -3357,7 +3357,7 @@ function decryptStoredAlpacaCredentials(row, table, whereClause, whereValues) {
   } catch (error) {
     // Do not leak ciphertext, key material, or a broker response. A corrupt
     // record fails closed and requires a fresh authenticated connection.
-    console.warn(`[Alpaca] Stored ${table} credential is unavailable: ${error.message}`);
+    console.warn(`[Alpaca] Stored ${table} credential is unavailable; reconnect the account before trading.`);
     return null;
   }
 }
@@ -3425,11 +3425,11 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     const isGet = !opts.method || opts.method === 'GET';
     if (isGet && _attempt < MAX_ATTEMPTS - 1) {
       const delay = Math.min(1000 * 2 ** _attempt, 8000);
-      console.warn(`[AT] Alpaca network error on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms: ${netErr.message}`);
+      console.warn(`[AT] Alpaca network failure on ${path} (attempt ${_attempt + 1}/${MAX_ATTEMPTS}) — retrying in ${delay}ms`);
       await new Promise(res => setTimeout(res, delay));
       return alpacaFetchWithCredentials(creds, path, opts, _attempt + 1);
     }
-    const error = new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}: ${netErr.message}`);
+    const error = new Error(`Alpaca unreachable${isGet ? ` after ${MAX_ATTEMPTS} attempts` : ''}.`);
     error.alpacaTransient = true;
     throw error;
   }
@@ -3457,7 +3457,10 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     throw error;
   }
   if (!r.ok) {
-    const error = new Error(data.message || `Alpaca error (${r.status})`);
+    // Upstream error bodies are not trusted: brokers and proxies can echo
+    // request material. Keep the message fixed so credentials never reach
+    // an API response or the application error log.
+    const error = new Error(`Alpaca request failed (HTTP ${r.status}).`);
     error.alpacaStatus = r.status;
     error.alpacaTransient = r.status === 429 || r.status >= 500;
     throw error;

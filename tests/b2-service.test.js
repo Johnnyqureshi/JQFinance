@@ -209,6 +209,56 @@ test('dedicated encrypted credentials automatically enable Paper without credent
   } finally { f.close(); }
 });
 
+test('legacy B2 plaintext credentials migrate before broker use and disconnect clears them', async () => {
+  const f = fixture();
+  const legacyKey = 'legacy-paper-api-key';
+  const legacySecret = 'legacy-paper-api-secret';
+  try {
+    f.db.prepare(`INSERT INTO b2_credentials(user_id,mode,account_id,api_key,api_secret)
+      VALUES (1,'paper','legacy-account',?,?)`).run(legacyKey, legacySecret);
+    f.db.prepare(`INSERT INTO broker_account_owners(account_id,user_id,scope,mode)
+      VALUES ('legacy-account',1,'b2','paper')`).run();
+
+    const status = f.service.status(1);
+    assert.equal(status.connected, true);
+    assert.equal(status.accountId, 'legacy-account');
+    assert.equal(JSON.stringify(status).includes(legacyKey), false);
+    assert.equal(JSON.stringify(status).includes(legacySecret), false);
+
+    const stored = f.db.prepare('SELECT api_key,api_secret FROM b2_credentials WHERE user_id=1 AND mode=?').get('paper');
+    assert(stored.api_key.startsWith('enc:v1:'));
+    assert(stored.api_secret.startsWith('enc:v1:'));
+    assert.notEqual(stored.api_key, legacyKey);
+    assert.notEqual(stored.api_secret, legacySecret);
+
+    await f.service.scan(1);
+    assert.equal(f.world.calls[0].key, legacyKey);
+    await f.service.disconnect(1);
+    assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM b2_credentials WHERE user_id=1').get().count, 0);
+    assert.equal(f.service.status(1).connected, false);
+  } finally { f.close(); }
+});
+
+test('broker failures do not write credential material to operational logs', async () => {
+  const f = fixture();
+  const secret = 'secret-that-must-never-be-logged';
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  let output = '';
+  console.warn = (...args) => { output += args.join(' '); };
+  console.error = (...args) => { output += args.join(' '); };
+  try {
+    await f.connect(1, 'paper-log-key', 'paper');
+    f.world.fail = () => { throw new Error(`upstream echoed ${secret}`); };
+    await assert.rejects(f.service.scan(1), /Broker connection or response failed/);
+    assert.equal(output.includes(secret), false);
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    f.close();
+  }
+});
+
 test('quarantine rejects connection and blocks existing authorization', async () => {
   const f = fixture();
   try {

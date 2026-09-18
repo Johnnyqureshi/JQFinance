@@ -5,7 +5,7 @@ channel = "stable-25_05"
 packages = ["cargo", "glibcLocales", "iana-etc", "libiconv", "libxcrypt", "openssl", "pkg-config", "postgresql", "rustc"]
 
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "vm"
 run = ["node", "server.js"]
 
 [workflows]

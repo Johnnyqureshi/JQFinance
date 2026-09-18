@@ -152,8 +152,13 @@ async function main() {
     await fs.writeFile(path.join(os.tmpdir(), 'b2-ui-mobile.png'), Buffer.from(mobile.data, 'base64'));
     await js(`document.querySelector('#b2LiveConnect').click()`);
     assert.equal(await js(`document.querySelector('#b2Modal').getBoundingClientRect().width <= 390`), true);
+    await call('Emulation.setDeviceMetricsOverride', { width: 1366, height: 620, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await js(`document.querySelector('#b2Submit').getBoundingClientRect().bottom <= window.innerHeight`), true);
+    assert.equal(await js(`document.querySelector('#b2Submit').getBoundingClientRect().top >= 0`), true);
+    assert.equal(await js(`getComputedStyle(document.querySelector('#b2Submit')).display !== 'none'`), true);
+    assert.equal(await js(`document.querySelector('.b2-modal-scroll').scrollHeight >= document.querySelector('.b2-modal-scroll').clientHeight`), true);
     assert.deepEqual(exceptions, []);
-    console.log('PASS B2 UI: size-only settings, automatic Paper, explicit Live consent, saved account selection, safety pause/resume, no manual scans, desktop/mobile. All B2 broker calls mocked.');
+    console.log('PASS B2 UI: size-only settings, automatic Paper, explicit Live consent, saved account selection, safety pause/resume, no manual scans, desktop/mobile, short-height visible connect action. All B2 broker calls mocked.');
   } finally {
     ws?.close();
     chrome.kill('SIGTERM');

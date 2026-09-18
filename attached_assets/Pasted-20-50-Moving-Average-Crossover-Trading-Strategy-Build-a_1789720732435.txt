@@ -1,0 +1,212 @@
+20/50 Moving Average Crossover Trading Strategy
+
+Build a fully automated stock-scanning and trading strategy based on the 20-day moving average (20MA) and 50-day moving average (50MA).
+
+Core Trading Signal
+
+Use the 20-day moving average as the FAST moving average and the 50-day moving average as the SLOW moving average.
+
+BUY / LONG SIGNAL
+
+Generate a BUY / LONG signal only when:
+
+* The 20MA crosses ABOVE the 50MA.
+* This must be an actual crossover event, meaning the previous relationship was:
+    * Previous 20MA <= Previous 50MA
+    * Current 20MA > Current 50MA
+* Do NOT generate repeated buy signals simply because the 20MA remains above the 50MA.
+* Once a position is entered, do not open another position from the same crossover unless the position has been completely exited and a new valid crossover occurs.
+
+EXIT SIGNAL
+
+Generate an EXIT / SELL signal when:
+
+* The 20MA crosses BELOW the 50MA.
+* This must be an actual crossover event:
+    * Previous 20MA >= Previous 50MA
+    * Current 20MA < Current 50MA
+
+When this occurs, immediately close the associated long position.
+
+MARKET / STOCK FILTERS
+
+Do NOT trade every crossover.
+
+Only consider stocks that satisfy ALL of the following conditions:
+
+1. Price: $1.00–$20.00
+2. Relative Volume: >= 2.0x normal volume
+3. Daily Performance: Stock is already up at least +10% on the trading day
+4. Trend: The stock must demonstrate a clear directional trend.
+5. Volume: High volume must support the move.
+6. Liquidity: Avoid securities with extremely poor liquidity, extremely wide bid/ask spreads, or insufficient trading volume to execute reliably.
+7. Choppy Market Filter: Do NOT enter trades when price action is sideways, whipsawing, or repeatedly crossing the 20MA and 50MA without establishing a directional trend.
+
+TREND QUALITY FILTER
+
+The bot must distinguish a genuine trend from a choppy environment.
+
+Prefer stocks where:
+
+* 20MA is beginning to slope upward after the bullish crossover.
+* 50MA is flat-to-rising rather than sharply declining.
+* Price is trading above the 20MA and 50MA.
+* Volume is substantially elevated.
+* Price action is making higher highs and higher lows.
+* The crossover is supported by strong price momentum rather than occurring during sideways consolidation.
+
+Reject setups where:
+
+* 20MA and 50MA repeatedly cross back and forth.
+* Price is oscillating around both moving averages.
+* Volume is weak.
+* The stock is trading sideways.
+* The crossover occurs without meaningful price expansion.
+* The stock has an extremely wide bid/ask spread or insufficient liquidity.
+
+STOCK UNIVERSE
+
+The scanner must scan the ENTIRE universe of tradable securities available through Alpaca, rather than scanning only a predefined watchlist or a small list of popular stocks.
+
+The universe must include:
+
+* All eligible U.S. stocks available through Alpaca.
+* ETFs.
+* Leveraged ETFs.
+* Inverse leveraged ETFs.
+* Other eligible exchange-traded securities supported by the Alpaca account/API.
+
+Do NOT hard-code a small ticker list.
+
+Refresh the Alpaca asset universe so newly available securities can be considered.
+
+Before submitting an order, verify that the security is:
+
+* Tradable.
+* Active.
+* Not halted.
+* Supported by the account.
+* Has sufficient real-time market data.
+* Meets all strategy filters.
+
+SETUP PRIORITIZATION
+
+If multiple securities produce valid signals simultaneously, rank candidates by:
+
+1. Relative volume
+2. Daily percentage gain
+3. Trend strength
+4. Volume confirmation
+5. Quality of the 20MA/50MA crossover
+6. Liquidity / execution quality
+
+Do not enter every qualifying stock indiscriminately if doing so would exceed the portfolio’s risk limits.
+
+STOP LOSS
+
+Every newly opened position must have a 5% stop loss.
+
+Initial stop:
+
+Stop Price = Entry Price × 0.95
+
+The stop must be established immediately after entering the position.
+
+The 5% stop loss is independent of the 20MA/50MA exit signal.
+
+Therefore, exit the position when either:
+
+* The 5% stop loss is triggered, OR
+* The 20MA crosses below the 50MA.
+
+POSITION MANAGEMENT
+
+Never enter a position without a defined stop loss.
+
+Never remove the 5% protective stop simply because the stock continues moving against the position.
+
+After a stop-loss exit, do not immediately re-enter unless a new valid 20MA/50MA bullish crossover event occurs and all filters are satisfied again.
+
+SIGNAL VALIDATION
+
+Before placing an order, perform a final validation:
+
+20MA crossed above 50MA?
+        YES
+          ↓
+Relative Volume >= 2x?
+        YES
+          ↓
+Stock up >= 10% today?
+        YES
+          ↓
+Price between $1-$20?
+        YES
+          ↓
+Clear directional trend?
+        YES
+          ↓
+Not choppy?
+        YES
+          ↓
+Adequate liquidity/execution?
+        YES
+          ↓
+PLACE LONG TRADE
+          ↓
+IMMEDIATELY ESTABLISH 5% STOP
+
+If ANY required condition fails, DO NOT TRADE.
+
+IMPORTANT IMPLEMENTATION REQUIREMENTS
+
+The crossover must be calculated from historical price data rather than simply checking whether:
+
+20MA > 50MA
+
+The system must specifically detect the transition from:
+
+20MA <= 50MA
+
+to:
+
+20MA > 50MA
+
+for a bullish crossover.
+
+Likewise, the bearish exit must detect the transition from:
+
+20MA >= 50MA
+
+to:
+
+20MA < 50MA
+
+Prevent duplicate orders, duplicate entries, and repeated signals caused by multiple scanner cycles.
+
+The strategy should be designed to run continuously during market hours and safely handle:
+
+* Market open
+* Trading halts
+* Missing market data
+* API errors
+* Order rejection
+* Partial fills
+* Position already exists
+* Duplicate signals
+* Market close
+* Alpaca connection/API interruptions
+
+PRIMARY OBJECTIVE
+
+The strategy is designed to capture strongly trending, high-volume momentum moves following a confirmed 20MA/50MA bullish crossover, while avoiding sideways/choppy securities.
+
+The bot should favor quality setups over quantity.
+
+A valid crossover alone is NOT sufficient.
+
+The complete entry requirement is:
+
+20MA bullish crossover + 2x+ relative volume + 10%+ daily gain + $1-$20 price + strong trend + non-choppy price action + adequate liquidity.
+
+Execute a long trade only when the complete setup is confirmed.

@@ -615,10 +615,10 @@ function goPage(page) {
   if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); futuresTracker.load(); }
   if (page==='scanner')   scanner.open();
   if (page==='trading')   { alpacaTrader.open(); }
-  if (page==='momentum')  { if (window.momentumTrader) momentumTrader.open(); }
-  else if (window.momentumTrader) momentumTrader.pause();
   if (page==='options') { if (window.optionsBot) optionsBot.open(); }
   else if (window.optionsBot) optionsBot.pause();
+  if (page==='b2') { if (window.b2Bot) b2Bot.open(); }
+  else if (window.b2Bot) b2Bot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

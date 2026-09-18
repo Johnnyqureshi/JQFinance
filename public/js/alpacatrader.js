@@ -332,12 +332,7 @@ const alpacaTrader = (() => {
 
   // ── Modal ──────────────────────────────────────────────────────────────────
   function connectionLabel(connection) {
-    return connection === 'pmh' ? 'Opening Momentum'
-      : connection === 'momentum' ? 'Momentum Trader'
-      : connection === 'candlestick' ? 'UltraBot3'
-      : connection === 'swing' ? 'Swing Trading Bot'
-      : connection === 'options' ? 'LEAP Options Bot'
-      : connection === 'money-printer' ? 'The Money Printer'
+    return connection === 'options' ? 'LEAP Options Bot'
       : 'Manual Trading';
   }
 
@@ -347,7 +342,7 @@ const alpacaTrader = (() => {
   }
 
   function showModal(connection = 'manual', requestedMode = alpacaMode) {
-    modalConnection = ['momentum', 'pmh', 'candlestick', 'swing', 'options', 'money-printer'].includes(connection) ? connection : 'manual';
+    modalConnection = connection === 'options' ? connection : 'manual';
     modalMode = requestedMode === 'live' ? 'live' : 'paper';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';
@@ -393,7 +388,6 @@ const alpacaTrader = (() => {
         loadOrders();
         startKeepAlive();
       }
-      // Notify momentum scanner so AlpacaClient re-checks with fresh credentials
       window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
     } catch (e) { if (errEl) errEl.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = 'Connect'; }
@@ -486,24 +480,11 @@ const alpacaTrader = (() => {
 
 })();
 
-// Bot pages call the shared connection modal through window so each bot can
-// select its own isolated broker scope. Top-level const
-// bindings are not window properties in browsers.
+// LEAP Options uses the shared connection modal with its isolated broker scope.
 window.alpacaTrader = alpacaTrader;
 
 document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());
 
-
-// ── Legacy simulator status shim (the live Swing Bot now has its own page) ───
-const simPanel = (() => {
-  function init() {}
-  function load() {}
-  function loadStatus() {}
-  function loadWhale() {}
-  return { init, load, loadStatus, loadWhale };
-})();
-
-function initBotToggles() {} // Swing/ORB bots removed — no toggles needed
 
 // ── Global Trading Settings module ───────────────────────────────────────────
 async function initTradeSettings() {
@@ -698,9 +679,6 @@ const macroCal = (() => {
   return { init, load };
 })();
 
-document.addEventListener('DOMContentLoaded', () => {
-  simPanel.init();
-  initBotToggles();
-  initTradeSettings();
-  macroCal.init();
-});
+// Retired automation panels owned simPanel, bot toggles, global trade settings,
+// and macroCal mounts. Manual Alpaca initialization is performed above and
+// remains the only DOMContentLoaded lifecycle hook required here.

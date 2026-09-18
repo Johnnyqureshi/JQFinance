@@ -10,9 +10,12 @@ description: Durable safety and ownership rules for every automated trading stra
 - Candidate pages are observational. A server scheduler is the sole owner of automated candidate selection and entry submission; strategy-specific browser entry endpoints stay closed.
   **Why:** browser-owned submissions create duplicate execution owners, stop when tabs close, and can bypass persisted enable, sizing, or Live-arm controls.
   **How to apply:** UI scans may refresh evidence and request reconciliation, but must not submit entries or automated exits. Scheduler functions call execution functions directly under strategy locks.
-- A verified dedicated Paper connection enables that strategy automatically. Connecting or switching to Live never arms orders; every broker identity or mode change clears the prior Live arm.
-  **Why:** Paper should be hands-off while Live requires an explicit, current authorization that cannot carry across account changes.
-  **How to apply:** Paper credential verification updates persisted enablement; Live eligibility checks both enabled state and a separately persisted arm before any broker POST.
+- B2 Paper starts automatically on verified connection or deliberate selection of a saved Paper account. Live connection/selection starts only with fresh explicit real-money consent for that action. Do not activate existing dormant accounts during migration or restart.
+  **Why:** The user requested hands-off trading after connection on 2026-09-18, superseding the earlier paused-Paper onboarding decision; it does not authorize silently carrying an old Live arm across accounts.
+  **How to apply:** Keep position dollars as the only strategy setting. Present authorization inside account connection rather than as a tunable strategy checkbox.
+- Emergency pause must immediately revoke unsubmitted entries without invalidating protective actions already in flight. It must also prevent an earlier asynchronous connection/resume attempt from re-enabling entries afterward.
+  **Why:** Waiting for a long scan lease delays the stop control; changing the general configuration revision can interrupt stop restoration after a confirmed cancellation and leave a position exposed.
+  **How to apply:** Keep entry revocation and pending activation invalidation separate from account/protection identity, and recheck entry authorization at the final broker boundary. Already-submitted orders cannot be undone by toggling a local flag.
 
 - The order API applies leverage server-side (`amount * leverage`). Clients must send the BASE dollar amount plus `leverage` — pre-multiplying on the client doubles leverage silently.
   **Why:** caused risk-cap checks to evaluate half the real exposure.
@@ -21,12 +24,8 @@ description: Durable safety and ownership rules for every automated trading stra
 - An entry safety signal must be enforced at the authenticated broker-order boundary, not only in browser automation; re-fetch fast-moving market evidence immediately before the broker POST.
   **Why:** a direct API caller or a delayed browser request can bypass an otherwise correct client-side gate.
   **How to apply:** use the strategy's broker credential scope on the server and fail the order when a final fresh-evidence recheck cannot confirm the constraint.
-- VWAP confirmation for a momentum entry is regular-session-only (9:30 AM–4:00 PM New York time) and needs a timestamp-fresh executable/current quote; exclude premarket, after-hours, and prior-session bars.
-  **Why:** rolling intraday windows or stale snapshot prices can make price appear above an obsolete VWAP and permit the exact reversal entry the gate is meant to prevent.
-  **How to apply:** use a session-bounded VWAP calculation and reject a missing, stale, or implausibly future-dated quote before comparing it with VWAP.
 - Auto-trade cycles need a mutex — scans can be triggered by timer, manual refresh, and config changes concurrently, causing duplicate orders.
-- Signal filtering must accept both `BUY` and `STRONG BUY`; strict `=== 'BUY'` silently excluded the highest-scoring setups.
-- Pre-trade gate order: signal → dump flags (hard: high-vol red candle or large topping tail; soft: 2+ of below-VWAP/below-EMA9/MACD-neg) → bearish pattern strength ≥2 → risk ≤5% of equity.
-- NO-SHORT policy: platform never opens shorts. Sells require a verified held position, are quantity-based, and cancel the symbol's open orders first (else a leftover OTO stop-loss child could later flip short).
+- Automated stock sells require a verified owned long position and residual quantity. Cancel only the strategy-owned protective sell with confirmed settlement before a separate closing sell; never cancel unrelated orders.
+  **Why:** A surviving stop plus a full-quantity exit can oversell and open an unintended short.
+  **How to apply:** Re-read fills and position size after cancellation, and reconcile ambiguous broker responses by durable client order ID.
 - User decision: NO manual inverse button — the strategy trades any eligible instrument, including leveraged or inverse ETFs, through server automation rather than a separate manual control.
-- Gotcha: server-side calcRSI was referenced in 3 endpoints but never defined — try/catch silently nulled RSI everywhere for a long time. Watch for other referenced-but-undefined helpers hidden by catch(_){}.

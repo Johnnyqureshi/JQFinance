@@ -7,4 +7,4 @@ When removing an automated strategy from a monolithic trading server, first bloc
 
 **Why:** Legacy handlers can remain textually present while the shared server is being decomposed; without an early route guard or disabled schema creation, stale clients or the next restart can reactivate the retired strategy or recreate its storage.
 
-**How to apply:** Keep shared Momentum, Options, manual trading, and broker ownership data intact. Verify startup, removed prefixes, database table absence after restart, and the full remaining test suite.
+**How to apply:** Keep retained strategies, manual trading, and their broker ownership data intact. Retirement must explicitly enumerate removed scopes, not delete every scope except a hardcoded retained list: a later-added bot otherwise loses ownership on restart. Physically remove dead credential queries as well as handlers. Verify startup, removed prefixes, table absence after restart, and retained tests.

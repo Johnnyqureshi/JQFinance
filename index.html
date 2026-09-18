@@ -40,7 +40,6 @@
     })();
   </script>
   <link rel="stylesheet" href="/public/css/style.css"/>
-  <link rel="stylesheet" href="/public/css/swing.css"/>
   <link rel="stylesheet" href="/public/css/options.css"/>
 </head>
 <body>
@@ -115,25 +114,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       Scanner
     </button>
-    <button class="nav-link money-printer-nav" data-page="money-printer">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v10H4z"/><path d="M8 7V4h8v3M8 17h8"/><circle cx="12" cy="12" r="2.5"/></svg>
-      Money Printer
-    </button>
     <button class="nav-link" data-page="momentum">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
       Momentum
-    </button>
-    <button class="nav-link" data-page="opening-momentum">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
-      Opening
-    </button>
-    <button class="nav-link" data-page="candlestick">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16m0-11h4m-4 6h4M18 4v16m-4-11h4m-4 6h4"/></svg>
-      UltraBot3
-    </button>
-    <button class="nav-link" data-page="swing">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18h18"/><path d="m5 15 4-5 4 3 6-8"/><circle cx="19" cy="5" r="1.5"/></svg>
-      Swing
     </button>
     <button class="nav-link" data-page="options">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
@@ -751,7 +734,7 @@
 
 <!-- TRADING PAGE -->
 <!-- THE MONEY PRINTER — Search automation command surface -->
-<div class="page" id="page-money-printer">
+<div class="page" id="page-money-printer" hidden>
   <div class="mp-page">
     <header class="mp-hero">
       <div class="mp-brandline"><span class="mp-brand-mark"></span><span>FLAGSHIP AUTOMATION / SEARCH SCIENCE</span></div>
@@ -1252,7 +1235,7 @@
 <!-- ══════════════════════════════════════════════════════════════════════════
      STANDALONE ULTRABOT3
      ══════════════════════════════════════════════════════════════════════════ -->
-<div class="page" id="page-candlestick">
+<div class="page" id="page-candlestick" hidden>
   <div class="mt-page candle-page">
     <div class="mt-topbar">
       <div class="mt-topbar-left">
@@ -1300,13 +1283,13 @@
 
 <!-- Dedicated multi-week Swing Bot. Markup is rendered by swing.js so its
      lifecycle remains independent from every intraday strategy page. -->
-<div class="page" id="page-swing"></div>
+<div class="page" id="page-swing" hidden></div>
 <div class="page" id="page-options"></div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      OPENING MOMENTUM — PMH BREAK
      ══════════════════════════════════════════════════════════════════════════ -->
-<div class="page" id="page-opening-momentum">
+<div class="page" id="page-opening-momentum" hidden>
   <div class="mt-page pmh-page">
     <div class="mt-topbar">
       <div class="mt-topbar-left">
@@ -1440,11 +1423,7 @@
 
 <script src="/js/alpacatrader.js"></script>
 <script src="/js/agent.js"></script>
-<script src="/js/money-printer.js"></script>
 <script src="/js/momentum.js"></script>
-<script src="/js/opening-momentum.js"></script>
-<script src="/js/candlestick.js"></script>
-<script src="/js/swing.js"></script>
 <script src="/js/options.js"></script>
 
 <!-- MOBILE BOTTOM NAV -->
@@ -1465,25 +1444,9 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
   </button>
-  <button class="mobile-nav-btn nav-link" data-page="money-printer" aria-label="The Money Printer">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v10H4z"/><path d="M8 7V4h8v3M8 17h8"/><circle cx="12" cy="12" r="2.5"/></svg>
-    <span>Printer</span>
-  </button>
   <button class="mobile-nav-btn nav-link" data-page="momentum" aria-label="Momentum">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
     <span>Momentum</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="opening-momentum" aria-label="Opening Momentum">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m3 12 5-4 5 3 8-7"/></svg>
-    <span>Opening</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="candlestick" aria-label="Candlestick automation">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16m0-11h4m-4 6h4M18 4v16m-4-11h4m-4 6h4"/></svg>
-    <span>UltraBot3</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="swing" aria-label="Swing trading automation">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18h18"/><path d="m5 15 4-5 4 3 6-8"/><circle cx="19" cy="5" r="1.5"/></svg>
-    <span>Swing</span>
   </button>
   <button class="mobile-nav-btn nav-link" data-page="options" aria-label="LEAP Options">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>

@@ -25,3 +25,4 @@
 - [Custom-domain TLS routing](custom-domain-tls-routing.md) — keep the apex behind Cloudflare’s active Universal SSL while preserving the verified Replit origin.
 - [Search volatility intelligence](search-volatility-intelligence.md) — volatility is feature-flagged, provenance-aware context; stale or incomplete inputs have zero influence and never create a verdict.
 - [RRG-style sector context](rrg-style-sector-context.md) — derived rotation context is read-only and clearly labeled; never claim official RRG data or let it drive trades.
+- [Retiring monolithic strategies](retiring-monolithic-strategies.md) — disable legacy API and schema paths before deleting local strategy storage; preserve broker state by avoiding broker mutations.

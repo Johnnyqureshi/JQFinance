@@ -81,42 +81,6 @@ const {
 } = require('./lib/market-direction');
 const { createMomentumInverseCycleStore } = require('./lib/momentum-inverse-cycle');
 const {
-  sanitizeCandlestickExecutionConfig,
-  calculateCandlestickEntryCapacity,
-  buildCandlestickBracketOrder,
-  candlestickBarsFromResponse,
-  requireCandlestickBrokerCollection,
-} = require('./lib/candlestick-execution-policy');
-const { summarizeCandlestickBrokerOrder, needsUnprotectedExit, cancellationAction } = require('./lib/candlestick-reconciliation');
-const {
-  DEFAULT_CANDLE_CONFIG,
-  evaluateCandlestickSetup,
-  aggregateTimeframeBars,
-  simulateCandlestickBacktest,
-} = require('./lib/candlestick-strategy');
-const {
-  DEFAULT_SWING_CONFIG,
-  evaluateSwingSetup,
-  simulateSwingBacktest,
-  aggregateSwingWeeklyBars,
-  ema: swingEma,
-  atr: swingAtr,
-} = require('./lib/swing-strategy');
-const {
-  sanitizeSwingExecutionConfig,
-  calculateLongQuantity,
-  buildSwingEntryOrder,
-} = require('./lib/swing-execution-policy');
-const {
-  calculateSwingAllocations,
-  ratchetSwingStop,
-  buildSwingClientOrderId,
-} = require('./lib/swing-management');
-const {
-  summarizeSwingLotProtection,
-  assertSwingOwnedBrokerTree,
-} = require('./lib/swing-reconciliation');
-const {
   ALLOWED_UNDERLYINGS: LEAP_UNDERLYINGS,
   evaluateLeapOptionsSignal,
   leapThesisInvalidated,
@@ -140,17 +104,6 @@ const {
   closingOrdersToCancelOnPositionLoss,
 } = require('./lib/leap-options-order-lifecycle');
 const { findDuplicateBrokerAssignments } = require('./lib/broker-account-isolation');
-const {
-  DEFAULT_PMH_CONFIG,
-  evaluatePmhBreak,
-  evaluatePmhRunnerExit,
-  pmhRegularSessionOpenAt,
-  calculatePmhBoundedEntry,
-  reservePmhEntryIntent,
-  managePmhRunnerExit,
-  pmhUsableRescueStop,
-  preparePmhManagedCycle,
-} = require('./lib/opening-momentum-pmh');
 const {
   annotateScannerRowsForShadow,
   createPaperShadow,
@@ -181,21 +134,6 @@ const {
   canReserveEntryUnits,
   isLikelyCryptoSymbol,
 } = require('./lib/broker-universe');
-const {
-  CANDLESTICK_WATCHLIST,
-  nextCandlestickWatchlistBatch,
-} = require('./lib/candlestick-watchlist');
-const {
-  DEFAULT_SETTINGS: MONEY_PRINTER_DEFAULTS,
-  sanitizeMoneyPrinterSettings,
-  evaluateMoneyPrinterPlan,
-  buildMoneyPrinterDecisionAudit,
-  executablePrice: moneyPrinterExecutablePrice,
-  buildMoneyPrinterBracket,
-  moneyPrinterClientOrderId,
-  finalMoneyPrinterAuthorization,
-  ownedBracketProtection,
-} = require('./lib/money-printer-policy');
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -215,6 +153,13 @@ const MIN_RR_RATIO = 2.0;            // Minimum risk:reward required to enter an
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
 const SEARCH_AI_KEY = process.env.AIML_API_KEY;
+
+// Legacy strategy handlers remain unreachable behind the retired-route guard
+// until their monolithic sections are removed. Keep their dead declarations
+// parse-safe without restoring any strategy, storage, or broker behavior.
+const DEFAULT_CANDLE_CONFIG = Object.freeze({});
+const DEFAULT_SWING_CONFIG = Object.freeze({});
+const MONEY_PRINTER_DEFAULTS = Object.freeze({});
 
 // ── SQLite Database ────────────────────────────────────────────────────────────
 const db = new Database('jqf.db');
@@ -325,9 +270,8 @@ db.exec(`
   );
 `);
 
-// The Money Printer has a dedicated broker identity and a small, explicit
-// settings surface. Search trigger thresholds remain server-owned.
-db.exec(`
+// Retired: Money Printer storage is intentionally no longer initialized.
+if (false) db.exec(`
   CREATE TABLE IF NOT EXISTS money_printer_settings (
     user_id INTEGER PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
@@ -404,11 +348,11 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
-try { db.prepare('ALTER TABLE money_printer_settings ADD COLUMN revision INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
+// Money Printer migration removed with the retired strategy.
 
 // PMH snapshots are frozen per user/symbol/session. Settings are separate from
 // Momentum Trader so changing one strategy cannot silently change the other.
-db.exec(`
+if (false) db.exec(`
   CREATE TABLE IF NOT EXISTS pmh_session_snapshots (
     user_id      INTEGER NOT NULL,
     symbol       TEXT NOT NULL,
@@ -508,10 +452,11 @@ db.exec(`
   );
 `);
 
+// Retired: Swing automation storage is no longer initialized.
+if (false) db.exec(`
 // Swing automation is deliberately isolated from every intraday strategy.
 // Its credentials, settings, catalog cursor, candidates, reservations, order
 // journal, and durable lease cannot be read by another bot's execution path.
-db.exec(`
   CREATE TABLE IF NOT EXISTS swing_settings (
     user_id INTEGER PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
@@ -817,8 +762,10 @@ db.exec(`
   `ALTER TABLE candlestick_alpaca_creds ADD COLUMN api_key_enc TEXT`,
   `ALTER TABLE candlestick_alpaca_creds ADD COLUMN api_secret_enc TEXT`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch(_) {} });
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_candlestick_trade_signal
-  ON candlestick_trade_log (user_id, symbol, signal_bar_at)`).run();
+try {
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_candlestick_trade_signal
+    ON candlestick_trade_log (user_id, symbol, signal_bar_at)`).run();
+} catch (_) {}
 
 // Paper/shadow evidence is global to the frozen study, never tied to a broker
 // account and never capable of submitting an order.
@@ -895,22 +842,6 @@ db.exec(`
     PRIMARY KEY (user_id, bot),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
-  CREATE TABLE IF NOT EXISTS candlestick_alpaca_creds (
-    user_id INTEGER NOT NULL,
-    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
-    api_key TEXT NOT NULL,
-    api_secret TEXT NOT NULL,
-    api_key_enc TEXT,
-    api_secret_enc TEXT,
-    account_id TEXT,
-    PRIMARY KEY (user_id, mode),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS candlestick_alpaca_active_mode (
-    user_id INTEGER PRIMARY KEY,
-    mode TEXT NOT NULL DEFAULT 'paper' CHECK(mode IN ('paper','live')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
 `);
 try {
   const migrated = migrateLegacyMomentumOwnership(db);
@@ -957,16 +888,7 @@ for (const seed of [
    SELECT account_id,user_id,bot,mode FROM bot_alpaca_creds
    WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
   `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
-   SELECT account_id,user_id,'candlestick',mode FROM candlestick_alpaca_creds
-   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
-  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
-   SELECT account_id,user_id,'swing',mode FROM swing_alpaca_creds
-   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
-  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
    SELECT account_id,user_id,'options',mode FROM options_alpaca_creds
-   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
-  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
-   SELECT account_id,user_id,'money-printer',mode FROM money_printer_alpaca_creds
    WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
 ]) {
   try { db.prepare(seed).run(); } catch (error) {
@@ -981,16 +903,7 @@ const legacyBrokerAssignments = db.prepare(`
     SELECT account_id,user_id,bot AS scope FROM bot_alpaca_creds
       WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
     UNION ALL
-    SELECT account_id,user_id,'candlestick' AS scope FROM candlestick_alpaca_creds
-      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
-    UNION ALL
-    SELECT account_id,user_id,'swing' AS scope FROM swing_alpaca_creds
-      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
-    UNION ALL
     SELECT account_id,user_id,'options' AS scope FROM options_alpaca_creds
-      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
-    UNION ALL
-    SELECT account_id,user_id,'money-printer' AS scope FROM money_printer_alpaca_creds
       WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
   )
 `).all();
@@ -1213,6 +1126,14 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
+
+// These strategy surfaces were retired. Keep old clients from reaching any
+// legacy handlers while the remaining Momentum and LEAP Options paths continue
+// to use the shared server.
+app.use(['/api/money-printer', '/api/opening-momentum', '/api/candlestick', '/api/swing'], (req, res) => {
+  res.status(410).json({ error: 'This trading bot has been removed.' });
+});
+
 const PostgresSessionStore = authStore.createSessionStore(session);
 const sessionMiddleware = session({
   store:             new PostgresSessionStore(),
@@ -8538,12 +8459,8 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
        ORDER BY created_at DESC LIMIT 10`
     ).all(req.session.userId);
     const userId = req.session.userId;
-    const pmhSetting = db.prepare('SELECT enabled FROM pmh_settings WHERE user_id=?').get(userId);
     const botSettings = [
       { name: 'momentum', enabled: momentumConfigFor(userId).enabled, scope: 'momentum' },
-      { name: 'opening-momentum', enabled: !!pmhSetting?.enabled && isBotEnabled(userId, 'pmh'), scope: 'pmh' },
-      { name: 'candlestick', enabled: candlestickConfigFor(userId).enabled, scope: 'candlestick' },
-      { name: 'swing', enabled: swingConfigFor(userId).enabled, scope: 'swing' },
       { name: 'options', enabled: optionsConfigFor(userId).enabled, scope: 'options' },
     ];
     const botReadiness = await Promise.all(botSettings.map(async bot => {
@@ -8552,30 +8469,18 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
       try {
         const brokerAccount = await alpacaFetchFor(userId, bot.scope, '/v2/account');
         const accountActive = String(brokerAccount?.status || '').toUpperCase() === 'ACTIVE';
-        const livePaused = bot.scope === 'pmh' && creds.mode === 'live' && PMH_LIVE_AUTOMATION_PAUSED;
         return {
           ...bot,
           connected: true,
           mode: creds.mode,
           accountActive,
-          livePaused,
-          executable: bot.enabled && accountActive && !livePaused
+          executable: bot.enabled && accountActive
             && (bot.scope !== 'momentum' || momentumConfigFor(userId).liveArmed || creds.mode !== 'live')
-            && (bot.scope !== 'pmh' || pmhConfigFor(userId).liveArmed || creds.mode !== 'live')
-            && (bot.scope !== 'candlestick' || candlestickConfigFor(userId).liveArmed || creds.mode !== 'live')
-            && (bot.scope !== 'swing' || swingConfigFor(userId).liveArmed || creds.mode !== 'live')
             && (bot.scope !== 'options' || optionsConfigFor(userId).liveArmed || creds.mode !== 'live'),
           reason: !bot.enabled ? 'Strategy is disabled.'
-            : livePaused ? 'PMH live automation is paused for safety validation. Paper mode remains available.'
             : !accountActive ? 'Broker account is not active.'
             : bot.scope === 'momentum' && creds.mode === 'live' && !momentumConfigFor(userId).liveArmed
               ? 'Live Momentum authorization is not armed.'
-              : bot.scope === 'pmh' && creds.mode === 'live' && !pmhConfigFor(userId).liveArmed
-                ? 'Live Opening Momentum authorization is not armed.'
-            : bot.scope === 'candlestick' && creds.mode === 'live' && !candlestickConfigFor(userId).liveArmed
-              ? 'Live candlestick authorization is not armed.'
-              : bot.scope === 'swing' && creds.mode === 'live' && !swingConfigFor(userId).liveArmed
-                ? 'Live Swing authorization is not armed.'
               : bot.scope === 'options' && creds.mode === 'live' && !optionsConfigFor(userId).liveArmed
                 ? 'Live Options authorization is not armed.'
               : null,
@@ -8603,19 +8508,19 @@ app.get('/api/bots/status', requireAuth, async (req, res) => {
 });
 
 // ── Bot toggle helpers ─────────────────────────────────────────────────────────
-const BOT_NAMES = ['countertrend', 'pmh', 'momentum', 'candlestick'];
+const BOT_NAMES = ['countertrend', 'momentum'];
 
 function isBotEnabled(userId, botName) {
   const row = db.prepare('SELECT enabled FROM bot_toggles WHERE user_id=? AND bot_name=?').get(userId, botName);
   // PMH is deliberately opt-in; an account connection must never silently
   // activate a new opening-range strategy.
-  return row ? !!row.enabled : ['pmh', 'momentum', 'candlestick'].includes(botName) ? false : true;
+  return row ? !!row.enabled : ['momentum'].includes(botName) ? false : true;
 }
 
 // GET /api/bots/toggles — returns { bounce: true, volatility_expansion: false, … }
 app.get('/api/bots/toggles', requireAuth, (req, res) => {
   const rows = db.prepare('SELECT bot_name, enabled FROM bot_toggles WHERE user_id=?').all(req.session.userId);
-  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, ['pmh', 'momentum', 'candlestick'].includes(b) ? false : true]));
+  const map  = Object.fromEntries(BOT_NAMES.map(b => [b, b === 'momentum' ? false : true]));
   rows.forEach(r => { map[r.bot_name] = !!r.enabled; });
   res.json(map);
 });
@@ -8638,7 +8543,7 @@ app.post('/api/bots/trigger', requireAuth, async (req, res) => {
   // Run sequentially. The shared account-level execution lock remains the
   // boundary between a triggered cycle, a scheduler tick, and manual orders.
   const outcomes = [];
-  for (const runCycle of [runMomentumCycle, runPmhCycle, runCandlestickCycle, runSwingCycle, runOptionsCycle]) {
+  for (const runCycle of [runMomentumCycle, runOptionsCycle]) {
     try {
       outcomes.push(await runCycle(userId, 'manual-trigger'));
     } catch (error) {
@@ -13062,7 +12967,7 @@ async function runMoneyPrinterCycle(userId) {
 }
 
 let moneyPrinterSchedulerRunning = false;
-setInterval(async () => {
+if (false) setInterval(async () => {
   if (moneyPrinterSchedulerRunning) return;
   moneyPrinterSchedulerRunning = true;
   try {
@@ -13346,7 +13251,7 @@ async function runCandlestickCycle(userId, source = 'server-scheduler') {
 }
 
 let candlestickSchedulerRunning = false;
-setInterval(async () => {
+if (false) setInterval(async () => {
   if (candlestickSchedulerRunning) return;
   candlestickSchedulerRunning = true;
   try {
@@ -13404,7 +13309,7 @@ async function runPmhCycle(userId, source = 'server-scheduler') {
 }
 
 let pmhSchedulerRunning = false;
-setInterval(async () => {
+if (false) setInterval(async () => {
   if (pmhSchedulerRunning) return;
   pmhSchedulerRunning = true;
   try {
@@ -13598,7 +13503,7 @@ setInterval(async () => {
 // broker-held exits, while expensive daily-universe scans are throttled inside
 // runSwingCycle and keep advancing a persisted catalog cursor.
 let swingSchedulerRunning = false;
-setInterval(async () => {
+if (false) setInterval(async () => {
   if (swingSchedulerRunning) return;
   swingSchedulerRunning = true;
   try {

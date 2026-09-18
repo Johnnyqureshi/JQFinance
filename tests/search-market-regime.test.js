@@ -143,3 +143,23 @@ test('fails closed when SPY data is unavailable and does not invent relative str
   const relative = classifyRelativeStrength({ stockDailyBars: [], spyDailyBars: [] });
   assert.equal(relative.label, 'UNAVAILABLE');
 });
+
+test('preserves an explicit WAIT verdict without market or sector directional penalties', () => {
+  const result = applySearchMarketRegime({
+    searchSignal: {
+      signal: { label: 'WAIT', direction: 'NEUTRAL', stage: 'WAITING' },
+      confidence: 0,
+      reasons: ['Directional evidence is incomplete; no trade bias issued'],
+    },
+    spyRegime: { available: true, regime: 'STRONG BULLISH', direction: 'BULLISH' },
+    sector: { label: 'BULLISH', direction: 'BULLISH' },
+    relativeStrength: { label: 'STRONG', score: 10 },
+  });
+  assert.equal(result.signal.label, 'WAIT');
+  assert.equal(result.signal.direction, 'NEUTRAL');
+  assert.equal(result.signal.stage, 'WAITING');
+  assert.equal(result.confidence, 0);
+  assert.equal(result.marketContext.finalSignal, 'WAIT');
+  assert.equal(result.confidenceBreakdown.marketAlignment, 0);
+  assert.equal(result.confidenceBreakdown.sectorAlignment, 0);
+});

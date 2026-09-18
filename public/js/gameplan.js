@@ -311,23 +311,29 @@ const gamePlan = (() => {
       : newsImpact.freshCatalystCount
         ? 'Recent headlines were not confirmed by matching price and volume'
         : 'No directional catalyst found in the last 24h';
-    const direction = signal.signal?.direction === 'BEARISH' ? 'BEARISH' : 'BULLISH';
-    const signalClass = direction === 'BEARISH' ? 'bear' : 'bull';
+    const direction = signal.signal?.direction === 'BEARISH'
+      ? 'BEARISH'
+      : signal.signal?.direction === 'BULLISH' ? 'BULLISH' : 'NEUTRAL';
+    const signalClass = direction === 'BEARISH' ? 'bear' : direction === 'BULLISH' ? 'bull' : 'neut';
     const structureText = direction === 'BULLISH'
       ? (signal.structure?.higherLows ? 'Higher lows are developing' : 'Price and volume favor buyers')
-      : (signal.structure?.lowerHighs ? 'Lower highs are developing' : 'Price and volume favor sellers');
+      : direction === 'BEARISH'
+        ? (signal.structure?.lowerHighs ? 'Lower highs are developing' : 'Price and volume favor sellers')
+        : 'Directional evidence is incomplete; no trade bias issued';
     const directionalVolume = direction === 'BULLISH'
       ? signal.bullishVolumeScore
-      : signal.bearishVolumeScore;
+      : direction === 'BEARISH' ? signal.bearishVolumeScore : null;
     const opposingVolume = direction === 'BULLISH'
       ? signal.bearishVolumeScore
-      : signal.bullishVolumeScore;
-    const activeLevel = direction === 'BULLISH' ? levels.resistance : levels.support;
+      : direction === 'BEARISH' ? signal.bullishVolumeScore : null;
+    const activeLevel = direction === 'BULLISH' ? levels.resistance : direction === 'BEARISH' ? levels.support : null;
     const levelText = activeLevel?.price == null
       ? 'No nearby decision level is available'
       : direction === 'BULLISH'
         ? `${activeLevel.broken ? 'Holding above' : 'Testing'} resistance at $${fmt(activeLevel.price)}`
-        : `${activeLevel.broken ? 'Trading below' : 'Testing'} support at $${fmt(activeLevel.price)}`;
+        : direction === 'BEARISH'
+          ? `${activeLevel.broken ? 'Trading below' : 'Testing'} support at $${fmt(activeLevel.price)}`
+          : 'No directional level is active';
     return `<section class="gp-evidence ${signalClass}">
       <div class="gp-evidence-head">
         <div>
@@ -607,7 +613,7 @@ const gamePlan = (() => {
       || (verdict.includes('SELL') ? 'BEARISH' : verdict.includes('BUY') ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);
-    const verdictStage = searchSignal?.signal?.stage || 'PROVISIONAL';
+    const verdictStage = searchSignal?.signal?.stage || (verdict === 'WAIT' ? 'WAITING' : 'PROVISIONAL');
     const verdictConfidence = Number(searchSignal?.confidence);
     const signalReasons = Array.isArray(searchSignal?.reasons)
       ? searchSignal.reasons.filter(Boolean).slice(0, 2)

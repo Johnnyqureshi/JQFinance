@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS broker_order_intents (
 -- Fenced durable image used by the single VM dispatcher. The image is a
 -- consistent SQLite serialization, never a raw WAL file copy.
 CREATE TABLE IF NOT EXISTS automated_trading_snapshots (
-  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
   generation BIGINT NOT NULL CHECK (generation >= 0),
   schema_version INTEGER NOT NULL,
   sha256 TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS automated_trading_snapshots (
 );
 
 CREATE TABLE IF NOT EXISTS automated_trading_fences (
-  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
   owner_id TEXT,
   epoch BIGINT NOT NULL DEFAULT 0 CHECK (epoch >= 0),
   lease_until TIMESTAMPTZ,
@@ -279,3 +279,12 @@ CREATE TABLE IF NOT EXISTS automated_trading_fences (
 INSERT INTO automated_trading_fences(singleton, epoch)
 VALUES (TRUE, 0)
 ON CONFLICT (singleton) DO NOTHING;
+
+-- Replit's publish-time schema differ wraps PostgreSQL check definitions.
+-- A bare boolean CHECK (singleton) was emitted as invalid
+-- CHECK (CHECK (singleton)); the primary key plus application-owned TRUE key
+-- already enforce the one-row access pattern.
+ALTER TABLE automated_trading_snapshots
+  DROP CONSTRAINT IF EXISTS automated_trading_snapshots_singleton_check;
+ALTER TABLE automated_trading_fences
+  DROP CONSTRAINT IF EXISTS automated_trading_fences_singleton_check;

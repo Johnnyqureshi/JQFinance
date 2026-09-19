@@ -51,7 +51,6 @@ const { buildVolatilitySnapshot } = require('./lib/volatility/orchestrator');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
-const { buildLiquidityAnalysis } = require('./lib/liquidity-analyzer');
 const {
   TOPICS: SEARCH_INTELLIGENCE_TOPICS,
   buildMacroPressure,
@@ -2610,9 +2609,6 @@ app.post('/api/agent/chat', requireAuth, async (req, res) => {
 
 const _gpCache = new Map();    // sym → { at, data }
 const _gpInflight = new Map(); // sym → Promise (coalesces concurrent generations)
-// Small per-user/symbol history used only for real Alpaca quote snapshots.
-// It is intentionally bounded and never populated from Yahoo or derived bars.
-const _liquidityHistory = new Map();
 const _gpForceAt = new Map();  // userId:sym → last forced-regeneration time
 const gpCacheKey = (userId, quoteScope, sym) => `${userId || 'anon'}:${quoteScope || 'manual'}:${sym}`;
 const GP_CACHE_MS = 60 * 1000;
@@ -3378,20 +3374,6 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       ...(cryptoSymbol ? { changeWindow: '24H' } : {}),
     };
 
-    const liquidityKey = `${userId}:${quoteScope}:${sym}`;
-    const liquidity = buildLiquidityAnalysis({
-      quote: cryptoSymbol ? null : quote,
-      indicators,
-      relativeVolume: displayRelVol,
-      levels,
-      history: _liquidityHistory.get(liquidityKey) || [],
-      now: generationNow,
-    });
-    if (liquidity.available && liquidity.history?.length) {
-      _liquidityHistory.set(liquidityKey, liquidity.history);
-      if (_liquidityHistory.size > 200) _liquidityHistory.delete(_liquidityHistory.keys().next().value);
-    }
-
     // ── AI narrative (facts in → narrative out; numbers stay deterministic) ──
     let ai = { available: false, reason: 'AI narrative unavailable' };
     const apiKey = null; // Search verdicts remain deterministic; generative narrative is intentionally disabled.
@@ -3464,17 +3446,6 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
         } } : {}),
       },
       snapshot, indicators: { ...indicators, macd: indicators.macd ? { value: +indicators.macd.value.toFixed(3), signal: +indicators.macd.signal.toFixed(3), histogram: +indicators.macd.histogram.toFixed(3) } : null },
-      liquidity,
-      liquiditySummary: {
-        state: liquidity.state,
-        score: liquidity.score,
-        available: liquidity.available,
-        summary: liquidity.summary,
-        // Top-of-book cannot establish persistent liquidity support/resistance.
-        // Keep completed-session technical levels in liquidity.technicalContext.
-        support: null,
-        resistance: null,
-      },
       selloff, oversold,
       analogs: analogs ? { threshold, ...analogs } : null,
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,

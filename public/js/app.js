@@ -642,9 +642,6 @@ async function openStock(sym, snap, { intelligenceQuery = null } = {}) {
 
   $('homeEmpty').style.display = 'none';
   $('homeWorkspace').style.display = '';
-  if (typeof window.liquidityHeatmap?.render === 'function') {
-    window.liquidityHeatmap.render({ available: false, summary: 'Loading verified liquidity snapshot.' }, sym);
-  }
   const topVerdict = $('searchVerdictTop');
   if (topVerdict) topVerdict.style.display = 'none';
 

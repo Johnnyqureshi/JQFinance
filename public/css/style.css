@@ -9228,6 +9228,8 @@ option { background: var(--card); }
 .gp-warn-txt{color:#facc15}
 .gp-levels{display:flex;flex-direction:column;gap:3px}
 .gp-lvl-row{display:flex;align-items:center;gap:10px;padding:4px 10px;border-radius:7px;font-size:.78rem}
+.gp-lvl-price{flex:0 0 auto;white-space:nowrap}
+.gp-lvl-label{min-width:0;overflow-wrap:anywhere}
 .gp-lvl-row.res{background:rgba(248,113,113,.07)}.gp-lvl-row.res .gp-lvl-price{color:#f87171}
 .gp-lvl-row.sup{background:rgba(34,211,165,.07)}.gp-lvl-row.sup .gp-lvl-price{color:#22d3a5}
 .gp-lvl-row.next{border:1px dashed rgba(148,163,184,.2);background:rgba(255,255,255,.025)}

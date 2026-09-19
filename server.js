@@ -101,6 +101,7 @@ const {
 const { findDuplicateBrokerAssignments } = require('./lib/broker-account-isolation');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 const { createCredentialVault } = require('./lib/credential-vault');
+const { createAutomatedState } = require('./lib/automated-state');
 const {
   buildTradableEquityCatalog,
   resolveInverseSymbol,
@@ -128,8 +129,49 @@ const SEARCH_AI_KEY = process.env.AIML_API_KEY;
 
 
 // ── SQLite Database ────────────────────────────────────────────────────────────
+const restored = process.env.AUTOMATED_STATE_RESTORED === 'true';
 const db = new Database('jqf.db');
-db.pragma('journal_mode = WAL');
+// Automated strategy state is isolated from manual/research state. The boot
+// wrapper restores this database from the fenced PostgreSQL image before this
+// module is loaded.
+const automatedDb = new Database('automated-trading.db');
+if (restored) {
+  db.pragma('journal_mode = WAL');
+  automatedDb.pragma('journal_mode = WAL');
+} else {
+  // A first cutover commits changes across jqf.db and its attached automated
+  // database. SQLite's cross-file atomic commit requires rollback journals;
+  // WAL mode does not participate in the super-journal guarantee.
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
+  try { automatedDb.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
+  db.pragma('journal_mode = DELETE');
+  automatedDb.pragma('journal_mode = DELETE');
+}
+automatedDb.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS automated_action_intents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    client_order_id TEXT,
+    request_json TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'prepared',
+    broker_order_id TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
 const sessionDb = new Database('sessions.db');
 sessionDb.pragma('journal_mode = WAL');
 db.exec(`
@@ -355,7 +397,89 @@ db.exec(`
   );
 `);
 retireRemovedStrategies(db);
-const automaticBotSettings = createAutomaticBotSettings(db);
+const automaticBotSettings = createAutomaticBotSettings(automatedDb);
+
+// Cut the automated tables out of the deployment-local manual database. The
+// attached schema keeps legacy synchronous LEAP queries working while the
+// dedicated connection is the only owner of automated state.
+const AUTOMATED_TABLES = [
+  'automated_action_intents',
+  'automatic_live_bot_arms',
+  'options_fills', 'options_events', 'options_alerts', 'options_entry_reservations',
+  'options_trades', 'options_candidates', 'options_execution_leases',
+  'options_alpaca_active_mode', 'options_alpaca_creds', 'options_settings',
+  'b2_close_attempts', 'b2_exit_fills', 'b2_alerts', 'b2_trades',
+  'b2_candidates', 'b2_coverage', 'b2_universe', 'b2_leases', 'b2_credentials',
+  'b2_settings', 'broker_account_quarantine', 'broker_account_owners',
+];
+db.exec(`ATTACH DATABASE 'automated-trading.db' AS automated`);
+automatedDb.pragma('foreign_keys = OFF');
+db.pragma('foreign_keys = OFF');
+if (!restored) {
+  // Create every destination table before the cross-database copy transaction.
+  // Opening DDL through a second SQLite connection after the first copied row
+  // would contend with the transaction's write lock and abort a fresh cutover.
+  for (const table of AUTOMATED_TABLES) {
+    const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
+    if (schema && !automatedDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+      automatedDb.exec(schema);
+    }
+  }
+  const migrateAutomatedTables = db.transaction(() => {
+    const verifiedTables = [];
+    for (const table of AUTOMATED_TABLES) {
+      const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
+      if (!schema) continue;
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+      if (!columns.length) continue;
+      const names = columns.map(column => `"${column.replace(/"/g, '""')}"`).join(',');
+      const sourceCount = db.prepare(`SELECT COUNT(*) AS count FROM main."${table}"`).get().count;
+      const priorDestinationCount = db.prepare(`SELECT COUNT(*) AS count FROM automated."${table}"`).get().count;
+      // A retry can find destination rows from an interrupted cutover while
+      // startup schema initialization has recreated an empty source table.
+      // Non-empty source remains authoritative; an empty source preserves an
+      // already copied destination instead of deleting durable local progress.
+      if (sourceCount > 0) {
+        db.exec(`DELETE FROM automated."${table}"`);
+        db.exec(`INSERT INTO automated."${table}" (${names}) SELECT ${names} FROM main."${table}"`);
+      }
+      const destinationCount = db.prepare(`SELECT COUNT(*) AS count FROM automated."${table}"`).get().count;
+      const expectedCount = sourceCount > 0 ? sourceCount : priorDestinationCount;
+      if (expectedCount !== destinationCount) throw new Error(`Automated-state migration count mismatch for ${table}.`);
+      verifiedTables.push(table);
+    }
+    if (db.pragma('integrity_check', { simple: true }) !== 'ok'
+        || db.pragma('automated.integrity_check', { simple: true }) !== 'ok') {
+      throw new Error('Automated-state migration integrity check failed.');
+    }
+    // Copy verification and source removal share the same attached-database
+    // transaction, so interruption rolls back both rather than leaving a
+    // partially removed source schema that cannot be retried safely.
+    for (const table of verifiedTables) db.exec(`DROP TABLE main."${table}"`);
+  });
+  try {
+    migrateAutomatedTables();
+  } catch (error) {
+    console.error('[AutomatedState] migration failed; source tables preserved:', error.message);
+    throw error;
+  }
+} else {
+  // A validated PostgreSQL restore is authoritative. Remove startup-created
+  // empty main-schema tables so they cannot shadow the restored attached data.
+  db.transaction(() => {
+    for (const table of AUTOMATED_TABLES) {
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        db.exec(`DROP TABLE main."${table}"`);
+      }
+    }
+  })();
+}
+// Normal operation uses WAL after the crash-atomic first-cut transaction has
+// committed and no cross-database schema move remains.
+db.pragma('journal_mode = WAL');
+automatedDb.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+automatedDb.pragma('foreign_keys = ON');
 
 for (const seed of [
   `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
@@ -405,6 +529,37 @@ function getSessionSecret() {
 const SESSION_SECRET = getSessionSecret();
 const credentialVault = createCredentialVault(SESSION_SECRET);
 
+// Credentials must be upgraded before the first durable automated snapshot.
+// A failed vault operation aborts startup and leaves the source journal intact.
+db.transaction(() => {
+  for (const table of ['b2_credentials', 'options_alpaca_creds']) {
+    const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
+    if (!columns.has('api_key')) continue;
+    for (const row of db.prepare(`SELECT rowid AS _rowid, * FROM ${table}`).all()) {
+      if (row.api_key === DISCONNECTED_SENTINEL || row.api_secret === DISCONNECTED_SENTINEL) continue;
+      if (columns.has('api_key_enc') && row.api_key === ENCRYPTED_CREDENTIAL_MARKER
+          && row.api_secret === ENCRYPTED_CREDENTIAL_MARKER) continue;
+      if (!columns.has('api_key_enc')) {
+        const keyEncrypted = credentialVault.isEncrypted(row.api_key);
+        const secretEncrypted = credentialVault.isEncrypted(row.api_secret);
+        if (keyEncrypted !== secretEncrypted) {
+          throw new Error(`Stored ${table} credential pair is only partially encrypted.`);
+        }
+        if (keyEncrypted) continue;
+      }
+      const key = columns.has('api_key_enc') && row.api_key_enc ? row.api_key_enc : credentialVault.encrypt(row.api_key);
+      const secret = columns.has('api_secret_enc') && row.api_secret_enc ? row.api_secret_enc : credentialVault.encrypt(row.api_secret);
+      if (columns.has('api_key_enc')) {
+        db.prepare(`UPDATE ${table} SET api_key=?,api_secret=?,api_key_enc=?,api_secret_enc=? WHERE rowid=?`)
+          .run(ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, key, secret, row._rowid);
+      } else {
+        db.prepare(`UPDATE ${table} SET api_key=?,api_secret=? WHERE rowid=?`)
+          .run(key, secret, row._rowid);
+      }
+    }
+  }
+})();
+
 // ── In-memory rate limiter for auth endpoints ──────────────────────────────────
 const authAttempts = new Map();
 function rateLimitAuth(req, res, next) {
@@ -441,13 +596,43 @@ if (retireLegacyAccount({
 }
 
 
-// Account identities and sessions are shared through PostgreSQL. The deployment
-// runs as a single VM so the established SQLite trading journal and broker state
-// remain consistent while their full shared-data migration is completed.
+// Account identities and sessions are shared through PostgreSQL. Automated
+// journals are fenced snapshots of the dedicated SQLite image.
 const authStore = createPostgresAuthStore({
   databaseUrl: process.env.DATABASE_URL,
   sessionTtlMs: 90 * 24 * 60 * 60 * 1000,
 });
+// The PostgreSQL snapshot/fence schema is applied by the development schema
+// flow and Publish. Until it is present, both strategies fail closed.
+const automatedState = createAutomatedState({
+  databaseUrl: process.env.DATABASE_URL,
+  db: automatedDb,
+});
+let automatedTradingPersistenceReady = false;
+const automatedStartup = automatedState.init()
+  .then(() => automatedState.acquireFence())
+  .then(() => automatedState.flush('startup'))
+  .then(() => {
+  automatedTradingPersistenceReady = automatedState.isReady();
+  if (automatedTradingPersistenceReady) {
+    console.log('[AutomatedState] Durable snapshot, fence, and startup checkpoint verified.');
+  } else {
+    console.warn('[AutomatedState] Fence/checkpoint readiness is incomplete; automated entries remain paused.');
+  }
+}).catch(error => {
+  console.error('[AutomatedState] Durable snapshot state unavailable; automated entries remain paused:', error.message);
+  throw error;
+});
+setInterval(() => {
+  automatedState.heartbeat()
+    .then(alive => {
+      if (!alive) automatedTradingPersistenceReady = false;
+    })
+    .catch(error => {
+      automatedTradingPersistenceReady = false;
+      console.error('[AutomatedState] fence heartbeat failed; automated actions withheld:', error.message);
+    });
+}, 10_000);
 let authStoreInitError = null;
 let authStoreInitialized = false;
 let authStoreReady = null;
@@ -562,10 +747,9 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// SQLite still owns broker connections and trade journals while PostgreSQL owns
-// identities and sessions. A session created before the migration can be valid
-// while its matching SQLite compatibility row is absent; reconcile it before
-// writing any foreign-key-bound trading data.
+// PostgreSQL owns identities and sessions. The dedicated automated SQLite
+// compatibility row is synchronized before strategy writes; manual/research
+// state remains in jqf.db.
 async function ensureSessionUserInTradingStore(req) {
   const sessionUserId = Number(req.session?.userId);
   if (!Number.isSafeInteger(sessionUserId) || sessionUserId <= 0) {
@@ -575,6 +759,7 @@ async function ensureSessionUserInTradingStore(req) {
   const user = await authStore.findUserById(sessionUserId);
   if (!user) throw new Error('Authenticated user was not found.');
   authStore.syncSqliteUser(db, user);
+  authStore.syncSqliteUser(automatedDb, user);
   return Number(user.id);
 }
 
@@ -3473,7 +3658,8 @@ function getAlpacaCreds(userId, scope = 'manual') {
   const row = db.prepare(`SELECT api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id FROM ${credentials} WHERE user_id=? AND mode=?`).get(userId, mode);
   if (!row || row.api_key === DISCONNECTED_SENTINEL || !row.account_id
       || isBrokerAccountQuarantined(row.account_id) || alpacaAccountConflict(userId, scope, row.account_id)) return null;
-  return decryptStoredAlpacaCredentials(row, credentials, 'user_id=? AND mode=?', [userId, mode]);
+  const decrypted = decryptStoredAlpacaCredentials(row, credentials, 'user_id=? AND mode=?', [userId, mode]);
+  return decrypted ? { ...decrypted, strategyScope: scope, user_id: userId } : null;
 }
 
 // Helper: check if a specific mode has valid (non-sentinel) credentials in DB
@@ -3509,6 +3695,23 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     ? 'https://api.alpaca.markets'
     : 'https://paper-api.alpaca.markets';
   const MAX_ATTEMPTS = 4;
+  const method = String(opts.method || 'GET').toUpperCase();
+  const automatedAction = creds.strategyScope === 'options' && method !== 'GET';
+  let actionIntentId = null;
+  if (automatedAction) {
+    const body = typeof opts.body === 'string' ? opts.body : '';
+    const clientOrderId = (() => { try { return JSON.parse(body)?.client_order_id || null; } catch (_) { return null; } })();
+    const stableId = clientOrderId || `options-${crypto.createHash('sha256')
+      .update(`${creds.account_id}|${method}|${path}|${body}`).digest('hex').slice(0, 40)}`;
+    const intent = db.prepare(`
+      INSERT INTO automated_action_intents
+        (strategy,user_id,account_id,mode,method,path,purpose,client_order_id,request_json,state,updated_at)
+      VALUES ('options',?,?,?,?,?,?,?,?,'prepared',datetime('now'))
+    `).run(creds.user_id, creds.account_id, creds.mode, method, path,
+      path.includes('/orders') ? 'broker-order' : 'broker-action', stableId, body || '{}');
+    actionIntentId = intent.lastInsertRowid;
+    await automatedState.flush(`options-before-${method.toLowerCase()}`);
+  }
   const controller = new AbortController();
   const timeoutId  = setTimeout(() => controller.abort(), 12000); // 12-second hard timeout
   let r;
@@ -3525,6 +3728,11 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     });
   } catch (netErr) {
     clearTimeout(timeoutId);
+    if (automatedAction && actionIntentId) {
+      db.prepare("UPDATE automated_action_intents SET state='submission_unknown',last_error=?,updated_at=datetime('now') WHERE id=?")
+        .run('Broker response was not confirmed; reconciliation required.', actionIntentId);
+      try { await automatedState.flush(`options-unknown-${method.toLowerCase()}`); } catch (_) {}
+    }
     // Only retry GET requests — POST/PUT/DELETE are not idempotent.
     // Retrying an order-placement POST after a timeout could create a duplicate order.
     const isGet = !opts.method || opts.method === 'GET';
@@ -3554,9 +3762,20 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     await new Promise(res => setTimeout(res, delay));
     return alpacaFetchWithCredentials(creds, path, opts, _attempt + 1);
   }
-  if (r.status === 204) return {};
+  if (r.status === 204) {
+    if (automatedAction) {
+      db.prepare("UPDATE automated_action_intents SET state='submitted',updated_at=datetime('now') WHERE id=?").run(actionIntentId);
+      await automatedState.flush(`options-after-${method.toLowerCase()}`);
+    }
+    return {};
+  }
   const data = await r.json().catch(() => ({}));
   if (r.status === 401 || r.status === 403) {
+    if (automatedAction) {
+      db.prepare("UPDATE automated_action_intents SET state='rejected',last_error=?,updated_at=datetime('now') WHERE id=?")
+        .run('Broker definitively rejected the action.', actionIntentId);
+      await automatedState.flush(`options-rejected-${method.toLowerCase()}`);
+    }
     const error = new Error('Alpaca authentication failed — check your API credentials.');
     error.alpacaStatus = r.status;
     throw error;
@@ -3568,7 +3787,19 @@ async function alpacaFetchWithCredentials(creds, path, opts = {}, _attempt = 0) 
     const error = new Error(`Alpaca request failed (HTTP ${r.status}).`);
     error.alpacaStatus = r.status;
     error.alpacaTransient = r.status === 429 || r.status >= 500;
+    if (automatedAction) {
+      db.prepare("UPDATE automated_action_intents SET state=?,last_error=?,updated_at=datetime('now') WHERE id=?")
+        .run(r.status >= 400 && r.status < 500 ? 'rejected' : 'submission_unknown',
+          r.status >= 400 && r.status < 500 ? 'Broker definitively rejected the action.' : 'Broker response was not confirmed; reconciliation required.',
+          actionIntentId);
+      await automatedState.flush(`options-${r.status >= 400 && r.status < 500 ? 'rejected' : 'unknown'}-${method.toLowerCase()}`);
+    }
     throw error;
+  }
+  if (automatedAction) {
+    db.prepare("UPDATE automated_action_intents SET state='submitted',broker_order_id=?,updated_at=datetime('now') WHERE id=?")
+      .run(data?.id || null, actionIntentId);
+    await automatedState.flush(`options-after-${method.toLowerCase()}`);
   }
   return data;
 }
@@ -3677,6 +3908,9 @@ function autoEnablePaperStrategy(userId, scope, mode) {
 // Save only verified, isolated manual or LEAP broker credentials.
 app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const scope = requestAlpacaScope(req);
+  if (scope === 'options' && !automatedTradingPersistenceReady) {
+    return res.status(503).json({ error: 'Durable automated-trading persistence is unavailable; LEAP remains paused until the PostgreSQL schema is published.' });
+  }
   const { credentials, active } = brokerTables(scope);
   const { apiKey, apiSecret, mode = 'paper' } = req.body || {};
   if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'mode must be paper or live.' });
@@ -3726,13 +3960,14 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
       autoEnablePaperStrategy(uid, scope, mode);
       if (previousAccountId && previousAccountId !== accountId) releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
     })();
+    if (scope === 'options') await automatedState.flush('options-credentials-connected');
     res.json({ ok: true, mode, connection: scope, accountId, automationEnabled: scope === 'options' && mode === 'paper', liveArmed: false });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.status === 409 ? error.message : 'Broker verification could not complete. Check the connection and try again.' });
   }
 });
 
-app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
+app.delete('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const uid = req.session.userId;
   const scope = requestAlpacaScope(req);
   const { credentials, active } = brokerTables(scope);
@@ -3750,6 +3985,10 @@ app.delete('/api/alpaca/credentials', requireAuth, (req, res) => {
     }
     releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
   })();
+  if (scope === 'options') {
+    try { await automatedState.flush('options-credentials-disconnected'); }
+    catch (error) { return res.status(503).json({ error: `Disconnect could not be durably saved: ${error.message}` }); }
+  }
   res.json({ ok: true, connection: scope });
 });
 
@@ -3763,7 +4002,7 @@ app.get('/api/alpaca/credentials', requireAuth, (req, res) => {
     connection: scope, accountId: creds?.account_id || null });
 });
 
-app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
+app.post('/api/alpaca/switch-mode', requireAuth, async (req, res) => {
   const { mode } = req.body || {};
   const scope = requestAlpacaScope(req);
   const uid = req.session.userId;
@@ -3779,6 +4018,10 @@ app.post('/api/alpaca/switch-mode', requireAuth, (req, res) => {
     }
     autoEnablePaperStrategy(uid, scope, mode);
   })();
+  if (scope === 'options') {
+    try { await automatedState.flush('options-mode-selected'); }
+    catch (error) { return res.status(503).json({ error: `Mode selection could not be durably saved: ${error.message}` }); }
+  }
   res.json({ ok: true, mode, connection: scope, automationEnabled: scope === 'options' && mode === 'paper', liveArmed: false });
 });
 
@@ -5946,6 +6189,9 @@ function optionsOrderLookupPath(orderId, clientOrderId) {
 }
 
 async function executeOptionsEntry(userId, symbol, source = 'manual', leaseToken = null) {
+  if (!automatedTradingPersistenceReady) {
+    throw new Error('Durable automated-trading persistence is unavailable; LEAP entry withheld.');
+  }
   let settings = optionsConfigFor(userId);
   let creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
   const brokerIdentity = creds ? `${creds.mode}:${creds.account_id}` : null;
@@ -6416,6 +6662,9 @@ app.get('/api/options/settings', requireAuth, async (req, res) => {
 app.put('/api/options/settings', requireAuth, async (req, res) => {
   try {
     const userId = await ensureSessionUserInTradingStore(req);
+    if (req.body?.enabled === true && !automatedTradingPersistenceReady) {
+      return res.status(503).json({ error: 'Durable automated-trading persistence is unavailable; LEAP entries remain paused until the PostgreSQL schema is published.' });
+    }
     db.prepare('INSERT OR IGNORE INTO options_settings(user_id) VALUES (?)').run(userId);
     const prior = optionsConfigFor(userId);
     const maxPositionDollars = Math.min(OPTIONS_MAX_POSITION_DOLLARS,
@@ -6466,6 +6715,7 @@ app.put('/api/options/settings', requireAuth, async (req, res) => {
     const fleet = automaticBotSettings.status(userId, 'options', {
       mode: creds?.mode || 'paper', enabled, liveArmed,
     });
+    await automatedState.flush('options-settings-saved');
     res.json({ ok: true, enabled, liveArmed, maxPositionDollars, ...fleet });
   } catch (error) { res.status(error.status || 503).json({ error: `Options settings could not be saved: ${error.message}` }); }
 });
@@ -6687,6 +6937,10 @@ async function runOptionsCycle(userId, source = 'server-scheduler') {
   try {
     const events = await reconcileOptionsTrades(userId, lease);
     outcome.reconciled = events.length;
+    if (!automatedTradingPersistenceReady) return finish({
+      status: 'reconciled_persistence_blocked',
+      reason: 'Durable automated-trading PostgreSQL schema is unavailable; existing lifecycles were reconciled and new entries were withheld.',
+    });
     if (!settings.enabled) return finish({
       status: 'reconciled_paused',
       reason: 'Automation is paused; broker-confirmed option positions and owned exits were still reconciled.',
@@ -6728,6 +6982,9 @@ async function runOptionsCycle(userId, source = 'server-scheduler') {
     return finish({ status: 'withheld', reason: String(error.message || 'Safety gates withheld the cycle.').slice(0, 300) });
   } finally {
     releaseOptionsExecutionLease(userId, lease);
+    if (automatedTradingPersistenceReady) {
+      await automatedState.flush('options-cycle-final');
+    }
     releaseExecutionLock(userId);
   }
 }
@@ -6775,6 +7032,7 @@ app.put('/api/trade-settings', requireAuth, (req, res) => {
 // open broker lifecycles even when new entries are paused.
 let optionsSchedulerRunning = false;
 setInterval(async () => {
+  if (!automatedTradingPersistenceReady) return;
   if (optionsSchedulerRunning) return;
   optionsSchedulerRunning = true;
   try {
@@ -6791,8 +7049,10 @@ setInterval(async () => {
 // and API failures remain explicit and retryable while the homepage gets a
 // small, safe maintenance response for unexpected server errors.
 const b2Service = mountB2({
-  app, db, requireAuth, ensureSessionUserInTradingStore,
+  app, db: automatedDb, requireAuth, ensureSessionUserInTradingStore,
   vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
 });
 
 app.use((error, req, res, next) => {
@@ -6822,7 +7082,25 @@ app.use((error, req, res, next) => {
     </main></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+let shuttingDown = false;
+async function stopAutomatedState(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  let failed = false;
+  try {
+    await automatedState.releaseFence();
+  } catch (error) {
+    failed = true;
+    console.error(`[AutomatedState] ${signal} flush failed; state may require reconciliation:`, error.message);
+  } finally {
+    process.exit(failed ? 1 : (signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1));
+  }
+}
+process.once('SIGTERM', () => { void stopAutomatedState('SIGTERM'); });
+process.once('SIGINT', () => { void stopAutomatedState('SIGINT'); });
+
+function startServer() {
+  app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);
   b2Service.start();
   // Pre-load SPY levels immediately at startup so data is ready before market open
@@ -6832,4 +7110,11 @@ app.listen(PORT, '0.0.0.0', () => {
   });
   // Refresh SPY levels every 30 min so they stay current through the trading day
   setInterval(() => getSPYLevels(), 30 * 60 * 1000);
+  });
+}
+
+automatedStartup.then(startServer).catch(() => {
+  // Fail closed: without a fenced durable image no HTTP listener or scheduler
+  // is started.
+  process.exitCode = 1;
 });

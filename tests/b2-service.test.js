@@ -180,7 +180,8 @@ function fixture(options = {}) {
         signalDate: expectedSessionDate, reasons: [], gates: [], metrics: { fastMA: bars.length >= 65 ? 10 : null, relativeVolume: 3 } };
     },
   };
-  const settings = { db, vault, fetch: fakeFetch, now: () => world.time, strategy, batchSize: 2, timeoutMs: 50, ...options };
+  const settings = { db, vault, fetch: fakeFetch, now: () => world.time, strategy, batchSize: 2, timeoutMs: 50,
+    persistenceReady: options.persistenceReady || (() => true), ...options };
   let service = createB2Service(settings);
   service.start({ schedule: false });
   const connect = (uid = 1, key = 'paper1', mode = 'paper', authorizeLive) => service.setCredentials(uid, { apiKey: key, apiSecret: `secret-${key}`, mode, authorizeLive });
@@ -190,6 +191,16 @@ function fixture(options = {}) {
     restart() { service.stop(); service = createB2Service(settings); service.start({ schedule: false }); },
     close() { service.stop(); db.close(); } };
 }
+
+test('automated entries fail closed when durable PostgreSQL persistence is unavailable', async () => {
+  const f = fixture({ persistenceReady: () => false });
+  try {
+    await assert.rejects(f.connect(), /persistence is unavailable/);
+    assert.equal(f.world.calls.length, 0);
+    assert.equal(f.service.status(1).entryReadyNow, false);
+    assert.match(f.service.status(1).blockers.join(' '), /PostgreSQL schema is unavailable/);
+  } finally { f.close(); }
+});
 
 test('dedicated encrypted credentials automatically enable Paper without credential disclosure or ownership leakage', async () => {
   const f = fixture();

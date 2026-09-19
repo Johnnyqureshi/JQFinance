@@ -28,3 +28,4 @@
 - [Shared entry liquidity policy](shared-entry-liquidity.md) — keep scanner and bot thresholds centralized; entry rejection must never suppress exit or protection decisions.
 - [Automatic bot context authority](automatic-bot-context-authority.md) — shared context is freshness-aware advisory evidence; each strategy explicitly owns any execution policy.
 - [Retired strategy comparisons](retired-strategy-comparisons.md) — compare removed bots only through neutral read-only Paper/shadow evidence; never restore execution paths.
+- [Fenced automated-state durability](fenced-automated-state-durability.md) — automated SQLite state is durable only behind a PostgreSQL fence, write-ahead checkpoints, and crash-atomic first cutover.

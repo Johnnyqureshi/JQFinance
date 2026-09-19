@@ -5,3 +5,4 @@ set -e
 # Installs any new npm dependencies added by the merged task.
 
 npm install --prefer-offline
+npm run db:push

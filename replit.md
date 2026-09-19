@@ -22,6 +22,7 @@ Johnny Qureshi Finance is a real-time stock market dashboard with a fully automa
 - Server-managed fills and protection continue when new entries are paused.
 - Position dollars is the only editable strategy setting; emergency pause/resume are separate authorization actions. Pausing revokes entries immediately without invalidating in-flight protective reconciliation.
 - Every actual strategy evaluation validates consecutive completed sessions against the broker calendar. Full catalog scans rotate in batches; status reports the minimum cycles per pass, not simultaneous whole-market coverage.
+- Automated B2 and LEAP entries remain fail-closed until the PostgreSQL repository/outbox cutover is complete. The development schema is `db/automated-trading-schema.sql`; Publish applies it to production, but the schema alone must never enable entries.
 - Tests: `npm run test:b2` (mock brokers only; never place real orders to verify code). `npm run test:b2-ui` uses isolated Chromium against the running dev app with all B2 endpoints mocked.
 
 ## System Architecture

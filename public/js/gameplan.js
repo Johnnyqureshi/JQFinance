@@ -867,7 +867,8 @@ const gamePlan = (() => {
     const price = Number(latestPrice);
     const watch = planWatch;
     if (!watch || watch.refreshTriggered || symbol !== currentSym || symbol !== watch.symbol
-        || !(price > 0) || !(watch.snapshotPrice > 0)) return;
+        || !Number.isFinite(price) || !(price > 0)
+        || !Number.isFinite(watch.snapshotPrice) || !(watch.snapshotPrice > 0)) return;
 
     const movePct = Math.abs(price - watch.snapshotPrice) / watch.snapshotPrice * 100;
     const crossedLevel = watch.levels.some(level =>

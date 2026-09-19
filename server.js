@@ -102,6 +102,8 @@ const { findDuplicateBrokerAssignments } = require('./lib/broker-account-isolati
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 const { createCredentialVault } = require('./lib/credential-vault');
 const { createAutomatedState } = require('./lib/automated-state');
+const { resolvePort } = require('./lib/runtime-config');
+const { closeServer } = require('./lib/graceful-shutdown');
 const {
   buildTradableEquityCatalog,
   resolveInverseSymbol,
@@ -121,7 +123,7 @@ console.warn = (...args) => {
 };
 
 const app      = express();
-const PORT           = 5000;
+const PORT           = resolvePort(process.env.PORT);
 const MAX_CONCURRENT_POSITIONS = 2;  // Manual account's entry capacity.
 const FMP_KEY  = process.env.FMP_API_KEY;
 const NEWS_KEY = process.env.NEWSAPI_KEY;
@@ -579,7 +581,7 @@ function rateLimitAuth(req, res, next) {
   next();
 }
 // Clean up stale entries every 15 minutes
-setInterval(() => {
+const authAttemptCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of authAttempts) if (now > entry.resetAt) authAttempts.delete(ip);
 }, 15 * 60 * 1000);
@@ -623,7 +625,7 @@ const automatedStartup = automatedState.init()
   console.error('[AutomatedState] Durable snapshot state unavailable; automated entries remain paused:', error.message);
   throw error;
 });
-setInterval(() => {
+const automatedHeartbeatTimer = setInterval(() => {
   automatedState.heartbeat()
     .then(alive => {
       if (!alive) automatedTradingPersistenceReady = false;
@@ -687,6 +689,11 @@ app.use(cors({ credentials: true, origin: true }));
 
 app.use(express.json({ limit: '50kb' }));
 
+// Liveness never depends on the database or external market services. Replit
+// can distinguish a running HTTP process from deeper readiness failures.
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 const PostgresSessionStore = authStore.createSessionStore(session);
 const sessionMiddleware = session({
@@ -7031,19 +7038,37 @@ app.put('/api/trade-settings', requireAuth, (req, res) => {
 // LEAP reconciliation runs independently of browser sessions and continues for
 // open broker lifecycles even when new entries are paused.
 let optionsSchedulerRunning = false;
-setInterval(async () => {
-  if (!automatedTradingPersistenceReady) return;
-  if (optionsSchedulerRunning) return;
-  optionsSchedulerRunning = true;
-  try {
-    const users = db.prepare(`SELECT user_id FROM options_settings WHERE enabled=1
-      UNION SELECT DISTINCT user_id FROM options_trades
-      WHERE status NOT IN ('closed','rejected','canceled')`).all();
-    for (const { user_id: userId } of users) await runOptionsCycle(userId);
-  } finally {
-    optionsSchedulerRunning = false;
-  }
-}, 2 * 60 * 1000);
+let optionsSchedulerStarted = false;
+let optionsSchedulerTimer = null;
+let optionsSchedulerCycle = Promise.resolve();
+function startOptionsScheduler() {
+  if (optionsSchedulerStarted) return;
+  optionsSchedulerStarted = true;
+  optionsSchedulerTimer = setInterval(() => {
+    if (!automatedTradingPersistenceReady || optionsSchedulerRunning) return;
+    optionsSchedulerRunning = true;
+    optionsSchedulerCycle = (async () => {
+      const users = db.prepare(`SELECT user_id FROM options_settings WHERE enabled=1
+        UNION SELECT DISTINCT user_id FROM options_trades
+        WHERE status NOT IN ('closed','rejected','canceled')`).all();
+      for (const { user_id: userId } of users) await runOptionsCycle(userId);
+    })().catch(error => {
+      console.error('[Options] scheduler cycle failed safely:', error.message);
+    }).finally(() => {
+      optionsSchedulerRunning = false;
+    });
+  }, 2 * 60 * 1000);
+  optionsSchedulerTimer.unref?.();
+}
+async function stopOptionsScheduler() {
+  optionsSchedulerStarted = false;
+  if (optionsSchedulerTimer) clearInterval(optionsSchedulerTimer);
+  optionsSchedulerTimer = null;
+  await optionsSchedulerCycle;
+}
+// Preserve the established two-minute reconciliation cadence from process
+// startup. The callback remains inert until durable persistence is ready.
+startOptionsScheduler();
 
 // Never expose database, broker, or internal stack traces to visitors. Session
 // and API failures remain explicit and retryable while the homepage gets a
@@ -7053,6 +7078,37 @@ const b2Service = mountB2({
   vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
   durability: automatedState,
+});
+let b2SchedulerStarted = false;
+let serviceShuttingDown = false;
+
+// Readiness verifies the live PostgreSQL fence and both scheduler loops without
+// exposing account, credential, owner, or strategy details.
+app.get('/readyz', async (_req, res) => {
+  let databaseReady = false;
+  try {
+    databaseReady = (await automatedState.health()).ready;
+  } catch (error) {
+    console.warn('[Health] PostgreSQL readiness probe failed:', error.message);
+  }
+  const b2Lifecycle = b2Service.lifecycleStatus();
+  const optionsScheduled = optionsSchedulerStarted && optionsSchedulerTimer !== null;
+  const ready = !serviceShuttingDown
+    && automatedTradingPersistenceReady
+    && databaseReady
+    && optionsScheduled
+    && b2SchedulerStarted
+    && b2Lifecycle.running
+    && b2Lifecycle.scheduled;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'unavailable',
+    database: databaseReady ? 'ready' : 'unavailable',
+    fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
+    schedulers: {
+      options: optionsScheduled ? 'started' : 'stopped',
+      b2: b2Lifecycle.running && b2Lifecycle.scheduled ? 'started' : 'stopped',
+    },
+  });
 });
 
 app.use((error, req, res, next) => {
@@ -7083,15 +7139,27 @@ app.use((error, req, res, next) => {
 });
 
 let shuttingDown = false;
+let httpServer = null;
 async function stopAutomatedState(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  serviceShuttingDown = true;
   let failed = false;
   try {
+    b2SchedulerStarted = false;
+    const b2Drain = b2Service.drain();
+    const optionsDrain = stopOptionsScheduler();
+    // A timeout is unsafe: active HTTP handlers may still mutate automated
+    // state, so do not checkpoint or release the fence on this path.
+    await closeServer(httpServer);
+    await Promise.all([b2Drain, optionsDrain]);
+    clearInterval(authAttemptCleanupTimer);
+    clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
+    await automatedState.close();
   } catch (error) {
     failed = true;
-    console.error(`[AutomatedState] ${signal} flush failed; state may require reconciliation:`, error.message);
+    console.error(`[AutomatedState] ${signal} drain or flush failed; state may require reconciliation:`, error.message);
   } finally {
     process.exit(failed ? 1 : (signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1));
   }
@@ -7100,9 +7168,10 @@ process.once('SIGTERM', () => { void stopAutomatedState('SIGTERM'); });
 process.once('SIGINT', () => { void stopAutomatedState('SIGINT'); });
 
 function startServer() {
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);
   b2Service.start();
+  b2SchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

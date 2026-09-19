@@ -36,6 +36,9 @@ function fakePool({ image, sha256, schemaVersion = SNAPSHOT_SCHEMA_VERSION } = {
         if (/lease_until=NOW\(\)/.test(sql)) { leaseUntil = 0; return { rowCount: 1, rows: [] }; }
         return { rowCount: owner === params[1] && epoch === params[2] ? 1 : 0, rows: [] };
       }
+      if (/^\s*SELECT 1\s+FROM automated_trading_fences/.test(sql)) {
+        return { rowCount: owner === params[0] && epoch === params[1] && leaseUntil > Date.now() ? 1 : 0, rows: [] };
+      }
       if (/INSERT INTO automated_trading_snapshots/.test(sql)) {
         if (owner !== params[6] || epoch !== params[5] || leaseUntil <= Date.now()) return { rowCount: 0, rows: [] };
         generation = params[1];
@@ -56,10 +59,12 @@ test('fenced checkpoint serializes the dedicated SQLite image and releases owner
   const state = createAutomatedState({ db, injectedPool: fakePool(), ownerId: 'test-owner' });
   await state.init();
   assert.equal(await state.acquireFence(), 1);
+  assert.deepEqual(await state.health(), { ready: true });
   const result = await state.flush('test');
   assert.equal(result.generation, 1);
   assert.match(result.sha256, /^[0-9a-f]{64}$/);
   await state.releaseFence();
+  assert.deepEqual(await state.health(), { ready: false });
   await state.close();
   db.close();
 });

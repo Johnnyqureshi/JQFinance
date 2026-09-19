@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "db:push": "node scripts/apply-dev-schema.js",
-    "pretest": "npm run test:liquidity && npm run test:macro && node tests/gameplan-analogs.test.js && node tests/volatility.test.js",
+    "test:deployment-config": "node scripts/check-deployment-invariant.js && node tests/runtime-config.test.js && node --test tests/graceful-shutdown.test.js",
+    "pretest": "npm run test:deployment-config && npm run test:liquidity && npm run test:macro && node tests/gameplan-analogs.test.js && node tests/volatility.test.js",
     "test:liquidity": "node tests/liquidity-policy.test.js && node tests/liquidity-integration.test.js && node tests/liquidity-scanner-ui.test.js",
     "test:macro": "node tests/macro-providers.test.js && node tests/verified-macro-context.test.js && node tests/macro-context-ui.test.js",
     "test:gameplan-analogs": "node tests/gameplan-analogs.test.js",

@@ -1,0 +1,391 @@
+We need to solve a serious reliability problem with this project.
+
+You repeatedly complete requested fixes, then when I ask “Are we production ready?” you discover another problem and say we are not ready.
+
+This creates an endless loop.
+
+From this point forward, you must use a SINGLE, FIXED production-readiness specification.
+
+Do NOT continuously invent new requirements after completing the defined checks.
+
+Do NOT tell me something is production-ready unless you have verified it.
+
+Do NOT tell me something is not production-ready unless you identify a concrete failed requirement.
+
+OBJECTIVE
+
+Establish whether this application is actually production-ready using the checklist below.
+
+Production readiness is determined ONLY by the criteria in this document plus genuine blocking failures discovered during verification.
+
+A cosmetic issue, optional enhancement, optimization, warning, future improvement, or non-blocking recommendation is NOT a reason to declare the application “not production-ready.”
+
+⸻
+
+PRODUCTION READINESS GATE
+
+The application passes production readiness only if ALL of the following critical requirements pass.
+
+1. APPLICATION STARTUP
+
+PASS requires:
+
+* Production process starts successfully.
+* Production process remains running.
+* No fatal startup exceptions.
+* Correct production startup command.
+* Correct environment configuration.
+* Server binds to 0.0.0.0.
+* Server uses the deployment-provided PORT.
+* No development server is being used unintentionally.
+
+2. DEPLOYMENT
+
+PASS requires:
+
+* Production deployment completes successfully.
+* Actual deployment target is verified.
+* Deployment target remains the intended VM deployment.
+* A subsequent harmless project update/redeploy does NOT change the deployment target to Cloud Run/Autoscale.
+* Deployment remains healthy after stabilization.
+
+If the deployment target changes unexpectedly, this is a FAIL.
+
+3. DATABASE
+
+PASS requires:
+
+* Production database is reachable.
+* Required migrations are applied.
+* Required bot tables exist.
+* Application can read from the database.
+* Application can write to the database.
+* No unresolved schema migration errors exist.
+
+4. API
+
+PASS requires:
+
+* Core API endpoints respond successfully.
+* Authentication works where applicable.
+* Database-backed API operations work.
+* No fatal API errors occur during basic production testing.
+
+5. FRONTEND
+
+PASS requires:
+
+* Application loads successfully.
+* Critical pages load.
+* No fatal JavaScript/runtime errors preventing core functionality.
+* API communication works.
+* Authentication/session behavior works where applicable.
+
+6. TRADING BOT SYSTEM
+
+PASS requires:
+
+* Bot services initialize successfully.
+* Required bot tables exist.
+* Scheduler initializes successfully.
+* Scheduler does not create duplicate workers/processes.
+* Bot execution does not crash immediately.
+* Required market-data connections initialize successfully.
+* Trading signals can be generated using the existing architecture.
+
+Do NOT change trading strategy logic while performing this verification.
+
+7. REAL-TIME CONNECTIONS
+
+Where the application uses WebSockets or other real-time connections:
+
+* Connection can be established.
+* Connection remains functional.
+* No deployment/proxy configuration is preventing the connection.
+* No persistent connection failure exists.
+
+8. ENVIRONMENT VARIABLES / SECRETS
+
+Verify that every REQUIRED production environment variable exists.
+
+Do NOT expose secret values.
+
+Report only:
+
+PASS — present
+
+or
+
+FAIL — missing
+
+Never print secret values into the response.
+
+9. ERROR LOGS
+
+Review production logs.
+
+Separate findings into:
+
+CRITICAL:
+Prevents production operation.
+
+WARNING:
+Should be addressed but does not prevent production operation.
+
+INFORMATIONAL:
+Not a production blocker.
+
+A WARNING or INFORMATIONAL item must NOT automatically change the final result to NOT READY.
+
+10. DATA INTEGRITY
+
+Verify that:
+
+* Existing production data is accessible.
+* No destructive migration occurred.
+* No required tables were accidentally dropped.
+* No obvious schema/data corruption exists.
+
+⸻
+
+CRITICAL RULE: STOP MOVING THE GOALPOSTS
+
+Once the above requirements have been tested, you MUST produce a final production-readiness decision.
+
+Do not respond with:
+
+“We aren’t ready because we could improve X.”
+
+Do not respond with:
+
+“Before production we should also consider Y.”
+
+Do not create another arbitrary checklist.
+
+Instead classify every issue as:
+
+BLOCKER
+WARNING
+INFORMATIONAL
+
+Only BLOCKERs can produce:
+
+FINAL STATUS: NOT PRODUCTION READY
+
+If there are zero BLOCKERs:
+
+FINAL STATUS: PRODUCTION READY
+
+⸻
+
+REQUIRED VERIFICATION PROCESS
+
+Do NOT make changes immediately.
+
+First perform an audit.
+
+Step 1:
+Inspect the repository and deployment configuration.
+
+Step 2:
+Run the application using the actual production configuration.
+
+Step 3:
+Verify deployment.
+
+Step 4:
+Verify database.
+
+Step 5:
+Verify APIs.
+
+Step 6:
+Verify frontend.
+
+Step 7:
+Verify bots/scheduler.
+
+Step 8:
+Verify real-time connections.
+
+Step 9:
+Review production logs.
+
+Step 10:
+Perform a clean production deployment.
+
+Step 11:
+Wait for stabilization.
+
+Step 12:
+Perform a harmless project update/redeployment.
+
+Step 13:
+Verify that the deployment configuration survives the redeployment.
+
+This regression test is REQUIRED because the project has previously reverted from VM to Cloud Run/Autoscale after updates.
+
+⸻
+
+CHANGE CONTROL
+
+During this audit:
+
+DO NOT:
+
+* redesign the application
+* rewrite working systems
+* change trading strategies
+* change signal logic
+* change database architecture unnecessarily
+* remove functionality
+* replace working dependencies without a reason
+* modify unrelated features
+* make cosmetic changes
+
+If a blocker is discovered, fix ONLY the blocker.
+
+After fixing it, rerun the relevant verification.
+
+⸻
+
+EVIDENCE REQUIREMENT
+
+Every PASS must be based on an actual verification.
+
+Do not say:
+
+“Looks good.”
+
+Instead say what was actually tested.
+
+For example:
+
+APPLICATION STARTUP:
+PASS — production process started successfully and remained healthy.
+
+DATABASE:
+PASS — connection verified and required bot tables confirmed.
+
+DEPLOYMENT:
+PASS — VM deployment verified after initial publish and after subsequent harmless redeployment.
+
+Do NOT fabricate test results.
+
+If you cannot test something, write:
+
+UNVERIFIED
+
+and explain why.
+
+An UNVERIFIED critical requirement means:
+
+FINAL STATUS: NOT VERIFIED
+
+It does NOT mean you should pretend it passed.
+
+⸻
+
+FINAL REPORT
+
+Your final response MUST use exactly this structure:
+
+PRODUCTION READINESS AUDIT
+
+APPLICATION STARTUP:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+DEPLOYMENT:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+DATABASE:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+API:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+FRONTEND:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+TRADING BOT SYSTEM:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+REAL-TIME CONNECTIONS:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+ENVIRONMENT VARIABLES:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+DATA INTEGRITY:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+PRODUCTION LOGS:
+CRITICAL:
+WARNINGS:
+INFORMATIONAL:
+
+REGRESSION TEST:
+PASS / FAIL / UNVERIFIED
+Evidence:
+
+BLOCKERS:
+[List only genuine production blockers.]
+
+WARNINGS:
+[List non-blocking issues.]
+
+FINAL STATUS:
+PRODUCTION READY
+or
+NOT PRODUCTION READY
+or
+NOT VERIFIED
+
+FINAL STATUS RULE:
+
+If all critical requirements pass and there are zero BLOCKERS:
+
+PRODUCTION READY
+
+If any critical requirement fails:
+
+NOT PRODUCTION READY
+
+If a critical requirement cannot actually be tested:
+
+NOT VERIFIED
+
+Do not invent additional requirements after this audit.
+
+⸻
+
+VERY IMPORTANT
+
+I do not want another cycle where you say:
+
+“I fixed everything, but we’re still not production-ready because I discovered another issue.”
+
+That behavior is exactly what we are eliminating.
+
+Perform the complete audit FIRST.
+
+Then identify the blockers.
+
+Then fix the blockers.
+
+Then rerun the audit.
+
+Then give ONE final evidence-based status.
+
+Do not continuously redefine production readiness.
+
+Production readiness must be a measurable state, not an endless conversation.

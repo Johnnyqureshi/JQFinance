@@ -202,6 +202,33 @@ test('automated entries fail closed when durable PostgreSQL persistence is unava
   } finally { f.close(); }
 });
 
+test('scheduler lifecycle is idempotent and drain waits for an active tick', async () => {
+  const f = fixture();
+  let release;
+  try {
+    assert.deepEqual(f.service.lifecycleStatus(), { running: true, ticking: false, scheduled: false });
+    await f.connect();
+    const blocked = new Promise(resolve => { release = resolve; });
+    let tickStarted = false;
+    f.world.before = async call => {
+      if (call.path === '/v2/account' && !tickStarted) {
+        tickStarted = true;
+        await blocked;
+      }
+    };
+    const tick = f.service.tick();
+    while (!tickStarted) await new Promise(resolve => setImmediate(resolve));
+    let drained = false;
+    const drain = f.service.drain().then(() => { drained = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(drained, false);
+    release();
+    await Promise.all([tick, drain]);
+    release = null;
+    assert.deepEqual(f.service.lifecycleStatus(), { running: false, ticking: false, scheduled: false });
+  } finally { release?.(); f.close(); }
+});
+
 test('dedicated encrypted credentials automatically enable Paper without credential disclosure or ownership leakage', async () => {
   const f = fixture();
   try {

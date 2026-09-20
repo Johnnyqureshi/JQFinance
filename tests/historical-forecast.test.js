@@ -85,6 +85,12 @@ test('builds normalized, weighted historical outcomes only from prior windows', 
   assert.equal(result.paths.current.at(-1), 100);
   assert.equal(result.paths.closest.length, 31);
   assert.equal(result.paths.closest[0], 100);
+  assert.equal(result.paths.analogs.length, result.matchCount);
+  assert.ok(result.paths.analogs.every(analog =>
+    typeof analog.date === 'string'
+    && Array.isArray(analog.path)
+    && analog.path.length === 31
+    && analog.path[0] === 100));
   if (result.paths.bullish) assert.equal(result.paths.bullish.average[0], 100);
   if (result.paths.bearish) assert.equal(result.paths.bearish.average[0], 100);
 });

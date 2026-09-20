@@ -792,14 +792,39 @@ function historicalMatchSimilarity(value) {
   return Number.isFinite(score) ? `${(Math.max(0, Math.min(1, score)) * 100).toFixed(0)}%` : '—';
 }
 
-function renderHistoricalMatches(data) {
+function historicalMatchPath(data, date) {
+  const analog = data?.paths?.analogs?.find(item => item.date === date);
+  if (analog?.path?.length) return analog.path;
+  return date === data?.closest?.date ? data?.paths?.closest : null;
+}
+
+function renderHistoricalSelection(data, selectedMatch) {
+  if (!selectedMatch) return '';
+  const outcome = historicalMatchOutcome(selectedMatch.outcome);
+  return `<div class="hf-selection" aria-live="polite">
+    <div class="hf-selection-head">
+      <strong>Focused historical match</strong>
+      <span>Read-only realized history</span>
+    </div>
+    <div class="hf-selection-grid">
+      <div><span>Historical date</span><strong>${escapeHtml(selectedMatch.date || '—')}</strong></div>
+      <div><span>Similarity</span><strong class="hf-match-similarity">${historicalMatchSimilarity(selectedMatch.similarity)}</strong></div>
+      <div><span>Forward result</span><strong class="hf-match-result ${outcome.cls}">${pct(selectedMatch.forwardReturn)}</strong><small>${outcome.label}</small></div>
+      <div><span>Max favorable</span><strong class="up">${pct(selectedMatch.maxRise)}</strong></div>
+      <div><span>Max adverse</span><strong class="down">${pct(selectedMatch.maxDrawdown)}</strong></div>
+    </div>
+  </div>`;
+}
+
+function renderHistoricalMatches(data, selectedDate) {
   if (!data?.displayable || !Array.isArray(data.matches) || !data.matches.length) return '';
   const matches = [...data.matches].sort((a, b) => Number(b.similarity || 0) - Number(a.similarity || 0));
   const rows = matches.map(match => {
     const outcome = historicalMatchOutcome(match.outcome);
     const date = escapeHtml(match.date || '—');
+    const selected = match.date === selectedDate;
     return `<tr>
-      <td><time datetime="${date}">${date}</time></td>
+      <td><button type="button" class="hf-match-select${selected ? ' selected' : ''}" data-hf-match="${date}" aria-pressed="${selected}"><time datetime="${date}">${date}</time><span>${selected ? 'Focused' : 'Compare'}</span></button></td>
       <td class="hf-match-similarity">${historicalMatchSimilarity(match.similarity)}</td>
       <td><span class="hf-match-result ${outcome.cls}">${pct(match.forwardReturn)}</span><small>${outcome.label}</small></td>
       <td class="up">${pct(match.maxRise)}</td>
@@ -809,7 +834,7 @@ function renderHistoricalMatches(data) {
 
   return `<details class="hf-matches">
     <summary><span>Review historical matches</span><strong>${matches.length}</strong></summary>
-    <div class="hf-matches-note">Past analogs only — these are realized historical outcomes, not live or guaranteed results.</div>
+    <div class="hf-matches-note">Past analogs only — select one to compare its realized path with the aggregate projection. These are not live or guaranteed results.</div>
     <div class="hf-match-table-wrap">
       <table class="hf-match-table">
         <caption class="hf-sr-only">Historical pattern matches and their realized outcomes</caption>
@@ -829,8 +854,10 @@ function drawForecastPath(canvas, data) {
   if (!canvas || !data?.paths?.current?.length) return;
   const current = data.paths.current;
   const horizon = Number(data.horizon) || 30;
+  const selectedDate = data.selectedMatch?.date || data.closest?.date;
+  const selectedPath = historicalMatchPath(data, selectedDate);
   const lines = [
-    { values: data.paths.closest, color: '#63b3ed', width: 2, label: 'Closest analog' },
+    { values: selectedPath, color: '#63b3ed', width: 2.5, label: 'Focused historical match' },
     { values: data.paths.bullish?.average, color: '#1dd6a3', width: 2.5, label: 'Bullish average' },
     { values: data.paths.bearish?.average, color: '#e84545', width: 2.5, label: 'Bearish average' },
   ].filter(line => Array.isArray(line.values) && line.values.length);
@@ -906,6 +933,17 @@ function renderForecastPanel(data, symbol) {
   const selectableHorizons = [5, 10, 20, 30, 60, 63];
   const lookback = data?.lookback || 90;
   const horizon = data?.horizon || 30;
+  const matches = Array.isArray(data?.matches) ? data.matches : [];
+  const rememberedSelection = state.forecastSelection;
+  const selectedDate = matches.some(match =>
+    match.date === rememberedSelection?.date
+    && rememberedSelection?.symbol === symbol
+    && rememberedSelection?.lookback === lookback
+    && rememberedSelection?.horizon === horizon)
+    ? rememberedSelection.date
+    : data?.closest?.date;
+  const selectedMatch = matches.find(match => match.date === selectedDate) || data?.closest;
+  const chartData = data ? { ...data, selectedMatch } : data;
   const stars = '★'.repeat(data?.robustness || 1) + '☆'.repeat(Math.max(0, 5 - (data?.robustness || 1)));
   const controls = `<div class="hf-controls">
       <label>Pattern <select id="forecastLookback">${selectableLookbacks.map(value => `<option value="${value}"${value === lookback ? ' selected' : ''}>${value} sessions</option>`).join('')}</select></label>
@@ -940,10 +978,11 @@ function renderForecastPanel(data, symbol) {
       ${probabilitySegment('Neutral', probs.neutral, 'neutral')}
       ${probabilitySegment('Bearish', probs.bear, 'bear')}
     </div>
+    ${renderHistoricalSelection(data, selectedMatch)}
     <div class="hf-chart-card">
-      <div class="hf-chart-head"><strong>Historical analog projection</strong><span>Normalized to 100 at the forecast point</span></div>
+      <div class="hf-chart-head"><strong>Focused match vs aggregate projection</strong><span>Normalized to 100 at the forecast point</span></div>
       <canvas id="forecastPathCanvas" aria-label="Current pattern and comparable historical outcome paths"></canvas>
-      <div class="hf-legend"><span class="current">● Current pattern</span><span class="analog">● Closest analog</span><span class="bull">● Bullish average</span><span class="bear">● Bearish average</span></div>
+      <div class="hf-legend"><span class="current">● Current pattern</span><span class="analog">● Focused historical match</span><span class="bull">● Bullish average</span><span class="bear">● Bearish average</span></div>
     </div>
     <div class="hf-facts">
       <div><span>Comparable windows</span><strong>${data.matchCount}</strong><small>${Number(data.effectiveSampleSize || 0).toFixed(1)} effective weighted sample</small></div>
@@ -953,11 +992,22 @@ function renderForecastPanel(data, symbol) {
     </div>
     ${renderForecastCalibration(data.validation)}
     <p class="hf-explain">${escapeHtml(data.explanation || '')}</p>
-    ${renderHistoricalMatches(data)}
+    ${renderHistoricalMatches(data, selectedDate)}
     <details class="hf-method"><summary>How calculated?</summary><p>Each comparison uses the selected normalized price path plus return correlation, volatility, momentum, and drawdown. A match’s influence is its similarity cubed. Bullish and bearish require a move beyond ±${Number(data.thresholdPct || 2).toFixed(1)}% over ${horizon} sessions. Future candles are used only to measure historical outcomes, never to select a match.</p><p>Historical outcomes among comparable patterns are not guarantees of future performance. This panel is read-only and does not change trading signals or place orders.</p></details>
   </div>`;
   const canvas = $('forecastPathCanvas');
-  requestAnimationFrame(() => drawForecastPath(canvas, data));
+  requestAnimationFrame(() => drawForecastPath(canvas, chartData));
+  panel.querySelectorAll('[data-hf-match]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.forecastSelection = {
+        symbol,
+        lookback,
+        horizon,
+        date: button.dataset.hfMatch,
+      };
+      renderForecastPanel(data, symbol);
+    });
+  });
   bindForecastControls(symbol);
 }
 

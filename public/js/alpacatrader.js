@@ -374,19 +374,13 @@ const alpacaTrader = (() => {
       if (modalConnection === 'manual') {
         const acct = await apiFetch('/api/alpaca/account');
         if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
-        connected = true;
-        reconnecting = false;
-        alpacaMode = r.mode || 'paper';
       }
       _pollFailures = 0;
-      if (modalConnection === 'manual') localStorage.setItem(LS_WAS_CONNECTED, '1');
       hideModal();
       if (modalConnection === 'manual') {
-        updateConnStatus();
-        loadAccount();
-        loadPositions();
-        loadOrders();
-        startKeepAlive();
+        // Refresh the server-authoritative mode map after a connection change.
+        // Without this, Paper/Live pills remained stale until a full reload.
+        await checkCredentials();
       }
       window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
     } catch (e) { if (errEl) errEl.textContent = e.message; }
@@ -400,12 +394,12 @@ const alpacaTrader = (() => {
       window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
       return;
     }
-    connected    = false;
-    reconnecting = false;
-    localStorage.removeItem(LS_WAS_CONNECTED);
     stopKeepAlive();
-    updateConnStatus();
     hideModal();
+    // The active mode may have been disconnected while another mode remains
+    // stored. Re-read both flags so the switcher cannot advertise stale
+    // credentials.
+    await checkCredentials();
     window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: 'manual' } }));
     const posBody = $('atPositionsBody');
     if (posBody) posBody.innerHTML = '<div class="at-empty">Connect Alpaca to view live positions</div>';

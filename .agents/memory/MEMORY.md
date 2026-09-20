@@ -30,3 +30,4 @@
 - [Automatic bot context authority](automatic-bot-context-authority.md) — shared context is freshness-aware advisory evidence; each strategy explicitly owns any execution policy.
 - [Retired strategy comparisons](retired-strategy-comparisons.md) — compare removed bots only through neutral read-only Paper/shadow evidence; never restore execution paths.
 - [Fenced automated-state durability](fenced-automated-state-durability.md) — automated SQLite state is durable only behind a PostgreSQL fence, write-ahead checkpoints, and crash-atomic first cutover.
+- [Manual connection state](manual-connection-state.md) — after changing a broker credential, reread the server mode map so Paper/Live availability cannot remain stale in the UI.

@@ -569,6 +569,111 @@ const gamePlan = (() => {
       </section>`;
   }
 
+  function proxyPrice(value) {
+    return value == null || !Number.isFinite(Number(value)) ? 'Unavailable' : '$' + fmt(value);
+  }
+
+  function proxyStatusClass(value) {
+    const state = String(value || '').toUpperCase();
+    return state.includes('BULL') || state === 'CONFIRMED' || state === 'RISING' || state === 'HIGH'
+      ? 'bull'
+      : state.includes('BEAR') || state === 'DECLINING' || state === 'LOW'
+        ? 'bear'
+        : 'neut';
+  }
+
+  function proxyLevelRows(levels, emptyLabel) {
+    if (!Array.isArray(levels) || !levels.length) {
+      return `<div class="msp-empty">${esc(emptyLabel)}</div>`;
+    }
+    return levels.map(level => `
+      <div class="msp-level-row">
+        <b>${proxyPrice(level.price)}</b>
+        <span>${esc(level.type || 'STRUCTURAL LEVEL')} · ${esc(level.label || 'Completed OHLCV')}</span>
+        <small>${level.confirmations > 1 ? `${level.confirmations} confirmations · ` : ''}${esc(level.source || 'Completed OHLCV bars')}</small>
+      </div>`).join('');
+  }
+
+  function marketStructureProxyHtml(data) {
+    const proxy = data || {};
+    const current = proxy.current || {};
+    const indicators = proxy.indicators || {};
+    const trend = proxy.trend || {};
+    const activity = proxy.activity || {};
+    const confirmation = activity.confirmation || {};
+    const levels = proxy.levels || {};
+    const conditions = proxy.conditions || {};
+    const input = proxy.gamePlanInput || {};
+    const concentration = proxy.volumeConcentration || {};
+    const symbol = proxy.symbol || currentSym || '--';
+    const available = proxy.available === true;
+    const trendClass = proxyStatusClass(trend.regime);
+    const inputClass = proxyStatusClass(input.bias);
+    const checkHtml = (trend.checks || []).map(check =>
+      `<span class="msp-check ${check.bullish ? 'bull' : 'bear'}"><i>${check.bullish ? '✓' : '↓'}</i>${esc(check.label)}</span>`).join('')
+      || '<span class="msp-check neut"><i>·</i>Trend checks unavailable</span>';
+    const condition = (label, item) => `<div class="msp-condition ${proxyStatusClass(item?.state)}">
+      <span>${esc(label)}</span><b>${esc(item?.state || 'UNAVAILABLE')}</b>
+      <small>${item?.trigger == null ? '' : `Trigger ${proxyPrice(item.trigger)} · `}${esc(item?.reason || 'Verified condition unavailable.')}</small>
+    </div>`;
+    const concentrationText = concentration.available
+      ? `${proxyPrice(concentration.low)}–${proxyPrice(concentration.high)} · ${fmt(concentration.sharePct, 1)}% of observed volume`
+      : 'Unavailable';
+    if (!available) {
+      return `<section class="market-structure-proxy unavailable" id="gpMarketStructureProxy" aria-label="Market structure proxy">
+        <div class="msp-head"><div><span class="gp-sec-title">MARKET STRUCTURE &amp; LIQUIDITY PROXY</span><span class="gp-sec-note">${esc(symbol)} · verified OHLCV context</span></div><b>UNAVAILABLE</b></div>
+        <p class="msp-notice">No verified current price and completed OHLCV history are available for this snapshot. No Level 2, wall, absorption, or executed-flow value is substituted.</p>
+      </section>`;
+    }
+    return `<section class="market-structure-proxy ${trendClass}" id="gpMarketStructureProxy" aria-label="${esc(symbol)} market structure and liquidity proxy">
+      <div class="msp-head">
+        <div><span class="msp-kicker">${esc(symbol)} MARKET STRUCTURE &amp; LIQUIDITY PROXY</span><h3>Verified price, volume, and structural context</h3></div>
+        <div class="msp-status"><b class="${trendClass}">${esc(trend.regime || 'MIXED')}</b><small>${esc(proxy.status || 'PARTIAL')} · ${proxy.dataQuality?.dailyBars ?? 0} daily bars</small></div>
+      </div>
+      <div class="msp-notice">Proxy only: this uses real quote/OHLCV observations and deterministic calculations. It does <strong>not</strong> observe Level 2, order-book walls, absorption, quote imbalance, or executed aggressor flow.</div>
+
+      <div class="msp-grid msp-snapshot">
+        <div class="msp-card"><span>Current price</span><b>${proxyPrice(current.price)}</b><small>${current.changePct == null ? 'Change unavailable' : `${current.changePct >= 0 ? '+' : ''}${fmt(current.changePct, 2)}%`} · ${esc(current.marketState || 'market state unavailable')}</small></div>
+        <div class="msp-card"><span>Trend / regime</span><b class="${trendClass}">${esc(trend.regime || 'MIXED')}</b><small>${esc(trend.reason || 'Verified trend evidence unavailable.')}</small></div>
+        <div class="msp-card"><span>Volume activity</span><b class="${proxyStatusClass(activity.state)}">${esc(activity.state || 'UNAVAILABLE')}</b><small>${activity.relativeVolume == null ? 'RVOL unavailable' : fmt(activity.relativeVolume, 2) + '× RVOL'} · ${esc(activity.label || '')}</small></div>
+        <div class="msp-card"><span>Volume confirmation</span><b class="${proxyStatusClass(confirmation.direction)}">${esc(confirmation.state || 'UNAVAILABLE')}</b><small>${esc(confirmation.reason || 'Verified price/volume confirmation unavailable.')}</small></div>
+      </div>
+
+      <div class="msp-section-title">Verified indicator inputs <small>calculated from completed bars unless noted</small></div>
+      <div class="msp-grid msp-indicators">
+        <div class="msp-card"><span>20 SMA</span><b>${proxyPrice(indicators.sma20)}</b><small>${indicators.sma20 == null ? 'Insufficient history' : 'Daily close average'}</small></div>
+        <div class="msp-card"><span>50 SMA</span><b>${proxyPrice(indicators.sma50)}</b><small>${indicators.sma50 == null ? 'Insufficient history' : 'Daily close average'}</small></div>
+        <div class="msp-card"><span>200 SMA</span><b>${proxyPrice(indicators.sma200)}</b><small>${indicators.sma200 == null ? 'Insufficient history' : 'Daily close average'}</small></div>
+        <div class="msp-card"><span>Session VWAP</span><b>${proxyPrice(indicators.vwap)}</b><small>${indicators.vwap == null ? 'Regular-session volume unavailable' : 'Observed session volume-weighted price'}</small></div>
+        <div class="msp-card"><span>ATR(14)</span><b>${proxyPrice(indicators.atr)}</b><small>${indicators.atrPct == null ? 'ATR percentage unavailable' : fmt(indicators.atrPct, 2) + '% of price'}</small></div>
+        <div class="msp-card"><span>Volume concentration</span><b>${esc(concentrationText)}</b><small>Approximate OHLCV volume-by-price, not a resting-liquidity map</small></div>
+      </div>
+
+      <div class="msp-section-title">Market structure</div>
+      <div class="msp-structure">
+        <div class="msp-structure-state"><span>Completed-bar structure</span><b class="${trendClass}">${esc(trend.structure || 'MIXED')}</b><small>${esc(trend.reason || 'Structure unavailable.')}</small><div class="msp-checks">${checkHtml}</div></div>
+        <div class="msp-level-block support"><span>Structural support</span>${proxyLevelRows(levels.support, 'No verified structural support below price')}</div>
+        <div class="msp-level-block resistance"><span>Structural resistance</span>${proxyLevelRows(levels.resistance, 'No verified structural resistance above price')}</div>
+      </div>
+
+      <div class="msp-section-title">Breakout / breakdown conditions <small>price crossing alone is not confirmation</small></div>
+      <div class="msp-conditions">${condition('Upside breakout', conditions.breakout)}${condition('Downside breakdown', conditions.breakdown)}</div>
+
+      <section class="msp-gameplan-input" id="gpGamePlanStructureInput" aria-label="Market structure input to game plan">
+        <div class="msp-section-title"><span>MARKET STRUCTURE INPUT TO GAME PLAN</span><small>${esc(input.status || 'PROVISIONAL')} · decision support only</small></div>
+        <div class="msp-input-head"><b class="${inputClass}">${esc(input.bias || 'NEUTRAL')}</b><span>${esc(input.reason || 'No verified directional input.')}</span></div>
+        <div class="msp-input-grid">
+          <div><span>Bullish condition</span><p>${esc(input.bullishCondition || 'Unavailable')}</p></div>
+          <div><span>Bearish condition</span><p>${esc(input.bearishCondition || 'Unavailable')}</p></div>
+          <div><span>Context invalidation</span><p>${esc(input.invalidation || 'Unavailable')}</p></div>
+          <div><span>Next structural levels</span><p>Upside ${proxyPrice(input.nextLevels?.upside)} · downside ${proxyPrice(input.nextLevels?.downside)}</p></div>
+        </div>
+      </section>
+      <p class="msp-method">${esc(proxy.methodology || '')}</p>
+      <p class="msp-disclaimer">${esc(proxy.disclaimer || '')}</p>
+    </section>`;
+  }
+
   function confluenceHtml(confluence, searchSignal) {
     if (!confluence?.available) return '';
     const scores = confluence.scores || {};
@@ -757,6 +862,8 @@ const gamePlan = (() => {
        ${tradeReferenceHtml(tradeLevels)}
        ${searchSignalHtml(searchSignal)}
        ${volatilityIntelligenceHtml(d.volatility)}
+
+       ${marketStructureProxyHtml(d.marketStructureProxy)}
 
        <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
 

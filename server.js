@@ -51,6 +51,7 @@ const { buildVolatilitySnapshot } = require('./lib/volatility/orchestrator');
 const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/search-gap-analysis');
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
+const { buildMarketStructureProxy } = require('./lib/market-structure-proxy');
 const {
   TOPICS: SEARCH_INTELLIGENCE_TOPICS,
   buildMacroPressure,
@@ -3333,6 +3334,25 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       smartMoney,
       searchSignal: finalSearchSignal,
     });
+    const marketStructureProxy = buildMarketStructureProxy({
+      symbol: sym,
+      snapshot: {
+        price,
+        prevClose: snapshotPrevClose,
+        open: cryptoSymbol ? null : quote?.open,
+        high: cryptoSymbol ? cryptoStats.high : quote?.dayHigh,
+        low: cryptoSymbol ? cryptoStats.low : quote?.dayLow,
+        volume: cryptoSymbol ? cryptoStats.volume : quote?.volume,
+        avgVolume: cryptoSymbol ? null : quote?.avgVolume,
+        marketState: cryptoSymbol ? '24/7' : quote?.marketState,
+        changePct: chg1d,
+      },
+      indicators,
+      dailyBars: searchLevelAnalysis.completedBars,
+      levels,
+      nowMs: generationNow,
+      source: cryptoSymbol ? 'Yahoo Finance chart API' : (quote?.source || 'Yahoo Finance quote and chart API'),
+    });
 
     // Do not manufacture probability percentages when no directly comparable
     // historical sample exists. Exact analog statistics are rendered separately.
@@ -3450,6 +3470,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       analogs: analogs ? { threshold, ...analogs } : null,
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
+      marketStructureProxy,
       probabilities, confluence, searchSignal: finalSearchSignal, marketContext, tradeLevels,
       ...(volatility ? { volatility } : {}),
       confidence: { overall, parts },

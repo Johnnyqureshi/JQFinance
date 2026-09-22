@@ -57,6 +57,37 @@ const gameplan = {
   displayLevels: { support: [{ price: 194 }], resistance: [{ price: 199 }] },
   smartMoney: maps['1D'],
   provenance: { quote: { provider: 'AAPL fixture', asOf: '2026-09-19T14:00:00.000Z' }, news: [] },
+  marketStructureProxy: {
+    available: true, symbol: 'AAPL', status: 'AVAILABLE', source: 'AAPL fixture',
+    dataQuality: { dailyBars: 60, complete: true, missing: [] },
+    current: { price: 196.8, changePct: 0.9, open: 195.5, high: 198, low: 194.8, volume: 50000000, marketState: 'REGULAR' },
+    trend: {
+      regime: 'BULLISH', structure: 'BULLISH',
+      checks: [{ label: 'Price vs 20 SMA', bullish: true }, { label: 'Higher highs / higher lows', bullish: true }],
+      reason: 'Fixture trend checks agree.',
+    },
+    indicators: { sma20: 194, sma50: 191, sma200: 178, vwap: 196, atr: 2.1, atrPct: 1.1, relativeVolume: 1.4 },
+    activity: {
+      state: 'NORMAL', label: 'Normal participation',
+      confirmation: { state: 'CONFIRMED', direction: 'BULLISH', reason: 'Fixture price and volume confirmation.' },
+    },
+    levels: {
+      support: [{ price: 194, label: 'Confirmed swing low', confirmations: 2, type: 'STRUCTURAL SUPPORT', source: 'AAPL fixture' }],
+      resistance: [{ price: 199, label: 'Prior-session high', confirmations: 2, type: 'STRUCTURAL RESISTANCE', source: 'AAPL fixture' }],
+    },
+    conditions: {
+      breakout: { state: 'WATCH', trigger: 199, reason: 'Fixture breakout condition.' },
+      breakdown: { state: 'WATCH', trigger: 194, reason: 'Fixture breakdown condition.' },
+    },
+    volumeConcentration: { available: true, low: 195, high: 197, sharePct: 24, method: 'Fixture' },
+    gamePlanInput: {
+      bias: 'BULLISH', status: 'VERIFIED_INPUTS', reason: 'Fixture verified inputs.',
+      bullishCondition: 'Close above $199 with volume.', bearishCondition: 'Close below $194 with volume.',
+      invalidation: 'Below $194.', nextLevels: { upside: 199, downside: 194 },
+    },
+    methodology: 'Fixture OHLCV method.',
+    disclaimer: 'Fixture context only; no Level 2 or order-book data.',
+  },
 };
 
 function installMock() {
@@ -152,6 +183,11 @@ async function main() {
     await js(`openStock('AAPL', ${JSON.stringify(gameplan.snapshot)})`);
     await wait(`document.querySelector('#gpSmartMoneyWrap [data-sm-timeframe="1D"].active')`);
     assert.equal(await js(`document.querySelectorAll('#searchVerdictTop').length`), 1);
+    await wait(`document.querySelector('#gpMarketStructureProxy') && document.querySelector('#gpGamePlanStructureInput')`);
+    const proxyText = await js(`document.querySelector('#gpMarketStructureProxy').textContent`);
+    assert.match(proxyText, /AAPL MARKET STRUCTURE & LIQUIDITY PROXY/);
+    assert.match(proxyText, /MARKET STRUCTURE INPUT TO GAME PLAN/);
+    assert.doesNotMatch(proxyText, /LIQUIDITY & DIRECTION HEATMAP|Heatmap Input to Game Plan/i);
     const verdict = await js(`document.querySelector('#searchVerdictTop').textContent`);
 
     for (const timeframe of timeframes) {

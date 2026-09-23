@@ -89,7 +89,7 @@ const gameplan = {
     disclaimer: 'Fixture context only; no Level 2 or order-book data.',
   },
   moneyFlow: {
-    available: true, symbol: 'AAPL', assetType: 'EQUITY', status: 'PARTIAL',
+    available: true, symbol: 'AAPL', assetType: 'EQUITY', instrumentType: 'STOCK', status: 'PARTIAL',
     source: 'AAPL fixture', generatedAt: '2026-09-19T14:00:00.000Z',
     summary: {
       status: 'INFLOW', score: 68, scoreLabel: 'OHLCV participation proxy score',
@@ -229,6 +229,7 @@ async function main() {
     await wait(`document.querySelector('#gpSmartMoneyWrap [data-sm-timeframe="1D"].active')`);
     await wait(`document.querySelector('#moneyFlowModule')`);
     assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /MONEY FLOW/);
+    assert.match(await js(`document.querySelector('#moneyFlowModule .mfm-asset').textContent`), /STOCK/);
     assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /ETF FLOW EXPOSURE — ESTIMATED/);
     assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /DATA UNAVAILABLE/);
     await js(`document.querySelector('#moneyFlowModule [data-moneyflow-period="20D"]').click()`);

@@ -7,4 +7,4 @@ The current Yahoo quote/chart paths provide price, completed OHLCV, relative-vol
 
 **Why:** Inferring these metrics from price and volume would misrepresent capital flow and derivatives activity.
 
-**How to apply:** Keep Money Flow labels provenance-aware and fail closed for unsupported fields until a provider supplies timestamped, venue- or instrument-specific data.
+**How to apply:** Classify ETFs from the provider quote type and keep single stocks as a separate instrument class. Keep Money Flow labels provenance-aware and fail closed for unsupported fields until a provider supplies timestamped, venue- or instrument-specific data.

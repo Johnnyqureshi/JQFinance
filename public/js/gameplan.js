@@ -732,8 +732,11 @@ const gamePlan = (() => {
   function moneyFlowPositioningHtml(data) {
     const positioning = data?.positioning || {};
     const metrics = Array.isArray(positioning.metrics) ? positioning.metrics : [];
+    const positioningLabel = data?.assetType === 'CRYPTO'
+      ? 'CRYPTO POSITIONING'
+      : data?.instrumentType === 'ETF' ? 'ETF POSITIONING' : 'SHORT POSITIONING';
     return `<div class="mfm-panel mfm-positioning">
-      <div class="mfm-panel-head"><span>${data?.assetType === 'CRYPTO' ? 'CRYPTO POSITIONING' : 'SHORT POSITIONING'}</span><small>${esc(positioning.status || 'DATA UNAVAILABLE')}</small></div>
+      <div class="mfm-panel-head"><span>${positioningLabel}</span><small>${esc(positioning.status || 'DATA UNAVAILABLE')}</small></div>
       <div class="mfm-position-grid">${metrics.map(metric => `
         <div><span>${esc(metric.label)}</span><b class="${moneyFlowClass(metric.direction)}">${metric.value == null ? 'Data unavailable' : moneyFlowNumber(metric.value, metric.unit === 'x' ? 'x' : metric.unit ? ` ${metric.unit}` : '', metric.unit === 'shares' ? 0 : 2)} ${metric.direction === 'UNAVAILABLE' ? '' : moneyFlowArrow(metric.direction)}</b></div>`).join('')}</div>
       <p class="mfm-source">${esc(positioning.note || 'Positioning data unavailable.')}</p>
@@ -750,6 +753,7 @@ const gamePlan = (() => {
     const score = summary.score;
     const scoreWidth = score == null ? 0 : Math.max(0, Math.min(100, Number(score)));
     const isCrypto = flow.assetType === 'CRYPTO';
+    const isEtf = flow.instrumentType === 'ETF';
     const driver = flow.primaryDriver || {};
     const available = flow.available === true;
     const activityRows = activity.length
@@ -761,10 +765,10 @@ const gamePlan = (() => {
       : '<div class="mfm-empty">Market and sector ETF activity unavailable.</div>';
     const missing = Array.isArray(flow.dataQuality?.missing) ? flow.dataQuality.missing : [];
     const liquidation = flow.liquidation;
-    return `<section class="money-flow-module ${isCrypto ? 'crypto' : 'equity'}" id="moneyFlowModule" aria-label="Money Flow">
+    return `<section class="money-flow-module ${isCrypto ? 'crypto' : isEtf ? 'etf' : 'equity'}" id="moneyFlowModule" aria-label="Money Flow">
       <div class="mfm-head">
         <div><span class="mfm-kicker">MONEY FLOW</span><h3>${esc(flow.symbol || currentSym || '--')} capital-flow context</h3></div>
-        <div class="mfm-asset"><b>${esc(flow.assetType || 'ASSET')}</b><small>${esc(flow.status || 'PARTIAL')} · ${esc(flow.source || 'SOURCE UNAVAILABLE')}</small></div>
+        <div class="mfm-asset"><b>${esc(flow.instrumentType || flow.assetType || 'ASSET')}</b><small>${esc(flow.status || 'PARTIAL')} · ${esc(flow.source || 'SOURCE UNAVAILABLE')}</small></div>
       </div>
       <div class="mfm-notice">Verified data only. The score is an ${esc(summary.scoreLabel || 'data-limited participation proxy')}; it is not institutional flow, ETF net flow, a squeeze signal, or a trade instruction.</div>
       ${available ? `<div class="mfm-summary">
@@ -777,7 +781,7 @@ const gamePlan = (() => {
 
       <div class="mfm-grid">
         <div class="mfm-panel mfm-etf">
-          <div class="mfm-panel-head"><span>ETF FLOW EXPOSURE — ESTIMATED</span><small>requires net flow × verified weight</small></div>
+          <div class="mfm-panel-head"><span>${esc(etfExposure.label || 'ETF FLOW EXPOSURE — ESTIMATED')}</span><small>${isEtf ? 'requires verified creations/redemptions feed' : 'requires net flow × verified weight'}</small></div>
           <div class="mfm-estimate-status"><b>${etfExposure.available ? 'ESTIMATED' : 'DATA UNAVAILABLE'}</b><span>${esc(etfExposure.reason || 'ETF net-flow inputs unavailable.')}</span></div>
           <div class="mfm-etf-activity-title">ETF activity context <small>price/volume only · not net flow</small></div>
           <div class="mfm-etf-rows">${activityRows}</div>

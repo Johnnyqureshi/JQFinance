@@ -15,27 +15,32 @@ const bars = Array.from({ length: 25 }, (_, index) => {
   };
 });
 
+const snapshotFixture = {
+  price: 120,
+  prevClose: 118,
+  changePct: 1.7,
+  volume: 3_000_000,
+  avgVolume: 1_500_000,
+};
+
+const marketFixture = {
+  spy: 0.8,
+  qqq: 1.1,
+  iwm: 0.2,
+  sectorEtf: 'SMH',
+  sectorChangePct: 1.4,
+  etfActivity: [{ symbol: 'QQQ', label: 'Nasdaq 100', changePct: 1.1, volume: 2_000_000, averageVolume: 1_000_000 }],
+};
+
 const equity = buildMoneyFlowData({
   symbol: 'NVDA',
   assetType: 'EQUITY',
+  instrumentType: 'STOCK',
   generatedAt: Date.parse('2026-09-23T15:00:00Z'),
-  snapshot: {
-    price: 120,
-    prevClose: 118,
-    changePct: 1.7,
-    volume: 3_000_000,
-    avgVolume: 1_500_000,
-  },
+  snapshot: snapshotFixture,
   indicators: { vwap: 118 },
   dailyBars: bars,
-  market: {
-    spy: 0.8,
-    qqq: 1.1,
-    iwm: 0.2,
-    sectorEtf: 'SMH',
-    sectorChangePct: 1.4,
-    etfActivity: [{ symbol: 'QQQ', label: 'Nasdaq 100', changePct: 1.1, volume: 2_000_000, averageVolume: 1_000_000 }],
-  },
+  market: marketFixture,
   quoteSummary: {
     defaultKeyStatistics: {
       sharesShort: 10_000_000,
@@ -48,6 +53,7 @@ const equity = buildMoneyFlowData({
 });
 
 assert.equal(equity.assetType, 'EQUITY');
+assert.equal(equity.instrumentType, 'STOCK');
 assert.equal(equity.summary.status, 'STRONG INFLOW');
 assert.equal(equity.participation.relativeVolume, 2);
 assert.equal(equity.participation.confirmation, 'CONFIRMED');
@@ -63,19 +69,40 @@ for (const symbol of ['GPRO', 'AAPL', 'TSLA']) {
   const symbolSnapshot = buildMoneyFlowData({
     symbol,
     assetType: 'EQUITY',
-    snapshot: equity.snapshot,
-    indicators: equity.indicators,
+    instrumentType: 'STOCK',
+    snapshot: snapshotFixture,
+    indicators: { vwap: 118 },
     dailyBars: bars,
-    market: equity.market,
+    market: marketFixture,
   });
   assert.equal(symbolSnapshot.symbol, symbol);
   assert.equal(symbolSnapshot.assetType, 'EQUITY');
+  assert.equal(symbolSnapshot.instrumentType, 'STOCK');
   assert.ok(symbolSnapshot.flowTrend['5D'].points.length > 0);
+}
+
+for (const symbol of ['SPY', 'QQQ', 'IWM', 'XLK', 'TQQQ', 'SQQQ']) {
+  const etf = buildMoneyFlowData({
+    symbol,
+    assetType: 'EQUITY',
+    instrumentType: 'ETF',
+    snapshot: snapshotFixture,
+    indicators: { vwap: 118 },
+    dailyBars: bars,
+    market: marketFixture,
+  });
+  assert.equal(etf.symbol, symbol);
+  assert.equal(etf.instrumentType, 'ETF');
+  assert.equal(etf.etfExposure.label, 'ETF Net Flow');
+  assert.equal(etf.etfExposure.available, false);
+  assert.equal(etf.positioning.status, 'DATA UNAVAILABLE');
+  assert.ok(etf.flowTrend['20D'].available);
 }
 
 const crypto = buildMoneyFlowData({
   symbol: 'BTC-USD',
   assetType: 'CRYPTO',
+  instrumentType: 'CRYPTO',
   snapshot: { price: 65_000, changePct: -2.1, volume: 2_000_000, avgVolume: 1_000_000 },
   indicators: { vwap: 65_500 },
   dailyBars: bars,
@@ -83,6 +110,7 @@ const crypto = buildMoneyFlowData({
 });
 
 assert.equal(crypto.assetType, 'CRYPTO');
+assert.equal(crypto.instrumentType, 'CRYPTO');
 assert.equal(crypto.positioning.available, false);
 assert.equal(crypto.liquidation.available, false);
 assert.match(crypto.dataQuality.note, /venue-aggregated/i);
@@ -91,6 +119,7 @@ assert.match(crypto.disclaimer, /does not prove/i);
 const unavailable = buildMoneyFlowData({
   symbol: 'GPRO',
   assetType: 'EQUITY',
+  instrumentType: 'STOCK',
   snapshot: { price: 1.2 },
   dailyBars: bars.map(bar => ({ ...bar, v: null })),
   market: {},

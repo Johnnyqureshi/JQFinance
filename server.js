@@ -1251,6 +1251,7 @@ function _normaliseQuote(q) {
 
   return {
     symbol:            q.symbol,
+    quoteType:         q.quoteType ?? null,
     name:              q.longName || q.shortName || q.symbol,
     price:             livePrice,
     regularClose:      regPrice,
@@ -2881,7 +2882,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       gpFetchIntraday(sym, '1m', '1d'),
       gpFetchIntraday(sym, '15m', '5d'),
       gpFetchIntraday(sym, '1h', '3mo'),
-      yf.quoteSummary(sym, { modules: ['assetProfile', 'defaultKeyStatistics', 'summaryDetail'] }, { validateResult: false }).catch(() => null),
+      yf.quoteSummary(sym, { modules: ['assetProfile', 'defaultKeyStatistics', 'summaryDetail', 'price'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
       gpFetchDaily('SPY', '2y'),
       // Yahoo options are a fallback source only and are fetched only behind
@@ -3415,6 +3416,11 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const moneyFlow = buildMoneyFlowData({
       symbol: sym,
       assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
+      instrumentType: cryptoSymbol
+        ? 'CRYPTO'
+        : String(quote?.quoteType || profile?.price?.quoteType || '').toUpperCase() === 'ETF'
+          ? 'ETF'
+          : 'STOCK',
       snapshot,
       indicators,
       dailyBars: searchLevelAnalysis.completedBars,

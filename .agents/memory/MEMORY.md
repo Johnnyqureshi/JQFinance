@@ -32,3 +32,4 @@
 - [Fenced automated-state durability](fenced-automated-state-durability.md) — automated SQLite state is durable only behind a PostgreSQL fence, write-ahead checkpoints, and crash-atomic first cutover.
 - [Manual connection state](manual-connection-state.md) — after changing a broker credential, reread the server mode map so Paper/Live availability cannot remain stale in the UI.
 - [Money Flow provider boundaries](money-flow-provider-boundaries.md) — Yahoo quote/chart supports participation context, not ETF net flows or crypto derivatives positioning
+- [Replit cache cleanup](replit-cache-cleanup.md) — never delete the workspace `.cache` wholesale; it can hold the provisioned Node runtime used by new shells.

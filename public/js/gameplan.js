@@ -674,6 +674,165 @@ const gamePlan = (() => {
     </section>`;
   }
 
+  function moneyFlowNumber(value, suffix = '', decimals = 2) {
+    return value == null || !Number.isFinite(Number(value))
+      ? 'Data unavailable'
+      : `${fmt(value, decimals)}${suffix}`;
+  }
+
+  function moneyFlowClass(value) {
+    const state = String(value || '').toUpperCase();
+    if (state.includes('INFLOW') || state === 'UP' || state === 'CONFIRMED' || state === 'AVAILABLE') return 'bull';
+    if (state.includes('OUTFLOW') || state === 'DOWN' || state === 'NOT CONFIRMED') return 'bear';
+    return 'neut';
+  }
+
+  function moneyFlowArrow(value) {
+    const state = String(value || '').toUpperCase();
+    return state === 'UP' ? '↑' : state === 'DOWN' ? '↓' : state === 'UNAVAILABLE' ? '—' : '→';
+  }
+
+  function moneyFlowSvg(data, period = '5D') {
+    const series = data?.priceFlow?.periods?.[period] || data?.flowTrend?.[period];
+    const points = Array.isArray(series?.points) ? series.points : [];
+    const pricePoints = points
+      .map((point, index) => point.priceNormalized == null ? null : [index, Number(point.priceNormalized)])
+      .filter(Boolean);
+    const flowPoints = points
+      .map((point, index) => point.flowNormalized == null ? null : [index, Number(point.flowNormalized)])
+      .filter(Boolean);
+    if (!series?.available || pricePoints.length < 2 || flowPoints.length < 2) {
+      return `<div class="mfm-chart-unavailable"><b>Data unavailable</b><span>${esc(series?.reason || 'A signed OHLCV participation series is not available for this period.')}</span></div>`;
+    }
+    const width = 360;
+    const height = 112;
+    const x = index => points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
+    const y = value => height - (Math.max(0, Math.min(100, value)) / 100) * height;
+    const line = values => values.map(([index, value]) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(' ');
+    const latest = points.at(-1);
+    return `<div class="mfm-chart-wrap">
+      <svg class="mfm-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Price and signed volume proxy over ${esc(period)}">
+        <line x1="0" y1="${height * .25}" x2="${width}" y2="${height * .25}" />
+        <line x1="0" y1="${height * .5}" x2="${width}" y2="${height * .5}" />
+        <line x1="0" y1="${height * .75}" x2="${width}" y2="${height * .75}" />
+        <polyline class="price" points="${line(pricePoints)}" />
+        <polyline class="flow" points="${line(flowPoints)}" />
+      </svg>
+      <div class="mfm-chart-legend"><span class="price">Price</span><span class="flow">Signed volume proxy</span><small>Last close ${moneyFlowNumber(latest?.price, '', 2)} · flow ${latest?.flow == null ? 'Data unavailable' : fmt(latest.flow, 0)}</small></div>
+    </div>`;
+  }
+
+  function moneyFlowTrendHtml(data, period = '5D') {
+    return `<div class="mfm-trend" id="mfmTrendChart" data-period="${esc(period)}">
+      <div class="mfm-chart-caption"><span>${esc(data?.flowTrend?.label || 'Observed participation trend')}</span><small>${esc(data?.flowTrend?.source || 'Source unavailable')}</small></div>
+      ${moneyFlowSvg(data, period)}
+    </div>`;
+  }
+
+  function moneyFlowPositioningHtml(data) {
+    const positioning = data?.positioning || {};
+    const metrics = Array.isArray(positioning.metrics) ? positioning.metrics : [];
+    return `<div class="mfm-panel mfm-positioning">
+      <div class="mfm-panel-head"><span>${data?.assetType === 'CRYPTO' ? 'CRYPTO POSITIONING' : 'SHORT POSITIONING'}</span><small>${esc(positioning.status || 'DATA UNAVAILABLE')}</small></div>
+      <div class="mfm-position-grid">${metrics.map(metric => `
+        <div><span>${esc(metric.label)}</span><b class="${moneyFlowClass(metric.direction)}">${metric.value == null ? 'Data unavailable' : moneyFlowNumber(metric.value, metric.unit === 'x' ? 'x' : metric.unit ? ` ${metric.unit}` : '', metric.unit === 'shares' ? 0 : 2)} ${metric.direction === 'UNAVAILABLE' ? '' : moneyFlowArrow(metric.direction)}</b></div>`).join('')}</div>
+      <p class="mfm-source">${esc(positioning.note || 'Positioning data unavailable.')}</p>
+      <small class="mfm-provenance">${esc(positioning.source || 'Source unavailable')}${positioning.asOf ? ` · ${esc(dateLabel(positioning.asOf))}` : ''}</small>
+    </div>`;
+  }
+
+  function moneyFlowHtml(data) {
+    const flow = data || {};
+    const summary = flow.summary || {};
+    const participation = flow.participation || {};
+    const etfExposure = flow.etfExposure || {};
+    const activity = Array.isArray(flow.etfActivity) ? flow.etfActivity : [];
+    const score = summary.score;
+    const scoreWidth = score == null ? 0 : Math.max(0, Math.min(100, Number(score)));
+    const isCrypto = flow.assetType === 'CRYPTO';
+    const driver = flow.primaryDriver || {};
+    const available = flow.available === true;
+    const activityRows = activity.length
+      ? activity.map(row => `<div class="mfm-etf-row">
+          <span><b>${esc(row.symbol)}</b><small>${esc(row.label)}</small></span>
+          <i class="${moneyFlowClass(row.changePct >= 0 ? 'UP' : 'DOWN')}">${row.changePct == null ? 'Data unavailable' : `${row.changePct >= 0 ? '+' : ''}${fmt(row.changePct, 2)}%`}</i>
+          <small>${row.relativeVolume == null ? 'RVOL unavailable' : `${fmt(row.relativeVolume, 2)}x activity`}</small>
+        </div>`).join('')
+      : '<div class="mfm-empty">Market and sector ETF activity unavailable.</div>';
+    const missing = Array.isArray(flow.dataQuality?.missing) ? flow.dataQuality.missing : [];
+    const liquidation = flow.liquidation;
+    return `<section class="money-flow-module ${isCrypto ? 'crypto' : 'equity'}" id="moneyFlowModule" aria-label="Money Flow">
+      <div class="mfm-head">
+        <div><span class="mfm-kicker">MONEY FLOW</span><h3>${esc(flow.symbol || currentSym || '--')} capital-flow context</h3></div>
+        <div class="mfm-asset"><b>${esc(flow.assetType || 'ASSET')}</b><small>${esc(flow.status || 'PARTIAL')} · ${esc(flow.source || 'SOURCE UNAVAILABLE')}</small></div>
+      </div>
+      <div class="mfm-notice">Verified data only. The score is an ${esc(summary.scoreLabel || 'data-limited participation proxy')}; it is not institutional flow, ETF net flow, a squeeze signal, or a trade instruction.</div>
+      ${available ? `<div class="mfm-summary">
+        <div class="mfm-summary-status"><span>Flow summary</span><b class="${moneyFlowClass(summary.status)}">${esc(summary.status || 'INSUFFICIENT DATA')}</b><small>${esc(summary.reason || '')}</small></div>
+        <div class="mfm-gauge">
+          <div class="mfm-gauge-track"><i style="width:${scoreWidth}%"></i><em style="left:${scoreWidth}%"></em></div>
+          <div class="mfm-gauge-labels"><span>Outflow</span><strong>${score == null ? 'Data unavailable' : `Strength ${score}/100`}</strong><span>Inflow</span></div>
+        </div>
+      </div>` : '<div class="mfm-unavailable">Money Flow data unavailable for this symbol.</div>'}
+
+      <div class="mfm-grid">
+        <div class="mfm-panel mfm-etf">
+          <div class="mfm-panel-head"><span>ETF FLOW EXPOSURE — ESTIMATED</span><small>requires net flow × verified weight</small></div>
+          <div class="mfm-estimate-status"><b>${etfExposure.available ? 'ESTIMATED' : 'DATA UNAVAILABLE'}</b><span>${esc(etfExposure.reason || 'ETF net-flow inputs unavailable.')}</span></div>
+          <div class="mfm-etf-activity-title">ETF activity context <small>price/volume only · not net flow</small></div>
+          <div class="mfm-etf-rows">${activityRows}</div>
+          <small class="mfm-provenance">${esc(etfExposure.source || 'ETF source unavailable')}</small>
+        </div>
+        <div class="mfm-panel mfm-volume">
+          <div class="mfm-panel-head"><span>RELATIVE VOLUME</span><small>${esc(participation.source || 'SOURCE UNAVAILABLE')}</small></div>
+          <div class="mfm-rvol-value">${participation.relativeVolume == null ? 'Data unavailable' : moneyFlowNumber(participation.relativeVolume, 'x', 2)}</div>
+          <div class="mfm-rvol-track"><i style="width:${participation.relativeVolume == null ? 0 : Math.min(100, Number(participation.relativeVolume) / 3 * 100)}%"></i></div>
+          <div class="mfm-rvol-labels"><span>Normal 1x</span><span>Elevated 1.5x</span><span>Strong 2x</span><span>Extreme 3x</span></div>
+          <b class="mfm-confirmation ${participation.confirmation === 'CONFIRMED' ? 'bull' : participation.confirmation === 'NOT CONFIRMED' ? 'bear' : 'neut'}">${esc(participation.note || 'Data unavailable')}</b>
+        </div>
+      </div>
+
+      <div class="mfm-grid">
+        <div class="mfm-panel">
+          <div class="mfm-panel-head"><span>FLOW TREND</span><div class="mfm-tabs">${['5D', '20D'].map(period => `<button type="button" data-moneyflow-period="${period}" class="${period === '5D' ? 'active' : ''}">${period}</button>`).join('')}</div></div>
+          ${moneyFlowTrendHtml(flow, '5D')}
+        </div>
+        <div class="mfm-panel">
+          <div class="mfm-panel-head"><span>PRICE VS MONEY FLOW</span><small>OHLCV proxy</small></div>
+          ${moneyFlowSvg(flow, '5D')}
+          <p class="mfm-source">${esc(flow.priceFlow?.note || 'Signed volume comparison unavailable.')}</p>
+        </div>
+      </div>
+
+      ${moneyFlowPositioningHtml(flow)}
+      ${isCrypto ? `<div class="mfm-panel mfm-liquidations">
+        <div class="mfm-panel-head"><span>LIQUIDATIONS · CRYPTO ONLY</span><small>${esc(liquidation?.status || 'DATA UNAVAILABLE')}</small></div>
+        <div class="mfm-liquidation-bars"><div><span>LONG</span><i></i><b>Data unavailable</b></div><div><span>SHORT</span><i></i><b>Data unavailable</b></div></div>
+        <p class="mfm-source">${esc(liquidation?.driver || 'No verified liquidation feed is connected.')}</p>
+      </div>` : ''}
+
+      <div class="mfm-driver"><span>PRIMARY MOVE DRIVER</span><b class="${moneyFlowClass(driver.label)}">${esc(driver.label || 'INSUFFICIENT DATA')}</b><p>${esc(driver.reason || 'No supported driver classification is available.')}</p></div>
+      ${missing.length ? `<div class="mfm-quality">Some data unavailable: ${missing.map(esc).join(' · ')}</div>` : ''}
+      <div class="mfm-footer">${esc(flow.timestamps?.source || flow.source || 'Source unavailable')} · Generated ${esc(dateLabel(flow.generatedAt))} · ${esc(flow.disclaimer || '')}</div>
+    </section>`;
+  }
+
+  function bindMoneyFlowControls() {
+    const wrap = $('moneyFlowModule');
+    const flow = window.searchMoneyFlow;
+    if (!wrap || !flow) return;
+    const chart = wrap.querySelector('#mfmTrendChart');
+    wrap.querySelectorAll('[data-moneyflow-period]').forEach(button => {
+      button.addEventListener('click', () => {
+        wrap.querySelectorAll('[data-moneyflow-period]').forEach(item => item.classList.toggle('active', item === button));
+        if (chart) {
+          const period = button.dataset.moneyflowPeriod || '5D';
+          chart.outerHTML = moneyFlowTrendHtml(flow, period);
+        }
+      });
+    });
+  }
+
   function confluenceHtml(confluence, searchSignal) {
     if (!confluence?.available) return '';
     const scores = confluence.scores || {};
@@ -864,6 +1023,7 @@ const gamePlan = (() => {
        ${volatilityIntelligenceHtml(d.volatility)}
 
        ${marketStructureProxyHtml(d.marketStructureProxy)}
+       ${moneyFlowHtml(d.moneyFlow)}
 
        <div id="gpSmartMoneyWrap">${smartMoneyHtml(d.smartMoney)}</div>
 
@@ -879,6 +1039,8 @@ const gamePlan = (() => {
     c.style.display = '';
     window.searchSmartMoney = d.smartMoney || null;
     if (typeof window.updateSearchSmartMoney === 'function') window.updateSearchSmartMoney(d.smartMoney || null);
+    window.searchMoneyFlow = d.moneyFlow || null;
+    bindMoneyFlowControls();
     bindSmartMoneyControls();
   }
 

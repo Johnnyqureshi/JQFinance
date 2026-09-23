@@ -88,6 +88,51 @@ const gameplan = {
     methodology: 'Fixture OHLCV method.',
     disclaimer: 'Fixture context only; no Level 2 or order-book data.',
   },
+  moneyFlow: {
+    available: true, symbol: 'AAPL', assetType: 'EQUITY', status: 'PARTIAL',
+    source: 'AAPL fixture', generatedAt: '2026-09-19T14:00:00.000Z',
+    summary: {
+      status: 'INFLOW', score: 68, scoreLabel: 'OHLCV participation proxy score',
+      direction: 'UP', reason: 'Fixture participation context.',
+    },
+    participation: {
+      relativeVolume: 1.4, confirmation: 'CONFIRMED', note: 'Volume confirms move',
+      source: 'AAPL fixture',
+    },
+    etfExposure: {
+      available: false, reason: 'Fixture has no verified ETF net-flow source.',
+      source: 'AAPL fixture',
+    },
+    etfActivity: [{ symbol: 'SPY', label: 'Broad market', changePct: 0.4, relativeVolume: 1.1 }],
+    flowTrend: {
+      label: 'Observed participation trend — OHLCV proxy, not ETF net flow',
+      source: 'AAPL fixture',
+      '5D': { available: true, points: [0, 1, 2, 3, 4].map((index) => ({ t: `2026-09-${15 + index}`, price: 195 + index, priceNormalized: 20 + index * 15, flow: index * 100, flowNormalized: 25 + index * 14 })) },
+      '20D': { available: true, points: Array.from({ length: 20 }, (_, index) => ({ t: `2026-08-${String(index + 1).padStart(2, '0')}`, price: 190 + index, priceNormalized: index * 5, flow: index * 100, flowNormalized: index * 5 })) },
+    },
+    priceFlow: {
+      note: 'Fixture signed-volume comparison only.',
+      periods: {
+        '5D': { available: true, points: [0, 1, 2, 3, 4].map((index) => ({ t: `2026-09-${15 + index}`, price: 195 + index, priceNormalized: 20 + index * 15, flow: index * 100, flowNormalized: 25 + index * 14 })) },
+        '20D': { available: true, points: Array.from({ length: 20 }, (_, index) => ({ t: `2026-08-${String(index + 1).padStart(2, '0')}`, price: 190 + index, priceNormalized: index * 5, flow: index * 100, flowNormalized: index * 5 })) },
+      },
+    },
+    positioning: {
+      available: true, status: 'AVAILABLE', source: 'AAPL fixture',
+      metrics: [
+        { label: 'Short interest', value: 1000000, unit: 'shares', direction: 'UP' },
+        { label: 'Short interest % float', value: 2.5, unit: '%', direction: 'UP' },
+        { label: 'Days to cover', value: 1.2, unit: 'days', direction: 'NEUTRAL' },
+        { label: 'Short volume', value: null, unit: '', direction: 'UNAVAILABLE' },
+        { label: 'Relative volume', value: 1.4, unit: 'x', direction: 'NEUTRAL' },
+      ],
+      note: 'Fixture short-interest context.',
+    },
+    primaryDriver: { label: 'ELEVATED VOLUME', reason: 'Fixture volume context.' },
+    dataQuality: { missing: ['ETF net flow exposure'] },
+    timestamps: { source: 'AAPL fixture' },
+    disclaimer: 'Fixture money-flow context only.',
+  },
 };
 
 function installMock() {
@@ -182,6 +227,12 @@ async function main() {
     await wait(`document.querySelector('#authOverlay')?.classList.contains('auth-hidden') && typeof openStock === 'function'`);
     await js(`openStock('AAPL', ${JSON.stringify(gameplan.snapshot)})`);
     await wait(`document.querySelector('#gpSmartMoneyWrap [data-sm-timeframe="1D"].active')`);
+    await wait(`document.querySelector('#moneyFlowModule')`);
+    assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /MONEY FLOW/);
+    assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /ETF FLOW EXPOSURE — ESTIMATED/);
+    assert.match(await js(`document.querySelector('#moneyFlowModule').textContent`), /DATA UNAVAILABLE/);
+    await js(`document.querySelector('#moneyFlowModule [data-moneyflow-period="20D"]').click()`);
+    assert.equal(await js(`document.querySelector('#mfmTrendChart').dataset.period`), '20D');
     assert.equal(await js(`document.querySelectorAll('#searchVerdictTop').length`), 1);
     await wait(`document.querySelector('#gpMarketStructureProxy') && document.querySelector('#gpGamePlanStructureInput')`);
     const proxyText = await js(`document.querySelector('#gpMarketStructureProxy').textContent`);

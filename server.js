@@ -52,6 +52,7 @@ const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/sear
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
 const { buildMarketStructureProxy } = require('./lib/market-structure-proxy');
+const { buildMoneyFlowData } = require('./lib/money-flow');
 const {
   TOPICS: SEARCH_INTELLIGENCE_TOPICS,
   buildMacroPressure,
@@ -2880,7 +2881,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       gpFetchIntraday(sym, '1m', '1d'),
       gpFetchIntraday(sym, '15m', '5d'),
       gpFetchIntraday(sym, '1h', '3mo'),
-      yf.quoteSummary(sym, { modules: ['assetProfile'] }, { validateResult: false }).catch(() => null),
+      yf.quoteSummary(sym, { modules: ['assetProfile', 'defaultKeyStatistics', 'summaryDetail'] }, { validateResult: false }).catch(() => null),
       yf.quote(['SPY', 'QQQ', 'IWM'], {}, { validateResult: false }).catch(() => null),
       gpFetchDaily('SPY', '2y'),
       // Yahoo options are a fallback source only and are fetched only behind
@@ -3053,9 +3054,11 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const sectorName = profile?.assetProfile?.sector || null;
     const sectorEtf = sectorName ? SECTOR_ETF[sectorName] || null : null;
     let sectorChg = null;
+    let sectorQuote = null;
     if (sectorEtf) {
       try {
         const sq = await yf.quote(sectorEtf, {}, { validateResult: false });
+        sectorQuote = sq;
         const sectorMove = Number(sq?.regularMarketChangePercent);
         sectorChg = Number.isFinite(sectorMove) ? +sectorMove.toFixed(2) : null;
       } catch { /* sector data unavailable */ }
@@ -3071,15 +3074,31 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       else if (Math.abs(mktMove) >= 1) attribution = 'MARKET-DRIVEN';
       else attribution = 'COMBINATION';
     }
+    const etfActivity = mktArr
+      .filter(item => item?.symbol)
+      .map(item => ({
+        symbol: item.symbol,
+        label: item.symbol === 'SPY' ? 'Broad market' : item.symbol === 'QQQ' ? 'Nasdaq 100' : item.symbol === 'IWM' ? 'Russell 2000' : item.symbol,
+        changePct: Number.isFinite(Number(item.regularMarketChangePercent)) ? +Number(item.regularMarketChangePercent).toFixed(2) : null,
+        volume: Number.isFinite(Number(item.regularMarketVolume)) ? Number(item.regularMarketVolume) : null,
+        averageVolume: Number.isFinite(Number(item.averageDailyVolume3Month)) ? Number(item.averageDailyVolume3Month) : null,
+      }));
+    const sectorActivity = sectorQuote ? {
+      symbol: sectorEtf,
+      changePct: sectorChg,
+      volume: Number.isFinite(Number(sectorQuote.regularMarketVolume)) ? Number(sectorQuote.regularMarketVolume) : null,
+      averageVolume: Number.isFinite(Number(sectorQuote.averageDailyVolume3Month)) ? Number(sectorQuote.averageDailyVolume3Month) : null,
+    } : null;
     const market = cryptoSymbol ? {
       spy: null, qqq: null, iwm: null, sector: null, sectorEtf: null,
       sectorChangePct: null, trend: null, sectorTrend: null, attribution: 'UNKNOWN',
+      etfActivity: [], sectorActivity: null,
     } : {
       spy: mkt.SPY ?? null, qqq: mkt.QQQ ?? null, iwm: mkt.IWM ?? null,
       sector: sectorName, sectorEtf, sectorChangePct: sectorChg,
       trend: mkt.SPY == null ? null : mkt.SPY >= 0.3 ? 'BULLISH' : mkt.SPY <= -0.3 ? 'BEARISH' : 'NEUTRAL',
       sectorTrend: sectorChg == null ? null : sectorChg >= 0.3 ? 'BULLISH' : sectorChg <= -0.3 ? 'BEARISH' : 'NEUTRAL',
-      attribution,
+      attribution, etfActivity, sectorActivity,
     };
     // News (Yahoo search — no key needed; NewsAPI headline titles if key present)
     let news = [];
@@ -3393,6 +3412,17 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       marketState: cryptoSymbol ? '24/7' : quote?.marketState, premarket: cryptoSymbol ? null : premarket, changePct: chg1d,
       ...(cryptoSymbol ? { changeWindow: '24H' } : {}),
     };
+    const moneyFlow = buildMoneyFlowData({
+      symbol: sym,
+      assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
+      snapshot,
+      indicators,
+      dailyBars: searchLevelAnalysis.completedBars,
+      market,
+      quoteSummary: profile,
+      source: cryptoSymbol ? 'Yahoo Finance chart API' : (quote?.source || 'Yahoo Finance quote and chart API'),
+      generatedAt: generationNow,
+    });
 
     // ── AI narrative (facts in → narrative out; numbers stay deterministic) ──
     let ai = { available: false, reason: 'AI narrative unavailable' };
@@ -3471,6 +3501,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       market, news, levels, displayLevels, dailyPivots, gapAnalysis, patternAnalysis, fibonacci,
       smartMoney: { ...smartMoney, availableTimeframes: SMART_MONEY_TIMEFRAME_ORDER },
       marketStructureProxy,
+      moneyFlow,
       probabilities, confluence, searchSignal: finalSearchSignal, marketContext, tradeLevels,
       ...(volatility ? { volatility } : {}),
       confidence: { overall, parts },

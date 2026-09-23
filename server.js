@@ -3427,10 +3427,11 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const moneyFlow = buildMoneyFlowData({
       symbol: sym,
       assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
-      instrumentType: classifyMoneyFlowInstrument({
-        assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
-        quoteType: quote?.quoteType || profile?.price?.quoteType,
-      }),
+      instrumentType: cryptoSymbol
+        ? 'CRYPTO'
+        : moneyFlowQuoteType
+          ? classifyMoneyFlowInstrument({ assetType: 'EQUITY', quoteType: moneyFlowQuoteType })
+          : null,
       snapshot,
       indicators,
       dailyBars: searchLevelAnalysis.completedBars,

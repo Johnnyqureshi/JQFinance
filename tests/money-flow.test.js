@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { buildMoneyFlowData } = require('../lib/money-flow');
+const { buildMoneyFlowData, classifyMoneyFlowInstrument } = require('../lib/money-flow');
 
 const bars = Array.from({ length: 25 }, (_, index) => {
   const close = 100 + index * 0.8;
@@ -31,6 +31,24 @@ const marketFixture = {
   sectorChangePct: 1.4,
   etfActivity: [{ symbol: 'QQQ', label: 'Nasdaq 100', changePct: 1.1, volume: 2_000_000, averageVolume: 1_000_000 }],
 };
+
+const allEtfClasses = [
+  ['SPY', 'ETF'],
+  ['QQQ', 'ETF'],
+  ['IWM', 'ETF'],
+  ['XLK', 'ETF'],
+  ['TQQQ', 'ETF'],
+  ['SQQQ', 'ETF'],
+];
+const allSingleStockFixtures = ['GPRO', 'NVDA', 'AAPL', 'TSLA'];
+
+for (const [symbol, quoteType] of allEtfClasses) {
+  assert.equal(classifyMoneyFlowInstrument({ assetType: 'EQUITY', quoteType }), 'ETF', `${symbol} should classify as ETF`);
+}
+for (const symbol of allSingleStockFixtures) {
+  assert.equal(classifyMoneyFlowInstrument({ assetType: 'EQUITY', quoteType: 'EQUITY' }), 'STOCK', `${symbol} should classify as stock`);
+}
+assert.equal(classifyMoneyFlowInstrument({ assetType: 'CRYPTO', quoteType: 'ETF' }), 'CRYPTO');
 
 const equity = buildMoneyFlowData({
   symbol: 'NVDA',
@@ -65,7 +83,7 @@ assert.equal(equity.flowTrend['5D'].available, true);
 assert.equal(equity.flowTrend['20D'].points.length, 20);
 assert.equal(equity.liquidation, null);
 
-for (const symbol of ['GPRO', 'AAPL', 'TSLA']) {
+for (const symbol of allSingleStockFixtures.filter(symbol => symbol !== 'NVDA')) {
   const symbolSnapshot = buildMoneyFlowData({
     symbol,
     assetType: 'EQUITY',
@@ -81,7 +99,7 @@ for (const symbol of ['GPRO', 'AAPL', 'TSLA']) {
   assert.ok(symbolSnapshot.flowTrend['5D'].points.length > 0);
 }
 
-for (const symbol of ['SPY', 'QQQ', 'IWM', 'XLK', 'TQQQ', 'SQQQ']) {
+for (const [symbol] of allEtfClasses) {
   const etf = buildMoneyFlowData({
     symbol,
     assetType: 'EQUITY',

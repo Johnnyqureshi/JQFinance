@@ -52,7 +52,7 @@ const { buildSearchGapAnalysis, summarizePatternAnalysis } = require('./lib/sear
 const { buildSearchFibonacci } = require('./lib/search-fibonacci');
 const { buildSearchTradeLevels } = require('./lib/search-trade-levels');
 const { buildMarketStructureProxy } = require('./lib/market-structure-proxy');
-const { buildMoneyFlowData } = require('./lib/money-flow');
+const { buildMoneyFlowData, classifyMoneyFlowInstrument } = require('./lib/money-flow');
 const {
   TOPICS: SEARCH_INTELLIGENCE_TOPICS,
   buildMacroPressure,
@@ -2913,6 +2913,17 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     if (cryptoSymbol && price == null) {
       return { ok: false, unavailable: true, symbol: sym, error: 'COMPLETED CRYPTO PRICE UNAVAILABLE' };
     }
+    let moneyFlowQuoteType = quote?.quoteType || profile?.price?.quoteType || null;
+    // Alpaca snapshots do not carry Yahoo's quoteType. Most symbols are
+    // classified by quoteSummary.price; use a single raw-quote fallback only
+    // when neither provider supplied an instrument type so every active ETF
+    // remains covered without hardcoded ticker lists.
+    if (!cryptoSymbol && !moneyFlowQuoteType) {
+      try {
+        const rawInstrumentQuote = await yf.quote(sym, {}, { validateResult: false });
+        moneyFlowQuoteType = rawInstrumentQuote?.quoteType || null;
+      } catch { /* instrument classification remains conservative */ }
+    }
     const cryptoReference = cryptoSymbol
       ? selectCrypto24hReference(cryptoBars, cryptoStats.latest?.timestampMs)
       : null;
@@ -3416,11 +3427,10 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
     const moneyFlow = buildMoneyFlowData({
       symbol: sym,
       assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
-      instrumentType: cryptoSymbol
-        ? 'CRYPTO'
-        : String(quote?.quoteType || profile?.price?.quoteType || '').toUpperCase() === 'ETF'
-          ? 'ETF'
-          : 'STOCK',
+      instrumentType: classifyMoneyFlowInstrument({
+        assetType: cryptoSymbol ? 'CRYPTO' : 'EQUITY',
+        quoteType: quote?.quoteType || profile?.price?.quoteType,
+      }),
       snapshot,
       indicators,
       dailyBars: searchLevelAnalysis.completedBars,

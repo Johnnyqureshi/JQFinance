@@ -407,7 +407,7 @@ const gamePlan = (() => {
         </div>
         <div class="gp-signal-strength">
           <span>Signal strength</span>
-          <b>${signal.confidence == null ? '—' : `${signal.confidence}/100`}</b>
+          <b>${signal.confidence == null || signal.signal?.stage === 'WAITING' ? '—' : `${signal.confidence}/100`}</b>
           <small>${esc(signal.signal?.stage || 'WATCH')}</small>
         </div>
       </div>

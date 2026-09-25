@@ -247,6 +247,23 @@ test('SD defaults: new users start paused in paper mode', async () => {
   } finally { f.close(); }
 });
 
+test('SD pre-fill: fresh users get desk defaults in status rules', async () => {
+  const f = fixture();
+  try {
+    const { rules } = f.service.status(9);
+    assert.equal(rules.single_target_pct, 1.0);
+    assert.equal(rules.double_target_pct, 2.0);
+    assert.equal(rules.partial_sell_pct, 50);
+    assert.equal(rules.min_quality_score, 7);
+    assert.equal(rules.max_risk_per_trade, 250);
+    assert.equal(rules.max_daily_loss, 500);
+    assert.equal(rules.max_open_positions, 3);
+    assert.equal(rules.max_total_exposure, 5000);
+    assert.equal(rules.max_trades_per_day, 10);
+    assert.equal(rules.max_position_dollars, 2000);
+  } finally { f.close(); }
+});
+
 test('live automation cannot resume without explicit arming', async () => {
   const f = fixture();
   try {

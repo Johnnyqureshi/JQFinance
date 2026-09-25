@@ -566,10 +566,14 @@ test('scores missing entry inputs as unavailable instead of favorable evidence',
     dayRangePosition: null,
     macroPressure: [],
   });
-  assert.equal(result.confidenceBreakdown.parts.trend, 0);
-  assert.equal(result.confidenceBreakdown.parts.entryQuality, 0);
-  assert.equal(result.confidenceBreakdown.parts.extensionChase, 0);
-  assert.equal(result.confidenceBreakdown.parts.marketMacro, 0);
+  assert.equal(result.confidenceBreakdown.parts.trend, null);
+  assert.equal(result.confidenceBreakdown.parts.entryQuality, null);
+  assert.equal(result.confidenceBreakdown.parts.extensionChase, null);
+  assert.equal(result.confidenceBreakdown.parts.marketMacro, null);
+  assert.deepEqual(
+    result.confidenceBreakdown.missingParts.sort(),
+    ['entryQuality', 'extensionChase', 'marketMacro', 'trend'].sort(),
+  );
   assert.equal(result.entryQuality.score, null);
   assert(result.dataQuality.missing.includes('20 SMA'));
   assert(result.dataQuality.missing.includes('Verified market/macro pressure'));

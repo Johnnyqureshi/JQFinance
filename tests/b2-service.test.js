@@ -229,12 +229,12 @@ test('scheduler lifecycle is idempotent and drain waits for an active tick', asy
   } finally { release?.(); f.close(); }
 });
 
-test('dedicated encrypted credentials automatically enable Paper without credential disclosure or ownership leakage', async () => {
+test('dedicated encrypted credentials stay paused until explicitly started, without credential disclosure or ownership leakage', async () => {
   const f = fixture();
   try {
     const state = await f.connect();
     assert.equal(state.connected, true);
-    assert.equal(state.enabled, true);
+    assert.equal(state.enabled, false, 'connecting keys must not auto-enable automation');
     assert.equal(state.liveArmed, false);
     const stored = f.db.prepare('SELECT * FROM b2_credentials').get();
     assert(stored.api_key.startsWith('enc:v1:'));
@@ -374,12 +374,17 @@ test('quarantine rejects connection and blocks existing authorization', async ()
   } finally { f.close(); }
 });
 
-test('Paper starts automatically, Live needs fresh explicit authorization; read-only scan never places orders', async () => {
+test('Paper stays paused until explicitly started; Live needs fresh explicit authorization; read-only scan never places orders', async () => {
   const f = fixture();
   try {
     await f.connect();
+    assert.equal(f.service.status(1).enabled, false, 'connecting paper keys must not auto-enable automation');
+    await f.service.runCycle(1);
+    assert.equal(f.buys().length, 0, 'paused automation must not place paper orders');
     await f.service.scan(1);
     assert.equal(f.buys().length, 0);
+    await f.service.setAutomation(1, { action: 'resume' });
+    assert.equal(f.service.status(1).enabled, true, 'explicit resume must enable paper automation');
     await f.connect(1, 'live1', 'live');
     await assert.rejects(f.service.setAutomation(1, { action: 'resume' }), /fresh explicit/);
     await f.service.runCycle(1);
@@ -414,6 +419,7 @@ test('entry is LIMIT GTC OTO with broker-held 5% stop and portfolio cap two', as
   const f = fixture();
   try {
     await f.connect();
+    await f.service.setAutomation(1, { action: 'resume' });
     await f.service.setSettings(1, { maxPositionDollars: 250 });
     await f.service.runCycle(1);
     assert.equal(f.buys().length, 2);
@@ -708,7 +714,7 @@ test('API rejects unauthenticated access, invalid identities and legacy settings
     const connectRoute = routes.find(route => route.method === 'put' && route.path.endsWith('/credentials'));
     const connected = await invoke(connectRoute, { mode: 'paper', apiKey: 'paper1', apiSecret: 'secret-paper1' }, { userId: 1 });
     assert.equal(connected.code, 200);
-    assert.equal(connected.body.enabled, true);
+    assert.equal(connected.body.enabled, false, 'connecting keys must not auto-enable automation');
     const automationRoute = routes.find(route => route.path.endsWith('/automation'));
     assert.equal((await invoke(automationRoute, { action: 'pause' }, { userId: 1 })).body.enabled, false);
     assert.equal((await invoke(automationRoute, { action: 'resume' }, { userId: 1 })).body.enabled, true);
@@ -741,7 +747,7 @@ test('saved connection map is secret-free and mode selection freshly authorizes 
     assert.deepEqual(f.service.status(1).connections, connections);
     assert(!JSON.stringify(f.service.status(1)).includes('secret-live1'));
     await f.service.setMode(1, { mode: 'paper' });
-    assert.equal(f.service.status(1).enabled, true);
+    assert.equal(f.service.status(1).enabled, false, 'switching modes must not auto-enable automation');
     assert.equal(f.service.status(1).liveArmed, false);
     await f.service.setMode(1, { mode: 'live' });
     assert.equal(f.service.status(1).enabled, false);
@@ -816,6 +822,7 @@ test('pause during confirmed stop cancellation does not invalidate residual prot
   const f = fixture({ batchSize: 1 });
   try {
     await f.connect();
+    await f.service.setAutomation(1, { action: 'resume' });
     f.world.fillEntry = true;
     await f.service.runCycle(1);
     f.world.time = Date.parse('2026-09-15T15:00:00Z'); f.world.latest = '2026-09-14';
@@ -870,6 +877,7 @@ test('persisted automation survives database reopen without activating dormant c
   try {
     f = fixture({ db: new Database(file) });
     await f.connect(1, 'active-paper');
+    await f.service.setAutomation(1, { action: 'resume' });
     await f.connect(2, 'dormant-paper');
     f.db.prepare('INSERT INTO users(id) VALUES (3),(4)').run();
     await f.connect(3, 'active-live', 'live', true);
@@ -940,6 +948,7 @@ test('bounded fair scheduler progresses other accounts while one broker request 
   try {
     f.db.prepare('INSERT INTO users(id) VALUES (3),(4)').run();
     for (let uid = 1; uid <= 4; uid++) await f.connect(uid, `paper${uid}`);
+    for (let uid = 1; uid <= 4; uid++) await f.service.setAutomation(uid, { action: 'resume' });
     const blocked = new Promise(resolve => { release = resolve; });
     let slowStarted = false;
     const concurrent = new Set();
@@ -1001,6 +1010,7 @@ test('service rejects a regressed DAY entry builder before reserving or submitti
   try {
     f.settings.strategy.buildB2Entry = input => ({ ...realStrategy.buildB2Entry(input), time_in_force: 'day' });
     await f.connect();
+    await f.service.setAutomation(1, { action: 'resume' });
     await f.service.runCycle(1);
     assert.equal(f.buys().length, 0);
     assert.equal(f.service.trades(1).trades.length, 0);
@@ -1012,6 +1022,7 @@ test('calendar evidence rejects missing internal daily sessions with the real ev
   const f = fixture({ batchSize: 1, strategy: realStrategy });
   try {
     await f.connect();
+    await f.service.setAutomation(1, { action: 'resume' });
     f.world.assets = f.world.assets.slice(0, 1);
     const bars = dailyBars(LAST, 120).map((bar, index) => {
       const c = index < 85 ? 10 : index < 105 ? 8 : 8 + 2.67 * (index - 105) / 14;
@@ -1042,6 +1053,7 @@ test('calendar failure preserves protection and long-held replay extends both hi
   const f = fixture({ batchSize: 1 });
   try {
     await f.connect();
+    await f.service.setAutomation(1, { action: 'resume' });
     f.world.fillEntry = true;
     await f.service.runCycle(1);
     await f.service.setAutomation(1, { action: 'pause' });
@@ -1638,4 +1650,193 @@ test('clock-race restore accepted with lost response and temporary 404 cannot co
     assert.equal(f.db.prepare('SELECT restore_client_id FROM b2_trades').get().restore_client_id, null);
     assert.equal(f.service.trades(1).trades[0].status, 'closed');
   } finally { f.close(); }
+});
+// ── Universe pre-filter (hot list) ──────────────────────────────────────────
+function momentumStrategy(gains) {
+  return {
+    B2_RULES: realStrategy.B2_RULES,
+    rankB2Candidates: realStrategy.rankB2Candidates,
+    buildB2Entry: realStrategy.buildB2Entry,
+    sessionDate: realStrategy.sessionDate,
+    evaluateB2({ asset, expectedSessionDate }) {
+      return { symbol: asset.symbol, eligible: false, signal: 'WAIT', crossover: null,
+        eventId: `${asset.symbol}:${expectedSessionDate}:WAIT`, signalDate: expectedSessionDate,
+        reasons: [], gates: [],
+        metrics: { price: 10, dailyGainPct: gains[asset.symbol] ?? 0, relativeVolume: 3 } };
+    },
+  };
+}
+const lastScannedSymbols = f => {
+  const bars = [...f.world.calls].reverse().find(c => c.path === '/v2/stocks/bars');
+  return bars.query.get('symbols').split(',');
+};
+const priorityRows = f => f.db.prepare('SELECT symbol,score FROM b2_priority ORDER BY score DESC').all();
+
+test('momentum names enter the hot list and are scanned first every cycle', async () => {
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy({ AAA: 12 }) });
+  try {
+    await f.connect();
+    await f.service.scan(1); // rotation scans AAA, BBB — AAA goes hot
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA']);
+    await f.service.scan(1); // AAA first (priority), then ETF (rotation)
+    assert.deepEqual(lastScannedSymbols(f), ['AAA', 'ETF']);
+    const coverage = f.service.status(1).coverage;
+    assert.equal(coverage.priority, 1);
+    assert.equal(coverage.cursor, 3); // rotation advanced by 1, not 2
+    assert.equal(coverage.scanned, 3);
+    await f.service.scan(1); // AAA still first while its momentum persists
+    assert.deepEqual(lastScannedSymbols(f), ['AAA', 'INV']);
+  } finally { f.close(); }
+});
+
+test('priority scan never exceeds the per-cycle market-data budget', async () => {
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy({ AAA: 12, BBB: 11, ETF: 9 }) });
+  try {
+    await f.connect();
+    await f.service.scan(1); // AAA, BBB scanned — both go hot
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA', 'BBB']);
+    await f.service.scan(1); // both priority slots taken, rotation gets nothing
+    assert.deepEqual(lastScannedSymbols(f), ['AAA', 'BBB']); // ordered by score desc
+    const coverage = f.service.status(1).coverage;
+    assert.equal(coverage.cursor, 2); // rotation did not advance
+    assert.equal(coverage.scanned, 2); // rotation progress only; priority re-scans do not inflate it
+  } finally { f.close(); }
+});
+
+test('hot-list entries drop out when momentum fades', async () => {
+  const gains = { AAA: 12 };
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy(gains) });
+  try {
+    await f.connect();
+    await f.service.scan(1);
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA']);
+    gains.AAA = 1; // fades below the 5% hot-list threshold
+    await f.service.scan(1); // AAA re-scanned via priority, then dropped
+    assert.deepEqual(priorityRows(f), []);
+    await f.service.scan(1); // back to pure rotation
+    assert.deepEqual(lastScannedSymbols(f), ['INV', 'LEV']);
+  } finally { f.close(); }
+});
+
+test('stale hot-list entries are pruned and never selected', async () => {
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy({}) });
+  try {
+    await f.connect();
+    await f.service.scan(1);
+    const account = f.db.prepare('SELECT account_id FROM b2_coverage').get().account_id;
+    const stale = new Date(f.world.time - 10 * 86400000).toISOString();
+    f.db.prepare(`INSERT INTO b2_priority(account_id,symbol,score,relative_volume,updated_at)
+      VALUES (?,?,?,?,?)`).run(account, 'AAA', 20, 3, stale);
+    await f.service.scan(1);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM b2_priority WHERE symbol='AAA'").get().n, 0);
+    assert.deepEqual(lastScannedSymbols(f), ['ETF', 'INV']); // pure rotation
+  } finally { f.close(); }
+});
+
+test('symbols with unresolved trades are excluded from the hot-list scan', async () => {
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy({ AAA: 12 }) });
+  try {
+    await f.connect();
+    await f.service.scan(1); // AAA goes hot
+    const account = f.db.prepare('SELECT account_id FROM b2_coverage').get().account_id;
+    const at = new Date().toISOString();
+    f.db.prepare(`INSERT INTO b2_trades(user_id,account_id,mode,symbol,event_id,client_id,status,
+      protection,created_at,updated_at) VALUES (1,?, 'paper','AAA','e1','c1','open','unknown',?,?)`)
+      .run(account, at, at);
+    await f.service.scan(1); // AAA held: priority skipped, rotation only
+    assert.deepEqual(lastScannedSymbols(f), ['ETF', 'INV']);
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA']); // row kept for later
+  } finally { f.close(); }
+});
+
+test('a failed scan preserves the hot list instead of wiping it', async () => {
+  const f = fixture({ batchSize: 2, strategy: momentumStrategy({ AAA: 12 }) });
+  try {
+    await f.connect();
+    await f.service.scan(1);
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA']);
+    f.world.fail = call => call.path === '/v2/stocks/bars';
+    await assert.rejects(f.service.scan(1));
+    assert.deepEqual(priorityRows(f).map(r => r.symbol), ['AAA']);
+  } finally { f.close(); }
+});
+
+test('priority rules are exposed as strategy configuration', async () => {
+  assert.equal(realStrategy.B2_RULES.priorityBatchSize, 25);
+  assert.equal(realStrategy.B2_RULES.priorityMinDailyGainPct, 5);
+  assert.equal(realStrategy.B2_RULES.priorityMinRelativeVolume, 1);
+  assert.equal(realStrategy.B2_RULES.priorityMaxAgeDays, 3);
+});
+
+test('take-profit closes an open position at the +15% target', async () => {
+  const f = fixture({ batchSize: 1 });
+  try {
+    await f.connect();
+    f.world.fillEntry = true;
+    await f.service.setAutomation(1, { action: 'resume' });
+    await f.service.runCycle(1);
+    assert.equal(f.service.trades(1).trades[0].status, 'open');
+    f.world.assets = f.world.assets.slice(0, 1);
+    f.account('paper1').positions.find(p => p.symbol === 'AAA').unrealized_plpc = '0.20';
+    await f.service.runCycle(1);
+    assert.equal(f.sells().filter(c => c.body.type === 'market').length, 1);
+    assert.equal(f.service.trades(1).trades[0].exitReason, 'take_profit');
+  } finally { f.close(); }
+});
+
+test('no take-profit below the target; no position data skips the check safely', async () => {
+  for (const [plpc, extra] of [['0.10', {}], ['0.20', { qty: '0' }], ['0.20', { unrealized_plpc: undefined, current_price: undefined }]]) {
+    const f = fixture({ batchSize: 1 });
+    try {
+      await f.connect();
+      f.world.fillEntry = true;
+      await f.service.setAutomation(1, { action: 'resume' });
+      await f.service.runCycle(1);
+      f.world.assets = f.world.assets.slice(0, 1);
+      const position = f.account('paper1').positions.find(p => p.symbol === 'AAA');
+      position.unrealized_plpc = plpc;
+      Object.assign(position, extra);
+      await f.service.runCycle(1);
+      assert.equal(f.sells().length, 0, `plpc=${plpc} extra=${JSON.stringify(extra)}`);
+      assert.equal(f.service.trades(1).trades[0].exitRequested, 0);
+    } finally { f.close(); }
+  }
+});
+
+test('take-profit falls back to current vs average-entry price without plpc', async () => {
+  const f = fixture({ batchSize: 1 });
+  try {
+    await f.connect();
+    f.world.fillEntry = true;
+    await f.service.setAutomation(1, { action: 'resume' });
+    await f.service.runCycle(1);
+    f.world.assets = f.world.assets.slice(0, 1);
+    const position = f.account('paper1').positions.find(p => p.symbol === 'AAA');
+    delete position.unrealized_plpc;
+    position.current_price = '11.40'; // +20% vs the 9.50 fill price
+    position.avg_entry_price = '9.50';
+    await f.service.runCycle(1);
+    assert.equal(f.sells().filter(c => c.body.type === 'market').length, 1);
+    assert.equal(f.service.trades(1).trades[0].exitReason, 'take_profit');
+  } finally { f.close(); }
+});
+
+test('bearish crossover exit records a bearish reason', async () => {
+  const f = fixture({ batchSize: 1 });
+  try {
+    await f.connect();
+    f.world.fillEntry = true;
+    f.world.assets = f.world.assets.slice(0, 1);
+    await f.service.setAutomation(1, { action: 'resume' });
+    await f.service.runCycle(1);
+    f.world.time = Date.parse('2026-09-15T15:00:00Z'); f.world.latest = '2026-09-14';
+    f.world.bearishDates.add(f.world.latest);
+    await f.service.runCycle(1);
+    assert.equal(f.sells().filter(c => c.body.type === 'market').length, 1);
+    assert.equal(f.service.trades(1).trades[0].exitReason, 'bearish');
+  } finally { f.close(); }
+});
+
+test('take-profit target is exposed as strategy configuration', async () => {
+  assert.equal(realStrategy.B2_RULES.takeProfitPct, 15);
 });

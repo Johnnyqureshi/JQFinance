@@ -407,7 +407,7 @@ const gamePlan = (() => {
         </div>
         <div class="gp-signal-strength">
           <span>Signal strength</span>
-          <b>${display(signal.confidence)}/100</b>
+          <b>${signal.confidence == null ? '—' : `${signal.confidence}/100`}</b>
           <small>${esc(signal.signal?.stage || 'WATCH')}</small>
         </div>
       </div>
@@ -941,20 +941,20 @@ const gamePlan = (() => {
       refreshTriggered: false,
     };
 
-    // Header badge
-    const decisiveZone = zoneVerdict(snapshotPrice, displayLevels || levels);
-    const verdict = decisiveZone?.verdict
-      || searchSignal?.signal?.state
+    // Header badge — the deterministic engine's regime-adjusted signal is
+    // authoritative. The zone heuristic is context only and never overrides it.
+    const zone = zoneVerdict(snapshotPrice, displayLevels || levels);
+    const verdict = searchSignal?.signal?.state
       || searchSignal?.signal?.label
       || 'UNAVAILABLE';
-    const direction = decisiveZone?.direction
-      || searchSignal?.signal?.direction
+    const direction = searchSignal?.signal?.direction
       || searchSignal?.entryQuality?.trendBias
       || (verdict.includes('SELL') ? 'BEARISH' : verdict.includes('BUY') ? 'BULLISH' : 'NEUTRAL');
     const setup = verdict === 'UNAVAILABLE' ? verdict : `${verdict} · ${direction}`;
     const verdictClass = setupClass(setup);
-    const verdictStage = decisiveZone ? 'ZONE BIAS' : searchSignal?.signal?.stage || (verdict === 'WAIT' ? 'WAITING' : 'PROVISIONAL');
-    const verdictConfidence = Number(decisiveZone?.confidence ?? searchSignal?.confidence);
+    const verdictStage = searchSignal?.signal?.stage || (verdict === 'WAIT' ? 'WAITING' : 'PROVISIONAL');
+    const verdictConfidence = Number(searchSignal?.confidence);
+    const zoneNote = zone ? ` Zone context: ${zone.direction} — ${zone.reason}` : '';
     const signalReasons = Array.isArray(searchSignal?.reasons)
       ? searchSignal.reasons.filter(Boolean).slice(0, 2)
       : [];
@@ -972,9 +972,9 @@ const gamePlan = (() => {
       el.style.width = `${Number.isFinite(verdictConfidence) ? Math.max(0, Math.min(100, verdictConfidence)) : 0}%`;
     });
     setSafe('searchVerdictReason', el => {
-      el.textContent = decisiveZone?.reason || (signalReasons.length
+      el.textContent = (signalReasons.length
         ? signalReasons.join(' · ')
-        : 'Using all available verified Search evidence; missing inputs remain provisional.');
+        : 'Using all available verified Search evidence; missing inputs remain provisional.') + zoneNote;
     });
     setSafe('searchDecisionLevelsTop', el => {
       el.innerHTML = decisionLevelsHtml(displayLevels || levels, gapAnalysis);
@@ -996,10 +996,11 @@ const gamePlan = (() => {
       ? Math.max(0, Math.min(100, ((Number(s.price) - Number(s.low)) / (Number(s.high) - Number(s.low))) * 100))
       : null;
     const confParts = confidence?.parts || {};
+    const confNotes = confidence?.partNotes || {};
     const confHtml = `<div class="gp-conf">
         <div class="gp-conf-overall">DATA COVERAGE <b>${confidence?.overall ?? '--'}/100</b></div>
         <div class="gp-conf-parts">${Object.entries(confParts).map(([k, v]) =>
-          `<span class="gp-conf-part"><i>${esc(k)}</i>${v}</span>`).join('')}</div>
+          `<span class="gp-conf-part"${confNotes[k] ? ` title="${esc(confNotes[k])}"` : ''}><i>${esc(k)}</i>${v}${confNotes[k] ? `<em>${esc(confNotes[k])}</em>` : ''}</span>`).join('')}</div>
       </div>`;
     const analogHtml = analogs ? `<div class="gp-analog">
         <div class="gp-analog-title">Time-matched historical outcomes ${analogs.lowConfidence ? '· LOW CONFIDENCE' : ''}</div>

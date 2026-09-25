@@ -1,0 +1,5 @@
+# Railway/Nixpacks build config for JQFinance.
+# Declares how to build and start the app. Commit this file to the repo
+# so any future GitHub-linked deploys use the same settings.
+[start]
+cmd = "node scripts/boot.js"

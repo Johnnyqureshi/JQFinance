@@ -792,6 +792,7 @@ function _searchCacheSet(key, data) {
 
 const KALSHI_API_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
 const KALSHI_CATALOG_TTL = 2 * 60 * 1000;
+const KALSHI_SERIES_TTL = 30 * 60 * 1000;
 const SEARCH_INTELLIGENCE_TTL = 60 * 1000;
 const _kalshiSeriesCache = new Map();
 const _kalshiQueryCache = new Map();
@@ -827,7 +828,7 @@ function kalshiCategories(classification) {
 
 async function fetchKalshiSeriesCategory(category) {
   const cached = _kalshiSeriesCache.get(category);
-  if (cached && Date.now() - cached.at < 30 * 60 * 1000) return cached.series;
+  if (cached && Date.now() - cached.at < KALSHI_SERIES_TTL) return cached.series;
   const query = new URLSearchParams({ category, limit: '1000' });
   const response = await fetch(`${KALSHI_API_BASE}/series?${query}`, {
     headers: { Accept: 'application/json', 'User-Agent': 'Qureshi-Finance-Search/1.0' },
@@ -967,7 +968,7 @@ async function fetchSearchMacroIndicators() {
   }
 }
 
-async function fetchSearchTopicNews(query) {
+async function fetchSearchTopicNews(query, symbol = null) {
   try {
     const response = await fetch(
       `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=0&newsCount=8`,
@@ -975,18 +976,24 @@ async function fetchSearchTopicNews(query) {
     );
     if (!response.ok) throw new Error(`Yahoo news returned ${response.status}`);
     const data = await response.json();
-    return {
-      status: 'live',
-      source: 'Yahoo Finance',
-      updatedAt: new Date().toISOString(),
-      items: (data.news || []).slice(0, 6).map(item => ({
+    const sym = String(symbol || '').toUpperCase();
+    const items = (data.news || [])
+      // When the query is a symbol, keep only stories Yahoo tags to it —
+      // unfiltered query news is how unrelated headlines leak in.
+      .filter(item => !sym || (Array.isArray(item.relatedTickers) && item.relatedTickers.includes(sym)))
+      .slice(0, 6).map(item => ({
         headline: item.title,
         source: item.publisher || 'Yahoo Finance',
         url: /^https?:\/\//i.test(String(item.link || '')) ? item.link : null,
         publishedAt: item.providerPublishTime
           ? new Date(item.providerPublishTime * 1000).toISOString()
           : null,
-      })).filter(item => item.headline),
+      })).filter(item => item.headline);
+    return {
+      status: 'live',
+      source: 'Yahoo Finance',
+      updatedAt: new Date().toISOString(),
+      items,
     };
   } catch (error) {
     return {
@@ -999,8 +1006,19 @@ async function fetchSearchTopicNews(query) {
   }
 }
 
+// Trim to a sentence boundary so UI copy never ends mid-word ("...inherently probab").
+function trimToSentence(text, maxLen) {
+  const s = String(text || '');
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(0, maxLen);
+  const lastEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  if (lastEnd > maxLen * 0.4) return cut.slice(0, lastEnd + 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
+}
+
 async function buildSearchAiInterpretation(facts) {
-  if (!SEARCH_AI_KEY) return { available: false, reason: 'AI interpretation is not configured' };
+  if (!SEARCH_AI_KEY) return { available: false, configured: false, reason: 'AI interpretation is not configured' };
   try {
     const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
       method: 'POST',
@@ -1029,11 +1047,11 @@ async function buildSearchAiInterpretation(facts) {
     if (!parsed.summary) return { available: false, reason: 'AI interpretation was empty' };
     return {
       available: true,
-      summary: String(parsed.summary).slice(0, 1200),
+      summary: trimToSentence(parsed.summary, 1200),
       potentialBeneficiaries: (parsed.potentialBeneficiaries || []).slice(0, 3).map(String),
       potentialPressure: (parsed.potentialPressure || []).slice(0, 3).map(String),
       riskFactors: (parsed.riskFactors || []).slice(0, 4).map(String),
-      caveat: String(parsed.caveat || 'This is analysis, not financial advice.').slice(0, 300),
+      caveat: trimToSentence(parsed.caveat || 'This is analysis, not financial advice.', 300),
       source: 'AI interpretation of listed source data',
       updatedAt: new Date().toISOString(),
     };
@@ -1248,6 +1266,10 @@ function _normaliseQuote(q) {
   const livePrice = extendedPrice ?? regPrice;
   const prev      = q.regularMarketPreviousClose ?? null;
   const change    = livePrice != null && prev != null ? livePrice - prev : null;
+  // Extended-hours moves: premarket is measured vs the prior close
+  // (regularMarketPrice can go stale before the open); after-hours vs
+  // today's regular close.
+  const extBase = extendedType === 'PRE' ? (prev ?? regPrice) : (regPrice ?? prev);
 
   return {
     symbol:            q.symbol,
@@ -1257,8 +1279,8 @@ function _normaliseQuote(q) {
     regularClose:      regPrice,
     extendedPrice,
     extendedType,
-    extendedChange:    extendedPrice != null && regPrice != null ? extendedPrice - regPrice : null,
-    extendedChangePct: extendedPrice != null && regPrice != null ? ((extendedPrice - regPrice) / regPrice) * 100 : null,
+    extendedChange:    extendedPrice != null && extBase != null ? extendedPrice - extBase : null,
+    extendedChangePct: extendedPrice != null && extBase ? ((extendedPrice - extBase) / extBase) * 100 : null,
     marketState,
     change,
     changesPercentage: change != null && prev ? (change / prev) * 100 : null,
@@ -1373,6 +1395,8 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
   } else if (isPre && price != null) {
     extendedPrice = price; extendedType = 'PRE';
   }
+  // Premarket moves are measured vs the prior close; after-hours vs today's bar.
+  const extBase = extendedType === 'PRE' ? (prev ?? daily.c) : (daily.c ?? prev);
   return {
     symbol:            sym,
     name:              extras.name || sym,
@@ -1380,8 +1404,8 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
     regularClose:      daily.c ?? price,
     extendedPrice,
     extendedType,
-    extendedChange:    extendedPrice != null && daily.c != null ? extendedPrice - daily.c : null,
-    extendedChangePct: extendedPrice != null && daily.c != null ? ((extendedPrice - daily.c) / daily.c) * 100 : null,
+    extendedChange:    extendedPrice != null && extBase != null ? extendedPrice - extBase : null,
+    extendedChangePct: extendedPrice != null && extBase ? ((extendedPrice - extBase) / extBase) * 100 : null,
     marketState,
     change,
     changesPercentage: changePct,
@@ -1585,7 +1609,7 @@ app.get('/api/search-intelligence', requireAuth, async (req, res) => {
   const [kalshiCatalog, macroFeed, topicNews, assetQuoteResult] = await Promise.all([
     fetchKalshiCatalog(query),
     fetchSearchMacroIndicators(),
-    fetchSearchTopicNews(query),
+    fetchSearchTopicNews(query, symbol),
     symbol
       ? Promise.all([
         yf.quote(symbol, {}, { validateResult: false }).catch(() => null),
@@ -1623,6 +1647,13 @@ app.get('/api/search-intelligence', requireAuth, async (req, res) => {
   const predictionMarkets = kalshiCatalog.status === 'live'
     ? selectRelevantKalshiMarkets(kalshiCatalog.markets, query, 6)
     : [];
+  // Provenance freshness reflects the actual quote timestamps, not just the
+  // catalog fetch time — otherwise "LIVE · Updated just now" sits next to
+  // cards aged in hours.
+  const newestQuoteAt = predictionMarkets
+    .map(market => Date.parse(market.updatedAt))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
   const macroPressure = buildMacroPressure(macroFeed.indicators, asset || {});
   const divergence = detectPredictionPriceDivergence(predictionMarkets, asset?.changePct);
   const relevantFedMarkets = predictionMarkets.filter(market =>
@@ -1631,7 +1662,8 @@ app.get('/api/search-intelligence', requireAuth, async (req, res) => {
     kalshi: {
       source: 'Kalshi official public API',
       status: kalshiCatalog.status,
-      updatedAt: kalshiCatalog.at ? new Date(kalshiCatalog.at).toISOString() : generatedAt,
+      updatedAt: newestQuoteAt ? new Date(newestQuoteAt).toISOString()
+        : kalshiCatalog.at ? new Date(kalshiCatalog.at).toISOString() : generatedAt,
       error: kalshiCatalog.status === 'unavailable' ? 'Data temporarily unavailable' : null,
     },
     macro: {
@@ -2087,11 +2119,11 @@ app.get('/api/stock/:symbol', async (req, res) => {
     const re = Array.isArray(rd) && rd[0] ? rd[0] : null;
     const ratings = re ? {
       strongBuy:  re.analystRatingsStrongBuy  || 0,
-      buy:        re.analystRatingsbuy         || 0,
+      buy:        re.analystRatingsBuy         || 0,
       hold:       re.analystRatingsHold        || 0,
       sell:       re.analystRatingsSell        || 0,
       strongSell: re.analystRatingsStrongSell  || 0,
-      total: (re.analystRatingsStrongBuy||0)+(re.analystRatingsbuy||0)+(re.analystRatingsHold||0)+(re.analystRatingsSell||0)+(re.analystRatingsStrongSell||0),
+      total: (re.analystRatingsStrongBuy||0)+(re.analystRatingsBuy||0)+(re.analystRatingsHold||0)+(re.analystRatingsSell||0)+(re.analystRatingsStrongSell||0),
     } : empty.ratings;
     const pt = Array.isArray(pd) ? pd[0] : pd;
     const priceTarget = pt?.targetMedian ? { targetLow: pt.targetLow, targetMedian: pt.targetMedian || pt.targetConsensus, targetHigh: pt.targetHigh } : null;
@@ -2208,11 +2240,18 @@ app.get('/api/signal/:symbol', async (req, res) => {
     const price   = closes.at(-1);
     const ema21   = calcEMA(closes, 21);
     const sma50   = calcSMA(closes, 50);
-    let rsi14 = 50;
+    // Missing inputs stay missing — never default RSI to 50, which would
+    // silently pass the momentum check.
+    let rsi14 = null;
     try { const v = calcRSI(closes, 14); if (v != null) rsi14 = +v.toFixed(1); } catch (_) {}
-    const aboveEma = price > ema21;
-    const aboveSma = price > sma50;
-    const rsiOk    = rsi14 < 70 && rsi14 > 30;
+    const aboveEma = ema21 != null && price > ema21;
+    const aboveSma = sma50 != null && price > sma50;
+    const rsiOk    = rsi14 != null && rsi14 < 70 && rsi14 > 30;
+    const missing  = [
+      ema21 == null ? '21 EMA' : null,
+      sma50 == null ? '50 SMA' : null,
+      rsi14 == null ? 'RSI(14)' : null,
+    ].filter(Boolean);
     const condsMet = [aboveEma, aboveSma, rsiOk].filter(Boolean).length;
     // ── Candlestick pattern detection ────────────────────────────────────────
     const patterns = detectCandlePatterns(bars);
@@ -2221,10 +2260,11 @@ app.get('/api/signal/:symbol', async (req, res) => {
     for (const p of patterns.bullish) confBoost += p.strength === 3 ? 6 : p.strength === 2 ? 3 : 1;
     for (const p of patterns.bearish) confBoost -= p.strength === 3 ? 6 : p.strength === 2 ? 3 : 1;
 
-    const signal    = condsMet === 3 ? 'BUY' : condsMet === 2 ? 'WATCH' : 'HOLD';
-    const rawConf   = condsMet === 3 ? 72 : condsMet === 2 ? 48 : 30;
+    const signal    = missing.length ? 'HOLD' : condsMet === 3 ? 'BUY' : condsMet === 2 ? 'WATCH' : 'HOLD';
+    const rawConf   = missing.length ? 20 : condsMet === 3 ? 72 : condsMet === 2 ? 48 : 30;
     const confidence = Math.min(95, Math.max(10, rawConf + confBoost));
     const reasons = [];
+    if (missing.length) reasons.push(`Unavailable inputs withheld from scoring: ${missing.join(', ')}`);
     if (aboveEma) reasons.push('Price above 21 EMA (short-term trend up)');
     if (aboveSma) reasons.push('Price above 50 SMA (medium-term trend up)');
     if (rsiOk)    reasons.push(`RSI ${rsi14} — momentum neutral/healthy`);
@@ -2235,12 +2275,13 @@ app.get('/api/signal/:symbol', async (req, res) => {
       symbol: sym,
       signal: {
         signal, confidence, reasons,
-        price, ema8: ema21, sma50,
-        confirmed: condsMet === 3,
-        zoneStr: condsMet === 3 ? 'Trend aligned — all conditions met' : condsMet === 2 ? 'Partial setup — monitoring' : 'No active setup',
+        price, ema21, sma50, rsi14,
+        missing,
+        confirmed: !missing.length && condsMet === 3,
+        zoneStr: missing.length ? `Incomplete data — ${missing.join(', ')} unavailable` : condsMet === 3 ? 'Trend aligned — all conditions met' : condsMet === 2 ? 'Partial setup — monitoring' : 'No active setup',
       },
       patterns: patterns.all,
-      regime: { regime: 'NEUTRAL', label: 'Market Neutral' },
+      regime: { regime: 'UNEVALUATED', label: 'Market regime not evaluated by this endpoint' },
     });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -3413,6 +3454,16 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       volume: displayRelVol != null ? (displayRelVol >= 1.5 ? 80 : 60) : 25,
     };
     const overall = Math.round(Object.values(parts).reduce((a, b) => a + b, 0) / Object.keys(parts).length);
+    // Per-part basis notes so identical-looking scores are auditable, not opaque.
+    const technicalAvailable = [indicators.rsi14 != null, vwap != null, !!indicators.macd, atr != null].filter(Boolean).length;
+    const partNotes = {
+      technical: `${technicalAvailable}/4 indicators available`,
+      historical: analogs ? `${analogs.sampleSize} comparable sessions` : 'No comparable historical sessions',
+      market: mkt.SPY != null ? 'SPY context available' : 'SPY context unavailable',
+      sector: sectorChg != null ? 'Sector context available' : 'Sector context unavailable',
+      catalyst: news.length ? `${news.length} ticker-tagged headlines` : 'No ticker-tagged headlines',
+      volume: displayRelVol != null ? `Relative volume ${Number(displayRelVol).toFixed(2)}x` : 'Volume baseline unavailable',
+    };
 
     const snapshot = {
       price: +price.toFixed(2), prevClose: snapshotPrevClose, open: cryptoSymbol ? null : quote?.open,
@@ -3521,7 +3572,7 @@ async function buildSearchGameplanForUser(sym, userId, requestedForce = false, q
       moneyFlow,
       probabilities, confluence, searchSignal: finalSearchSignal, marketContext, tradeLevels,
       ...(volatility ? { volatility } : {}),
-      confidence: { overall, parts },
+      confidence: { overall, parts, partNotes },
       ai,
     };
     _smartMoneyCache.set(`${sym}:1D`, { at: Date.now(), data: smartMoney });

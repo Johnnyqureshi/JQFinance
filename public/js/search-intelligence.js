@@ -4,7 +4,9 @@ window.searchIntelligence = (() => {
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[character]));
-  const number = value => Number.isFinite(Number(value)) ? Number(value) : null;
+  const number = value => (value == null || value === '')
+    ? null
+    : (Number.isFinite(Number(value)) ? Number(value) : null);
   const fmt = (value, digits = 2) => number(value) == null
     ? '—'
     : Number(value).toLocaleString('en-US', {
@@ -173,12 +175,15 @@ window.searchIntelligence = (() => {
       <div class="mi-section-head"><div><span class="mi-kicker">NEWS & CATALYSTS</span><h3>Recent query-linked headlines</h3></div><span class="mi-source-pill">${esc(source.source || 'Source unavailable')}</span></div>
       ${items.length ? `<div class="mi-news-list">${items.map(item => `<a ${item.url ? `href="${esc(item.url)}" target="_blank" rel="noopener"` : ''}>
         <strong>${esc(item.headline)}</strong><span>${esc(item.source)} · ${relativeTime(item.publishedAt)}</span>
-      </a>`).join('')}</div>` : '<div class="mi-empty">News data temporarily unavailable</div>'}
+      </a>`).join('')}</div>` : `<div class="mi-empty">${source.status === 'live' ? 'No headlines tagged to this query right now' : 'News data temporarily unavailable'}</div>`}
     </section>`;
   }
 
   function interpretation(data) {
     const ai = data.interpretation || {};
+    // When AI is not configured at all, the section is hidden rather than
+    // rendered as a permanently empty "not configured" panel.
+    if (!ai.available && ai.configured === false) return '';
     return `<section class="mi-section mi-interpretation">
       <div class="mi-section-head"><div><span class="mi-kicker">AI MARKET INTERPRETATION</span><h3>What this could mean</h3></div><span class="mi-source-pill">Uses listed facts only</span></div>
       ${ai.available ? `

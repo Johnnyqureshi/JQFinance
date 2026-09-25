@@ -9442,6 +9442,7 @@ html[data-theme="light"] .mi-market-card,html[data-theme="light"] .mi-indicator,
 .gp-conf-parts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
 .gp-conf-part{font-size:.68rem;background:rgba(255,255,255,.05);border-radius:6px;padding:3px 8px;color:#cbd5e1}
 .gp-conf-part i{font-style:normal;color:#64748b;margin-right:5px;text-transform:capitalize}
+.gp-conf-part em{display:block;font-style:normal;color:#64748b;font-size:.6rem;margin-top:1px}
 .gp-gaps{margin-top:10px;font-size:.7rem;color:#facc15}
 .gp-disclaimer{margin-top:10px;font-size:.66rem;color:#475569;text-align:center}
 .market-structure-proxy{margin-top:14px;border:1px solid rgba(56,189,248,.28);background:linear-gradient(135deg,rgba(9,35,58,.82),rgba(7,15,28,.72));border-radius:13px;padding:14px;color:var(--t1)}

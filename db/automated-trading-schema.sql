@@ -72,6 +72,14 @@ CREATE TABLE IF NOT EXISTS b2_candidates (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (account_id, symbol)
 );
+CREATE TABLE IF NOT EXISTS b2_priority (
+  account_id TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  score DOUBLE PRECISION NOT NULL,
+  relative_volume DOUBLE PRECISION,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (account_id, symbol)
+);
 CREATE TABLE IF NOT EXISTS b2_trades (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES app_auth_users(id) ON DELETE CASCADE,

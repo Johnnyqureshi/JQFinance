@@ -38,3 +38,23 @@ test('keeps Fibonacci contribution bounded', () => {
   assert.equal(result.available, true);
   assert.equal(result.confluenceScore <= 10, true);
 });
+test('nearest support/resistance price always pairs with its own level-list ratio', () => {
+  // Regression lock: the UI once showed a nearest-support price tagged with a
+  // different ratio than the level list. nearestSupport/nearestResistance must
+  // be the identical level object (price AND ratio) from the levels array.
+  const bars = Array.from({ length: 40 }, (_, index) => {
+    const base = 200 + index * 1.5 + Math.sin(index) * 2;
+    return bar(index + 1, base + 2, base - 2, base);
+  });
+  for (const currentPrice of [205, 225, 250, 262]) {
+    const result = buildSearchFibonacci({ dailyBars: bars, currentPrice });
+    if (!result.available) continue;
+    for (const key of ['nearestSupport', 'nearestResistance']) {
+      const near = result[key];
+      if (!near) continue;
+      const match = result.levels.find(l => l.price === near.price);
+      assert.ok(match, `${key} price ${near.price} must exist in levels`);
+      assert.equal(match.ratio, near.ratio, `${key} ratio must match level-list ratio for $${near.price}`);
+    }
+  }
+});

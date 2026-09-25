@@ -12,6 +12,8 @@ const state = {
   watchlist:   [],
   currentUser: null,
   loadId:      0,
+  forecastLoadId: 0,
+  forecastSelection: null,
 };
 // The AI assistant is loaded as a separate browser module and reads the live
 // session context through this explicit bridge.
@@ -104,6 +106,12 @@ const api = {
   },
   async valuation(sym) {
     try { const r = await fetch(`/api/valuation/${sym}`); return r.ok ? r.json() : null; } catch { return null; }
+  },
+  async forecast(sym, lookback = 90, horizon = 30) {
+    try {
+      const r = await fetch(`/api/forecast/${encodeURIComponent(sym)}?lookback=${lookback}&horizon=${horizon}`);
+      return r.ok ? r.json() : null;
+    } catch { return null; }
   },
   async wsb() {
     try { const r = await fetch('/api/wsb'); return r.ok ? r.json() : null; } catch { return null; }
@@ -239,9 +247,14 @@ const marketAlerts = (() => {
 function renderStockHeader(sym, snap) {
   const price = snap?.price || 0;
   const prev = snap?.previousClose || 0;
+  // One authoritative reference close: premarket anchors to the prior close
+  // (regularMarketPrice can go stale before the open); otherwise the regular close.
+  const refClose = snap?.extendedType === 'PRE'
+    ? (snap?.previousClose ?? snap?.regularClose)
+    : snap?.regularClose;
   $('sTicker').textContent = sym;
   $('sName').textContent = snap?.name || '';
-  const displayPrice = snap?.regularClose ?? price;
+  const displayPrice = refClose ?? price;
   const displayChg = displayPrice - prev;
   const displayPct = prev ? (displayChg / prev) * 100 : 0;
   const displayUp = displayChg >= 0;
@@ -255,7 +268,7 @@ function renderStockHeader(sym, snap) {
   const extRow = $('sExtRow');
   if (extRow && snap?.extendedPrice) {
     const ep = snap.extendedPrice;
-    const base = snap.regularClose ?? price;
+    const base = refClose ?? price;
     const ec = base ? ep - base : 0;
     const epct = base ? (ec / base) * 100 : 0;
     const eup = ec >= 0;
@@ -671,7 +684,9 @@ async function openStock(sym, snap, { intelligenceQuery = null } = {}) {
   const authoritativeSnap = analysis?.snapshot ? {
     ...snap,
     price: analysis.snapshot.price,
-    regularClose: analysis.snapshot.price,
+    // Preserve the true regular-session close from the original snapshot.
+    // Overwriting regularClose with the live price collapsed the
+    // extended-hours change to $0.00.
     previousClose: analysis.snapshot.prevClose,
     open: analysis.snapshot.open,
     dayHigh: analysis.snapshot.high,
@@ -722,7 +737,25 @@ function switchStockTab(tab) {
   if (tab==='overview') renderOverview(d.snap, d.bars, up);
   if (tab==='chart')    renderChart(d.sym, d.bars, up);
   if (tab==='analysts') renderAnalysts(d.fmp, d.snap?.price||0, d.val, d.analysis);
-  if (tab==='news')     renderNews(d.news);
+  if (tab==='news')     renderNews(d.news, d.sym);
+  if (tab==='forecast') loadForecastTab(d.sym);
+}
+
+// ── Historical Forecast tab ──────────────────────────────────────────────────
+async function loadForecastTab(sym) {
+  if (!sym) return;
+  if (state.stockData?.forecastLoadedFor === sym && state.stockData?.forecast) {
+    renderForecastPanel(state.stockData.forecast, sym);
+    return;
+  }
+  const panel = $('forecastPanel');
+  if (panel) panel.innerHTML = '<div class="tab-spin"><div class="spinner"></div></div>';
+  const loadId = ++state.forecastLoadId;
+  const forecast = await api.forecast(sym);
+  if (sym !== state.symbol || loadId !== state.forecastLoadId || !state.stockData) return;
+  state.stockData.forecast = forecast;
+  state.stockData.forecastLoadedFor = sym;
+  renderForecastPanel(forecast, sym);
 }
 
 // ── Overview tab ───────────────────────────────────────────────────────────────
@@ -1329,9 +1362,9 @@ function renderAnalysts(fmp, price, val) {
 
 // ── News tab ───────────────────────────────────────────────────────────────────
 
-function renderNews(news) {
+function renderNews(news, sym) {
   if (!news?.length) {
-    $('tab-news').innerHTML = '<div class="news-feed"><p class="no-data" style="padding:24px">No recent news found.</p></div>';
+    $('tab-news').innerHTML = `<div class="news-feed"><p class="no-data" style="padding:24px">No recent news found${sym ? ` for ${escapeHtml(sym)}` : ''}. Headlines below the analysis may still carry market-wide context.</p></div>`;
     return;
   }
   const cards = news.slice(0, 20).map(n => {
@@ -2039,6 +2072,7 @@ function buildDropItems(results) {
   return results.slice(0, 8).map(r => {
     const item = document.createElement('div');
     item.className = `drop-item${r.kind === 'macro' ? ' drop-macro' : ''}`;
+    item.setAttribute('role', 'option');
     if (r.kind === 'macro') {
       item.dataset.query = r.query;
       if (r.symbol) item.dataset.contextSymbol = r.symbol;
@@ -2268,6 +2302,11 @@ function setupAuthUI() {
     $('authError').textContent  = '';
     $('tabLogin').classList.toggle('active', !isReg);
     $('tabReg').classList.toggle('active',    isReg);
+    $('tabLogin').setAttribute('aria-selected', String(!isReg));
+    $('tabReg').setAttribute('aria-selected', String(isReg));
+    $('authUser').placeholder = isReg ? 'Choose a username' : 'Enter your username';
+    $('authPass').placeholder = isReg ? 'Choose a password' : 'Enter your password';
+    $('authPass').setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
     $('authSwitchLink')?.addEventListener('click', e=>{ e.preventDefault(); setMode(isReg?'login':'register'); });
   }
 

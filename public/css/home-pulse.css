@@ -1,0 +1,142 @@
+/* HomePulse — home-page "Command Center" module.
+ * Dark glassy aesthetic: Space Grotesk headings, subtle borders,
+ * teal/gold accents, no emojis, mobile-friendly. */
+
+/* The module replaces the old centered empty state inside #homeEmpty. */
+#homeEmpty {
+  display: block;
+  min-height: 0;
+  padding: 22px 24px 40px;
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.hp { display: flex; flex-direction: column; gap: 18px; }
+
+.hp-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t2);
+  margin-bottom: 8px;
+  display: block;
+}
+
+/* ── Regime banner ───────────────────────────────────────────────────────── */
+.hp-regime {
+  --regime: var(--gold);
+  --regime-dim: var(--gold-dim);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--regime);
+  border-radius: 14px;
+  padding: 16px 20px 12px;
+  background:
+    radial-gradient(circle at 8% 50%, var(--regime-dim), transparent 45%),
+    linear-gradient(105deg, rgba(255,255,255,0.02), var(--card) 60%);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+}
+.hp-regime[data-tone="on"]      { --regime: var(--teal); --regime-dim: var(--teal-dim); }
+.hp-regime[data-tone="off"]     { --regime: var(--red);  --regime-dim: var(--red-dim); }
+.hp-regime[data-tone="chop"]    { --regime: var(--gold); --regime-dim: var(--gold-dim); }
+.hp-regime[data-tone="neutral"] { --regime: var(--t2);   --regime-dim: rgba(122,144,184,0.08); }
+
+.hp-regime-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hp-regime-top .hp-eyebrow { margin-bottom: 0; }
+.hp-regime-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--regime);
+}
+.hp-regime-reason { margin: 8px 0 0; font-size: 14px; color: var(--t1); line-height: 1.55; }
+.hp-disclaimer { margin: 8px 0 0; font-size: 11px; color: var(--t3); letter-spacing: 0.02em; }
+
+/* ── Market pulse strip ──────────────────────────────────────────────────── */
+.hp-pulse {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+.hp-pulse::-webkit-scrollbar { height: 6px; }
+.hp-pulse::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.hp-tile {
+  flex: 0 0 auto;
+  min-width: 118px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(160deg, var(--card2), var(--card));
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hp-tile-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; color: var(--t2); }
+.hp-tile-price { font-family: 'DM Mono', monospace; font-size: 17px; font-weight: 500; color: var(--t1); }
+.hp-tile-chg { font-family: 'DM Mono', monospace; font-size: 12.5px; }
+.hp-up   { color: var(--green); }
+.hp-down { color: var(--red); }
+.hp-flat { color: var(--t3); }
+
+/* ── Bot command center ──────────────────────────────────────────────────── */
+.hp-bot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hp-bot {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(160deg, var(--card2), var(--card));
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.15);
+}
+.hp-bot-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hp-bot-head h3 { margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; color: var(--t1); letter-spacing: -0.01em; }
+.hp-bot-sub { display: block; font-size: 11px; font-weight: 400; color: var(--t2); letter-spacing: 0.04em; margin-top: 2px; font-family: 'Inter', sans-serif; }
+
+.hp-pill {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.hp-pill-live   { color: var(--green); border-color: var(--teal-bdr); background: var(--teal-dim); }
+.hp-pill-paper  { color: var(--blue);  border-color: rgba(74,144,226,0.35); background: var(--blue-dim); }
+.hp-pill-paused { color: var(--t2);    border-color: var(--border2); background: rgba(122,144,184,0.08); }
+
+.hp-bot-stats { display: flex; gap: 24px; }
+.hp-bot-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.hp-bot-stats span { font-size: 11px; color: var(--t2); letter-spacing: 0.04em; }
+.hp-bot-num { font-family: 'DM Mono', monospace; font-size: 19px; font-weight: 500; color: var(--t1); }
+
+.hp-view {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: 9px;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.hp-view:hover { border-color: var(--teal-bdr); background: var(--teal-dim); }
+
+@media (max-width: 640px) {
+  #homeEmpty { padding: 16px 14px 32px; }
+  .hp-bot-grid { grid-template-columns: 1fr; }
+  .hp-regime-label { font-size: 22px; }
+  .hp-tile { min-width: 104px; padding: 8px 12px; }
+}

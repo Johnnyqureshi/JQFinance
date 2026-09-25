@@ -43,6 +43,7 @@
   <link rel="stylesheet" href="/public/css/options.css?v=20260925b"/>
   <link rel="stylesheet" href="/public/css/b2.css?v=20260925b"/>
   <link rel="stylesheet" href="/public/css/sd.css?v=20260925c"/>
+  <link rel="stylesheet" href="/public/css/home-pulse.css?v=20260925d"/>
 </head>
 <body>
 
@@ -213,11 +214,56 @@
     </div>
   </div>
 
-  <!-- Empty state -->
+  <!-- Command Center module (replaces the old empty state) -->
   <div id="homeEmpty" class="home-empty">
-    <div class="home-empty-glyph">⚡</div>
-    <h2 class="home-empty-title">Search Markets</h2>
-    <p class="home-empty-sub">Search stocks, ETFs, indices, crypto, Fed policy, inflation, recession, oil, tariffs, or geopolitical risk.</p>
+    <section class="hp" aria-label="Market command center">
+
+      <!-- 1 · Regime banner -->
+      <div class="hp-regime" id="hpRegime" data-tone="neutral">
+        <div class="hp-regime-top">
+          <span class="hp-eyebrow">Market regime</span>
+          <span class="hp-regime-label" id="hpRegimeLabel">Loading…</span>
+        </div>
+        <p class="hp-regime-reason" id="hpRegimeReason">Pulling today&rsquo;s tape…</p>
+        <p class="hp-disclaimer">Quick read, not financial advice.</p>
+      </div>
+
+      <!-- 2 · Market pulse strip -->
+      <div class="hp-pulse-wrap">
+        <span class="hp-eyebrow">Market pulse</span>
+        <div class="hp-pulse" id="hpTiles" role="list" aria-label="Market snapshot"></div>
+      </div>
+
+      <!-- 3 · Bot command center -->
+      <div class="hp-bots">
+        <span class="hp-eyebrow">Bot command center</span>
+        <div class="hp-bot-grid">
+          <article class="hp-bot" aria-label="B2 bot status">
+            <div class="hp-bot-head">
+              <h3>B2<span class="hp-bot-sub">Swing momentum</span></h3>
+              <span class="hp-pill hp-pill-paused" id="hpB2Pill">…</span>
+            </div>
+            <div class="hp-bot-stats">
+              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpB2Pnl">—</strong></div>
+              <div><span>Open positions</span><strong class="hp-bot-num" id="hpB2Open">—</strong></div>
+            </div>
+            <button class="hp-view" id="hpB2View" type="button">View →</button>
+          </article>
+          <article class="hp-bot" aria-label="Singles and Doubles bot status">
+            <div class="hp-bot-head">
+              <h3>S&amp;D<span class="hp-bot-sub">Intraday momentum</span></h3>
+              <span class="hp-pill hp-pill-paused" id="hpSdPill">…</span>
+            </div>
+            <div class="hp-bot-stats">
+              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpSdPnl">—</strong></div>
+              <div><span>Open positions</span><strong class="hp-bot-num" id="hpSdOpen">—</strong></div>
+            </div>
+            <button class="hp-view" id="hpSdView" type="button">View →</button>
+          </article>
+        </div>
+      </div>
+
+    </section>
   </div>
 
   <!-- Analysis workspace (shown when stock loaded) -->
@@ -818,6 +864,7 @@
 
 <script src="/js/rrg-style.js?v=20260925b"></script>
 <script src="/js/app.js?v=20260925b"></script>
+<script src="/js/home-pulse.js?v=20260925d"></script>
 <script src="/js/search-intelligence.js?v=20260925b"></script>
 <script src="/js/realtimetrader.js?v=20260925b"></script>
 <script src="/js/gameplan.js?v=20260925b"></script>

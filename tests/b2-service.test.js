@@ -415,6 +415,97 @@ test('full catalog rotation survives restart and multi-symbol pagination is exha
   } finally { f.close(); }
 });
 
+test('curated leveraged and inverse ETFs are evaluated every scan cycle', async () => {
+  const f = fixture({ batchSize: 2,
+    strategy: { ...momentumStrategy({}), LEVERAGED_ETF_SYMBOLS: realStrategy.LEVERAGED_ETF_SYMBOLS } });
+  try {
+    await f.connect();
+    // The catalog holds only regular stocks; the curated ETF list is injected by the service.
+    f.world.assets = ['AAA', 'BBB'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true }));
+    await f.service.scan(1);
+    const symbols = f.service.candidates(1).candidates.map(c => c.symbol);
+    for (const etf of realStrategy.LEVERAGED_ETF_SYMBOLS) {
+      assert(symbols.includes(etf), `expected curated ETF ${etf} to be scanned`);
+    }
+    await f.service.scan(1);
+    const second = lastScannedSymbols(f);
+    for (const etf of realStrategy.LEVERAGED_ETF_SYMBOLS) {
+      assert(second.includes(etf), `expected ${etf} to be re-scanned on the second cycle`);
+    }
+    // The curated list is additive: rotation still advances through the universe.
+    assert.equal(f.service.status(1).coverage.cursor, 0);
+  } finally { f.close(); }
+});
+
+test('rotation skips recently-seen expensive stocks and spends budget on cheaper names', async () => {
+  const f = fixture({ batchSize: 1, strategy: momentumStrategy({}) });
+  f.settings.strategy.evaluateB2 = ({ bars, asset, expectedSessionDate }) => ({
+    symbol: asset.symbol, eligible: false, signal: 'WAIT', crossover: null, eventId: null,
+    signalDate: expectedSessionDate, reasons: [], gates: [],
+    metrics: { price: asset.symbol === 'AAA' ? 50 : 10, relativeVolume: 3 },
+  });
+  try {
+    await f.connect();
+    f.world.assets = ['AAA', 'BBB'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true }));
+    await f.service.scan(1); // learns AAA is expensive
+    await f.service.scan(1); // completes the first pass on BBB
+    f.world.calls.length = 0;
+    await f.service.scan(1); // new pass: AAA is skipped, BBB takes the budget
+    const symbols = f.world.calls.filter(c => c.path === '/v2/stocks/bars')
+      .flatMap(c => c.query.get('symbols').split(','));
+    assert(!symbols.includes('AAA'), 'expensive AAA must be skipped while its reading is fresh');
+    assert(symbols.includes('BBB'), 'cheap BBB must take the rotation budget');
+    const coverage = f.service.candidates(1).coverage;
+    assert.equal(coverage.total, 2);
+    assert.equal(coverage.scanned, 2);
+    assert.equal(coverage.cursor, 0);
+  } finally { f.close(); }
+});
+
+test('stale expensive readings are re-checked after the recheck window', async () => {
+  const f = fixture({ batchSize: 1, strategy: momentumStrategy({}) });
+  f.settings.strategy.evaluateB2 = ({ bars, asset, expectedSessionDate }) => ({
+    symbol: asset.symbol, eligible: false, signal: 'WAIT', crossover: null, eventId: null,
+    signalDate: expectedSessionDate, reasons: [], gates: [],
+    metrics: { price: asset.symbol === 'AAA' ? 50 : 10, relativeVolume: 3 },
+  });
+  try {
+    await f.connect();
+    f.world.assets = ['AAA', 'BBB'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true }));
+    await f.service.scan(1); // learns AAA is expensive
+    await f.service.scan(1); // completes the first pass on BBB
+    f.world.time += 8 * 86400000; // past the 7-day recheck window
+    f.world.calls.length = 0;
+    await f.service.scan(1); // AAA's reading is stale, so it is examined again
+    const symbols = f.world.calls.filter(c => c.path === '/v2/stocks/bars')
+      .flatMap(c => c.query.get('symbols').split(','));
+    assert(symbols.includes('AAA'), 'stale expensive AAA must be re-checked after the window');
+  } finally { f.close(); }
+});
+
+test('a full universe pass covers every symbol once and resets cleanly', async () => {
+  const f = fixture({ batchSize: 1, strategy: momentumStrategy({}) });
+  f.settings.strategy.evaluateB2 = ({ bars, asset, expectedSessionDate }) => ({
+    symbol: asset.symbol, eligible: false, signal: 'WAIT', crossover: null, eventId: null,
+    signalDate: expectedSessionDate, reasons: [], gates: [],
+    metrics: { price: asset.symbol === 'BBB' ? 60 : 10, relativeVolume: 3 },
+  });
+  try {
+    await f.connect();
+    f.world.assets = ['AAA', 'BBB', 'CCC'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true }));
+    await f.service.scan(1);
+    assert.equal(f.service.status(1).coverage.cursor, 1);
+    await f.service.scan(1);
+    assert.equal(f.service.status(1).coverage.cursor, 2);
+    await f.service.scan(1);
+    const coverage = f.service.candidates(1).coverage;
+    assert.equal(coverage.total, 3);
+    assert.equal(coverage.scanned, 3);
+    assert.equal(coverage.cursor, 0);
+    assert.deepEqual(f.service.candidates(1).candidates.map(c => c.symbol).sort(), ['AAA', 'BBB', 'CCC']);
+  } finally { f.close(); }
+});
+
 test('entry is LIMIT GTC OTO with broker-held 5% stop and portfolio cap two', async () => {
   const f = fixture();
   try {
@@ -1551,8 +1642,17 @@ test('real evaluator integration: 120 completed OHLCV bars enter then replay mis
       expectedSessionDate: '2026-09-14' }).signal, 'EXIT');
     bars.push({ t: '2026-09-15T04:00:00Z', o: 1, h: 1.1, l: .9, c: 1, v: 300000 });
     f.world.time = Date.parse('2026-09-16T15:00:00Z'); f.world.latest = '2026-09-15';
-    assert.notEqual(realStrategy.evaluateB2({ bars, asset: { symbol: 'AAA' }, now: f.world.time,
+    // The 09-14 cross is inside the crossover window as of 09-15, so the
+    // exit signal persists for a few sessions instead of expiring overnight.
+    assert.equal(realStrategy.evaluateB2({ bars, asset: { symbol: 'AAA' }, now: f.world.time,
       expectedSessionDate: '2026-09-15' }).signal, 'EXIT');
+    // Once the cross ages out of the window the direct signal goes quiet,
+    // but the per-session replay below must still close the position.
+    bars.push({ t: '2026-09-16T04:00:00Z', o: 1, h: 1.1, l: .9, c: 1, v: 300000 });
+    bars.push({ t: '2026-09-17T04:00:00Z', o: 1, h: 1.1, l: .9, c: 1, v: 300000 });
+    f.world.time = Date.parse('2026-09-18T15:00:00Z'); f.world.latest = '2026-09-17';
+    assert.notEqual(realStrategy.evaluateB2({ bars, asset: { symbol: 'AAA' }, now: f.world.time,
+      expectedSessionDate: '2026-09-17' }).signal, 'EXIT');
     await f.service.setAutomation(1, { action: 'pause' });
     f.world.fail = call => call.path.includes('snapshot');
     f.restart();

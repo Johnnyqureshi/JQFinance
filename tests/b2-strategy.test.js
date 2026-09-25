@@ -199,4 +199,87 @@ test('invalid or empty sizing and absent durable ID cannot place order', () => {
   assert.equal(B2_RULES.stopLossPct, 5);
   assert.equal(B2_RULES.maxPositions, 2);
 });
+// --- Crossover window + leveraged-ETF universe (2026-09-25) ---
+// Fixture with the 20/50 bullish crossover at a known bar: 82 sessions,
+// flat 10 -> flat 6 -> linear rise, crossing exactly at bar 79.
+// extraTail appends gently-rising sessions after the cross to age it.
+function windowFixture(symbol = 'TEST', priceScale = 1, extraTail = 0) {
+  const total = 82 + extraTail;
+  const end = new Date('2026-09-21T12:00:00Z');
+  for (let added = 0; added < extraTail; end.setUTCDate(end.getUTCDate() + 1)) {
+    if (![0, 6].includes(end.getUTCDay())) added++;
+  }
+  const endDate = end.toISOString().slice(0, 10);
+  const dates = [];
+  for (const d = new Date(end); dates.length < total; d.setUTCDate(d.getUTCDate() - 1)) {
+    if (![0, 6].includes(d.getUTCDay())) dates.unshift(d.toISOString().slice(0, 10));
+  }
+  const nextSession = new Date(end);
+  do { nextSession.setUTCDate(nextSession.getUTCDate() + 1); } while ([0, 6].includes(nextSession.getUTCDay()));
+  const nowDate = nextSession.toISOString().slice(0, 10);
+  const nowMs = Date.parse(`${nowDate}T15:00:00Z`);
+  const bars = dates.map((date, i) => {
+    let c = i < 40 ? 10 : i < 70 ? 6 : 7 + 6 * Math.min(i - 70, 11) / 11;
+    if (i > 81) c += 0.15 * (i - 81);
+    c *= priceScale;
+    return { t: `${date}T04:00:00Z`, o: c * .99, h: c * 1.01, l: c * .98, c, v: 300000 };
+  });
+  const price = bars.at(-1).c * 1.11;
+  return { bars, now: nowMs, expectedSessionDate: endDate,
+    asset: { symbol, tradable: true, status: 'active', class: 'us_equity' },
+    snapshot: {
+      latestTrade: { p: price, t: new Date(nowMs).toISOString() },
+      latestQuote: { bp: price - .01, ap: price + .01, bs: 10, as: 10, t: new Date(nowMs).toISOString() },
+      dailyBar: { t: `${nowDate}T04:00:00Z`, v: 900000 },
+      prevDailyBar: { t: `${endDate}T04:00:00Z`, c: bars.at(-1).c },
+    } };
+}
+test('bullish crossover two sessions back still buys with stable identity', () => {
+  const r = evaluateB2(windowFixture());
+  assert.equal(r.signal, 'BUY');
+  assert.equal(r.eligible, true);
+  assert.equal(r.crossover, 'BULLISH');
+  // Identity is pinned to the crossover session, not the evaluation day.
+  assert.equal(r.eventId, 'TEST:2026-09-17:BULLISH');
+  assert.equal(r.signalDate, '2026-09-17');
+});
+test('crossover older than the window does not buy', () => {
+  const r = evaluateB2(windowFixture('TEST', 1, 4));
+  assert.equal(r.signal, 'WAIT');
+  assert.equal(r.crossover, null);
+  assert.ok(r.reasons.some(reason => reason.includes('No bullish 20-day / 50-day SMA crossover')));
+});
+test('fresher bearish crossover overrides an older bullish one', () => {
+  const dates = [];
+  for (const d = new Date('2026-09-21T12:00:00Z'); dates.length < 80; d.setUTCDate(d.getUTCDate() - 1)) {
+    if (![0, 6].includes(d.getUTCDay())) dates.unshift(d.toISOString().slice(0, 10));
+  }
+  const nowMs = Date.parse('2026-09-22T15:00:00Z');
+  const bars = dates.map((date, i) => {
+    const c = i < 77 ? 10 : i === 77 ? 10.3 : 9.7;
+    return { t: `${date}T04:00:00Z`, o: c * .99, h: c * 1.01, l: c * .98, c, v: 300000 };
+  });
+  const r = evaluateB2({ bars, now: nowMs, expectedSessionDate: dates.at(-1),
+    asset: { symbol: 'TEST', tradable: true, status: 'active', class: 'us_equity' }, snapshot: {} });
+  assert.equal(r.crossover, 'BEARISH');
+  assert.equal(r.signal, 'EXIT');
+});
+test('leveraged ETF trades above the $20 stock cap', () => {
+  const r = evaluateB2(windowFixture('TQQQ', 60 / 13));
+  assert.equal(r.signal, 'BUY');
+  assert.equal(r.eligible, true);
+  assert.ok(r.metrics.price > 20);
+});
+test('common stock above $20 still fails the price gate', () => {
+  const r = evaluateB2(windowFixture('TEST', 60 / 13));
+  assert.equal(r.signal, 'WAIT');
+  assert.equal(r.eligible, false);
+  assert.ok(r.gates.find(g => g.name.startsWith('Price $1')).passed === false);
+});
+test('buildB2Entry honors the leveraged-ETF price band', () => {
+  const order = buildB2Entry({ symbol: 'TQQQ', ask: 60, maxPositionDollars: 1000, buyingPower: 10000, clientOrderId: 'b2_tqqq' });
+  assert.equal(order.symbol, 'TQQQ');
+  assert.equal(order.qty, '16');
+  assert.throws(() => buildB2Entry({ symbol: 'TEST', ask: 60, maxPositionDollars: 1000, buyingPower: 10000, clientOrderId: 'b2_test' }));
+});
 console.log(`B2 strategy: ${passed} checks passed.`);

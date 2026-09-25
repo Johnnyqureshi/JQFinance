@@ -3,6 +3,7 @@ const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { mountB2 } = require('./lib/b2-service');
+const { mountSd } = require('./lib/sd-service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -7170,7 +7171,14 @@ const b2Service = mountB2({
   persistenceReady: () => automatedTradingPersistenceReady,
   durability: automatedState,
 });
+const sdService = mountSd({
+  app, db: automatedDb, requireAuth, ensureSessionUserInTradingStore,
+  vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
 let b2SchedulerStarted = false;
+let sdSchedulerStarted = false;
 let serviceShuttingDown = false;
 
 // Readiness verifies the live PostgreSQL fence and both scheduler loops without
@@ -7183,6 +7191,7 @@ app.get('/readyz', async (_req, res) => {
     console.warn('[Health] PostgreSQL readiness probe failed:', error.message);
   }
   const b2Lifecycle = b2Service.lifecycleStatus();
+  const sdLifecycle = sdService.lifecycleStatus();
   const optionsScheduled = optionsSchedulerStarted && optionsSchedulerTimer !== null;
   const ready = !serviceShuttingDown
     && automatedTradingPersistenceReady
@@ -7190,7 +7199,10 @@ app.get('/readyz', async (_req, res) => {
     && optionsScheduled
     && b2SchedulerStarted
     && b2Lifecycle.running
-    && b2Lifecycle.scheduled;
+    && b2Lifecycle.scheduled
+    && sdSchedulerStarted
+    && sdLifecycle.running
+    && sdLifecycle.scheduled;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
@@ -7198,6 +7210,7 @@ app.get('/readyz', async (_req, res) => {
     schedulers: {
       options: optionsScheduled ? 'started' : 'stopped',
       b2: b2Lifecycle.running && b2Lifecycle.scheduled ? 'started' : 'stopped',
+      sd: sdLifecycle.running && sdLifecycle.scheduled ? 'started' : 'stopped',
     },
   });
 });
@@ -7239,11 +7252,13 @@ async function stopAutomatedState(signal) {
   try {
     b2SchedulerStarted = false;
     const b2Drain = b2Service.drain();
+    sdSchedulerStarted = false;
+    const sdDrain = sdService.drain();
     const optionsDrain = stopOptionsScheduler();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([b2Drain, optionsDrain]);
+    await Promise.all([b2Drain, sdDrain, optionsDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -7263,6 +7278,8 @@ function startServer() {
   console.log(`Qureshi Finance on :${PORT}`);
   b2Service.start();
   b2SchedulerStarted = true;
+  sdService.start();
+  sdSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

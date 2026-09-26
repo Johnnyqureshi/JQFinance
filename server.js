@@ -12,6 +12,8 @@ const { evaluateYahooLiquidity, evaluateAlpacaLiquidity } = require('./lib/liqui
 const { evaluateSessionVwapContext } = require('./lib/session-vwap-context');
 const { brokerOrderMatchesIntent } = require('./lib/broker-order-ownership');
 const { barsFromBrokerResponse, easternDateKey, completedDailyBars, completedWeeklyBars } = require('./lib/market-bars');
+const emailVerification = require('./lib/email-verification');
+const emailSender = require('./lib/email');
 require('dotenv').config();
 const express      = require('express');
 const cors         = require('cors');
@@ -341,7 +343,40 @@ try { db.prepare('ALTER TABLE options_settings ADD COLUMN activation_revision IN
   `ALTER TABLE alpaca_creds ADD COLUMN api_key_enc TEXT`,
   `ALTER TABLE alpaca_creds ADD COLUMN api_secret_enc TEXT`,
   `ALTER TABLE alpaca_creds ADD COLUMN account_id TEXT`,
+  `ALTER TABLE users ADD COLUMN email TEXT`,
+  `ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`,
 ].forEach(sql => { try { db.prepare(sql).run(); } catch (_) {} });
+try { automatedDb.prepare('ALTER TABLE users ADD COLUMN email TEXT').run(); } catch (_) {}
+try { automatedDb.prepare('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
+
+// ── Email verification tokens (single-use, 24h expiry, hash-only storage) ────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS email_verification_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    token_hash TEXT    NOT NULL UNIQUE,
+    expires_at TEXT    NOT NULL,
+    used_at    TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_evt_token_hash ON email_verification_tokens(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_evt_user_id ON email_verification_tokens(user_id);
+`);
+
+// ── One-time grandfathering: every account already in the database at deploy
+// time is marked email-verified, so no existing user is ever locked out.
+// Only accounts registered AFTER this deploy go through verification.
+// The sentinel row (via emailVerification.grandfatherAllUsers) makes this
+// run exactly once per database.
+for (const store of [db, automatedDb]) {
+  try {
+    const n = emailVerification.grandfatherAllUsers(store);
+    if (n) console.log(`[Auth] Grandfathered ${n} pre-existing user(s) as email-verified (sqlite).`);
+  } catch (e) {
+    console.error('[Auth] Email grandfathering failed:', e.message);
+  }
+}
 
 // ── DB migration: upgrade alpaca_creds to composite (user_id, mode) PK ────────
 // Allows separate paper + live credentials to coexist for the same user.
@@ -653,6 +688,13 @@ function ensureAuthStoreReady() {
   }
 
   authStoreReady = authStore.init(db)
+    .then(() => authStore.ensureEmailVerificationColumns().catch(error => {
+      // Non-fatal: verification columns are best-effort on managed schemas.
+      console.error('[Auth] Email-verification column migration failed:', error.message);
+    }))
+    .then(() => authStore.grandfatherAllUsers()
+      .then(n => { if (n) console.log(`[Auth] Grandfathered ${n} pre-existing user(s) as email-verified.`); })
+      .catch(error => console.error('[Auth] Email grandfathering failed:', error.message)))
     .then(() => authStore.retireLegacyUsername(
       bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
     ))
@@ -680,7 +722,7 @@ ensureAuthStoreReady().catch(() => {});
 // settings flow. Never assign environment credentials to a fixed user ID.
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
-app.set('trust proxy', 1);  // Trust Replit's reverse proxy for correct cookie behaviour
+app.set('trust proxy', 1);  // Trust the Railway/Cloudflare reverse proxy for correct cookie behaviour
 
 // Security headers: removes X-Powered-By, sets X-Frame-Options, X-Content-Type-Options, etc.
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -706,7 +748,7 @@ const sessionMiddleware = session({
   rolling:           true,   // Reset cookie expiry on every request (keeps active users logged in)
   cookie: {
     httpOnly: true,
-    secure:   false,          // Replit's proxy handles HTTPS termination; cookie is still httpOnly + sameSite
+    secure:   true,           // Railway/Cloudflare terminates HTTPS at the proxy (trust proxy is set above); Secure cookies are required in production
     sameSite: 'lax',
     maxAge:   90 * 24 * 60 * 60 * 1000,  // 90 days
   },
@@ -753,6 +795,31 @@ app.use('/api/auth', requireAuthStore);
 // Auth guard helper
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  next();
+}
+
+// ── Email verification enforcement ──────────────────────────────────────────
+// New registrations must verify their email before connecting a broker account
+// or enabling bot automation. Login stays allowed so users can reach the
+// "check your inbox" state. Existing users with broker activity are
+// grandfathered (see grandfatherEmailVerified below).
+const EMAIL_UNVERIFIED_ERROR =
+  'Please verify your email address before connecting a broker account or enabling bot automation. Check your inbox for the verification link.';
+
+function emailVerifiedIn(store, userId) {
+  try {
+    const row = store.prepare('SELECT email_verified FROM users WHERE id=?').get(Number(userId));
+    return !!row && Number(row.email_verified) === 1;
+  } catch {
+    return false;
+  }
+}
+
+// Express middleware form (reads the main trading-store mirror).
+function requireVerifiedEmail(req, res, next) {
+  if (!emailVerifiedIn(db, req.session?.userId)) {
+    return res.status(403).json({ error: EMAIL_UNVERIFIED_ERROR, code: 'EMAIL_UNVERIFIED' });
+  }
   next();
 }
 
@@ -1113,32 +1180,100 @@ async function _fetchFloatData(sym) {
 // ── Authentication ───────────────────────────────────────────────────────────
 
 app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password)
-    return res.status(400).json({ error: 'Username and password are required.' });
+  const { username, password, email } = req.body || {};
+  if (!username || !password || !email)
+    return res.status(400).json({ error: 'Username, email, and password are required.' });
 
-  const u = username.trim().toLowerCase();   // Always store as lowercase — prevents case duplicates
+  const u = username.trim().toLowerCase();
+  const em = email.trim().toLowerCase();
   if (!/^[a-zA-Z0-9_]{3,20}$/.test(u))
     return res.status(400).json({ error: 'Username must be 3–20 characters (letters, numbers, _).' });
+  if (!emailVerification.isValidEmail(em))
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
   if (password.length < 6)
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
 
   try {
     const hash = await bcrypt.hash(password, 10);
-    const user = await authStore.createUser(u, hash);
+    const user = await authStore.createUser(u, hash, em);
     if (!user) return res.status(409).json({ error: 'Username already taken.' });
+    const uid = Number(user.id);
     authStore.syncSqliteUser(db, user);
-    req.session.userId   = Number(user.id);
+    // Issue a verification token and send the email. Fail-open: mail problems
+    // never break signup — the token flow still works and can be re-sent.
+    let verificationSent = false;
+    try {
+      const { raw } = emailVerification.issueToken(db, uid);
+      const result = await emailSender.sendVerificationEmail({ to: em, username: u, rawToken: raw });
+      verificationSent = result.sent;
+    } catch (e) {
+      console.error('[Auth] Verification email failed:', e.message);
+    }
+    req.session.userId   = uid;
     req.session.username = u;
     req.session.save(error => {
       if (error) return res.status(500).json({ error: 'Account was created, but the sign-in session could not be saved. Please sign in again.' });
-      res.json({ id: Number(user.id), username: u });
+      res.json({ id: uid, username: u, emailVerified: false, verificationSent });
     });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Username already taken.' });
+    if (e.code === 'EMAIL_TAKEN') return res.status(409).json({ error: 'An account with this email already exists.' });
     console.error('[Auth] Registration failed:', e.message);
     res.status(500).json({ error: 'Registration failed.' });
   }
+});
+
+// Consume an email-verification token (public; linked from the verification email).
+app.get('/api/auth/verify-email', async (req, res) => {
+  const result = emailVerification.consumeToken(db, req.query.token);
+  if (!result.ok) {
+    const messages = {
+      invalid: 'This verification link is invalid.',
+      expired: 'This verification link has expired. Please request a new one.',
+      used: 'This verification link has already been used.',
+    };
+    return res.status(400).json({ ok: false, code: result.code, error: messages[result.code] || 'Verification failed.' });
+  }
+  const uid = result.userId;
+  try {
+    emailVerification.setEmailVerified(db, uid, true);
+    try { emailVerification.setEmailVerified(automatedDb, uid, true); } catch (_) {}
+    await authStore.markEmailVerified(uid).catch(() => {});
+    try {
+      const user = await authStore.findUserById(uid);
+      if (user) {
+        authStore.syncSqliteUser(db, user);
+        authStore.syncSqliteUser(automatedDb, user);
+      }
+    } catch (_) {}
+  } catch (e) {
+    console.error('[Auth] Marking email verified failed:', e.message);
+  }
+  res.json({ ok: true });
+});
+
+// Re-send the verification email. Rate-limited, and always returns success so
+// the endpoint cannot be used to enumerate registered emails.
+app.post('/api/auth/resend-verification', rateLimitAuth, async (req, res) => {
+  try {
+    let email = String(req.body?.email || '').trim().toLowerCase();
+    let user = null;
+    if (emailVerification.isValidEmail(email)) {
+      user = await authStore.findUserByEmail(email).catch(() => null);
+    } else if (req.session?.userId) {
+      // Logged-in users can re-send without retyping their address.
+      user = await authStore.findUserById(Number(req.session.userId)).catch(() => null);
+      email = user?.email || '';
+    }
+    if (user && !user.email_verified && emailVerification.isValidEmail(email)) {
+      const uid = Number(user.id);
+      authStore.syncSqliteUser(db, user);
+      const { raw } = emailVerification.issueToken(db, uid);
+      await emailSender.sendVerificationEmail({ to: email, username: user.username, rawToken: raw })
+        .catch(e => console.error('[Auth] Verification resend failed:', e.message));
+    }
+  } catch (_) {}
+  res.json({ ok: true });
 });
 
 // Login
@@ -1206,7 +1341,18 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 // Current user
 app.get('/api/auth/me', (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
-  res.json({ id: req.session.userId, username: req.session.username });
+  let emailVerified = false;
+  let email = null;
+  try {
+    const row = db.prepare('SELECT email, email_verified FROM users WHERE id=?').get(Number(req.session.userId));
+    if (row) { emailVerified = Number(row.email_verified) === 1; email = row.email || null; }
+  } catch (_) {}
+  res.json({ id: req.session.userId, username: req.session.username, email, emailVerified });
+});
+
+// Friendly verification landing page (linked from the verification email).
+app.get('/verify-email', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'verify-email.html'));
 });
 
 // ── Watchlist Routes (auth-protected) ─────────────────────────────────────────
@@ -4019,6 +4165,10 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   let uid;
   try { uid = await ensureSessionUserInTradingStore(req); }
   catch { return res.status(503).json({ error: 'Your signed-in account could not be prepared for broker connections. Sign in again and retry.' }); }
+  // Broker connections require a verified email (pre-deploy users grandfathered).
+  if (!emailVerifiedIn(db, uid)) {
+    return res.status(403).json({ error: EMAIL_UNVERIFIED_ERROR, code: 'EMAIL_UNVERIFIED' });
+  }
   const activeOptions = () => scope === 'options' && hasActiveOptionsTrades(uid);
   if (activeOptions()) return res.status(409).json({ error: 'Reconcile or close active LEAP lifecycles before replacing this connection.' });
   try {
@@ -6764,6 +6914,10 @@ app.put('/api/options/settings', requireAuth, async (req, res) => {
     if (req.body?.enabled === true && !automatedTradingPersistenceReady) {
       return res.status(503).json({ error: 'Durable automated-trading persistence is unavailable; LEAP entries remain paused until the PostgreSQL schema is published.' });
     }
+    // Enabling LEAP automation requires a verified email (pre-deploy users grandfathered).
+    if (req.body?.enabled === true && !emailVerifiedIn(db, userId)) {
+      return res.status(403).json({ error: EMAIL_UNVERIFIED_ERROR, code: 'EMAIL_UNVERIFIED' });
+    }
     db.prepare('INSERT OR IGNORE INTO options_settings(user_id) VALUES (?)').run(userId);
     const prior = optionsConfigFor(userId);
     const maxPositionDollars = Math.min(OPTIONS_MAX_POSITION_DOLLARS,
@@ -7170,12 +7324,14 @@ const b2Service = mountB2({
   vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
   durability: automatedState,
+  emailVerified: uid => emailVerifiedIn(automatedDb, uid),
 });
 const sdService = mountSd({
   app, db: automatedDb, requireAuth, ensureSessionUserInTradingStore,
   vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
   durability: automatedState,
+  emailVerified: uid => emailVerifiedIn(automatedDb, uid),
 });
 let b2SchedulerStarted = false;
 let sdSchedulerStarted = false;

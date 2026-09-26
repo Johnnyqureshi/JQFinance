@@ -69,7 +69,8 @@ function setupThemeToggle() {
 const authAPI = {
   async me()          { try { const r=await fetch('/api/auth/me'); return r.ok ? r.json() : null; } catch { return null; } },
   async login(u,p)    { try { const r=await fetch('/api/auth/login',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
-  async register(u,p) { try { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
+  async register(u,p,email) { try { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p,email})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
+  async resendVerification(email) { try { const r=await fetch('/api/auth/resend-verification', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(email?{email}:{})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false}; } },
   async logout()      { try { await fetch('/api/auth/logout', {method:'POST'}); } catch {} },
 };
 
@@ -2244,11 +2245,40 @@ function setupWatchlistPage() {
 }
 
 // ── Auth overlay helpers ────────────────────────────────────────────────────────
+// Email-verification nudge: visible to logged-in users whose email is unverified.
+function updateVerifyBanner(user) {
+  const banner = $('verifyBanner');
+  if (!banner) return;
+  if ((user && user.emailVerified) || sessionStorage.getItem('verifyBannerDismissed') === '1') {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'flex';
+}
+
+function setupVerifyBanner() {
+  const close = $('verifyBannerClose');
+  if (close) close.addEventListener('click', () => {
+    sessionStorage.setItem('verifyBannerDismissed', '1');
+    $('verifyBanner').style.display = 'none';
+  });
+  const resend = $('verifyResendBtn');
+  if (resend) resend.addEventListener('click', async () => {
+    resend.disabled = true;
+    resend.textContent = 'Sending…';
+    const r = await authAPI.resendVerification();
+    resend.textContent = r.ok ? 'Sent — check your inbox' : 'Try again later';
+    if (r.ok) setTimeout(() => { resend.disabled = false; resend.textContent = 'Resend email'; }, 30000);
+    else { resend.disabled = false; }
+  });
+}
+
 function showApp(user) {
   state.currentUser = user;
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
+  updateVerifyBanner(user);
   window.jqfAgent?.show();
   futuresTracker.init();
   marketAlerts.start();
@@ -2268,6 +2298,7 @@ function showAuthOverlay() {
   window.stockScanner?.pause();
   state.currentUser = null;
   state.watchlist   = [];
+  sessionStorage.removeItem('verifyBannerDismissed');
   // Always land on the Sign In tab — prevents "username already taken" loop
   _resetAuthToLogin();
   $('authUser').value = '';
@@ -2307,6 +2338,8 @@ function setupAuthUI() {
     $('authUser').placeholder = isReg ? 'Choose a username' : 'Enter your username';
     $('authPass').placeholder = isReg ? 'Choose a password' : 'Enter your password';
     $('authPass').setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
+    const emailField = $('authEmailField');
+    if (emailField) emailField.style.display = isReg ? '' : 'none';
     $('authSwitchLink')?.addEventListener('click', e=>{ e.preventDefault(); setMode(isReg?'login':'register'); });
   }
 
@@ -2318,6 +2351,7 @@ function setupAuthUI() {
     e.preventDefault();
     const u = $('authUser').value.trim();
     const p = $('authPass').value;
+    const em = $('authEmail') ? $('authEmail').value.trim() : '';
     $('authError').textContent = '';
 
     // Client-side validation
@@ -2325,11 +2359,12 @@ function setupAuthUI() {
     if (!p) { $('authError').textContent = 'Please enter a password.';  $('authPass').focus(); return; }
     if (mode === 'register' && p.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
     if (mode === 'register' && !/^[a-zA-Z0-9_]{3,20}$/.test(u)) { $('authError').textContent = 'Username must be 3–20 characters (letters, numbers, _).'; return; }
+    if (mode === 'register' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { $('authError').textContent = 'Please enter a valid email address.'; $('authEmail').focus(); return; }
 
     $('authSubmit').disabled    = true;
     $('authSubmit').textContent = mode === 'login' ? 'Signing in…' : 'Creating account…';
 
-    const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p);
+    const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p, em);
 
     if (res.ok) {
       await wlAPI.load();
@@ -2355,6 +2390,7 @@ function setupAuthUI() {
 document.addEventListener('DOMContentLoaded', async () => {
   setupThemeToggle();
   setupAuthUI();
+  setupVerifyBanner();
   marketAlerts.setup();
 
   // Check if already logged in

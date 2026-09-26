@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Verify your email — Qureshi Finance</title>
+<link rel="stylesheet" href="/public/css/style.css?v=20260925b"/>
+<style>
+  .verify-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .verify-card { max-width: 460px; width: 100%; text-align: center; padding: 40px 32px; border: 1px solid rgba(255,255,255,.09); border-radius: 16px; background: rgba(255,255,255,.03); }
+  .verify-card h1 { font-family: 'Space Grotesk', sans-serif; margin: 0 0 12px; font-size: 24px; }
+  .verify-card p { opacity: .8; line-height: 1.6; margin: 0 0 20px; }
+  .verify-icon { font-size: 44px; margin-bottom: 12px; }
+  .verify-btn { display: inline-block; background: #1dd6a3; color: #06281f; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 10px; }
+  .verify-link-btn { background: none; border: none; color: #1dd6a3; cursor: pointer; font-size: 15px; text-decoration: underline; padding: 0; }
+  .verify-ok .verify-icon { filter: none; }
+</style>
+</head>
+<body>
+<div class="verify-wrap">
+  <div class="verify-card" id="verifyCard">
+    <div class="verify-icon" id="verifyIcon">…</div>
+    <h1 id="verifyTitle">Verifying…</h1>
+    <p id="verifyMsg">Please wait while we confirm your email address.</p>
+    <div id="verifyActions"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var token = new URLSearchParams(location.search).get('token');
+  var icon = document.getElementById('verifyIcon');
+  var title = document.getElementById('verifyTitle');
+  var msg = document.getElementById('verifyMsg');
+  var actions = document.getElementById('verifyActions');
+
+  function done(ok, t, m, showResend) {
+    icon.textContent = ok ? '✓' : '✕';
+    icon.style.color = ok ? '#1dd6a3' : '#e5484d';
+    title.textContent = t;
+    msg.textContent = m;
+    actions.innerHTML = '<a class="verify-btn" href="/">Go to Qureshi Finance</a>' +
+      (showResend ? '<p style="margin-top:16px"><button class="verify-link-btn" id="resendBtn" type="button">Send me a new link</button></p>' : '');
+    var rb = document.getElementById('resendBtn');
+    if (rb) rb.addEventListener('click', function () {
+      rb.disabled = true; rb.textContent = 'Sending…';
+      fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function () { rb.textContent = 'New link sent — check your inbox.'; })
+        .catch(function () { rb.disabled = false; rb.textContent = 'Send me a new link'; });
+    });
+  }
+
+  if (!token) { done(false, 'Invalid link', 'This verification link is missing its token.'); return; }
+  fetch('/api/auth/verify-email?token=' + encodeURIComponent(token))
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      if (res.ok && res.d.ok) {
+        done(true, 'Email verified', 'Your email is confirmed. You now have full access to broker connections and bot automation.');
+      } else if (res.d.code === 'expired') {
+        done(false, 'Link expired', 'This verification link has expired. We can send you a fresh one.', true);
+      } else if (res.d.code === 'used') {
+        done(false, 'Already used', 'This link was already used. If you still need verification, request a new link.', true);
+      } else {
+        done(false, 'Invalid link', res.d.error || 'This verification link is not valid.');
+      }
+    })
+    .catch(function () { done(false, 'Something went wrong', 'We could not verify your email right now. Please try again.'); });
+})();
+</script>
+</body>
+</html>

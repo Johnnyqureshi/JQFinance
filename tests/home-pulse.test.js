@@ -133,6 +133,101 @@ test('pillFor: disabled -> Paused, live -> Live, paper -> Paper', () => {
   assert.deepEqual(HomePulse.pillFor({ enabled: true, mode: 'paper' }), { text: 'Paper', cls: 'hp-pill-paper' });
 });
 
+// ── LEAP pill ─────────────────────────────────────────────────────────────
+
+test('leapPillFor: not connected -> Not connected (gray outline)', () => {
+  assert.deepEqual(HomePulse.leapPillFor(null), { text: 'Not connected', cls: 'hp-pill-off' });
+  assert.deepEqual(HomePulse.leapPillFor({}), { text: 'Not connected', cls: 'hp-pill-off' });
+  assert.deepEqual(HomePulse.leapPillFor({ connected: false, enabled: true, mode: 'paper' }),
+    { text: 'Not connected', cls: 'hp-pill-off' });
+});
+
+test('leapPillFor: connected but disabled -> Paused', () => {
+  assert.deepEqual(HomePulse.leapPillFor({ connected: true, enabled: false, mode: 'paper' }),
+    { text: 'Paused', cls: 'hp-pill-paused' });
+});
+
+test('leapPillFor: live + enabled + liveArmed -> Live', () => {
+  assert.deepEqual(HomePulse.leapPillFor({ connected: true, enabled: true, mode: 'live', liveArmed: true }),
+    { text: 'Live', cls: 'hp-pill-live' });
+});
+
+test('leapPillFor: paper + enabled -> Paper', () => {
+  assert.deepEqual(HomePulse.leapPillFor({ connected: true, enabled: true, mode: 'paper', liveArmed: false }),
+    { text: 'Paper', cls: 'hp-pill-paper' });
+});
+
+test('leapPillFor: live mode without liveArmed degrades to Paper, not Live', () => {
+  assert.deepEqual(HomePulse.leapPillFor({ connected: true, enabled: true, mode: 'live', liveArmed: false }),
+    { text: 'Paper', cls: 'hp-pill-paper' });
+});
+
+// ── LEAP blocker sub-line ─────────────────────────────────────────────────
+
+test('leapBlockerText shows the first blocker when not ready', () => {
+  assert.equal(
+    HomePulse.leapBlockerText({ ready: false, blockers: ['A dedicated LEAP Options Alpaca account is not connected.', 'Other'] }),
+    'A dedicated LEAP Options Alpaca account is not connected.');
+});
+
+test('leapBlockerText is empty when ready or when there is no payload', () => {
+  assert.equal(HomePulse.leapBlockerText({ ready: true, blockers: ['stale'] }), '');
+  assert.equal(HomePulse.leapBlockerText({ ready: false, blockers: [] }), '');
+  assert.equal(HomePulse.leapBlockerText({ ready: false }), '');
+  assert.equal(HomePulse.leapBlockerText(null), '');
+});
+
+// ── LEAP trade summarizers (options shape: camelCase + closedAt) ──────────
+
+test('leapTodayRealizedPnl prefers closedAt over createdAt', () => {
+  const today = todayIso();
+  const trades = [
+    // opened yesterday, closed today -> counts (createdAt alone would miss it)
+    { status: 'closed', pnl: 200, createdAt: '2020-05-01T10:00:00', closedAt: today + 'T09:45:00' },
+    // closed yesterday -> excluded even though created today
+    { status: 'closed', pnl: 999, createdAt: today + 'T08:00:00', closedAt: '2020-05-01T15:00:00' },
+    // no closedAt: falls back to createdAt
+    { status: 'closed', pnl: -50, createdAt: today + 'T13:00:00' },
+    { status: 'open', pnl: 500, createdAt: today + 'T10:00:00' }, // unrealized, excluded
+  ];
+  const r = HomePulse.leapTodayRealizedPnl(trades);
+  assert.equal(r.pnl, 150);
+  assert.equal(r.trades, 2);
+});
+
+test('leapTodayRealizedPnl is zero-safe on empty/bad input', () => {
+  assert.deepEqual(HomePulse.leapTodayRealizedPnl([]), { pnl: 0, trades: 0 });
+  assert.deepEqual(HomePulse.leapTodayRealizedPnl(null), { pnl: 0, trades: 0 });
+  assert.deepEqual(HomePulse.leapTodayRealizedPnl([{ status: 'closed' }]), { pnl: 0, trades: 0 });
+});
+
+test('leapOpenCount counts open and exit-intent lifecycles only', () => {
+  const trades = [
+    { status: 'open' },
+    { status: 'target_intent' },        // still holding contracts
+    { status: 'thesis_exit_pending' },  // still holding contracts
+    { status: 'thesis_exit_intent' },   // still holding contracts
+    { status: 'partial' },
+    { status: 'closed' },
+    { status: 'rejected' },
+    { status: 'pending_entry' },        // entry in flight, no contracts yet
+    { status: 'lifecycle_review' },
+    {},
+  ];
+  assert.equal(HomePulse.leapOpenCount(trades), 5);
+  assert.equal(HomePulse.leapOpenCount(null), 0);
+});
+
+test('leapTodayRealizedPnl ignores non-numeric pnl', () => {
+  const today = todayIso();
+  const r = HomePulse.leapTodayRealizedPnl([
+    { status: 'closed', pnl: 'n/a', closedAt: today + 'T10:00:00' },
+    { status: 'closed', pnl: 30, closedAt: today + 'T11:00:00' },
+  ]);
+  assert.equal(r.pnl, 30);
+  assert.equal(r.trades, 1);
+});
+
 // ── Formatters ──────────────────────────────────────────────────────────────
 
 test('formatters handle values and unknowns', () => {

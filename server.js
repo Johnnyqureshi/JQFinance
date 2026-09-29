@@ -699,10 +699,10 @@ const automatedStartup = automatedState.init()
   // Warrior rejection log retired 2026-09-29: drop before the startup
   // checkpoint so the drop propagates into the durable snapshot.
   .then(() => automatedState.dropRetiredWarriorRejectionTable())
-  // B2 paused 2026-09-29 on Johnny's order ("stop the bots from trading").
+  // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.
-  .then(() => automatedState.pauseB2Once())
+  .then(() => automatedState.pauseAllBotsOnce())
   .then(() => automatedState.flush('startup').catch(error => {
     // A refused startup checkpoint (empty local image while a snapshot
     // exists) must not take the whole site down: the bots simply stay

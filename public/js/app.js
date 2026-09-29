@@ -76,7 +76,32 @@ const authAPI = {
 
 // ── Watchlist API ───────────────────────────────────────────────────────────────
 const wlAPI = {
-  async load()     { try { const r=await fetch('/api/watchlist'); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
+  // One-shot wipe-recovery flag. If the server list is empty but this device
+  // remembers symbols (a deploy wiped the server-side list before the volume
+  // fix), push the remembered list up once so the account keeps it. After
+  // that the server is the source of truth, so an intentional delete on
+  // another device is never resurrected twice.
+  _didWipeRecovery: false,
+  async load() {
+    try {
+      const r = await fetch('/api/watchlist');
+      if (!r.ok) return;
+      const d = await r.json();
+      const server = d.watchlist || [];
+      if (!server.length && state.watchlist.length && !this._didWipeRecovery) {
+        this._didWipeRecovery = true;
+        for (const sym of state.watchlist) {
+          try { await fetch('/api/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: sym }) }); } catch (_) {}
+        }
+        try {
+          const r2 = await fetch('/api/watchlist');
+          if (r2.ok) { const d2 = await r2.json(); state.watchlist = d2.watchlist || []; }
+        } catch (_) {}
+        return;
+      }
+      state.watchlist = server;
+    } catch (_) {}
+  },
   async add(sym)   { try { const r=await fetch('/api/watchlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})}); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
   async remove(sym){ try { const r=await fetch(`/api/watchlist/${encodeURIComponent(sym)}`,{method:'DELETE'}); if(r.ok){const d=await r.json(); state.watchlist=d.watchlist||[];} } catch {} },
 };
@@ -273,8 +298,9 @@ function renderStockHeader(sym, snap) {
     const ec = base ? ep - base : 0;
     const epct = base ? (ec / base) * 100 : 0;
     const eup = ec >= 0;
-    $('sExtBadge').textContent = snap.extendedType || 'EXT';
-    $('sExtBadge').className = 's-ext-badge ' + (snap.extendedType === 'PRE' ? 'pre' : 'post');
+    const extType = snap.extendedType || 'EXT';
+    $('sExtBadge').textContent = extType === 'OVERNIGHT' ? 'Overnight' : extType;
+    $('sExtBadge').className = 's-ext-badge ' + (extType === 'PRE' ? 'pre' : extType === 'OVERNIGHT' ? 'ovn' : 'post');
     $('sExtPrice').textContent = '$' + fmt(ep);
     $('sExtChange').textContent = `${eup ? '+' : ''}${fmt(ec)} (${eup ? '+' : ''}${fmt(epct)}%)`;
     $('sExtChange').className = 's-ext-change ' + (eup ? 'up' : 'down');
@@ -621,6 +647,19 @@ function revealMobileNavPage(page) {
   }
 }
 
+// ── Watchlist cross-device sync ─────────────────────────────────────────────
+// The watchlist lives server-side per account, but the client only fetched it
+// at login/boot — edits made on another device never appeared until re-login.
+// Re-sync the list from the server whenever the watchlist page opens, every
+// 60s while it stays open, and whenever the app returns to the foreground.
+let wlSyncTimer = null;
+async function syncWatchlistPage() {
+  try { await wlAPI.load(); } catch (_) {}
+  loadWatchlist();
+  loadSectorHeatmap();
+  futuresTracker.load();
+}
+
 function goPage(page) {
   state.prevPage = state.page;
   state.page     = page;
@@ -629,14 +668,66 @@ function goPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $('page-'+page).classList.add('active');
   if (page==='markets')   loadMarkets();
-  if (page==='watchlist') { loadWatchlist(); loadSectorHeatmap(); futuresTracker.load(); }
+  if (page==='watchlist') {
+    syncWatchlistPage();
+    clearInterval(wlSyncTimer);
+    wlSyncTimer = setInterval(() => {
+      if (document.getElementById('page-watchlist')?.classList.contains('active')) syncWatchlistPage();
+    }, 60000);
+  } else {
+    clearInterval(wlSyncTimer);
+    wlSyncTimer = null;
+  }
   if (page==='scanner')   scanner.open();
   if (page==='trading')   { alpacaTrader.open(); }
   if (page==='options') { if (window.optionsBot) optionsBot.open(); }
   else if (window.optionsBot) optionsBot.pause();
+  if (page==='warrior') { if (window.warriorBot) warriorBot.open(); }
+  else if (window.warriorBot) warriorBot.pause();
+  if (page==='crypto') { if (window.cryptoBot) cryptoBot.open(); }
+  else if (window.cryptoBot) cryptoBot.pause();
   if (page==='b2') { if (window.b2Bot) b2Bot.open(); }
   else if (window.b2Bot) b2Bot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
+}
+
+// Reset the home page to the main dashboard (Command Center), clearing any
+// open ticker workspace / search state. Used by the site logo click.
+function resetToDashboard() {
+  state.prevPage = null;
+  state.page     = 'home';
+  state.symbol   = null;
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === 'home'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $('page-home')?.classList.add('active');
+  const ws = $('homeWorkspace'); if (ws) ws.style.display = 'none';
+  const he = $('homeEmpty');     if (he) he.style.display = '';
+  const hero = $('heroInput');   if (hero) hero.value = '';
+  const drop = $('homeDrop');    if (drop) drop.classList.remove('open');
+  const topVerdict = $('searchVerdictTop'); if (topVerdict) topVerdict.style.display = 'none';
+  if (window.searchIntelligence) searchIntelligence.hide();
+}
+
+// Collapsible desktop sidebar — persists collapsed state in localStorage.
+// The collapsed styles only apply inside the min-width:769px media query,
+// so mobile (top bar + bottom nav) is unaffected.
+function setupSidebar() {
+  const nav = document.querySelector('.nav');
+  const btn = $('navCollapse');
+  if (!nav || !btn) return;
+  const KEY = 'qf_sidebar_collapsed';
+  const apply = (collapsed) => {
+    nav.classList.toggle('collapsed', collapsed);
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    btn.setAttribute('aria-label', label);
+    btn.setAttribute('title', label);
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch (_) {}
+  };
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(KEY) === '1'; } catch (_) {}
+  apply(collapsed);
+  btn.addEventListener('click', () => apply(!nav.classList.contains('collapsed')));
 }
 
 // ── Stock page ─────────────────────────────────────────────────────────────────
@@ -2245,40 +2336,11 @@ function setupWatchlistPage() {
 }
 
 // ── Auth overlay helpers ────────────────────────────────────────────────────────
-// Email-verification nudge: visible to logged-in users whose email is unverified.
-function updateVerifyBanner(user) {
-  const banner = $('verifyBanner');
-  if (!banner) return;
-  if ((user && user.emailVerified) || sessionStorage.getItem('verifyBannerDismissed') === '1') {
-    banner.style.display = 'none';
-    return;
-  }
-  banner.style.display = 'flex';
-}
-
-function setupVerifyBanner() {
-  const close = $('verifyBannerClose');
-  if (close) close.addEventListener('click', () => {
-    sessionStorage.setItem('verifyBannerDismissed', '1');
-    $('verifyBanner').style.display = 'none';
-  });
-  const resend = $('verifyResendBtn');
-  if (resend) resend.addEventListener('click', async () => {
-    resend.disabled = true;
-    resend.textContent = 'Sending…';
-    const r = await authAPI.resendVerification();
-    resend.textContent = r.ok ? 'Sent — check your inbox' : 'Try again later';
-    if (r.ok) setTimeout(() => { resend.disabled = false; resend.textContent = 'Resend email'; }, 30000);
-    else { resend.disabled = false; }
-  });
-}
-
 function showApp(user) {
   state.currentUser = user;
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
-  updateVerifyBanner(user);
   window.jqfAgent?.show();
   futuresTracker.init();
   marketAlerts.start();
@@ -2298,7 +2360,6 @@ function showAuthOverlay() {
   window.stockScanner?.pause();
   state.currentUser = null;
   state.watchlist   = [];
-  sessionStorage.removeItem('verifyBannerDismissed');
   // Always land on the Sign In tab — prevents "username already taken" loop
   _resetAuthToLogin();
   $('authUser').value = '';
@@ -2323,6 +2384,7 @@ function setupAuthUI() {
 
   function setMode(m) {
     mode = m;
+    hideVerifyPending();
     const isReg = m === 'register';
     $('authTitle').textContent  = isReg ? 'Create your account' : 'Welcome back';
     $('authSub').textContent    = isReg ? 'Start tracking your personal watchlist' : 'Sign in to access your personalised watchlist';
@@ -2367,13 +2429,24 @@ function setupAuthUI() {
     const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p, em);
 
     if (res.ok) {
-      await wlAPI.load();
-      showApp(res.data);
-      goPage('home');
+      if (mode === 'register') {
+        // Account exists but has no session yet: the emailed verification
+        // link gates the site, so show the "check your inbox" state.
+        showVerifyPending(em);
+      } else {
+        await wlAPI.load();
+        showApp(res.data);
+        goPage('home');
+      }
     } else {
-      $('authError').textContent = res.data?.code === 'LEGACY_ACCOUNT_RETIRED'
-        ? 'This older account was retired for security. Select “Create Account” above to make a new account with this username, then reconnect your broker account.'
-        : res.data?.error || 'Something went wrong.';
+      const code = res.data?.code;
+      if (code === 'LEGACY_ACCOUNT_RETIRED') {
+        $('authError').textContent = 'This older account was retired for security. Select “Create Account” above to make a new account with this username, then reconnect your broker account.';
+      } else if (code === 'EMAIL_UNVERIFIED') {
+        showUnverifiedLoginError(res.data?.email || em);
+      } else {
+        $('authError').textContent = res.data?.error || 'Something went wrong.';
+      }
       $('authSubmit').disabled    = false;
       $('authSubmit').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
     }
@@ -2384,13 +2457,82 @@ function setupAuthUI() {
     setMode('login');
     $('authSubmit').disabled = false;
   };
+
+  // "Check your inbox" state shown right after signup — the account exists
+  // but has no session until the emailed link is clicked.
+  $('verifyPendingResend')?.addEventListener('click', async () => {
+    const btn = $('verifyPendingResend');
+    const email = $('authVerifyPending').dataset.email || '';
+    $('verifyPendingError').textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const r = await authAPI.resendVerification(email);
+    if (r.ok) {
+      btn.textContent = 'Sent — check your inbox';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Resend verification email'; }, 30000);
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Resend verification email';
+      $('verifyPendingError').textContent = 'Could not send the email. Try again in a bit.';
+    }
+  });
+  $('verifyPendingBack')?.addEventListener('click', e => { e.preventDefault(); setMode('login'); });
+}
+
+// After signup: hide the form and show the "check your inbox" panel.
+function showVerifyPending(email) {
+  document.querySelector('.auth-tabs').style.display = 'none';
+  $('authForm').style.display = 'none';
+  $('authSwitch').style.display = 'none';
+  $('authTitle').textContent = 'Check your inbox';
+  $('authSub').textContent = email
+    ? `We sent a verification link to ${email}. Click the link to verify your email, then sign in.`
+    : 'We sent you a verification link. Click the link to verify your email, then sign in.';
+  $('verifyPendingError').textContent = '';
+  const panel = $('authVerifyPending');
+  panel.dataset.email = email || '';
+  panel.style.display = '';
+  const btn = $('verifyPendingResend');
+  btn.disabled = false;
+  btn.textContent = 'Resend verification email';
+}
+
+function hideVerifyPending() {
+  const panel = $('authVerifyPending');
+  if (panel) panel.style.display = 'none';
+  const tabs = document.querySelector('.auth-tabs');
+  if (tabs) tabs.style.display = '';
+  const form = $('authForm');
+  if (form) form.style.display = '';
+  const sw = $('authSwitch');
+  if (sw) sw.style.display = '';
+}
+
+// Unverified sign-in attempt: explain the gate and offer a fresh link.
+function showUnverifiedLoginError(email) {
+  const err = $('authError');
+  err.innerHTML = '';
+  const msg = document.createElement('span');
+  msg.textContent = 'Please verify your email before signing in. Check your inbox for the verification link. ';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'auth-link-btn';
+  btn.textContent = 'Resend verification email';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const r = await authAPI.resendVerification(email);
+    btn.textContent = r.ok ? 'Sent — check your inbox' : 'Try again later';
+    if (r.ok) setTimeout(() => { btn.disabled = false; btn.textContent = 'Resend verification email'; }, 30000);
+    else btn.disabled = false;
+  });
+  err.append(msg, btn);
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   setupThemeToggle();
   setupAuthUI();
-  setupVerifyBanner();
   marketAlerts.setup();
 
   // Check if already logged in
@@ -2399,6 +2541,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await wlAPI.load();
     showApp(me);
   }
+
+  // Re-sync the watchlist when the app returns to the foreground (phones
+  // background tabs constantly; the other device may have edited the list).
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && document.getElementById('page-watchlist')?.classList.contains('active')) {
+      syncWatchlistPage();
+    }
+  });
 
   // Logout
   $('navLogout')?.addEventListener('click', async () => {
@@ -2470,6 +2620,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('homeWorkspace').style.display = 'none';
     $('homeEmpty').style.display = '';
   });
+
+  // Site logo → reset to the main dashboard (desktop + mobile top bar share .nav-logo)
+  document.querySelectorAll('.nav-logo').forEach(logo=>{
+    logo.addEventListener('click', resetToDashboard);
+    logo.addEventListener('keydown', e=>{
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); resetToDashboard(); }
+    });
+  });
+
+  setupSidebar();
 
   $('watchBtn')?.addEventListener('click',async()=>{
     const sym=state.symbol; if(!sym) return;

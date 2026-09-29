@@ -4,7 +4,7 @@
  * Lives inside #homeEmpty (replacing the old Search Markets empty state).
  * Three parts: regime banner (client-side Risk-On / Risk-Off / Chop read),
  * market pulse strip (SPY/QQQ/IWM/VIX/10Y/BTC/Oil tiles, 60s refresh), and
- * a bot command center (B2 + S&D + LEAP status pills, today's realized P&L,
+ * a bot command center (B2 + LEAP status pills, today's realized P&L,
  * open positions). Read-only use of existing endpoints; never touches
  * B2/SD/LEAP strategy, service, API or table code.
  *
@@ -243,6 +243,12 @@
 
   function renderBotCard(prefix, status, trades) {
     setPill(prefix + 'Pill', pillFor(status));
+    var blockerEl = $(prefix + 'Blocker');
+    if (blockerEl) {
+      var txt = (!status || status.ready) ? '' : (status.blockers || []).slice(0, 1).join(' ');
+      blockerEl.textContent = txt;
+      blockerEl.style.display = txt ? '' : 'none';
+    }
     var pnlEl = $(prefix + 'Pnl'), openEl = $(prefix + 'Open');
     if (trades == null) {
       if (pnlEl) pnlEl.textContent = '—';
@@ -298,8 +304,8 @@
 
   function refreshBots() {
     var jobs = [
+      { prefix: 'hpWarrior', statusUrl: '/api/warrior/status', tradesUrl: '/api/warrior/trades' },
       { prefix: 'hpB2', statusUrl: '/api/b2/status', tradesUrl: '/api/b2/trades' },
-      { prefix: 'hpSd', statusUrl: '/api/sd/status', tradesUrl: '/api/sd/trades' },
       { prefix: 'hpLeap', statusUrl: '/api/options/readiness', tradesUrl: '/api/options/trades', leap: true },
     ];
     return Promise.all(jobs.map(function (job) {
@@ -326,9 +332,9 @@
 
   function init() {
     if (!$('homeEmpty') || !$('hpTiles')) return;
-    var b2view = $('hpB2View'), sdview = $('hpSdView'), leapview = $('hpLeapView');
+    var warriorview = $('hpWarriorView'), b2view = $('hpB2View'), leapview = $('hpLeapView');
+    if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
     if (b2view) b2view.addEventListener('click', function () { if (typeof goPage === 'function') goPage('b2'); });
-    if (sdview) sdview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('sd'); });
     if (leapview) leapview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('options'); });
     refresh();
     setInterval(function () { if (homeVisible()) refresh(); }, 60000);

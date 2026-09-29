@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Verify your email — Qureshi Finance</title>
-<link rel="stylesheet" href="/public/css/style.css?v=20260925b"/>
+<link rel="stylesheet" href="/public/css/style.css?v=20260927d"/>
 <style>
   .verify-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
   .verify-card { max-width: 460px; width: 100%; text-align: center; padding: 40px 32px; border: 1px solid rgba(255,255,255,.09); border-radius: 16px; background: rgba(255,255,255,.03); }
@@ -39,11 +39,18 @@
     title.textContent = t;
     msg.textContent = m;
     actions.innerHTML = '<a class="verify-btn" href="/">Go to Qureshi Finance</a>' +
-      (showResend ? '<p style="margin-top:16px"><button class="verify-link-btn" id="resendBtn" type="button">Send me a new link</button></p>' : '');
+      (showResend
+        ? '<p style="margin-top:16px"><input id="resendEmail" type="email" placeholder="you@example.com" ' +
+          'style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:inherit;width:100%;max-width:280px;margin-bottom:10px" /></p>' +
+          '<p><button class="verify-link-btn" id="resendBtn" type="button">Send me a new link</button></p>'
+        : '');
     var rb = document.getElementById('resendBtn');
     if (rb) rb.addEventListener('click', function () {
+      var em = document.getElementById('resendEmail');
+      var email = em ? em.value.trim() : '';
+      if (!email || email.indexOf('@') < 0) { rb.textContent = 'Enter your email address first'; return; }
       rb.disabled = true; rb.textContent = 'Sending…';
-      fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email }) })
         .then(function () { rb.textContent = 'New link sent — check your inbox.'; })
         .catch(function () { rb.disabled = false; rb.textContent = 'Send me a new link'; });
     });
@@ -54,11 +61,11 @@
     .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
     .then(function (res) {
       if (res.ok && res.d.ok) {
-        done(true, 'Email verified', 'Your email is confirmed. You now have full access to broker connections and bot automation.');
+        done(true, 'Email verified', 'Your email is confirmed and you are now signed in. Welcome to Qureshi Finance.');
       } else if (res.d.code === 'expired') {
-        done(false, 'Link expired', 'This verification link has expired. We can send you a fresh one.', true);
+        done(false, 'Link expired', 'This verification link has expired. Enter your email and we will send you a fresh one.', true);
       } else if (res.d.code === 'used') {
-        done(false, 'Already used', 'This link was already used. If you still need verification, request a new link.', true);
+        done(false, 'Already used', 'This link was already used. If you still need verification, request a new link below.', true);
       } else {
         done(false, 'Invalid link', res.d.error || 'This verification link is not valid.');
       }

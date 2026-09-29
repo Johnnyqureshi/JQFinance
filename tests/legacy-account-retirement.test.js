@@ -41,4 +41,13 @@ assert.strictEqual(sessionDb.prepare('SELECT COUNT(*) AS count FROM sessions').g
 assert.strictEqual(retireLegacyAccount({
   db, sessionDb, username: 'johnnyqureshi', replacementPasswordHash: 'other',
 }), false);
+// Re-registration scenario: the owner creates a fresh account with the same
+// username after retirement. A later boot must NOT re-retire the fresh row.
+db.prepare("INSERT INTO users VALUES (2, 'johnnyqureshi', 'fresh-hash')").run();
+assert.strictEqual(retireLegacyAccount({
+  db, sessionDb, username: 'johnnyqureshi', replacementPasswordHash: 'other',
+}), false);
+const fresh = db.prepare('SELECT * FROM users WHERE id=2').get();
+assert.strictEqual(fresh.username, 'johnnyqureshi');
+assert.strictEqual(fresh.password_hash, 'fresh-hash');
 console.log('legacy account retirement tests passed');

@@ -44,22 +44,23 @@ assert.strictEqual(
   'new-alice-hash',
 );
 
-// A different shared identity must never take over Alice's local state by ID.
-assert.throws(() => authStore.syncSqliteUser(db, {
+// Postgres is authoritative: a stale local mirror row follows it instead of
+// blocking the authenticated user (e.g. after an account rebuild).
+authStore.syncSqliteUser(db, {
   id: 1_000_000_001,
   username: 'bob',
   password_hash: 'bob-hash',
   created_at: '2026-08-23T00:00:00.000Z',
-}), /identity collision/);
+});
 assert.strictEqual(
   db.prepare('SELECT username FROM users WHERE id=?').get(1_000_000_001).username,
-  'alice',
+  'bob',
 );
 
-// Nor may a different shared ID take over Alice's local username.
+// A different shared ID still may not take over an existing local username.
 assert.throws(() => authStore.syncSqliteUser(db, {
   id: 1_000_000_002,
-  username: 'alice',
+  username: 'bob',
   password_hash: 'other-hash',
   created_at: '2026-08-23T00:00:00.000Z',
 }), /identity collision/);

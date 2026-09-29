@@ -47,6 +47,11 @@ function fakePool({ image, sha256, schemaVersion = SNAPSHOT_SCHEMA_VERSION } = {
       if (/SELECT generation, schema_version/.test(sql)) {
         return snapshots ? { rowCount: 1, rows: [snapshots] } : { rowCount: 0, rows: [] };
       }
+      if (/SELECT generation FROM automated_trading_snapshots/.test(sql)) {
+        return snapshots
+          ? { rowCount: 1, rows: [{ generation: snapshots.generation }] }
+          : { rowCount: 0, rows: [] };
+      }
       throw new Error(`Unexpected SQL in fake pool: ${sql.slice(0, 70)}`);
     },
     async end() {},
@@ -93,4 +98,55 @@ test('restore writes the validated highest image before service startup', async 
   assert.equal(restored.prepare('SELECT value FROM marker').get().value, 'restored');
   restored.close();
   rmSync(dir, { recursive: true, force: true });
+});
+test('checkpoint refuses to overwrite a durable snapshot with an empty local image', async () => {
+  const source = new Database(':memory:');
+  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  const image = source.serialize();
+  source.close();
+  // Local DB is fresh/empty (restore never ran); a durable snapshot exists.
+  const db = new Database(':memory:');
+  const state = createAutomatedState({ db, injectedPool: fakePool({ image }), ownerId: 'test-owner' });
+  await state.init();
+  await state.acquireFence();
+  await assert.rejects(state.flush('startup'), /refusing to overwrite/);
+  await state.close();
+  db.close();
+});
+
+test('checkpoint commits once the local image carries bot identity', async () => {
+  const source = new Database(':memory:');
+  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  const image = source.serialize();
+  source.close();
+  const db = new Database(':memory:');
+  db.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  const state = createAutomatedState({ db, injectedPool: fakePool({ image }), ownerId: 'test-owner' });
+  await state.init();
+  await state.acquireFence();
+  const result = await state.flush('startup');
+  assert.equal(result.generation, 2);
+  await state.close();
+  db.close();
+});
+
+test('checkpoint allows an empty image when this boot restored the snapshot', async () => {
+  const source = new Database(':memory:');
+  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  const image = source.serialize();
+  source.close();
+  // Restore ran (scripts/boot.js sets this); the local image IS the snapshot.
+  process.env.AUTOMATED_STATE_RESTORED = 'true';
+  try {
+    const db = new Database(':memory:');
+    const state = createAutomatedState({ db, injectedPool: fakePool({ image }), ownerId: 'test-owner' });
+    await state.init();
+    await state.acquireFence();
+    const result = await state.flush('startup');
+    assert.equal(result.generation, 2);
+    await state.close();
+    db.close();
+  } finally {
+    delete process.env.AUTOMATED_STATE_RESTORED;
+  }
 });

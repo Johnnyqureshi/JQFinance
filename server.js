@@ -1,9 +1,17 @@
 const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
+const { resolveExtendedHours } = require('./lib/extended-hours');
+const {
+  OVERNIGHT_FUTURES,
+  isOvernightWindow,
+  overnightAnchorYmd,
+  deriveOvernightPrice,
+} = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { mountB2 } = require('./lib/b2-service');
-const { mountSd } = require('./lib/sd-service');
+const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
+const { createCryptoService, mountCrypto } = require('./lib/crypto/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -135,8 +143,18 @@ const SEARCH_AI_KEY = process.env.AIML_API_KEY;
 
 
 // ── SQLite Database ────────────────────────────────────────────────────────────
+// Durability: Railway's container filesystem is ephemeral — without a volume,
+// every deploy wipes jqf.db (watchlists, broker credentials). When SQLITE_DIR
+// is set (a mounted volume in production), user-data databases live there.
+// automated-trading.db intentionally stays put: scripts/boot.js restores it
+// from its fenced PostgreSQL snapshot before this module loads.
 const restored = process.env.AUTOMATED_STATE_RESTORED === 'true';
-const db = new Database('jqf.db');
+const SQLITE_DIR = process.env.SQLITE_DIR || '.';
+try { fs.mkdirSync(SQLITE_DIR, { recursive: true }); } catch (_) {}
+const db = new Database(path.join(SQLITE_DIR, 'jqf.db'));
+// Brief rolling deploys can leave two containers sharing the volume: wait on
+// a locked write instead of throwing immediately.
+db.pragma('busy_timeout = 5000');
 // Automated strategy state is isolated from manual/research state. The boot
 // wrapper restores this database from the fenced PostgreSQL image before this
 // module is loaded.
@@ -178,7 +196,7 @@ automatedDb.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
-const sessionDb = new Database('sessions.db');
+const sessionDb = new Database(path.join(SQLITE_DIR, 'sessions.db'));
 sessionDb.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -648,9 +666,54 @@ const automatedState = createAutomatedState({
   db: automatedDb,
 });
 let automatedTradingPersistenceReady = false;
+// Railway rolling deploys boot the new container while the old instance still
+// owns the 30s dispatch fence. Retry acquisition (bounded) instead of
+// fail-closing on the first attempt: the old instance releases the fence on
+// SIGTERM, and its lease lapses 30s after its last heartbeat if it dies hard.
+// Still fail closed when the fence never frees — only one dispatcher may ever
+// hold it.
+const FENCE_ACQUIRE_TIMEOUT_MS = 90_000;
+const FENCE_ACQUIRE_RETRY_MS = 5_000;
+async function acquireFenceWithRetry() {
+  const deadline = Date.now() + FENCE_ACQUIRE_TIMEOUT_MS;
+  for (;;) {
+    try {
+      return await automatedState.acquireFence();
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      console.warn(`[AutomatedState] Dispatch fence held by another instance; retrying: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, FENCE_ACQUIRE_RETRY_MS));
+    }
+  }
+}
 const automatedStartup = automatedState.init()
-  .then(() => automatedState.acquireFence())
-  .then(() => automatedState.flush('startup'))
+  .then(() => acquireFenceWithRetry())
+  // The previous fence holder checkpoints during its graceful drain, which
+  // can land after init() read the generation. Re-read it now that this
+  // instance owns the fence (sole writer) so the startup checkpoint's
+  // optimistic generation check passes.
+  .then(() => automatedState.refreshGeneration())
+  // Singles & Doubles was deleted: drop its tables before the startup
+  // checkpoint so the drop propagates into the durable snapshot.
+  .then(() => automatedState.dropRetiredSdTables())
+  // Warrior rejection log retired 2026-09-29: drop before the startup
+  // checkpoint so the drop propagates into the durable snapshot.
+  .then(() => automatedState.dropRetiredWarriorRejectionTable())
+  // B2 paused 2026-09-29 on Johnny's order ("stop the bots from trading").
+  // One-shot: runs before the startup checkpoint so the pause propagates
+  // into the durable snapshot, and never re-runs after Johnny re-enables.
+  .then(() => automatedState.pauseB2Once())
+  .then(() => automatedState.flush('startup').catch(error => {
+    // A refused startup checkpoint (empty local image while a snapshot
+    // exists) must not take the whole site down: the bots simply stay
+    // disconnected until reconnected, and no trade can fire without
+    // credentials. Any other flush failure still fail-closes below.
+    if (/refusing to overwrite/.test(error.message)) {
+      console.warn('[AutomatedState] Startup checkpoint skipped:', error.message);
+      return null;
+    }
+    throw error;
+  }))
   .then(() => {
   automatedTradingPersistenceReady = automatedState.isReady();
   if (automatedTradingPersistenceReady) {
@@ -698,6 +761,7 @@ function ensureAuthStoreReady() {
     .then(() => authStore.retireLegacyUsername(
       bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
     ))
+    .then(() => enforceRetiredSessions())
     .then(() => {
       authStoreInitialized = true;
       authStoreInitError = null;
@@ -793,16 +857,43 @@ async function requireAuthStore(req, res, next) {
 app.use('/api/auth', requireAuthStore);
 
 // Auth guard helper
+//
+// Retired-account defense: the bootstrap retirement renames the user row, but
+// a session minted BEFORE the retirement still carries the old userId and
+// would otherwise keep serving the dead account's data (its watchlist, its
+// settings) under a cookie that looks perfectly valid. requireAuth only
+// checked that a userId exists — now it also rejects retired ids outright.
+let retiredUserIds = new Set();
 function requireAuth(req, res, next) {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const uid = req.session?.userId;
+  if (!uid) return res.status(401).json({ error: 'Not authenticated' });
+  if (retiredUserIds.has(Number(uid))) {
+    req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Not authenticated', code: 'ACCOUNT_RETIRED' });
+  }
   next();
 }
 
+// Idempotent: enumerate retired user ids and purge any surviving sessions.
+// Runs at boot (after the retirement migration) so a redeploy self-heals.
+async function enforceRetiredSessions() {
+  try {
+    const ids = await authStore.listRetiredUserIds();
+    retiredUserIds = new Set(ids);
+    if (ids.length) {
+      const n = await authStore.deleteSessionsForUserIds(ids);
+      console.log(`[Auth] Retired account(s): ${ids.join(',')}; purged ${n} surviving session(s).`);
+    }
+  } catch (error) {
+    console.error('[Auth] Retired-session enforcement failed:', error.message);
+  }
+}
+
 // ── Email verification enforcement ──────────────────────────────────────────
-// New registrations must verify their email before connecting a broker account
-// or enabling bot automation. Login stays allowed so users can reach the
-// "check your inbox" state. Existing users with broker activity are
-// grandfathered (see grandfatherEmailVerified below).
+// Verification gates the entire site: new accounts must click the emailed
+// link before they can sign in at all. (Pre-verification users were
+// grandfathered as verified.) Broker connect and bot automation keep their
+// own 403 checks as defense in depth.
 const EMAIL_UNVERIFIED_ERROR =
   'Please verify your email address before connecting a broker account or enabling bot automation. Check your inbox for the verification link.';
 
@@ -1195,6 +1286,12 @@ app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 10);
+    // Recovery for the retired bootstrap account: the retired row still holds
+    // the owner's email, which would otherwise make re-registration impossible
+    // ("account retired" on login, "email already exists" on signup). The
+    // retired row is dead, so freeing its email is safe; the new account must
+    // still verify the address via the emailed token link.
+    await authStore.releaseRetiredEmail(em).catch(() => {});
     const user = await authStore.createUser(u, hash, em);
     if (!user) return res.status(409).json({ error: 'Username already taken.' });
     const uid = Number(user.id);
@@ -1209,12 +1306,9 @@ app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
     } catch (e) {
       console.error('[Auth] Verification email failed:', e.message);
     }
-    req.session.userId   = uid;
-    req.session.username = u;
-    req.session.save(error => {
-      if (error) return res.status(500).json({ error: 'Account was created, but the sign-in session could not be saved. Please sign in again.' });
-      res.json({ id: uid, username: u, emailVerified: false, verificationSent });
-    });
+    // No session yet: the email must be verified before the account can sign
+    // in at all. Verification gates the entire site, not just broker access.
+    res.json({ id: uid, username: u, email: em, emailVerified: false, verificationSent });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Username already taken.' });
     if (e.code === 'EMAIL_TAKEN') return res.status(409).json({ error: 'An account with this email already exists.' });
@@ -1235,19 +1329,27 @@ app.get('/api/auth/verify-email', async (req, res) => {
     return res.status(400).json({ ok: false, code: result.code, error: messages[result.code] || 'Verification failed.' });
   }
   const uid = result.userId;
+  let verifiedUser = null;
   try {
     emailVerification.setEmailVerified(db, uid, true);
     try { emailVerification.setEmailVerified(automatedDb, uid, true); } catch (_) {}
     await authStore.markEmailVerified(uid).catch(() => {});
     try {
-      const user = await authStore.findUserById(uid);
-      if (user) {
-        authStore.syncSqliteUser(db, user);
-        authStore.syncSqliteUser(automatedDb, user);
+      verifiedUser = await authStore.findUserById(uid);
+      if (verifiedUser) {
+        authStore.syncSqliteUser(db, verifiedUser);
+        authStore.syncSqliteUser(automatedDb, verifiedUser);
       }
     } catch (_) {}
   } catch (e) {
     console.error('[Auth] Marking email verified failed:', e.message);
+  }
+  // The emailed token proves inbox ownership, so sign the user straight in —
+  // no second login step stands between verification and the site.
+  if (verifiedUser && req.session) {
+    req.session.userId = Number(verifiedUser.id);
+    req.session.username = verifiedUser.username;
+    return req.session.save(() => res.json({ ok: true }));
   }
   res.json({ ok: true });
 });
@@ -1301,6 +1403,16 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });
 
+    // Verification gates the whole site: unverified accounts cannot sign in.
+    // They must click the emailed verification link first.
+    if (!user.email_verified) {
+      return res.status(403).json({
+        code: 'EMAIL_UNVERIFIED',
+        error: 'Please verify your email address before signing in. Check your inbox for the verification link.',
+        email: user.email || null,
+      });
+    }
+
     authStore.syncSqliteUser(db, user);
     req.session.userId   = Number(user.id);
     req.session.username = user.username;
@@ -1339,14 +1451,37 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 });
 
 // Current user
-app.get('/api/auth/me', (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const uid = Number(req.session.userId);
   let emailVerified = false;
   let email = null;
+  let pgChecked = false;
+  let username = null;
   try {
-    const row = db.prepare('SELECT email, email_verified FROM users WHERE id=?').get(Number(req.session.userId));
-    if (row) { emailVerified = Number(row.email_verified) === 1; email = row.email || null; }
-  } catch (_) {}
+    const user = await authStore.findUserById(uid);
+    pgChecked = true;
+    if (user) { emailVerified = user.email_verified === true; email = user.email || null; username = user.username || null; }
+  } catch (_) { /* fall back to the SQLite mirror below */ }
+  if (!pgChecked) {
+    try {
+      const row = db.prepare('SELECT email, email_verified, username FROM users WHERE id=?').get(uid);
+      if (row) { emailVerified = Number(row.email_verified) === 1; email = row.email || null; username = row.username || null; }
+    } catch (_) {}
+  }
+  if (pgChecked && !emailVerified) {
+    // Verification is mandatory now: a stale pre-enforcement session grants
+    // nothing. Kill it so the client falls back to the sign-in screen.
+    req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Not authenticated', code: 'EMAIL_UNVERIFIED' });
+  }
+  if (!username || username.startsWith('retired-bootstrap-') || retiredUserIds.has(uid)) {
+    // Dead account (retired bootstrap, or a session whose user row is gone):
+    // the cookie may predate the retirement. Kill it.
+    try { retiredUserIds.add(uid); } catch (_) {}
+    req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Not authenticated', code: 'ACCOUNT_RETIRED' });
+  }
   res.json({ id: req.session.userId, username: req.session.username, email, emailVerified });
 });
 
@@ -1354,6 +1489,60 @@ app.get('/api/auth/me', (req, res) => {
 app.get('/verify-email', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'verify-email.html'));
 });
+
+// ── TEMPORARY connection verification — REMOVE AFTER 2026-09-27 CHECK ──────
+// Token-gated, read-only. Confirms each bot's broker credentials + automation
+// state after Johnny connects both paper accounts. Exposes no key material.
+app.get('/api/_verify20260927', async (req, res) => {
+  if (!process.env.AUDIT_TOKEN || req.query.t !== process.env.AUDIT_TOKEN) return res.status(404).end();
+  try {
+    const q = (sql, ...a) => { try { return db.prepare(sql).all(...a); } catch (e) { return [{ _error: e.message }]; } };
+    const mask = id => id ? String(id).slice(0, 4) + '…' + String(id).slice(-4) : null;
+    // NOTE: B2 state lives in automatedDb (automated-trading.db, Postgres-
+    // snapshot durable), NOT in the main jqf.db. Query the right database.
+    const aq = (sql, ...a) => { try { return automatedDb.prepare(sql).all(...a); } catch (e) { return [{ _error: e.message }]; } };
+    let mounts = null, dataLs = null, dbStat = null;
+    try { mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n').filter(l => l.includes('/data')); } catch (e) { mounts = ['read-error: ' + e.message]; }
+    try { dataLs = fs.readdirSync('/data'); } catch (e) { dataLs = ['read-error: ' + e.message]; }
+    try { const s = fs.statSync('/data/jqf.db'); dbStat = { size: s.size, mtime: s.mtime.toISOString() }; } catch (e) { dbStat = 'missing: ' + e.message; }
+    const out = {
+      env_sqlite_dir: process.env.SQLITE_DIR || null,
+      cwd: process.cwd(),
+      data_mounts: mounts,
+      data_ls: dataLs,
+      db_stat: dbStat,
+      b2_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM b2_settings'),
+      b2_creds: aq('SELECT user_id, mode, length(api_key) AS key_bytes FROM b2_credentials'),
+      owners: aq('SELECT user_id, scope, mode, account_id FROM broker_account_owners')
+        .map(o => ({ ...o, account_id: mask(o.account_id) })),
+      // TEMP trade-activity visibility (bot health watch, 2026-09-28)
+      b2_trades: aq('SELECT COUNT(*) AS n FROM b2_trades')[0],
+      b2_open: aq(`SELECT COUNT(*) AS n FROM b2_trades WHERE status NOT IN ('closed','rejected','canceled','expired')`)[0],
+      b2_alerts: aq('SELECT created_at, type AS kind, message FROM b2_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Warrior visibility (2026-09-29) — keep B2 fields untouched above
+      warrior_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM warrior_settings'),
+      warrior_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM warrior_credentials'),
+      warrior_proposals: aq("SELECT COUNT(*) AS n FROM warrior_proposals WHERE status='pending'")[0],
+      warrior_positions: aq("SELECT COUNT(*) AS n FROM warrior_positions WHERE status='open'")[0],
+      warrior_alerts: aq('SELECT created_at, kind, message FROM warrior_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
+      crypto_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM crypto_settings'),
+      crypto_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM crypto_credentials'),
+      crypto_positions: aq("SELECT COUNT(*) AS n FROM crypto_positions WHERE status='open'")[0],
+      crypto_alerts: aq('SELECT created_at, kind, message FROM crypto_alerts ORDER BY created_at DESC LIMIT 5'),
+    };
+    // Durability truth: what does the Postgres snapshot actually hold?
+    try {
+      const { Pool } = require('pg');
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 8000 });
+      const snaps = await pool.query(`SELECT generation, reason, committed_at, length(image) AS bytes, fence_epoch FROM automated_trading_snapshots WHERE singleton=TRUE`);
+      out.snapshot = snaps.rows;
+      await pool.end().catch(() => {});
+    } catch (e) { out.snapshot = [{ _error: e.message }]; }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── END TEMPORARY ─────────────────────────────────────────────────────────────
 
 // ── Watchlist Routes (auth-protected) ─────────────────────────────────────────
 
@@ -1387,28 +1576,13 @@ function _normaliseQuote(q) {
   if (!q) return null;
 
   const marketState = q.marketState || 'CLOSED';
-  const isPost = ['POST', 'POSTPOST'].includes(marketState);
-  const isPre  = ['PRE',  'PREPRE' ].includes(marketState);
 
   const regPrice = q.regularMarketPrice ?? null;
 
-  // In PRE/PREPRE sessions try preMarketPrice; if not available yet (PREPRE early morning)
-  // fall back to postMarketPrice (last known AH price from prior session)
-  let extendedPrice = null;
-  let extendedType  = null;
-  if (isPost) {
-    extendedPrice = q.postMarketPrice ?? null;
-    extendedType  = 'AH';
-  } else if (isPre) {
-    if (q.preMarketPrice != null) {
-      extendedPrice = q.preMarketPrice;
-      extendedType  = 'PRE';
-    } else if (q.postMarketPrice != null) {
-      // PREPRE window — no pre-market trading yet; show last AH price
-      extendedPrice = q.postMarketPrice;
-      extendedType  = 'AH';
-    }
-  }
+  // Extended-hours price resolution lives in lib/extended-hours.js so it is
+  // unit-testable. Note: Yahoo keeps reporting the last session's AH price
+  // through the weekend with marketState CLOSED — surfaced when it moved.
+  const { extendedPrice, extendedType } = resolveExtendedHours(q);
 
   const livePrice = extendedPrice ?? regPrice;
   const prev      = q.regularMarketPreviousClose ?? null;
@@ -1589,17 +1763,90 @@ function _normaliseAlpacaSnapshot(sym, snap, extras = {}) {
 // ── fetchLiveQuote: Alpaca-first, Yahoo-fallback ───────────────────────────────
 // Single source of truth for real-time price throughout the app.
 // data.alpaca.markets is the primary feed (24/7); Yahoo Finance is the safety net.
+// ── Overnight (24h-market) price backfill ─────────────────────────────────────
+// When equities are CLOSED but index futures are live (Sunday evening /
+// weeknights), Friday's AH close is stale. Derive a live overnight price for
+// the index ETFs from their futures: implied = etfClose × (futureLive / futureAnchor).
+// The 16:00 ET anchor bar is fixed once the close day ends, so it is cached
+// per (future, anchor-day) for the whole weekend.
+const _overnightAnchorCache = new Map();
+async function overnightFutureAnchor(futureSym, anchorYmd) {
+  const key = `${futureSym}:${anchorYmd}`;
+  if (_overnightAnchorCache.has(key)) return _overnightAnchorCache.get(key);
+  try {
+    const c = await yf.chart(futureSym, { period1: new Date(Date.now() - 6 * 86400000), interval: '5m' }, { validateResult: false });
+    const bars = Array.isArray(c?.quotes) ? c.quotes : [];
+    let anchor = null;
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const b = bars[i];
+      if (!b?.date || b.close == null) continue;
+      const et = new Date(new Date(b.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const bymd = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, '0')}-${String(et.getDate()).padStart(2, '0')}`;
+      if (bymd > anchorYmd) continue;
+      // Anchor to the future's bar nearest the 16:00 ET equity close (5m bars
+      // are stamped by bar start; 16:05 covers the 16:00–16:05 print).
+      if (bymd === anchorYmd && et.getHours() * 60 + et.getMinutes() > 965) continue;
+      anchor = b.close;
+      break;
+    }
+    if (anchor != null) {
+      if (_overnightAnchorCache.size > 40) _overnightAnchorCache.clear();
+      _overnightAnchorCache.set(key, anchor);
+    }
+    return anchor;
+  } catch { return null; }
+}
+
+// Try to attach a live overnight price to quote q. Returns true when applied.
+async function backfillOvernight(symbol, q) {
+  const futureSym = OVERNIGHT_FUTURES[symbol];
+  if (!futureSym || q?.regularClose == null) return false;
+  if (!isOvernightWindow()) return false;
+  try {
+    const fq = await yfChartQuote(futureSym);
+    // Futures quote must be fresh — a stale quote would derive a wrong price.
+    const asOf = fq?.asOf ? new Date(fq.asOf).getTime() : 0;
+    if (!fq || fq.price == null || Date.now() - asOf > 45 * 60 * 1000) return false;
+    const anchor = await overnightFutureAnchor(futureSym, overnightAnchorYmd());
+    const implied = deriveOvernightPrice({ futureLive: fq.price, futureAnchor: anchor, etfClose: q.regularClose });
+    if (implied == null) return false;
+    q.extendedPrice = Math.round(implied * 100) / 100;
+    q.extendedType  = 'OVERNIGHT';
+    q.extendedChange = q.extendedPrice - q.regularClose;
+    q.extendedChangePct = q.regularClose ? (q.extendedChange / q.regularClose) * 100 : null;
+    return true;
+  } catch { return false; }
+}
+
 async function fetchLiveQuote(symbol, userId = null, scope = 'manual') {
   if (userId) {
     try {
       const snap = await alpacaSnapshotFetch(userId, symbol, scope);
       if (snap?.[symbol]) {
         const q = _normaliseAlpacaSnapshot(symbol, snap[symbol]);
-        if (q?.price != null) return q;
+        if (q?.price != null) {
+          const session = currentMarketState();
+          // Overnight window (CLOSED + futures live): a live-derived price
+          // beats Friday's stale AH close.
+          if (session === 'CLOSED' && !(await backfillOvernight(symbol, q)) && q.extendedPrice == null) {
+            // Alpaca snapshots carry no extended-hours data on weekends/holidays
+            // (no fresh minute bars; session reads CLOSED). Backfill from Yahoo
+            // so the AH line still renders on the quote header.
+            const yq = await yfChartQuote(symbol);
+            if (yq?.extendedPrice != null) {
+              q.extendedPrice = yq.extendedPrice;
+              q.extendedType  = yq.extendedType;
+            }
+          }
+          return q;
+        }
       }
     } catch { /* fall through */ }
   }
-  return yfChartQuote(symbol);
+  const q = await yfChartQuote(symbol);
+  // Same overnight preference on the Yahoo path: live-derived beats stale AH.
+  if (q && currentMarketState() === 'CLOSED') await backfillOvernight(symbol, q);
+  return q;
 }
 
 // ── GET /api/futures — near-24/5 futures + overnight proxy prices ─────────────
@@ -1653,7 +1900,12 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
       const snap = await alpacaSnapshotFetch(uid, syms).catch(() => null);
       if (snap && Object.keys(snap).length) {
         const out = {};
-        syms.forEach(s => { if (snap[s]) out[s] = _normaliseAlpacaSnapshot(s, snap[s]); });
+        for (const s of syms) {
+          if (!snap[s]) continue;
+          const nq = _normaliseAlpacaSnapshot(s, snap[s]);
+          if (nq && currentMarketState() === 'CLOSED') await backfillOvernight(s, nq);
+          if (nq) out[s] = nq;
+        }
         if (Object.keys(out).length) return res.json(out);
       }
     }
@@ -1661,7 +1913,12 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
     const raw = await yf.quote(syms, {}, { validateResult: false });
     const quotes = Array.isArray(raw) ? raw : [raw];
     const out = {};
-    quotes.forEach(q => { if (q?.symbol) out[q.symbol] = _normaliseQuote(q); });
+    for (const q of quotes) {
+      if (!q?.symbol) continue;
+      const nq = _normaliseQuote(q);
+      if (nq && currentMarketState() === 'CLOSED') await backfillOvernight(q.symbol.toUpperCase(), nq);
+      if (nq) out[q.symbol] = nq;
+    }
     res.json(out);
   } catch (e) {
     console.error('Snapshots error:', e.message);
@@ -7326,18 +7583,30 @@ const b2Service = mountB2({
   durability: automatedState,
   emailVerified: uid => emailVerifiedIn(automatedDb, uid),
 });
-const sdService = mountSd({
-  app, db: automatedDb, requireAuth, ensureSessionUserInTradingStore,
-  vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-  emailVerified: uid => emailVerifiedIn(automatedDb, uid),
-});
 let b2SchedulerStarted = false;
-let sdSchedulerStarted = false;
 let serviceShuttingDown = false;
 
-// Readiness verifies the live PostgreSQL fence and both scheduler loops without
+// Warrior is wired next to B2: own tables, own scheduler, own lease. The
+// deleted S&D bot is not restored. Proposals never auto-submit.
+const warriorService = createWarriorService({
+  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
+mountWarrior({ app, service: warriorService, requireAuth, ensureSessionUserInTradingStore });
+let warriorSchedulerStarted = false;
+
+// Crypto breakout bot is wired next to Warrior: own tables, own scheduler, own
+// lease. Runs 24/7 — no market-hours logic anywhere in the wiring.
+const cryptoService = createCryptoService({
+  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
+mountCrypto({ app, service: cryptoService, requireAuth, ensureSessionUserInTradingStore });
+let cryptoSchedulerStarted = false;
+
+// Readiness verifies the live PostgreSQL fence and all scheduler loops without
 // exposing account, credential, owner, or strategy details.
 app.get('/readyz', async (_req, res) => {
   let databaseReady = false;
@@ -7347,7 +7616,6 @@ app.get('/readyz', async (_req, res) => {
     console.warn('[Health] PostgreSQL readiness probe failed:', error.message);
   }
   const b2Lifecycle = b2Service.lifecycleStatus();
-  const sdLifecycle = sdService.lifecycleStatus();
   const optionsScheduled = optionsSchedulerStarted && optionsSchedulerTimer !== null;
   const ready = !serviceShuttingDown
     && automatedTradingPersistenceReady
@@ -7356,9 +7624,8 @@ app.get('/readyz', async (_req, res) => {
     && b2SchedulerStarted
     && b2Lifecycle.running
     && b2Lifecycle.scheduled
-    && sdSchedulerStarted
-    && sdLifecycle.running
-    && sdLifecycle.scheduled;
+    && warriorSchedulerStarted
+    && cryptoSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
@@ -7366,7 +7633,8 @@ app.get('/readyz', async (_req, res) => {
     schedulers: {
       options: optionsScheduled ? 'started' : 'stopped',
       b2: b2Lifecycle.running && b2Lifecycle.scheduled ? 'started' : 'stopped',
-      sd: sdLifecycle.running && sdLifecycle.scheduled ? 'started' : 'stopped',
+      warrior: warriorSchedulerStarted ? 'started' : 'stopped',
+      crypto: cryptoSchedulerStarted ? 'started' : 'stopped',
     },
   });
 });
@@ -7407,14 +7675,16 @@ async function stopAutomatedState(signal) {
   let failed = false;
   try {
     b2SchedulerStarted = false;
+    warriorSchedulerStarted = false;
+    cryptoSchedulerStarted = false;
+    const cryptoDrain = cryptoService.drain();
+    const warriorDrain = warriorService.drain();
     const b2Drain = b2Service.drain();
-    sdSchedulerStarted = false;
-    const sdDrain = sdService.drain();
     const optionsDrain = stopOptionsScheduler();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([b2Drain, sdDrain, optionsDrain]);
+    await Promise.all([cryptoDrain, warriorDrain, b2Drain, optionsDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -7434,8 +7704,12 @@ function startServer() {
   console.log(`Qureshi Finance on :${PORT}`);
   b2Service.start();
   b2SchedulerStarted = true;
-  sdService.start();
-  sdSchedulerStarted = true;
+  warriorService.start(); // first run delayed ~30s, staggered from B2
+  warriorSchedulerStarted = true;
+  // Crypto first run is delayed by the service itself (~45s), staggered after
+  // Warrior's ~30s; crypto trades 24/7 with no market-hours gating.
+  cryptoService.start();
+  cryptoSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

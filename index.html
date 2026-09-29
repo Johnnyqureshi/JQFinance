@@ -39,11 +39,12 @@
       } catch {}
     })();
   </script>
-  <link rel="stylesheet" href="/public/css/style.css?v=20260925b"/>
-  <link rel="stylesheet" href="/public/css/options.css?v=20260925b"/>
-  <link rel="stylesheet" href="/public/css/b2.css?v=20260925b"/>
-  <link rel="stylesheet" href="/public/css/sd.css?v=20260925c"/>
-  <link rel="stylesheet" href="/public/css/home-pulse.css?v=20260925f"/>
+  <link rel="stylesheet" href="/public/css/style.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/options.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/b2.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/warrior.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/crypto.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/home-pulse.css?v=20260929d"/>
 </head>
 <body>
 
@@ -81,6 +82,11 @@
       <div class="auth-error" id="authError"></div>
       <button class="auth-submit" id="authSubmit" type="submit">Sign In</button>
     </form>
+    <div class="auth-verify-pending" id="authVerifyPending" style="display:none">
+      <div class="auth-error" id="verifyPendingError"></div>
+      <button class="auth-submit" id="verifyPendingResend" type="button">Resend verification email</button>
+      <p class="auth-footer-note"><a href="#" id="verifyPendingBack">Back to sign in</a></p>
+    </div>
     <p class="auth-footer-note" id="authSwitch">
       No account? <a href="#" id="authSwitchLink">Create one free</a>
     </p>
@@ -94,7 +100,7 @@
 
 <!-- NAV -->
 <nav class="nav">
-  <div class="nav-logo">
+  <div class="nav-logo" role="button" tabindex="0" title="Back to dashboard" aria-label="Back to dashboard">
     <div class="nav-logo-icon">
       <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
         <path d="M3 22L9 14L15 18L21 7L29 12" stroke="#1dd6a3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -107,33 +113,37 @@
   <div class="nav-links">
     <button class="nav-link active" data-page="home">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-      Search
+      <span class="nav-label">Search</span>
     </button>
     <button class="nav-link" data-page="markets">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      Markets
+      <span class="nav-label">Markets</span>
     </button>
     <button class="nav-link" data-page="watchlist">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
-      Watchlist
+      <span class="nav-label">Watchlist</span>
     </button>
     <button class="nav-link" data-page="scanner">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-      Scanner
-    </button>
-    <button class="nav-link" data-page="options">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
-      LEAP Options
-    </button>
-    <button class="nav-link" data-page="b2">
+      <span class="nav-label">Scanner</span>
+    </button><button class="nav-link" data-page="warrior">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
+      <span class="nav-label">Warrior</span>
+    </button><button class="nav-link" data-page="b2">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 15l4-4 3 2 6-7"/><circle cx="8" cy="11" r="1"/><circle cx="17" cy="6" r="1"/></svg>
-      B2 Bot
-    </button>
-    <button class="nav-link" data-page="sd">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
-      S&amp;D Bot
+      <span class="nav-label">B2 Bot</span>
+    </button><button class="nav-link" data-page="options">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
+      <span class="nav-label">LEAP Options</span>
+    </button><button class="nav-link" data-page="crypto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+      <span class="nav-label">Crypto</span>
     </button>
   </div>
+
+  <button class="nav-collapse" id="navCollapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
 
   <div class="nav-right">
     <div class="market-pill">
@@ -189,12 +199,6 @@
 </nav>
 
 <!-- Email verification nudge — shown to logged-in users with unverified email -->
-<div id="verifyBanner" class="verify-banner" style="display:none" role="status">
-  <span class="verify-banner-text">Please verify your email to connect a broker and enable bot automation. Check your inbox for the verification link.</span>
-  <button class="verify-banner-btn" id="verifyResendBtn" type="button">Resend email</button>
-  <button class="verify-banner-close" id="verifyBannerClose" type="button" aria-label="Dismiss">×</button>
-</div>
-
 <main class="main">
 
 <!-- HOME PAGE — unified analysis workspace -->
@@ -249,7 +253,18 @@
       <div class="hp-bots">
         <span class="hp-eyebrow">Bot command center</span>
         <div class="hp-bot-grid">
-          <article class="hp-bot" aria-label="B2 bot status">
+          <article class="hp-bot" aria-label="Warrior bot status">
+            <div class="hp-bot-head">
+              <h3>Warrior<span class="hp-bot-sub">Manual-approval intraday</span></h3>
+              <span class="hp-pill hp-pill-paused" id="hpWarriorPill">…</span>
+            </div>
+            <p class="hp-bot-blocker" id="hpWarriorBlocker" style="display:none"></p>
+            <div class="hp-bot-stats">
+              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpWarriorPnl">—</strong></div>
+              <div><span>Open positions</span><strong class="hp-bot-num" id="hpWarriorOpen">—</strong></div>
+            </div>
+            <button class="hp-view" id="hpWarriorView" type="button">View →</button>
+          </article><article class="hp-bot" aria-label="B2 bot status">
             <div class="hp-bot-head">
               <h3>B2<span class="hp-bot-sub">Swing momentum</span></h3>
               <span class="hp-pill hp-pill-paused" id="hpB2Pill">…</span>
@@ -259,19 +274,7 @@
               <div><span>Open positions</span><strong class="hp-bot-num" id="hpB2Open">—</strong></div>
             </div>
             <button class="hp-view" id="hpB2View" type="button">View →</button>
-          </article>
-          <article class="hp-bot" aria-label="Singles and Doubles bot status">
-            <div class="hp-bot-head">
-              <h3>S&amp;D<span class="hp-bot-sub">Intraday momentum</span></h3>
-              <span class="hp-pill hp-pill-paused" id="hpSdPill">…</span>
-            </div>
-            <div class="hp-bot-stats">
-              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpSdPnl">—</strong></div>
-              <div><span>Open positions</span><strong class="hp-bot-num" id="hpSdOpen">—</strong></div>
-            </div>
-            <button class="hp-view" id="hpSdView" type="button">View →</button>
-          </article>
-          <article class="hp-bot" aria-label="LEAP Options bot status">
+          </article><article class="hp-bot" aria-label="LEAP Options bot status">
             <div class="hp-bot-head">
               <h3>LEAP<span class="hp-bot-sub">Options bot</span></h3>
               <span class="hp-pill hp-pill-off" id="hpLeapPill">…</span>
@@ -842,8 +845,9 @@
 </div>
 
 <div class="page" id="page-options"></div>
+<div class="page" id="page-warrior"></div>
 <div class="page" id="page-b2"></div>
-<div class="page" id="page-sd"></div>
+<div class="page" id="page-crypto"></div>
 
 
 <!-- ALPACA CONNECT MODAL -->
@@ -885,20 +889,21 @@
 
 </main>
 
-<script src="/js/rrg-style.js?v=20260925b"></script>
-<script src="/js/app.js?v=20260925f"></script>
-<script src="/js/home-pulse.js?v=20260925e"></script>
-<script src="/js/search-intelligence.js?v=20260925b"></script>
-<script src="/js/realtimetrader.js?v=20260925b"></script>
-<script src="/js/gameplan.js?v=20260925b"></script>
-<script src="/js/macro-context.js?v=20260925b"></script>
-<script src="/js/scanner.js?v=20260925b"></script>
+<script src="/js/rrg-style.js?v=20260929d"></script>
+<script src="/js/app.js?v=20260929d"></script>
+<script src="/js/home-pulse.js?v=20260929d"></script>
+<script src="/js/search-intelligence.js?v=20260929d"></script>
+<script src="/js/realtimetrader.js?v=20260929d"></script>
+<script src="/js/gameplan.js?v=20260929d"></script>
+<script src="/js/macro-context.js?v=20260929d"></script>
+<script src="/js/scanner.js?v=20260929d"></script>
 
-<script src="/js/alpacatrader.js?v=20260925b"></script>
-<script src="/js/agent.js?v=20260925b"></script>
-<script src="/js/options.js?v=20260925b"></script>
-<script src="/js/b2.js?v=20260925b"></script>
-<script src="/js/sd.js?v=20260925c"></script>
+<script src="/js/alpacatrader.js?v=20260929d"></script>
+<script src="/js/agent.js?v=20260929d"></script>
+<script src="/js/options.js?v=20260929d"></script>
+<script src="/js/b2.js?v=20260929d"></script>
+<script src="/js/warrior.js?v=20260929e"></script>
+<script src="/js/crypto.js?v=20260929d"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -917,18 +922,18 @@
   <button class="mobile-nav-btn nav-link" data-page="scanner" aria-label="Scanner">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="options" aria-label="LEAP Options">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
-    <span>Options</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="b2" aria-label="B2 Bot">
+  </button><button class="mobile-nav-btn nav-link" data-page="warrior" aria-label="Warrior Bot">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
+    <span>Warrior</span>
+  </button><button class="mobile-nav-btn nav-link" data-page="b2" aria-label="B2 Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 15l4-4 3 2 6-7"/></svg>
     <span>B2</span>
-  </button>
-  <button class="mobile-nav-btn nav-link" data-page="sd" aria-label="S and D Bot">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
-    <span>S&amp;D</span>
+  </button><button class="mobile-nav-btn nav-link" data-page="options" aria-label="LEAP Options">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
+    <span>Options</span>
+  </button><button class="mobile-nav-btn nav-link" data-page="crypto" aria-label="Crypto Bot">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+    <span>Crypto</span>
   </button>
 </nav>
 

@@ -1940,3 +1940,26 @@ test('bearish crossover exit records a bearish reason', async () => {
 test('take-profit target is exposed as strategy configuration', async () => {
   assert.equal(realStrategy.B2_RULES.takeProfitPct, 15);
 });
+
+test('PUT /api/b2/credentials auto-starts paper automation (connect-and-go)', async () => {
+  const f = fixture();
+  let service;
+  try {
+    const routes = [];
+    const app = Object.fromEntries(['get', 'post', 'put', 'delete'].map(method => [method,
+      (path, auth, handler) => routes.push({ method, path, auth, handler })]));
+    service = mountB2({ app, ...f.settings, requireAuth: () => {},
+      ensureSessionUserInTradingStore: async req => Number(req.session?.userId) });
+    const route = routes.find(r => r.method === 'put' && r.path === '/api/b2/credentials');
+    assert.ok(route, 'PUT /api/b2/credentials is mounted');
+    let body, code = 200;
+    const res = { status(c) { code = c; return this; }, json(v) { body = v; } };
+    await route.handler({ session: { userId: 1 }, body: { apiKey: 'paper1', apiSecret: 'secret-paper1', mode: 'paper' } }, res);
+    assert.equal(code, 200);
+    assert.equal(body.autoStarted, true);
+    const st = await service.status(1);
+    assert.equal(st.mode, 'paper');
+    assert.equal(st.enabled, true);
+    service.stop();
+  } finally { f.close(); }
+});

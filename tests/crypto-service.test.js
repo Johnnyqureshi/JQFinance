@@ -233,7 +233,7 @@ test('crypto schema creates every crypto_* table', () => {
     .all().map(r => r.name);
   for (const expected of ['crypto_settings', 'crypto_credentials', 'crypto_universe', 'crypto_breakouts',
     'crypto_opportunities', 'crypto_scan_runs', 'crypto_positions', 'crypto_trades', 'crypto_alerts',
-    'crypto_backtests', 'crypto_backtest_trades', 'crypto_journal', 'crypto_leases']) {
+    'crypto_backtests', 'crypto_backtest_trades', 'crypto_leases']) {
     assert.ok(names.includes(expected), `missing table ${expected}`);
   }
 });

@@ -356,6 +356,31 @@ db.exec(`
 `);
 try { db.prepare('ALTER TABLE options_settings ADD COLUMN activation_revision INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
 
+// Johnny 2026-09-29: "pause ALL bots" — the LEAP/options bot lives in jqf.db
+// (not automated-trading.db), so it gets its own one-shot pause migration.
+// enabled=0 withholds new entries; the cycle still reconciles open positions.
+db.exec(`CREATE TABLE IF NOT EXISTS boot_migrations (
+  name TEXT PRIMARY KEY,
+  ran_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+if (!db.prepare(`SELECT 1 FROM boot_migrations WHERE name='pause-options-bot-20260929'`).get()) {
+  db.prepare(`UPDATE options_settings SET enabled=0`).run();
+  db.prepare(`INSERT INTO boot_migrations(name) VALUES('pause-options-bot-20260929')`).run();
+  console.log('[Options] LEAP bot paused by one-shot boot migration (2026-09-29).');
+}
+
+// Johnny 2026-09-29: lean database — diagnostic history is pruned on a 7-day
+// retention; real trade records (options_trades, options_fills) and live state
+// (candidates, reservations, settings, creds) are never pruned.
+function pruneOptionsDiagnostics(userId) {
+  db.prepare(`DELETE FROM options_alerts WHERE user_id=? AND created_at < datetime('now','-7 days')`).run(userId);
+  db.prepare(`DELETE FROM options_events WHERE user_id=? AND created_at < datetime('now','-7 days')`).run(userId);
+}
+for (const row of db.prepare('SELECT user_id FROM options_settings').all()) {
+  try { pruneOptionsDiagnostics(row.user_id); }
+  catch (error) { console.warn('[Options] boot prune failed:', error.message); }
+}
+
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
 [
   `ALTER TABLE alpaca_creds ADD COLUMN api_key_enc TEXT`,
@@ -465,7 +490,7 @@ const AUTOMATED_TABLES = [
   'options_fills', 'options_events', 'options_alerts', 'options_entry_reservations',
   'options_trades', 'options_candidates', 'options_execution_leases',
   'options_alpaca_active_mode', 'options_alpaca_creds', 'options_settings',
-  'b2_close_attempts', 'b2_exit_fills', 'b2_alerts', 'b2_trades',
+  'b2_exit_fills', 'b2_alerts', 'b2_trades',
   'b2_candidates', 'b2_coverage', 'b2_universe', 'b2_leases', 'b2_credentials',
   'b2_settings', 'broker_account_quarantine', 'broker_account_owners',
 ];
@@ -699,6 +724,10 @@ const automatedStartup = automatedState.init()
   // Warrior rejection log retired 2026-09-29: drop before the startup
   // checkpoint so the drop propagates into the durable snapshot.
   .then(() => automatedState.dropRetiredWarriorRejectionTable())
+  // b2_close_attempts + crypto_journal retired 2026-09-29 (Johnny: no zombie
+  // data) — drop before the startup checkpoint so the drops persist.
+  .then(() => automatedState.dropRetiredB2CloseAttempts())
+  .then(() => automatedState.dropRetiredCryptoJournal())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.
@@ -7554,7 +7583,10 @@ function startOptionsScheduler() {
       const users = db.prepare(`SELECT user_id FROM options_settings WHERE enabled=1
         UNION SELECT DISTINCT user_id FROM options_trades
         WHERE status NOT IN ('closed','rejected','canceled')`).all();
-      for (const { user_id: userId } of users) await runOptionsCycle(userId);
+      for (const { user_id: userId } of users) {
+        try { pruneOptionsDiagnostics(userId); } catch (_) { /* Prune is best-effort. */ }
+        await runOptionsCycle(userId);
+      }
     })().catch(error => {
       console.error('[Options] scheduler cycle failed safely:', error.message);
     }).finally(() => {
@@ -7605,6 +7637,22 @@ const cryptoService = createCryptoService({
 });
 mountCrypto({ app, service: cryptoService, requireAuth, ensureSessionUserInTradingStore });
 let cryptoSchedulerStarted = false;
+
+// Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
+// runs even while the bots are paused. In-cycle prunes (B2 tick, Warrior and
+// Crypto scan loops) keep it lean once re-enabled.
+for (const row of automatedDb.prepare('SELECT user_id FROM b2_settings').all()) {
+  try { b2Service.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[B2] boot prune failed:', error.message); }
+}
+for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
+  try { warriorService.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
+}
+for (const row of automatedDb.prepare('SELECT user_id FROM crypto_settings').all()) {
+  try { cryptoService.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[Crypto] boot prune failed:', error.message); }
+}
 
 // Readiness verifies the live PostgreSQL fence and all scheduler loops without
 // exposing account, credential, owner, or strategy details.

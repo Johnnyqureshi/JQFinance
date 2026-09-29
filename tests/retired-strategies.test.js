@@ -19,7 +19,7 @@ for (const table of RETIRED_TABLES) {
 for (const route of ['/api/search', '/api/scanner-batch', '/api/alpaca/order', '/api/options/settings', '/api/options/reconcile']) {
   assert.ok(source.includes(`'${route}'`), `preserved ${route}`);
 }
-assert.match(source, /for \(const \{ user_id: userId \} of users\) await runOptionsCycle\(userId\)/);
+assert.match(source, /for \(const \{ user_id: userId \} of users\) \{\s*try \{ pruneOptionsDiagnostics\(userId\); \} catch \(_\) \{ \/\* Prune is best-effort\. \*\/ \}\s*await runOptionsCycle\(userId\);\s*\}/);
 assert.doesNotMatch(source, /(?:completedSwing|candlestickBarsFromResponse|aggregateSwingWeeklyBars)/);
 
 const schemaDb = new Database(':memory:');

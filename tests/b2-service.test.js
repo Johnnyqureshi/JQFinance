@@ -1570,7 +1570,6 @@ test('definitive bearish close rejection retries using a fresh durable generatio
     await f.service.runCycle(1);
     assert.equal(f.service.trades(1).trades[0].status, 'exit_retry');
     const firstId = f.sells().find(c => c.body.type === 'market').body.client_order_id;
-    assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM b2_close_attempts').get().count, 1);
     f.restart();
     f.world.rejectExit = false;
     f.world.time += 61000;
@@ -1579,7 +1578,6 @@ test('definitive bearish close rejection retries using a fresh durable generatio
     assert.equal(attempts.length, 2);
     assert.notEqual(attempts[1].body.client_order_id, firstId);
     assert.equal(f.service.trades(1).trades[0].status, 'closed');
-    assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM b2_close_attempts').get().count, 2);
   } finally { f.close(); }
 });
 

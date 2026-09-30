@@ -308,6 +308,27 @@ test('pruneDiagnostics removes terminal setups older than 7 days', async () => {
   assert.deepEqual(rows, ['s-fresh', 's-live']);
 });
 
+test('recordSetup inserts a complete C1 setup row (column/placeholder arity)', async () => {
+  // Regression cover for 2026-09-30: the C1 INSERT was missing the wall_price
+  // placeholder, so every live tick at/after 9:45 ET threw
+  // "Unexpected Flipper scheduler error" and no setups were ever recorded.
+  const f = fixture();
+  const c1 = { o: 101, h: 101.6, l: 99.9, c: 101.3 };
+  f.service._recordSetup(1, TRADE_DATE, 'AAA',
+    { direction: 'long', wallType: 'range_low', wallPrice: 100 }, c1);
+  const row = f.db.prepare('SELECT * FROM flipper_setups WHERE user_id=1 AND symbol=?').get('AAA');
+  assert.ok(row, 'setup row was inserted');
+  assert.equal(row.trade_date, TRADE_DATE);
+  assert.equal(row.direction, 'long');
+  assert.equal(row.wall_type, 'range_low');
+  assert.equal(row.wall_price, 100);
+  assert.equal(row.state, 'testing_wall');
+  assert.deepEqual(JSON.parse(row.c1_json), c1);
+  assert.equal(row.c2_json, null);
+  assert.equal(row.trigger_price, null);
+  assert.ok(row.why.includes('range low wall'));
+});
+
 // --- route mounting ----------------------------------------------------------
 test('mountFlipper registers all 13 routes', async () => {
   const { service } = fixture();

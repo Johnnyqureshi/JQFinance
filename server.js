@@ -1,5 +1,16 @@
 const DISCONNECTED_SENTINEL = '__disconnected__';
 const ENCRYPTED_CREDENTIAL_MARKER = '__encrypted__';
+
+// CrashGuard: a scheduler tick that escapes its try/catch (rejected promise,
+// sync throw outside a request handler) must NEVER take the site down during
+// trading. Log loudly and keep serving — each bot's scheduler already records
+// its own failures into scheduler_status/alerts, so nothing is hidden.
+process.on('unhandledRejection', (reason) => {
+  console.error('[CrashGuard] unhandledRejection — site kept alive:', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[CrashGuard] uncaughtException — site kept alive:', error && error.stack ? error.stack : error);
+});
 const { retireRemovedStrategies } = require('./lib/retired-strategies-migration');
 const { resolveExtendedHours } = require('./lib/extended-hours');
 const {

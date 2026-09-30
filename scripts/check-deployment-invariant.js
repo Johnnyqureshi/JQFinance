@@ -1,24 +1,22 @@
 'use strict';
 
-const fs = require('fs');
+// Deployment invariant: production must boot through scripts/boot.js (durable
+// snapshot restore + single-instance fence). This is what bit us on
+// 2026-09-28, when Railway ran `node server.js` directly and every deploy
+// silently wiped automated-trading.db.
+//
+// Railway's entrypoint is package.json "start" (the old Replit .replit config
+// this script used to read is a dead artifact now), so that is what we check.
+
 const path = require('path');
 
-const configPath = path.join(__dirname, '..', '.replit');
-const config = fs.readFileSync(configPath, 'utf8');
-const deployment = config.match(/\[deployment\]([\s\S]*?)(?=\n\[|$)/)?.[1] || '';
+const pkg = require(path.join(__dirname, '..', 'package.json'));
 
-if (!/^\s*deploymentTarget\s*=\s*"vm"\s*$/m.test(deployment)) {
-  throw new Error('Deployment invariant failed: production must use deploymentTarget = "vm".');
-}
-if (!/^\s*run\s*=\s*\[\s*"node"\s*,\s*"scripts\/boot\.js"\s*\]\s*$/m.test(deployment)) {
-  throw new Error('Deployment invariant failed: production must run node scripts/boot.js.');
-}
-const portBlocks = config.split('[[ports]]').slice(1).map(block => block.split(/\n\[\[/, 1)[0]);
-const hasWebPort = portBlocks.some(block =>
-  /^\s*localPort\s*=\s*5000\s*$/m.test(block)
-  && /^\s*externalPort\s*=\s*80\s*$/m.test(block));
-if (!hasWebPort) {
-  throw new Error('Deployment invariant failed: local port 5000 must map to external port 80.');
+const start = pkg && pkg.scripts && pkg.scripts.start;
+if (start !== 'node scripts/boot.js') {
+  throw new Error(
+    `Deployment invariant failed: package.json "start" must be "node scripts/boot.js" (got ${JSON.stringify(start)}).`
+  );
 }
 
-console.log('Deployment invariant verified: VM, boot wrapper, and port mapping are configured.');
+console.log('Deployment invariant verified: package.json start runs scripts/boot.js.');

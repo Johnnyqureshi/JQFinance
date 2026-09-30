@@ -15,7 +15,7 @@ test('DEFAULT_RISK_RULES match the pinned architecture values', () => {
   assert.equal(DEFAULT_RISK_RULES.partialPct, 50);
   assert.equal(DEFAULT_RISK_RULES.runnerTrailPct, 1.0);
   assert.equal(DEFAULT_RISK_RULES.rrTarget, 2.0);
-  assert.equal(DEFAULT_RISK_RULES.sizeMode, 'shares');
+  assert.equal(DEFAULT_RISK_RULES.sizeMode, 'dollars');
   assert.equal(DEFAULT_RISK_RULES.defaultShares, 100);
   assert.equal(DEFAULT_RISK_RULES.defaultDollars, 2000);
   assert.equal(DEFAULT_RISK_RULES.riskPct, 0.5);
@@ -25,7 +25,7 @@ test('DEFAULT_RISK_RULES match the pinned architecture values', () => {
 // --- sizePosition ---
 
 test('sizePosition shares mode returns defaultShares', () => {
-  assert.equal(sizePosition({ entryPrice: 10, stopPrice: 9.5, equity: 25000 }), 100);
+  assert.equal(sizePosition({ entryPrice: 10, stopPrice: 9.5, equity: 25000 }), 200); // dollars default: 2000/10
   assert.equal(sizePosition({ rules: { sizeMode: 'shares', defaultShares: 37 }, entryPrice: 10, stopPrice: 9.5, equity: 25000 }), 37);
 });
 

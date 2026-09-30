@@ -46,7 +46,7 @@
     { group: 'Sessions', fields: [
       ['premarketEnabled', 'Premarket 04:00–09:30 ET', 'checkbox'], ['afterHoursEnabled', 'After-hours 16:00–20:00 ET', 'checkbox'] ] },
     { group: 'Universe filters', fields: [
-      ['minPrice', 'Min price ($)', 'number', 0.5], ['maxPrice', 'Max price ($)', 'number', 1],
+      ['minPrice', 'Min price ($)', 'number', 0.1], ['maxPrice', 'Max price ($)', 'number', 1],
       ['minAvgDailyVolume', 'Min avg daily volume', 'number', 100000], ['minDollarVolume', 'Min avg dollar volume ($)', 'number', 1000000],
       ['minRvol', 'Min relative volume (x)', 'number', 0.1], ['minPctGain', 'Min day gain (%)', 'number', 0.5],
       ['maxSpread', 'Max spread (fraction)', 'number', 0.001], ['minMarketCap', 'Min market cap ($) — inert on paper', 'number', 100000000],

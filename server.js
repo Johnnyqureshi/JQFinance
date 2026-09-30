@@ -12,6 +12,7 @@ const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { mountB2 } = require('./lib/b2-service');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
 const { createCryptoService, mountCrypto } = require('./lib/crypto/service');
+const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -1561,6 +1562,11 @@ app.get('/api/_verify20260927', async (req, res) => {
       crypto_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM crypto_credentials'),
       crypto_positions: aq("SELECT COUNT(*) AS n FROM crypto_positions WHERE status='open'")[0],
       crypto_alerts: aq('SELECT created_at, kind, message FROM crypto_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Flipper visibility (2026-09-30) — keep B2/Warrior/Crypto fields untouched above
+      flipper_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM flipper_settings'),
+      flipper_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM flipper_credentials'),
+      flipper_positions: aq("SELECT COUNT(*) AS n FROM flipper_positions WHERE status IN ('open','pending_entry')")[0],
+      flipper_alerts: aq('SELECT created_at, kind, message FROM flipper_alerts ORDER BY created_at DESC LIMIT 5'),
     };
     // Durability truth: what does the Postgres snapshot actually hold?
     try {
@@ -7640,6 +7646,17 @@ const cryptoService = createCryptoService({
 mountCrypto({ app, service: cryptoService, requireAuth, ensureSessionUserInTradingStore });
 let cryptoSchedulerStarted = false;
 
+// Flipper "Invisible Wall Reversal" bot is wired next to Crypto: own tables,
+// own scheduler, own lease. Ships DISABLED and paper-first — never enable it
+// for Johnny; he connects and enables bots himself.
+const flipperService = createFlipperService({
+  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
+mountFlipper({ app, service: flipperService, requireAuth, ensureSessionUserInTradingStore });
+let flipperSchedulerStarted = false;
+
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
 // runs even while the bots are paused. In-cycle prunes (B2 tick, Warrior and
 // Crypto scan loops) keep it lean once re-enabled.
@@ -7654,6 +7671,10 @@ for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').al
 for (const row of automatedDb.prepare('SELECT user_id FROM crypto_settings').all()) {
   try { cryptoService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Crypto] boot prune failed:', error.message); }
+}
+for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').all()) {
+  try { flipperService.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[Flipper] boot prune failed:', error.message); }
 }
 
 // Readiness verifies the live PostgreSQL fence and all scheduler loops without
@@ -7675,7 +7696,8 @@ app.get('/readyz', async (_req, res) => {
     && b2Lifecycle.running
     && b2Lifecycle.scheduled
     && warriorSchedulerStarted
-    && cryptoSchedulerStarted;
+    && cryptoSchedulerStarted
+    && flipperSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
@@ -7685,6 +7707,7 @@ app.get('/readyz', async (_req, res) => {
       b2: b2Lifecycle.running && b2Lifecycle.scheduled ? 'started' : 'stopped',
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
       crypto: cryptoSchedulerStarted ? 'started' : 'stopped',
+      flipper: flipperSchedulerStarted ? 'started' : 'stopped',
     },
   });
 });
@@ -7727,14 +7750,16 @@ async function stopAutomatedState(signal) {
     b2SchedulerStarted = false;
     warriorSchedulerStarted = false;
     cryptoSchedulerStarted = false;
+    flipperSchedulerStarted = false;
     const cryptoDrain = cryptoService.drain();
     const warriorDrain = warriorService.drain();
+    const flipperDrain = flipperService.drain();
     const b2Drain = b2Service.drain();
     const optionsDrain = stopOptionsScheduler();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([cryptoDrain, warriorDrain, b2Drain, optionsDrain]);
+    await Promise.all([cryptoDrain, warriorDrain, flipperDrain, b2Drain, optionsDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -7760,6 +7785,10 @@ function startServer() {
   // Warrior's ~30s; crypto trades 24/7 with no market-hours gating.
   cryptoService.start();
   cryptoSchedulerStarted = true;
+  // Flipper first run is delayed by the service itself (~90s), staggered
+  // after crypto. Ships disabled: the loop idles until Johnny enables it.
+  flipperService.start();
+  flipperSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

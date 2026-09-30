@@ -684,6 +684,8 @@ function goPage(page) {
   else if (window.optionsBot) optionsBot.pause();
   if (page==='warrior') { if (window.warriorBot) warriorBot.open(); }
   else if (window.warriorBot) warriorBot.pause();
+  if (page==='flipper') { if (window.flipperBot) flipperBot.open(); }
+  else if (window.flipperBot) flipperBot.pause();
   if (page==='crypto') { if (window.cryptoBot) cryptoBot.open(); }
   else if (window.cryptoBot) cryptoBot.pause();
   if (page==='b2') { if (window.b2Bot) b2Bot.open(); }

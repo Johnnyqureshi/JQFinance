@@ -33,7 +33,9 @@
       ['minRR', 'Minimum R:R', 'number', 0.1], ['strongRvol', 'Strong RVOL (x)', 'number', 0.1],
       ['veryStrongRvol', 'Very strong RVOL (x)', 'number', 0.1] ] },
     { group: 'Position sizing', fields: [
-      ['riskPerTradePct', 'Risk per trade (%)', 'number', 0.1], ['maxRiskPerTradePct', 'Max risk per trade (%)', 'number', 0.1] ] },
+      ['riskPerTradePct', 'Risk per trade (%)', 'number', 0.1], ['maxRiskPerTradePct', 'Max risk per trade (%)', 'number', 0.1],
+      ['autoApprove', 'Auto-approve proposals (skip manual size approval)', 'checkbox'],
+      ['autoApproveDollars', 'Auto-approve size ($ per trade)', 'number', 50] ] },
     { group: 'Daily guards', fields: [
       ['maxDailyLossPct', 'Max daily loss (%)', 'number', 0.1], ['maxConsecutiveLosses', 'Max consecutive losses', 'number', 1],
       ['maxPositions', 'Max open positions', 'number', 1], ['maxTradesPerDay', 'Max trades per day', 'number', 1],

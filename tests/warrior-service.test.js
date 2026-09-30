@@ -392,17 +392,37 @@ test('scoreSymbol duplicate protection blocks repeat proposals and positions', a
   assert.equal(dupPosition.stage, 'duplicate');
 });
 
-test('run() scans, creates proposals, and never auto-submits orders', async () => {
+test('run() auto-approves proposals at the fixed dollar size when autoApprove is on', async () => {
   const f = fixture();
   await connectAndGet(f);
   const result = await f.service.run(1);
   assert.equal(result.ok, true);
   assert.ok(result.scan, 'a scan ran');
   assert.equal(result.scan.funnel.proposals, 1, 'one proposal was created');
-  const proposals = f.service.proposals(1, { status: 'pending' });
-  assert.equal(proposals.proposals.length, 1);
-  assert.equal(proposals.proposals[0].status, 'pending');
-  assert.equal(proposals.proposals[0].symbol, 'AAA');
+  assert.equal(result.scan.proposalIds.length, 1, 'the scan reports the created proposal id');
+  const approved = f.service.proposals(1, { status: 'approved' }).proposals;
+  assert.equal(approved.length, 1, 'the proposal was auto-approved');
+  assert.equal(approved[0].symbol, 'AAA');
+  const expectedShares = Math.max(1, Math.floor(500 / approved[0].entry));
+  assert.equal(approved[0].shares_recommended, expectedShares, 'shares sized to the $500 default');
+  assert.ok(approved[0].reasons.some(r => /Auto-approve/.test(r)), 'reasons note the auto-approve sizing');
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 1, 'exactly one entry order was submitted');
+  assert.equal(Number(posts[0].body.qty), expectedShares, 'order qty matches the auto-approve size');
+});
+
+test('run() keeps the manual-approval invariant when autoApprove is off', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(result.scan, 'a scan ran');
+  assert.equal(result.scan.funnel.proposals, 1, 'one proposal was created');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].status, 'pending');
+  assert.equal(pending[0].symbol, 'AAA');
   const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
   assert.equal(posts.length, 0, 'the scan must never submit orders — proposals wait for manual approval');
   const runRow = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
@@ -410,6 +430,22 @@ test('run() scans, creates proposals, and never auto-submits orders', async () =
   assert.equal(runRow.symbols_scanned, 1);
   assert.ok(!runRow.detail_json, 'no per-symbol scan detail persisted (funnel counts only)');
   assert.equal(runRow.proposals_created, 1, 'funnel counts recorded');
+});
+
+test('setSettings validates the auto-approve rules', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const updated = await f.service.setSettings(1, { rules: { autoApprove: true, autoApproveDollars: 1000 } });
+  assert.equal(updated.rules.autoApprove, true);
+  assert.equal(updated.rules.autoApproveDollars, 1000);
+  await assert.rejects(
+    () => f.service.setSettings(1, { rules: { autoApprove: 'yes' } }),
+    /autoApprove must be boolean/,
+  );
+  await assert.rejects(
+    () => f.service.setSettings(1, { rules: { autoApproveDollars: -5 } }),
+    /autoApproveDollars must be a finite non-negative number/,
+  );
 });
 
 test('assessOrderFlow reports the Alpaca paper limitation without fabricating data', async () => {

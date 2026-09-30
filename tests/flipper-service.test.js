@@ -295,6 +295,19 @@ test('pruneDiagnostics removes alerts older than 7 days', async () => {
   assert.deepEqual(rows, ['fresh']);
 });
 
+test('pruneDiagnostics removes terminal setups older than 7 days', async () => {
+  const f = fixture();
+  const ins = f.db.prepare(`INSERT INTO flipper_setups
+    (setup_id,user_id,symbol,trade_date,direction,wall_type,wall_price,state,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
+  ins.run('s-old', 1, 'AAA', '2026-09-20', 'long', 'range_low', 5, 'expired', iso(NOW));
+  ins.run('s-live', 1, 'BBB', '2026-09-29', 'short', 'range_high', 6, 'waiting_c2', iso(NOW));
+  ins.run('s-fresh', 1, 'CCC', '2026-09-30', 'long', 'range_low', 5, 'cancelled', iso(NOW));
+  await f.service.pruneDiagnostics(1);
+  const rows = f.db.prepare('SELECT setup_id FROM flipper_setups').all().map(r => r.setup_id).sort();
+  assert.deepEqual(rows, ['s-fresh', 's-live']);
+});
+
 // --- route mounting ----------------------------------------------------------
 test('mountFlipper registers all 13 routes', async () => {
   const { service } = fixture();

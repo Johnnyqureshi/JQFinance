@@ -64,7 +64,7 @@ test('Warrior is first in desktop nav, mobile nav, and the Command Center', () =
   assert.ok(warriorCard !== -1 && b2Card !== -1, 'Command Center has Warrior and B2 cards');
   assert.ok(warriorCard < b2Card, 'Warrior card sorts before the B2 card');
   assert.ok(html.includes('id="page-warrior"'), 'Warrior page container exists');
-  assert.ok(html.includes('/js/warrior.js?v=20260929e'), 'Warrior script uses the v=20260929e asset tag');
+  assert.ok(html.includes('/js/warrior.js?v=20260930a'), 'Warrior script uses the v=20260930a asset tag');
   assert.ok(html.includes('/public/css/warrior.css?v=20260929d'), 'Warrior stylesheet uses the v=20260929d asset tag');
 });
 

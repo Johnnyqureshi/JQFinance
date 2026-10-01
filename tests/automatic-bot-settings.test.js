@@ -64,6 +64,10 @@ async function delayedArmIsRejectedAfterNewerAction() {
   assert.equal(settings.owner(3), null, 'rejected arm must not take ownership');
 }
 
+// ORB is a registered paper-only strategy (connect calls revoke('orb')).
+settings.revoke(2, 'orb');
+assert.equal(settings.status(2, 'orb', { mode: 'paper', enabled: false, liveArmed: false }).posture, 'paused');
+
 (async () => {
   await delayedArmIsRejectedAfterNewerAction();
   db.close();

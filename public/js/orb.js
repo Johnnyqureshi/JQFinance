@@ -627,7 +627,7 @@
       changing = true; revision++;
       $('orbModal').querySelectorAll('button,input,select').forEach(control => { control.disabled = true; });
       try {
-        status = await api('/api/orb/connect', { method: 'POST', body: JSON.stringify({ apiKey: $('orbKey').value, apiSecret: $('orbSecret').value }) });
+        status = await api('/api/orb/connect', { method: 'POST', body: JSON.stringify({ key: $('orbKey').value, secret: $('orbSecret').value }) });
         settingsView = await api('/api/orb/settings');
         close(); renderStatus(); renderSettings();
         notice('Paper connected. Trading is still disabled — resume it when ready.');

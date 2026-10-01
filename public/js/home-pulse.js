@@ -232,6 +232,7 @@
   function refreshBots() {
     var jobs = [
       { prefix: 'hpWarrior', statusUrl: '/api/warrior/status', tradesUrl: '/api/warrior/trades' },
+      { prefix: 'hpFlipper', statusUrl: '/api/flipper/status', tradesUrl: '/api/flipper/trades' },
       { prefix: 'hpOrb', statusUrl: '/api/orb/status', tradesUrl: '/api/orb/trades' },
     ];
     return Promise.all(jobs.map(function (job) {
@@ -259,6 +260,8 @@
     if (!$('homeEmpty') || !$('hpTiles')) return;
     var warriorview = $('hpWarriorView');
     if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
+    var flipperview = $('hpFlipperView');
+    if (flipperview) flipperview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('flipper'); });
     var orbview = $('hpOrbView');
     if (orbview) orbview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('orb'); });
     refresh();

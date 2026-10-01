@@ -91,6 +91,7 @@
       ['maxTradesPerSymbol', 'Max trades per symbol/day', 'number', 1] ] },
     { group: 'Universe & Liquidity', fields: [
       ['watchlist', 'Fixed watchlist — comma-separated (overrides universe; price band ignored for these)', 'watchlist'],
+      ['maxRsiLong', 'Max RSI(14) for long entries (0 = off)', 'number', 1],
       ['minPrice', 'Min price ($)', 'number', 0.1],
       ['maxPrice', 'Max price ($)', 'number', 1],
       ['minAvgVolume', 'Min avg daily volume (shares)', 'number', 100000],

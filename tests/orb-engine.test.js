@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_ORB_RULES,
+  parseWatchlist,
   computeOpeningRange,
   classifyRegime,
   scoreSetup,
@@ -993,4 +994,25 @@ test('engine exports the full wave-1 API', () => {
     assert.equal(typeof eng[fn], 'function', fn);
   }
   assert.equal(typeof eng.DEFAULT_ORB_RULES, 'object');
+});
+
+// ---------------------------------------------------------------------------
+// Watchlist parsing (engine-level, shared by paper / live / backtest).
+// ---------------------------------------------------------------------------
+test('parseWatchlist normalizes, uppercases, dedupes, drops empties', () => {
+  assert.deepEqual(parseWatchlist({ watchlist: ' aaa, AAA ,, SOUN ' }), ['AAA', 'SOUN']);
+});
+test('parseWatchlist accepts an array and an empty/absent list', () => {
+  assert.deepEqual(parseWatchlist({ watchlist: ['aaa', 'BBB'] }), ['AAA', 'BBB']);
+  assert.deepEqual(parseWatchlist({ watchlist: '' }), []);
+  assert.deepEqual(parseWatchlist({}), []);
+  assert.deepEqual(parseWatchlist(null), []);
+});
+test('validateConfig accepts the default 86-symbol watchlist and rejects junk types', () => {
+  const ok = validateConfig({ watchlist: DEFAULT_ORB_RULES.watchlist });
+  assert.equal(ok.ok, true, JSON.stringify(ok.errors));
+  assert.equal(parseWatchlist(DEFAULT_ORB_RULES).length, 86, 'default holds Johnny\'s 86');
+  const bad = validateConfig({ watchlist: 123 });
+  assert.equal(bad.ok, false, 'numeric watchlist is invalid');
+  assert.ok(bad.errors.some(e => e.startsWith('watchlist:')), 'error names the field');
 });

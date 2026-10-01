@@ -90,6 +90,7 @@
       ['maxExposureDollars', 'Max total exposure ($)', 'number', 100],
       ['maxTradesPerSymbol', 'Max trades per symbol/day', 'number', 1] ] },
     { group: 'Universe & Liquidity', fields: [
+      ['watchlist', 'Fixed watchlist — comma-separated (overrides universe; price band ignored for these)', 'watchlist'],
       ['minPrice', 'Min price ($)', 'number', 0.1],
       ['maxPrice', 'Max price ($)', 'number', 1],
       ['minAvgVolume', 'Min avg daily volume (shares)', 'number', 100000],
@@ -441,6 +442,7 @@
       if (type === 'select') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><select id="${id}" data-rule="${key}">${stepOrOptions.map(o => `<option value="${esc(o)}" ${String(value) === String(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
       if (type === 'time') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="time" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
       if (type === 'text') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="text" maxlength="32" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
+      if (type === 'watchlist') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><textarea id="${id}" data-rule="${key}" rows="5" placeholder="SOUN, UUUU, SMR, …">${esc(value ?? '')}</textarea></label>`;
       return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="number" step="${stepOrOptions}" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
     };
     el.innerHTML = `
@@ -467,6 +469,7 @@
       if (input.type === 'checkbox') setPath(rules, key, input.checked);
       else if (input.tagName === 'SELECT') setPath(rules, key, input.value);
       else if (input.type === 'time' || input.type === 'text') { if (input.value.trim() !== '') setPath(rules, key, input.value.trim()); }
+      else if (input.tagName === 'TEXTAREA') setPath(rules, key, input.value.trim()); // empty clears → universe scan
       else if (input.value !== '') setPath(rules, key, Number(input.value));
     });
     return rules;

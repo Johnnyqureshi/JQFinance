@@ -285,7 +285,7 @@ test('disconnect is refused while a position is open', async () => {
 test('scan cycle takes the engineered long entry end to end', async () => {
   const f = fixture();
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true });
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
   await f.service._scanCycle(1);
 
   assert.equal(f.world.orderPosts.length, 1, 'exactly one entry order');
@@ -325,7 +325,7 @@ test('scan cycle takes the engineered long entry end to end', async () => {
 test('scan cycle withholds entries when nothing qualifies', async () => {
   const f = fixture({ time: Date.parse('2026-10-01T11:00:00Z') }); // 07:00 ET — pre-market
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true });
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
   await f.service._scanCycle(1);
   assert.equal(f.world.orderPosts.length, 0, 'no entries before the regular session');
 });
@@ -369,7 +369,7 @@ test('LIVE orders are refused loudly even with both live switches on', async () 
   await connectPaper(f);
   await f.service.setSettings(1, {
     enabled: true,
-    rules: { tradingMode: 'LIVE', liveEnabled: true, liveConfirmed: true },
+    rules: { watchlist: '', tradingMode: 'LIVE', liveEnabled: true, liveConfirmed: true },
   });
   await f.service._scanCycle(1);
   assert.equal(f.world.orderPosts.length, 0, 'no live orders ever reach the broker');
@@ -405,7 +405,7 @@ test('dashboard returns the full pinned shape', async () => {
 test('dashboard reflects the entry after a scan cycle', async () => {
   const f = fixture();
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true });
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
   await f.service._scanCycle(1);
   const dash = await f.service.dashboard(1);
   assert.equal(dash.candidates.length, 1);
@@ -418,7 +418,7 @@ test('dashboard reflects the entry after a scan cycle', async () => {
 test('trades() lists the open position as a journal-shaped row', async () => {
   const f = fixture();
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true });
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
   await f.service._scanCycle(1);
   const { trades } = f.service.trades(1);
   assert.equal(trades.length, 2, 'one open ride-along row + one journal row');
@@ -429,7 +429,7 @@ test('trades() lists the open position as a journal-shaped row', async () => {
 test('universe() returns today\'s scanned candidates', async () => {
   const f = fixture();
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true });
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
   await f.service._scanCycle(1);
   const { universe, total, tradeDate } = f.service.universe(1);
   assert.equal(total, 1);
@@ -487,7 +487,8 @@ test('backtest requires a connected broker account', async () => {
 test('backtest runs the point-in-time engine and persists results', async () => {
   const f = fixture();
   await connectPaper(f);
-  const result = await f.service.backtest(1, { startDate: '2026-10-01', endDate: '2026-10-01' });
+  // catalog path: backtest merges input.rules over defaults
+  const result = await f.service.backtest(1, { startDate: '2026-10-01', endDate: '2026-10-01', rules: { watchlist: '' } });
   assert.ok(result.backtestId, 'backtest id returned');
   assert.ok(result.report && typeof result.report === 'object', 'report object');
   assert.ok(result.report.summary && typeof result.report.summary === 'object', 'report.summary');
@@ -502,6 +503,54 @@ test('backtest runs the point-in-time engine and persists results', async () => 
   let missing = null;
   try { f.service.getBacktest(1, 'does-not-exist'); } catch (e) { missing = e; }
   assert.ok(missing instanceof OrbError && missing.status === 404, 'unknown backtest id → 404');
+});
+
+// --- fixed watchlist (Johnny 2026-10-01) ----------------------------------------
+test('setSettings stores a normalized watchlist', async () => {
+  const { service } = fixture();
+  await service.setSettings(1, { rules: { watchlist: ' aaa,AAA,, soun ' } });
+  assert.equal(service.getSettings(1).rules.watchlist, 'AAA,SOUN', 'uppercased, deduped, comma-joined');
+  await service.setSettings(1, { rules: { watchlist: '' } });
+  assert.equal(service.getSettings(1).rules.watchlist, '', 'explicit clear survives');
+});
+
+test('watchlist scan skips the asset catalog and trades the list', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'AAA' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 1, 'engineered AAA entry still fires on the watchlist');
+  assert.equal(f.world.orderPosts[0].symbol, 'AAA');
+  assert.ok(!f.world.calls.some(c => c.path === '/v2/assets'), 'no /v2/assets catalog call in watchlist mode');
+});
+
+test('price band is bypassed for watchlist symbols', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  // AAA's latest is $10.07 — above maxPrice 5, so the catalog path would drop it.
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'AAA', maxPrice: 5 } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 1, 'watchlist symbol trades despite the price band');
+});
+
+test('price band still applies when the watchlist is empty', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '', maxPrice: 5 } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 0, 'AAA ($10.07) is filtered by the price band on the catalog path');
+  assert.ok(f.world.calls.some(c => c.path === '/v2/assets'), 'catalog IS consulted when watchlist is empty');
+});
+
+test('backtest uses the watchlist universe and bypasses the price band', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  const result = await f.service.backtest(1, {
+    startDate: '2026-10-01', endDate: '2026-10-01', rules: { watchlist: 'AAA', maxPrice: 5 },
+  });
+  assert.ok(result.report && result.report.summary, 'report produced on the watchlist');
+  assert.equal(result.report.summary.startDate, '2026-10-01');
+  assert.ok(!f.world.calls.some(c => c.path === '/v2/assets'), 'no /v2/assets catalog call in watchlist backtest');
 });
 
 // --- mountOrb ---------------------------------------------------------------------

@@ -44,9 +44,14 @@
       ['breakevenAction', 'Breakeven action', 'select', ['breakeven', 'ema9', 'none']],
       ['trailingMethod', 'Trailing stop', 'select', ['ema9', 'atr', 'swing', 'vwap', 'fixedPct']],
       ['partialAtR', 'Partial at R', 'number', 0.5], ['partialPct', 'Partial size (fraction)', 'number', 0.1],
+      ['holdRunners', 'Hold runners until volume fades (no fixed target after partial)', 'checkbox'],
+      ['fadeVolumeFraction', 'Fade: recent volume below × baseline', 'number', 0.05],
+      ['fadeStallBars', 'Fade: recent bars counted', 'number', 1], ['fadeBaselineBars', 'Fade: baseline bars', 'number', 1],
       ['maxHoldCandles', 'Max hold (1m candles)', 'number', 1], ['eodFlatten', 'Flatten at 15:55 ET', 'checkbox'] ] },
     { group: 'Sessions', fields: [
-      ['premarketEnabled', 'Premarket 04:00–09:30 ET', 'checkbox'], ['afterHoursEnabled', 'After-hours 16:00–20:00 ET', 'checkbox'] ] },
+      ['premarketEnabled', 'Premarket scanning 04:00–09:30 ET', 'checkbox'],
+      ['premarketScanOnly', 'Premarket scan-only (no entries before 09:30 ET)', 'checkbox'],
+      ['afterHoursEnabled', 'After-hours 16:00–20:00 ET', 'checkbox'] ] },
     { group: 'Universe filters', fields: [
       ['minPrice', 'Min price ($)', 'number', 0.1], ['maxPrice', 'Max price ($)', 'number', 1],
       ['minAvgDailyVolume', 'Min avg daily volume', 'number', 100000], ['minDollarVolume', 'Min avg dollar volume ($)', 'number', 1000000],

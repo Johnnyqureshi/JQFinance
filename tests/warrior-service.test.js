@@ -146,6 +146,9 @@ function fixture(options = {}) {
         if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         const symbols = (query.get('symbols') || '').split(',');
         const tf = query.get('timeframe');
+        if (tf === '1Min' && typeof world.minuteBarsOverride === 'function') {
+          return response({ bars: Object.fromEntries(symbols.map(s => [s, world.minuteBarsOverride(s)])), next_page_token: null });
+        }
         let bars = tf === '1Min' ? minuteBars() : (world.dailyBarsOverride || dailyBars());
         if (tf === '1Min') {
           // Day-aware: the backtest requests one range per trading day, so
@@ -171,7 +174,14 @@ function fixture(options = {}) {
     persistenceReady: () => true, durability: null,
     exitPoll: { tries: 3, intervalMs: 0 },
   });
-  return { db, service, world };
+  // A fresh service instance over the same db/world — simulates the next
+  // process boot (e.g. for one-shot stored-rules upgrades).
+  const recreate = () => createWarriorService({
+    db, vault, fetch: fakeFetch, now: () => world.time,
+    persistenceReady: () => true, durability: null,
+    exitPoll: { tries: 3, intervalMs: 0 },
+  });
+  return { db, service, world, recreate };
 }
 
 function insertProposal(db, overrides = {}) {
@@ -642,9 +652,14 @@ test('a partial exit banks realized P&L and re-protects the exact remainder', as
   assert.equal(row.qty, 5, 'local quantity updates only after the confirmed partial fill');
   assert.equal(row.partial_taken, 1);
   assert.equal(Number(row.banked_pnl), 50, 'realized partial P&L is banked: (110-100)*5');
-  const ocos = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST' && c.body?.order_class === 'oco');
-  const runnerOco = ocos[ocos.length - 1];
-  assert.equal(runnerOco.body.qty, 5, 'the replacement OCO covers exactly the remaining shares');
+  const protections = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST'
+    && (c.body?.order_class === 'oco' || c.body?.type === 'stop'));
+  const runnerProtection = protections[protections.length - 1];
+  assert.equal(runnerProtection.body.qty, 5, 'the replacement protection covers exactly the remaining shares');
+  // holdRunners defaults ON (Johnny 2026-10-01): the runner is re-protected
+  // STOP-ONLY — no OCO take-profit leg that would dump it at the target.
+  assert.equal(runnerProtection.body.type, 'stop', 'the runner protection is a stop order');
+  assert.equal(runnerProtection.body.order_class, undefined, 'no fixed-target OCO leg on a held runner');
 });
 
 test('a halted account reconciles but scans no new proposals', async () => {
@@ -824,4 +839,182 @@ test("scoreSymbol admits a waking name on today's volume alone", async () => {
   });
   assert.equal(stillSleepy.outcome, 'rejected');
   assert.equal(stillSleepy.stage, 'universe', 'average and today both illiquid — still rejected');
+});
+
+// --- Premarket scanning + hold-the-runner (Johnny 2026-10-01) ---------------
+// (1) Scanning starts in the premarket (04:00 ET): ticks scan + score and
+// premarket movers carry priority into the regular session, but NO entry
+// order may leave before 09:30 ET. (2) After the partial banks, the
+// runner is held until volume fades — the stop always stays live.
+
+const PREMARKET_TIME = Date.parse('2026-09-29T12:00:00Z'); // 08:00 ET
+
+test('premarket tick scans and scores but places no entries before 09:30 ET', async () => {
+  const f = fixture();
+  f.world.time = PREMARKET_TIME;
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(result.scan, 'a scan ran during the premarket window');
+  const proposals = f.db.prepare('SELECT * FROM warrior_proposals WHERE user_id=1').all();
+  assert.ok(proposals.length >= 1, 'the premarket scan produced scored proposals');
+  assert.ok(proposals.every(p => p.status === 'pending'), 'no premarket proposal was approved');
+  const entries = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST' && c.body?.side === 'buy');
+  assert.equal(entries.length, 0, 'zero entry orders before the open');
+  // Enforced in the order path itself, not just the scheduler loop:
+  await assert.rejects(() => f.service.approveProposal(1, proposals[0].proposal_id), /scan-only/);
+});
+
+test('premarketScanOnly=false is honored: entries are allowed premarket when explicitly switched off', async () => {
+  const f = fixture();
+  f.world.time = PREMARKET_TIME;
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { premarketScanOnly: false } });
+  const proposal = insertProposal(f.db);
+  const approved = await f.service.approveProposal(1, proposal.proposal_id);
+  assert.equal(approved.proposal.status, 'approved');
+  const entries = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST' && c.body?.side === 'buy');
+  assert.equal(entries.length, 1, 'exactly one premarket entry order with scan-only off');
+});
+
+test('premarket movers are boosted to the front of the regular-session rotation', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'DDD', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  f.world.time = PREMARKET_TIME;
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
+  await f.service.run(1);
+  const rows = f.db.prepare('SELECT symbol, priority FROM warrior_universe').all();
+  const zzz = rows.find(r => r.symbol === 'ZZZ');
+  assert.ok(zzz.priority >= 5, `premarket mover boosted (priority ${zzz.priority})`);
+  for (const row of rows) {
+    if (row.symbol !== 'ZZZ') assert.ok(zzz.priority > row.priority, `${row.symbol} must not outrank the premarket mover`);
+  }
+});
+
+test('stored rules from before the premarket feature get scanning switched on once, never re-forced', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const legacy = { ...DEFAULT_WARRIOR_RULES, premarketEnabled: false };
+  f.db.prepare('UPDATE warrior_settings SET rules=? WHERE user_id=1').run(JSON.stringify(legacy));
+  f.recreate(); // next boot applies the one-shot upgrade
+  let stored = JSON.parse(f.db.prepare('SELECT rules FROM warrior_settings WHERE user_id=1').get().rules);
+  assert.equal(stored.premarketEnabled, true, "Johnny's order reaches existing stored rules");
+  // Johnny later turns it off in settings — the upgrade must never undo that.
+  stored.premarketEnabled = false;
+  f.db.prepare('UPDATE warrior_settings SET rules=? WHERE user_id=1').run(JSON.stringify(stored));
+  f.recreate();
+  stored = JSON.parse(f.db.prepare('SELECT rules FROM warrior_settings WHERE user_id=1').get().rules);
+  assert.equal(stored.premarketEnabled, false, 'a later explicit choice is never overridden');
+});
+
+function seedRunner(f, overrides = {}) {
+  insertProposal(f.db);
+  const pos = seedOpenPosition(f.db, { qty: 5, target_price: 115, ...overrides });
+  f.db.prepare('UPDATE warrior_positions SET partial_taken=1, breakeven_set=1 WHERE position_id=?')
+    .run(pos.position_id);
+  return pos;
+}
+
+test('holdRunners holds the remainder past the old fixed target while volume is strong', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedRunner(f);
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '120' }];
+  f.world.latestPrice = 120; // beyond the 115 target — the old engine dumped here
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 120;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'open', 'the runner is still held past the fixed target');
+  const marketSells = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST'
+    && c.body?.side === 'sell' && c.body?.type === 'market');
+  assert.equal(marketSells.length, 0, 'no exit order was submitted');
+  const stopProtection = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST'
+    && c.body?.type === 'stop' && c.body?.symbol === 'AAA');
+  assert.ok(stopProtection.length >= 1, 'the runner is protected stop-only');
+  assert.equal(stopProtection[stopProtection.length - 1].body.qty, 5);
+});
+
+test('holdRunners=false restores the fixed-target full exit', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { holdRunners: false } });
+  seedRunner(f);
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '120' }];
+  f.world.latestPrice = 120;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 120;
+  await f.service.run(1);
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the target exit is journaled');
+  assert.equal(trade.exitReason, 'target');
+});
+
+function fadingTape() {
+  // 40 one-minute bars from 13:20Z: 20k-share bars while price grinds
+  // 110 -> 112, then volume collapses to 4k and the final close breaks
+  // the prior bar's low — the volume-fade signature.
+  const bars = [];
+  const start = Date.parse('2026-09-29T13:20:00Z');
+  for (let i = 0; i < 40; i++) {
+    let c; let v;
+    if (i < 37) { c = 110 + i * (2 / 36); v = 20000; }
+    else if (i === 37) { c = 112; v = 4000; }
+    else if (i === 38) { c = 111.9; v = 4000; }
+    else { c = 111.5; v = 4000; }
+    bars.push({ t: new Date(start + i * 60000).toISOString(), o: c - 0.05, h: c + 0.1, l: c - 0.05, c, v });
+  }
+  bars[38].l = 111.85; bars[38].o = 111.95; bars[38].h = 112.0;
+  return bars;
+}
+
+test('holdRunners exits the remainder when volume fades and price stalls', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedRunner(f);
+  f.world.minuteBarsOverride = () => fadingTape();
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '111.5' }];
+  f.world.latestPrice = 111.5;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 111.5;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'closed', 'the faded runner was exited');
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the fade exit is journaled');
+  assert.equal(trade.exitReason, 'volume_fade');
+});
+
+test('the stop-loss still fires under holdRunners', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedRunner(f);
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '94' }];
+  f.world.latestPrice = 94; // below the 95 stop
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 94;
+  await f.service.run(1);
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the stop exit is journaled');
+  assert.equal(trade.exitReason, 'stop');
+});
+
+test('EOD flatten still flattens a held runner at 15:55 ET', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedRunner(f);
+  f.db.prepare('UPDATE warrior_positions SET banked_pnl=50 WHERE position_id=?').run('pos-test-1');
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '120' }];
+  f.world.latestPrice = 120; // far beyond the old target — held as a runner
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 120;
+  f.world.time = Date.parse('2026-09-29T19:56:00Z'); // 15:56 ET
+  await f.service.run(1);
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the EOD exit is journaled');
+  assert.equal(trade.exitReason, 'eod_flatten');
+  assert.equal(Number(trade.pnl), 150, 'P&L is the runner leg (120-100)*5 plus the banked partial 50');
 });

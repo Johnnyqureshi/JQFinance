@@ -155,3 +155,49 @@ test('DEFAULT_CONFIG carries the spec execution settings', () => {
   assert.equal(DEFAULT_CONFIG.partialPct, 0.5);
   assert.equal(DEFAULT_CONFIG.trailMethod, 'ema9');
 });
+
+// --- Hold-the-runner parity (Johnny 2026-10-01) -----------------------------
+// The backtester MIRRORS the live exit engine: after the partial banks,
+// holdRunners removes the fixed target for the remainder, which exits on
+// the shared volume-fade definition instead.
+function runnerBars() {
+  const bars = [];
+  for (let i = 0; i < 60; i += 1) {
+    let c; let v = 20000;
+    if (i <= 30) c = 100;                                     // flat into the signal
+    else if (i < 46) c = Math.min(100 + (i - 30) * 0.25, 104); // climb through +2R and the 103 target
+    else if (i <= 50) c = 104;                                 // holds the highs on strong volume
+    else if (i === 51) { c = 104; v = 2000; }                  // volume collapses…
+    else if (i === 52) { c = 103.9; v = 2000; }
+    else c = 103.5;                                            // …and price stalls (v defaults back, exit already fired)
+    if (i >= 53) v = 2000;
+    const bar = mkBar(i, c - 0.02, c + 0.05, c - 0.05, c, v);
+    if (i === 52) bar.l = 103.85; // the final fade bar's close (103.5) breaks this low
+    bars.push(bar);
+  }
+  return bars;
+}
+const runnerStrategy = (symbol, ctx) =>
+  (ctx.barIndex === 30 ? { entry: 100, stop: 99, target: 103, pattern_name: 'test' } : null);
+
+test('backtest holdRunners rides past the fixed target and exits on the volume fade', () => {
+  const { trades } = runBacktest({
+    barsBySymbol: { TEST: { daily: [], m5: [], m1: runnerBars() } },
+    strategy: runnerStrategy,
+    config: { equity: 25000, trailMethod: 'none' }, // holdRunners defaults ON
+  });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitReason, 'volume_fade');
+  assert.ok(trades[0].exitPrice > 103, `runner exited above the old target, got ${trades[0].exitPrice}`);
+  assert.ok(trades[0].pnl > 0);
+});
+
+test('backtest holdRunners=false restores the fixed-target exit', () => {
+  const { trades } = runBacktest({
+    barsBySymbol: { TEST: { daily: [], m5: [], m1: runnerBars() } },
+    strategy: runnerStrategy,
+    config: { equity: 25000, trailMethod: 'none', holdRunners: false },
+  });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitReason, 'target');
+});

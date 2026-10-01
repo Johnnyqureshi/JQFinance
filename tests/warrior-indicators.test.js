@@ -114,3 +114,46 @@ test('computeIntraday rows are no-look-ahead: prefix recompute matches', () => {
   assert.ok(Number.isFinite(full[59].ema9));
   assert.ok(Number.isFinite(full[59].macdHist));
 });
+
+// --- Volume fade (Johnny 2026-10-01: hold runners until volume falls off) --
+const { volumeFadeDetected } = require('../lib/warrior/indicators');
+
+function fadeTape({ bars = 40, baseVol = 20000, recentVol = 20000, stall = false } = {}) {
+  const out = [];
+  for (let i = 0; i < bars; i++) {
+    const recent = i >= bars - 2;
+    const c = 100 + i * 0.1;
+    out.push({ t: T0 + i * 60000, o: c - 0.02, h: c + 0.05, l: c - 0.05, c, v: recent ? recentVol : baseVol });
+  }
+  if (stall) {
+    // Final close breaks the prior bar's low.
+    const last = out[out.length - 1];
+    last.c = out[out.length - 2].l - 0.2;
+    last.l = last.c - 0.05;
+  }
+  return out;
+}
+
+test('volumeFadeDetected: strong volume never fades, even on a stall', () => {
+  assert.equal(volumeFadeDetected(fadeTape({ recentVol: 20000, stall: true })), false);
+});
+
+test('volumeFadeDetected: collapsed volume without a stall is not a fade', () => {
+  assert.equal(volumeFadeDetected(fadeTape({ recentVol: 2000, stall: false })), false);
+});
+
+test('volumeFadeDetected: collapsed volume AND a stall is a fade', () => {
+  assert.equal(volumeFadeDetected(fadeTape({ recentVol: 2000, stall: true })), true);
+});
+
+test('volumeFadeDetected: too little history never fades', () => {
+  assert.equal(volumeFadeDetected(fadeTape({ bars: 10, recentVol: 1, stall: true })), false);
+  assert.equal(volumeFadeDetected([]), false);
+  assert.equal(volumeFadeDetected(null), false);
+});
+
+test('volumeFadeDetected: the fade fraction is configurable', () => {
+  const tape = fadeTape({ recentVol: 9000, stall: true }); // 0.45x of baseline
+  assert.equal(volumeFadeDetected(tape, { fadeVolumeFraction: 0.6 }), true);
+  assert.equal(volumeFadeDetected(tape, { fadeVolumeFraction: 0.4 }), false);
+});

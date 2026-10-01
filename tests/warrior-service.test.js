@@ -134,11 +134,19 @@ function fixture(options = {}) {
       }
     }
     if (host === 'data.alpaca.markets') {
+      if (path === '/v1beta1/screener/stocks/gainers-losers') {
+        if (world.moversError) return response({ message: 'screener unavailable' }, 500);
+        return response({ gainers: world.gainers || [], losers: [], market_open: true });
+      }
+      if (path === '/v1beta1/screener/stocks/most-actives') {
+        if (world.moversError) return response({ message: 'screener unavailable' }, 500);
+        return response({ most_actives: world.mostActives || [] });
+      }
       if (path === '/v2/stocks/bars') {
         if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         const symbols = (query.get('symbols') || '').split(',');
         const tf = query.get('timeframe');
-        let bars = tf === '1Min' ? minuteBars() : dailyBars();
+        let bars = tf === '1Min' ? minuteBars() : (world.dailyBarsOverride || dailyBars());
         if (tf === '1Min') {
           // Day-aware: the backtest requests one range per trading day, so
           // land the synthetic tape on the requested date (09:30 ET start).
@@ -712,4 +720,108 @@ test('mountWarrior serializes handler results with res.json (regression)', async
   };
   await wrapped({ session: { userId: 7 } }, res, () => {});
   assert.deepEqual(jsonBody, { ok: true, uid: 7 }, 'the handler result reaches res.json');
+});
+
+// --- Live movers feed + today's-volume liquidity gates (Johnny 2026-10-01) --
+// SSM sat flat all morning, then ran +96% from 1:25 PM ET. Two changes so
+// Warrior can catch that class: (1) the screener's top gainers / most
+// actives jump the scan rotation; (2) today's actual volume satisfies the
+// liquidity gates as an alternative to the 20-day average.
+
+test('scan puts live top gainers at the front of the scan queue', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/gainers-losers'), 'screener was queried');
+  const dailyCall = f.world.calls.find(c => c.path === '/v2/stocks/bars'
+    && new URL(c.url).searchParams.get('timeframe') === '1Day'
+    && !new URL(c.url).searchParams.get('symbols').includes('SPY'));
+  assert.ok(dailyCall, 'daily bars were loaded for the scan');
+  const scanned = new URL(dailyCall.url).searchParams.get('symbols').split(',');
+  assert.equal(scanned.length, 2, 'scan budget respected');
+  assert.equal(scanned[0], 'ZZZ', 'the top gainer is scanned first, ahead of the rotation');
+});
+
+test('a screener outage never breaks the scan (fail-soft to rotation)', async () => {
+  const f = fixture({ moversError: true });
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(result.scan, 'a scan ran');
+  assert.equal(result.scan.funnel.proposals, 1, 'rotation scan still produces its proposal');
+});
+
+function sleepyDailyBars(todayVolume) {
+  // $2 stock: 20-day average is 2M shares (~$4M/day — below the $5M dollar
+  // gate) but liquid on share count; today's bar carries today's volume.
+  const bars = [];
+  let date = Date.parse('2026-09-29T13:30:00Z');
+  for (let i = 0; i < 45; i++) {
+    const last = i === 0;
+    const c = last ? 2.00 : 1.90;
+    bars.unshift({
+      t: new Date(date).toISOString(), o: c - 0.05, h: c + 0.05, l: c - 0.05,
+      c, v: last ? todayVolume : 2000000,
+    });
+    date -= 86400000;
+  }
+  return bars;
+}
+
+test("phase 1 admits a name whose TODAY dollar volume clears the gate", async () => {
+  const f = fixture({ dailyBarsOverride: sleepyDailyBars(10000000) }); // today: 10M sh × $2 = $20M
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  const runRow = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
+  assert.equal(runRow.universe_pass, 1, "today's $20M dollar volume passes the $5M gate despite a $4M average");
+});
+
+test('phase 1 still rejects when average AND today are both illiquid', async () => {
+  const f = fixture({ dailyBarsOverride: sleepyDailyBars(1000000) }); // today: 1M sh × $2 = $2M
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  const runRow = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
+  assert.equal(runRow.universe_pass, 0, 'both averages and today below the gate — rejected');
+});
+
+function wakingDailyBars(todayVolume) {
+  // Sleepy history (100k shares/day), prev close $10.00, today closes at
+  // the minute tape's $10.55 on today's volume.
+  const bars = [];
+  let date = Date.parse('2026-09-29T13:30:00Z');
+  for (let i = 0; i < 45; i++) {
+    const last = i === 0;
+    const second = i === 1;
+    const c = last ? 10.55 : second ? 10.00 : 9.90;
+    bars.unshift({
+      t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15,
+      c, v: last ? todayVolume : 100000,
+    });
+    date -= 86400000;
+  }
+  return bars.map(b => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+}
+
+test("scoreSymbol admits a waking name on today's volume alone", async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  const waking = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: wakingDailyBars(3000000),
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(waking.outcome, 'eligible', `today's volume must carry the liquidity gates, got ${JSON.stringify(waking).slice(0, 300)}`);
+  const stillSleepy = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: wakingDailyBars(100000),
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(stillSleepy.outcome, 'rejected');
+  assert.equal(stillSleepy.stage, 'universe', 'average and today both illiquid — still rejected');
 });

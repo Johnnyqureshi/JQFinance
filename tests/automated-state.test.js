@@ -101,7 +101,7 @@ test('restore writes the validated highest image before service startup', async 
 });
 test('checkpoint refuses to overwrite a durable snapshot with an empty local image', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   // Local DB is fresh/empty (restore never ran); a durable snapshot exists.
@@ -116,11 +116,11 @@ test('checkpoint refuses to overwrite a durable snapshot with an empty local ima
 
 test('checkpoint commits once the local image carries bot identity', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: fakePool({ image }), ownerId: 'test-owner' });
   await state.init();
   await state.acquireFence();
@@ -132,7 +132,7 @@ test('checkpoint commits once the local image carries bot identity', async () =>
 
 test('checkpoint allows an empty image when this boot restored the snapshot', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE b2_settings(user_id TEXT); INSERT INTO b2_settings VALUES ('u1')");
+  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   // Restore ran (scripts/boot.js sets this); the local image IS the snapshot.

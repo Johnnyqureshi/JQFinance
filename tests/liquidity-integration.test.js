@@ -9,7 +9,6 @@ const {
 } = require('../lib/liquidity-providers');
 
 const server = readFileSync(require.resolve('../server.js'), 'utf8');
-const b2 = readFileSync(require.resolve('../lib/b2-service.js'), 'utf8');
 
 function section(source, start, end) {
   const from = source.indexOf(start);
@@ -55,38 +54,7 @@ test('catalyst ranking excludes liquidity rejects and exposes their evidence sep
   assert.ok(unavailable.codes.includes('SPREAD_UNAVAILABLE'));
 });
 
-test('options underlying liquidity blocks before weekly signal and contract research', () => {
-  const candidate = section(server, 'async function buildOptionsCandidate', 'function saveOptionsCandidates');
-  const liquidityAt = candidate.indexOf('evaluateAlpacaLiquidity(');
-  const signalAt = candidate.indexOf('evaluateLeapOptionsSignal({');
-  const contractsAt = candidate.indexOf('discoverOptionsContracts');
-  assert.ok(liquidityAt >= 0 && liquidityAt < signalAt && signalAt < contractsAt);
-  assert.match(candidate, /status:\s*'LIQUIDITY REJECTED'/);
-  assert.match(candidate, /reasons:\s*liquidity\.reasons/);
-  assert.match(candidate, /evaluateAlpacaLiquidity\(underlying\.snapshot/);
-});
-
-test('B2 candidate and final entry preflight both enforce shared liquidity', () => {
-  const evaluation = section(b2, 'async function evaluate(ctx, assets, marketState)', 'async function scanContext');
-  const entry = section(b2, 'async function enter(ctx, candidate, marketState)', 'async function runCycle');
-  assert.match(evaluation, /const liquidity = evaluateAlpacaLiquidity/);
-  assert.match(evaluation, /evaluateAlpacaLiquidity\(snapshot/);
-  assert.ok(evaluation.indexOf("result.signal === 'EXIT'") < evaluation.indexOf('if (!liquidity.eligible)'));
-  assert.match(evaluation, /if \(!liquidity\.eligible\)/);
-  assert.match(evaluation, /signal:\s*'WAIT'/);
-  assert.match(entry, /const finalLiquidity = evaluateAlpacaLiquidity/);
-  assert.match(entry, /if \(!finalLiquidity\.eligible\) return/);
-  assert.match(b2, /liquidityPolicy:\s*DEFAULT_LIQUIDITY_POLICY/);
-  assert.deepEqual(DEFAULT_LIQUIDITY_POLICY, {
-    minDollarVolume: 1000000,
-    minShareVolume: 100000,
-    maxSpreadPct: 1,
-    pumpChangePct: 30,
-    pumpMinDollarVolume: 10000000,
-  });
-});
-
-test('B2 liquidity evidence cannot suppress an EXIT and missing session volume blocks entry', () => {
+test('liquidity evidence cannot suppress an EXIT and missing session volume blocks entry', () => {
   const missingVolume = evaluateLiquidity({
     price: 10, volume: undefined, bid: 9.99, ask: 10.01, changePct: -5,
   });

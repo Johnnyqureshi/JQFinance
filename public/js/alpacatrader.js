@@ -331,9 +331,8 @@ const alpacaTrader = (() => {
   }
 
   // ── Modal ──────────────────────────────────────────────────────────────────
-  function connectionLabel(connection) {
-    return connection === 'options' ? 'LEAP Options Bot'
-      : 'Manual Trading';
+  function connectionLabel() {
+    return 'Manual Trading';
   }
 
   function connectionUrl(path, connection = modalConnection) {
@@ -342,14 +341,12 @@ const alpacaTrader = (() => {
   }
 
   function showModal(connection = 'manual', requestedMode = alpacaMode) {
-    modalConnection = connection === 'options' ? connection : 'manual';
+    modalConnection = 'manual';
     modalMode = requestedMode === 'live' ? 'live' : 'paper';
     const m = $('trdModal'); if (m) m.style.display = 'flex';
     if ($('trdModalErr')) $('trdModalErr').textContent = '';
-    if ($('trdModalTitle')) $('trdModalTitle').textContent = `Connect Alpaca — ${connectionLabel(modalConnection)}`;
-    if ($('trdModalSub')) $('trdModalSub').textContent = modalConnection === 'manual'
-      ? 'API keys stored securely per user'
-      : `Dedicated account for ${connectionLabel(modalConnection)}. It cannot be shared with the other bot.`;
+    if ($('trdModalTitle')) $('trdModalTitle').textContent = `Connect Alpaca — ${connectionLabel()}`;
+    if ($('trdModalSub')) $('trdModalSub').textContent = 'API keys stored securely per user';
     if ($('trdModalDisc')) $('trdModalDisc').style.display = 'none';
     document.querySelectorAll('.trd-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === modalMode));
     const w = $('trdLiveWarn'); if (w) w.style.display = modalMode === 'live' ? '' : 'none';
@@ -371,17 +368,13 @@ const alpacaTrader = (() => {
         body:    JSON.stringify({ apiKey: key, apiSecret: secret, mode: modalMode, connection: modalConnection }),
       });
       if (r.error) throw new Error(r.error);
-      if (modalConnection === 'manual') {
-        const acct = await apiFetch('/api/alpaca/account');
-        if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
-      }
+      const acct = await apiFetch('/api/alpaca/account');
+      if (acct.error) throw new Error('Credentials saved but account check failed: ' + acct.error);
       _pollFailures = 0;
       hideModal();
-      if (modalConnection === 'manual') {
-        // Refresh the server-authoritative mode map after a connection change.
-        // Without this, Paper/Live pills remained stale until a full reload.
-        await checkCredentials();
-      }
+      // Refresh the server-authoritative mode map after a connection change.
+      // Without this, Paper/Live pills remained stale until a full reload.
+      await checkCredentials();
       window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
     } catch (e) { if (errEl) errEl.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = 'Connect'; }
@@ -389,11 +382,6 @@ const alpacaTrader = (() => {
 
   async function disconnect() {
     await apiFetch(connectionUrl('/api/alpaca/credentials'), { method: 'DELETE' });
-    if (modalConnection !== 'manual') {
-      hideModal();
-      window.dispatchEvent(new CustomEvent('alpaca-connection-changed', { detail: { connection: modalConnection } }));
-      return;
-    }
     stopKeepAlive();
     hideModal();
     // The active mode may have been disconnected while another mode remains
@@ -474,7 +462,6 @@ const alpacaTrader = (() => {
 
 })();
 
-// LEAP Options uses the shared connection modal with its isolated broker scope.
 window.alpacaTrader = alpacaTrader;
 
 document.addEventListener('DOMContentLoaded', () => alpacaTrader.init());

@@ -16,10 +16,9 @@ assert.ok(!/if\s*\(false\)/.test(source), 'no hidden retired implementations');
 for (const table of RETIRED_TABLES) {
   assert.ok(!new RegExp(`\\b(?:FROM|INTO|UPDATE|TABLE(?: IF NOT EXISTS)?)\\s+${table}\\b`, 'i').test(source), `retired storage access ${table}`);
 }
-for (const route of ['/api/search', '/api/scanner-batch', '/api/alpaca/order', '/api/options/settings', '/api/options/reconcile']) {
+for (const route of ['/api/search', '/api/scanner-batch', '/api/alpaca/order']) {
   assert.ok(source.includes(`'${route}'`), `preserved ${route}`);
 }
-assert.match(source, /for \(const \{ user_id: userId \} of users\) \{\s*try \{ pruneOptionsDiagnostics\(userId\); \} catch \(_\) \{ \/\* Prune is best-effort\. \*\/ \}\s*await runOptionsCycle\(userId\);\s*\}/);
 assert.doesNotMatch(source, /(?:completedSwing|candlestickBarsFromResponse|aggregateSwingWeeklyBars)/);
 
 const schemaDb = new Database(':memory:');
@@ -35,7 +34,6 @@ assert.equal(schemaDb.prepare('SELECT account_id FROM alpaca_creds').get().accou
 assert.equal(schemaDb.prepare('PRAGMA table_info(alpaca_creds)').all().filter(row => row.pk).length, 2);
 retireRemovedStrategies(schemaDb);
 retireRemovedStrategies(schemaDb);
-assert.ok(schemaDb.prepare("SELECT 1 FROM sqlite_master WHERE name='options_trades'").get());
 assert.ok(schemaDb.prepare("SELECT 1 FROM sqlite_master WHERE name='trade_settings'").get());
 for (const table of RETIRED_TABLES) assert.equal(schemaDb.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table), undefined);
 schemaDb.close();
@@ -46,18 +44,12 @@ db.exec(`
   INSERT INTO users VALUES (1,'test','test');
   CREATE TABLE alpaca_creds (user_id INTEGER, mode TEXT, api_key TEXT, api_secret TEXT, api_key_enc TEXT, api_secret_enc TEXT, account_id TEXT);
   CREATE TABLE alpaca_active_mode (user_id INTEGER, mode TEXT);
-  CREATE TABLE options_alpaca_creds (user_id INTEGER, mode TEXT, api_key TEXT, api_secret TEXT, api_key_enc TEXT, api_secret_enc TEXT, account_id TEXT);
-  CREATE TABLE options_alpaca_active_mode (user_id INTEGER, mode TEXT);
-  CREATE TABLE options_trades (id INTEGER PRIMARY KEY);
   CREATE TABLE broker_account_owners (account_id TEXT PRIMARY KEY, user_id INTEGER, scope TEXT, mode TEXT, claimed_at TEXT);
   CREATE TABLE broker_account_quarantine (account_id TEXT PRIMARY KEY, reason TEXT, detected_at TEXT, resolved_at TEXT);
   INSERT INTO broker_account_owners VALUES ('b2-account',1,'b2','paper','now'),('manual-account',1,'manual','paper','now'),('retired',1,'momentum','paper','now');
   INSERT INTO broker_account_quarantine VALUES ('b2-account','B2_RECONCILIATION_REQUIRED','now',NULL);
   INSERT INTO alpaca_creds VALUES (1,'paper','fixture','fixture',NULL,NULL,'manual-account');
   INSERT INTO alpaca_active_mode VALUES (1,'paper');
-  INSERT INTO options_alpaca_creds VALUES (1,'paper','fixture','fixture',NULL,NULL,'options-account');
-  INSERT INTO options_alpaca_active_mode VALUES (1,'paper');
-  INSERT INTO options_trades VALUES (42);
 `);
 for (const table of RETIRED_TABLES) db.exec(`CREATE TABLE "${table}" (id INTEGER)`);
 retireRemovedStrategies(db);
@@ -66,8 +58,6 @@ for (const table of RETIRED_TABLES) assert.equal(db.prepare("SELECT 1 FROM sqlit
 assert.equal(db.prepare("SELECT COUNT(*) n FROM broker_account_owners WHERE scope='b2'").get().n, 1);
 assert.equal(db.prepare("SELECT COUNT(*) n FROM broker_account_owners WHERE scope='momentum'").get().n, 0);
 assert.equal(db.prepare('SELECT COUNT(*) n FROM alpaca_creds').get().n, 1);
-assert.equal(db.prepare('SELECT COUNT(*) n FROM options_alpaca_creds').get().n, 1);
-assert.equal(db.prepare('SELECT id FROM options_trades').get().id, 42);
 assert.equal(db.prepare("SELECT resolved_at FROM broker_account_quarantine WHERE account_id='b2-account'").get().resolved_at, null);
 
 // Evaluate only isolated helper declarations, never the server/app or a broker.
@@ -88,14 +78,13 @@ vm.runInContext(
 );
 assert.equal(context.normalizeAlpacaScope(undefined), 'manual');
 assert.equal(context.normalizeAlpacaScope('manual'), 'manual');
-assert.equal(context.normalizeAlpacaScope('options'), 'options');
-for (const scope of ['momentum', 'pmh', 'candlestick', 'swing', 'money-printer', 'b2', '', null, {}, []]) {
+for (const scope of ['momentum', 'pmh', 'candlestick', 'swing', 'money-printer', 'b2', 'options', '', null, {}, []]) {
   assert.throws(() => context.normalizeAlpacaScope(scope), /Invalid broker connection scope/);
   assert.throws(() => context.getAlpacaCreds(1, scope), /Invalid broker connection scope/);
 }
 assert.equal(context.getAlpacaCreds(1, 'manual').account_id, 'manual-account');
-assert.equal(context.getAlpacaCreds(1, 'options').account_id, 'options-account');
-assert.equal(context._alpacaCredsExist(1, 'paper', 'options'), true);
+assert.throws(() => context.getAlpacaCreds(1, 'options'), /Invalid broker connection scope/);
+assert.throws(() => context._alpacaCredsExist(1, 'paper', 'options'), /Invalid broker connection scope/);
 assert.equal(context.alpacaAccountConflict(1, 'manual', 'b2-account').owner, 'b2');
 assert.equal(context.brokerAccountOwnerCount('manual-account'), 1);
 context.refreshBrokerAccountQuarantine('b2-account');

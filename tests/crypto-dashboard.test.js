@@ -43,24 +43,20 @@ test('crypto dashboard covers the spec section-20 panels', () => {
   assert.ok(!/console\.log\(.*key/i.test(js) && !/localStorage/.test(js), 'never logs or persists keys client-side');
 });
 
-test('Crypto nav tab sits after LEAP in desktop and mobile nav', () => {
+test('Crypto nav tab exists in desktop and mobile nav (LEAP deleted 2026-10-01)', () => {
   const html = read('index.html');
-  const desktopCrypto = html.indexOf('data-page="crypto"');
-  const desktopOptions = html.indexOf('data-page="options"');
-  assert.ok(desktopCrypto !== -1, 'desktop nav has a Crypto entry');
-  assert.ok(desktopCrypto > desktopOptions, 'Crypto sorts after LEAP in the desktop nav');
+  assert.ok(html.indexOf('data-page="crypto"') !== -1, 'desktop nav has a Crypto entry');
+  assert.ok(html.indexOf('data-page="options"') === -1, 'LEAP nav entry is gone');
+  assert.ok(html.indexOf('data-page="b2"') === -1, 'B2 nav entry is gone');
   const mobileSection = html.slice(html.indexOf('id="mobileNav"'));
-  const mobileCrypto = mobileSection.indexOf('data-page="crypto"');
-  const mobileOptions = mobileSection.indexOf('data-page="options"');
-  assert.ok(mobileCrypto !== -1 && mobileOptions !== -1, 'mobile nav has Crypto and LEAP entries');
-  assert.ok(mobileCrypto > mobileOptions, 'Crypto sorts after LEAP in the mobile nav');
+  assert.ok(mobileSection.indexOf('data-page="crypto"') !== -1, 'mobile nav has a Crypto entry');
   assert.ok(html.includes('id="page-crypto"'), 'crypto page container exists');
 });
 
-test('crypto asset tags use v=20260929d and no stale tag remains', () => {
+test('crypto asset tags use v=20261001a and no stale tag remains', () => {
   const html = read('index.html');
-  assert.ok(html.includes('/js/crypto.js?v=20260929d'), 'Crypto script uses the v=20260929d asset tag');
-  assert.ok(html.includes('/public/css/crypto.css?v=20260929d'), 'Crypto stylesheet uses the v=20260929d asset tag');
+  assert.ok(html.includes('/js/crypto.js?v=20261001a'), 'Crypto script uses the v=20261001a asset tag');
+  assert.ok(html.includes('/public/css/crypto.css?v=20261001a'), 'Crypto stylesheet uses the v=20261001a asset tag');
   assert.ok(!html.includes('v=20260929c'), 'no stale v=20260929c tag remains in index.html');
 });
 
@@ -69,7 +65,7 @@ test('app.js routes the crypto page through window.cryptoBot', () => {
   assert.ok(/page==='crypto'/.test(app), 'app.js activates the crypto page');
   assert.ok(/window\.cryptoBot/.test(app), 'app.js drives window.cryptoBot');
   assert.ok(/cryptoBot\.pause\(\)/.test(app), 'app.js pauses cryptoBot on other pages');
-  assert.ok(/page==='warrior'/.test(app) && /page==='b2'/.test(app) && /page==='options'/.test(app), 'warrior/b2/options branches untouched');
+  assert.ok(/page==='warrior'/.test(app) && !/page==='b2'/.test(app) && !/page==='options'/.test(app), 'warrior branch kept; b2/options branches deleted');
 });
 
 test('crypto.css degrades below 620px without touching shared classes', () => {

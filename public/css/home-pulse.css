@@ -117,7 +117,6 @@
 .hp-pill-paused { color: var(--t2);    border-color: var(--border2); background: rgba(122,144,184,0.08); }
 .hp-pill-off    { color: var(--t3);    border-color: var(--border2); background: transparent; border-style: dashed; }
 
-/* LEAP blocker sub-line: subtle, shown only when the bot is not ready. */
 .hp-bot-blocker { margin: 0; font-size: 12px; line-height: 1.5; color: var(--t2); letter-spacing: 0.01em; }
 
 .hp-bot-stats { display: flex; gap: 24px; }

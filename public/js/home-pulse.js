@@ -4,9 +4,9 @@
  * Lives inside #homeEmpty (replacing the old Search Markets empty state).
  * Three parts: regime banner (client-side Risk-On / Risk-Off / Chop read),
  * market pulse strip (SPY/QQQ/IWM/VIX/10Y/BTC/Oil tiles, 60s refresh), and
- * a bot command center (B2 + LEAP status pills, today's realized P&L,
+ * a bot command center (bot status pills, today's realized P&L,
  * open positions). Read-only use of existing endpoints; never touches
- * B2/SD/LEAP strategy, service, API or table code.
+ * strategy, service, API or table code.
  *
  * Pure logic (classifyRegime, formatters, trade summarizers) has no DOM
  * dependencies and is exported for node tests via module.exports.
@@ -82,9 +82,7 @@
     };
   }
 
-  // Normalise a trade row from the B2 (camelCase) or SD (snake_case) APIs.
-  // Options (LEAP) rows are camelCase too and additionally carry closedAt,
-  // which the LEAP summarizers prefer over createdAt for "today" filtering.
+  // Normalise a trade row from the bot APIs (camelCase or snake_case).
   function normTrade(t) {
     if (!t || typeof t !== 'object') return null;
     return {
@@ -134,53 +132,6 @@
     if (!status || !status.enabled) return { text: 'Paused', cls: 'hp-pill-paused' };
     if (status.mode === 'live') return { text: 'Live', cls: 'hp-pill-live' };
     return { text: 'Paper', cls: 'hp-pill-paper' };
-  }
-
-  // LEAP pill from the /api/options/readiness payload
-  // ({ connected, mode, enabled, liveArmed, blockers[] }). Separate code
-  // path from B2/SD: never shared, never mixed.
-  function leapPillFor(readiness) {
-    if (!readiness || !readiness.connected) return { text: 'Not connected', cls: 'hp-pill-off' };
-    if (!readiness.enabled) return { text: 'Paused', cls: 'hp-pill-paused' };
-    if (readiness.mode === 'live' && readiness.liveArmed) return { text: 'Live', cls: 'hp-pill-live' };
-    return { text: 'Paper', cls: 'hp-pill-paper' };
-  }
-
-  // First blocker sub-line for the LEAP card; '' when there is nothing
-  // worth saying (ready, or no payload at all).
-  function leapBlockerText(readiness) {
-    if (!readiness || readiness.ready) return '';
-    var b = readiness.blockers;
-    if (Array.isArray(b) && b.length && b[0]) return String(b[0]);
-    return '';
-  }
-
-  // Today's realized LEAP P&L = sum of pnl over lifecycles closed today,
-  // using closedAt (falling back to createdAt when absent).
-  function leapTodayRealizedPnl(trades) {
-    const today = localDayKey(new Date());
-    let sum = 0, count = 0;
-    for (const t of [].concat(trades || [])) {
-      const n = normTrade(t);
-      if (!n || n.status !== 'closed') continue;
-      const when = n.closed || n.created;
-      if (!when || localDayKey(new Date(when)) !== today) continue;
-      if (Number.isFinite(n.pnl)) { sum += n.pnl; count++; }
-    }
-    return { pnl: sum, trades: count };
-  }
-
-  // Open LEAP lifecycles = states that still hold contracts. Besides 'open'
-  // itself, the exit-intent states ('target_intent', 'thesis_exit_intent',
-  // 'thesis_exit_pending') hold contracts until the exit order fills.
-  var LEAP_OPEN_STATUSES = { open: 1, partial: 1, target_intent: 1, thesis_exit_intent: 1, thesis_exit_pending: 1 };
-  function leapOpenCount(trades) {
-    let n = 0;
-    for (const t of [].concat(trades || [])) {
-      const s = normTrade(t);
-      if (s && LEAP_OPEN_STATUSES[s.status]) n++;
-    }
-    return n;
   }
 
   // ── DOM / network (browser only) ──────────────────────────────────────────
@@ -278,42 +229,15 @@
     });
   }
 
-  // LEAP card render — its own code path, never mixed with B2/SD numbers.
-  function renderLeapCard(readiness, trades) {
-    setPill('hpLeapPill', leapPillFor(readiness));
-    var blockerEl = $('hpLeapBlocker');
-    if (blockerEl) {
-      var txt = leapBlockerText(readiness);
-      blockerEl.textContent = txt;
-      blockerEl.style.display = txt ? '' : 'none';
-    }
-    var pnlEl = $('hpLeapPnl'), openEl = $('hpLeapOpen');
-    if (trades == null) {
-      if (pnlEl) pnlEl.textContent = '—';
-      if (openEl) openEl.textContent = '—';
-      return;
-    }
-    var realized = leapTodayRealizedPnl(trades);
-    var open = leapOpenCount(trades);
-    if (pnlEl) {
-      pnlEl.textContent = fmtMoney(realized.pnl);
-      pnlEl.className = 'hp-bot-num ' + (realized.pnl > 0 ? 'hp-up' : realized.pnl < 0 ? 'hp-down' : '');
-    }
-    if (openEl) openEl.textContent = String(open);
-  }
-
   function refreshBots() {
     var jobs = [
       { prefix: 'hpWarrior', statusUrl: '/api/warrior/status', tradesUrl: '/api/warrior/trades' },
-      { prefix: 'hpB2', statusUrl: '/api/b2/status', tradesUrl: '/api/b2/trades' },
-      { prefix: 'hpLeap', statusUrl: '/api/options/readiness', tradesUrl: '/api/options/trades', leap: true },
     ];
     return Promise.all(jobs.map(function (job) {
       return Promise.allSettled([fetchJson(job.statusUrl), fetchJson(job.tradesUrl)]).then(function (rs) {
         var status = rs[0].status === 'fulfilled' ? rs[0].value : null;
         var trades = rs[1].status === 'fulfilled' ? (rs[1].value && rs[1].value.trades) : null;
-        if (job.leap) renderLeapCard(status, trades);
-        else renderBotCard(job.prefix, status, trades);
+        renderBotCard(job.prefix, status, trades);
       });
     }));
   }
@@ -332,10 +256,8 @@
 
   function init() {
     if (!$('homeEmpty') || !$('hpTiles')) return;
-    var warriorview = $('hpWarriorView'), b2view = $('hpB2View'), leapview = $('hpLeapView');
+    var warriorview = $('hpWarriorView');
     if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
-    if (b2view) b2view.addEventListener('click', function () { if (typeof goPage === 'function') goPage('b2'); });
-    if (leapview) leapview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('options'); });
     refresh();
     setInterval(function () { if (homeVisible()) refresh(); }, 60000);
   }
@@ -346,10 +268,6 @@
     todayRealizedPnl: todayRealizedPnl,
     openPositionCount: openPositionCount,
     pillFor: pillFor,
-    leapPillFor: leapPillFor,
-    leapBlockerText: leapBlockerText,
-    leapTodayRealizedPnl: leapTodayRealizedPnl,
-    leapOpenCount: leapOpenCount,
     fmtPct: fmtPct,
     fmtPrice: fmtPrice,
     fmtMoney: fmtMoney,

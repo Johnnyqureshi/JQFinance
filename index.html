@@ -40,11 +40,9 @@
     })();
   </script>
   <link rel="stylesheet" href="/public/css/style.css?v=20260929d"/>
-  <link rel="stylesheet" href="/public/css/options.css?v=20260929d"/>
-  <link rel="stylesheet" href="/public/css/b2.css?v=20260929d"/>
   <link rel="stylesheet" href="/public/css/warrior.css?v=20260929d"/>
-  <link rel="stylesheet" href="/public/css/crypto.css?v=20260929d"/>
-  <link rel="stylesheet" href="/public/css/home-pulse.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
+  <link rel="stylesheet" href="/public/css/home-pulse.css?v=20261001a"/>
 </head>
 <body>
 
@@ -132,12 +130,6 @@
     </button><button class="nav-link" data-page="flipper">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
       <span class="nav-label">Flipper</span>
-    </button><button class="nav-link" data-page="b2">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 15l4-4 3 2 6-7"/><circle cx="8" cy="11" r="1"/><circle cx="17" cy="6" r="1"/></svg>
-      <span class="nav-label">B2 Bot</span>
-    </button><button class="nav-link" data-page="options">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
-      <span class="nav-label">LEAP Options</span>
     </button><button class="nav-link" data-page="crypto">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
       <span class="nav-label">Crypto</span>
@@ -267,27 +259,6 @@
               <div><span>Open positions</span><strong class="hp-bot-num" id="hpWarriorOpen">—</strong></div>
             </div>
             <button class="hp-view" id="hpWarriorView" type="button">View →</button>
-          </article><article class="hp-bot" aria-label="B2 bot status">
-            <div class="hp-bot-head">
-              <h3>B2<span class="hp-bot-sub">Swing momentum</span></h3>
-              <span class="hp-pill hp-pill-paused" id="hpB2Pill">…</span>
-            </div>
-            <div class="hp-bot-stats">
-              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpB2Pnl">—</strong></div>
-              <div><span>Open positions</span><strong class="hp-bot-num" id="hpB2Open">—</strong></div>
-            </div>
-            <button class="hp-view" id="hpB2View" type="button">View →</button>
-          </article><article class="hp-bot" aria-label="LEAP Options bot status">
-            <div class="hp-bot-head">
-              <h3>LEAP<span class="hp-bot-sub">Options bot</span></h3>
-              <span class="hp-pill hp-pill-off" id="hpLeapPill">…</span>
-            </div>
-            <p class="hp-bot-blocker" id="hpLeapBlocker" style="display:none"></p>
-            <div class="hp-bot-stats">
-              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpLeapPnl">—</strong></div>
-              <div><span>Open positions</span><strong class="hp-bot-num" id="hpLeapOpen">—</strong></div>
-            </div>
-            <button class="hp-view" id="hpLeapView" type="button">View →</button>
           </article>
         </div>
       </div>
@@ -847,10 +818,8 @@
 
 </div>
 
-<div class="page" id="page-options"></div>
 <div class="page" id="page-warrior"></div>
 <div class="page" id="page-flipper"></div>
-<div class="page" id="page-b2"></div>
 <div class="page" id="page-crypto"></div>
 
 
@@ -894,21 +863,19 @@
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
-<script src="/js/app.js?v=20260930a"></script>
-<script src="/js/home-pulse.js?v=20260929d"></script>
+<script src="/js/app.js?v=20261001a"></script>
+<script src="/js/home-pulse.js?v=20261001a"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
 <script src="/js/gameplan.js?v=20260929d"></script>
 <script src="/js/macro-context.js?v=20260929d"></script>
 <script src="/js/scanner.js?v=20260929d"></script>
 
-<script src="/js/alpacatrader.js?v=20260929d"></script>
+<script src="/js/alpacatrader.js?v=20261001a"></script>
 <script src="/js/agent.js?v=20260929d"></script>
-<script src="/js/options.js?v=20260929d"></script>
-<script src="/js/b2.js?v=20260929d"></script>
-<script src="/js/warrior.js?v=20260930c"></script>
-<script src="/js/flipper.js?v=20260930a"></script>
-<script src="/js/crypto.js?v=20260929d"></script>
+<script src="/js/warrior.js?v=20261001a"></script>
+<script src="/js/flipper.js?v=20261001a"></script>
+<script src="/js/crypto.js?v=20261001a"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -933,12 +900,6 @@
   </button><button class="mobile-nav-btn nav-link" data-page="flipper" aria-label="Flipper Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
     <span>Flipper</span>
-  </button><button class="mobile-nav-btn nav-link" data-page="b2" aria-label="B2 Bot">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 15l4-4 3 2 6-7"/></svg>
-    <span>B2</span>
-  </button><button class="mobile-nav-btn nav-link" data-page="options" aria-label="LEAP Options">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16M6 16V8m6 8V5m6 11v-5"/><path d="M4 5h4"/></svg>
-    <span>Options</span>
   </button><button class="mobile-nav-btn nav-link" data-page="crypto" aria-label="Crypto Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
     <span>Crypto</span>

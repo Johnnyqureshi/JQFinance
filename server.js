@@ -20,7 +20,6 @@ const {
   deriveOvernightPrice,
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
-const { mountB2 } = require('./lib/b2-service');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
 const { createCryptoService, mountCrypto } = require('./lib/crypto/service');
 const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
@@ -99,29 +98,6 @@ const {
 } = require('./lib/historical-forecast');
 const { evaluatePriceActionSetup } = require('./lib/price-action-setups');
 const { regularSessionWindow } = require('./lib/intraday-vwap');
-const {
-  ALLOWED_UNDERLYINGS: LEAP_UNDERLYINGS,
-  evaluateLeapOptionsSignal,
-  leapThesisInvalidated,
-  simulateLeapOptionsStrategy,
-} = require('./lib/leap-options-strategy');
-const {
-  selectLeapContract,
-  quotePassesLeapGates,
-  calculateLeapContracts,
-  immutableLeapClientOrderId,
-  buildLeapEntryOrder,
-  buildLeapTargetOrder,
-} = require('./lib/leap-options-execution-policy');
-const {
-  assertLeapOwnedOrder,
-  summarizeLeapFills,
-} = require('./lib/leap-options-reconciliation');
-const {
-  classifyExitIntent,
-  decideLeapExitAction,
-  closingOrdersToCancelOnPositionLoss,
-} = require('./lib/leap-options-order-lifecycle');
 const { findDuplicateBrokerAssignments } = require('./lib/broker-account-isolation');
 const { EmergencyFlattenError, runEmergencyFlatten } = require('./lib/emergency-flatten');
 const { createCredentialVault } = require('./lib/credential-vault');
@@ -236,162 +212,6 @@ db.exec(`
   );
 `);
 
-// Long-call LEAP automation has a wholly separate broker identity and journal.
-// Entry authorization may be paused, but reconciliation records remain durable.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS options_settings (
-    user_id INTEGER PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 0,
-    live_armed INTEGER NOT NULL DEFAULT 0,
-    activation_revision INTEGER NOT NULL DEFAULT 0,
-    max_position_dollars REAL NOT NULL DEFAULT 1000,
-    last_cycle_at TEXT,
-    last_cycle_status TEXT,
-    last_cycle_reason TEXT,
-    last_scan_at TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_alpaca_creds (
-    user_id INTEGER NOT NULL,
-    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
-    api_key TEXT NOT NULL,
-    api_secret TEXT NOT NULL,
-    api_key_enc TEXT,
-    api_secret_enc TEXT,
-    account_id TEXT,
-    PRIMARY KEY (user_id, mode),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE UNIQUE INDEX IF NOT EXISTS uq_options_alpaca_creds_account
-    ON options_alpaca_creds (user_id, account_id)
-    WHERE account_id IS NOT NULL AND api_key <> '__disconnected__';
-  CREATE TABLE IF NOT EXISTS options_alpaca_active_mode (
-    user_id INTEGER PRIMARY KEY,
-    mode TEXT NOT NULL DEFAULT 'paper' CHECK(mode IN ('paper','live')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_candidates (
-    user_id INTEGER NOT NULL,
-    symbol TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    signal_bar_at TEXT,
-    evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, symbol),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_entry_reservations (
-    user_id INTEGER NOT NULL,
-    symbol TEXT NOT NULL,
-    signal_bar_at TEXT NOT NULL,
-    trade_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, symbol, signal_bar_at),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_trades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    underlying_symbol TEXT NOT NULL,
-    contract_symbol TEXT NOT NULL,
-    mode TEXT NOT NULL CHECK(mode IN ('paper','live')),
-    account_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'entry_intent',
-    requested_contracts INTEGER NOT NULL,
-    filled_contracts INTEGER NOT NULL DEFAULT 0,
-    contracts_remaining INTEGER NOT NULL DEFAULT 0,
-    entry_price REAL,
-    target_price REAL,
-    strike_price REAL NOT NULL,
-    expiration_date TEXT NOT NULL,
-    multiplier INTEGER NOT NULL DEFAULT 100,
-    signal_bar_at TEXT NOT NULL,
-    setup_json TEXT NOT NULL DEFAULT '{}',
-    entry_client_order_id TEXT NOT NULL,
-    entry_order_id TEXT,
-    target_client_order_id TEXT,
-    target_order_id TEXT,
-    target_revision INTEGER NOT NULL DEFAULT 0,
-    thesis_exit_client_order_id TEXT,
-    thesis_exit_order_id TEXT,
-    exit_reason TEXT,
-    pnl REAL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    closed_at TEXT,
-    UNIQUE(user_id, entry_client_order_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_options_trades_open
-    ON options_trades (user_id, status, underlying_symbol);
-  CREATE TABLE IF NOT EXISTS options_fills (
-    trade_id INTEGER NOT NULL,
-    broker_order_id TEXT NOT NULL,
-    purpose TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    price REAL NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (trade_id, broker_order_id),
-    FOREIGN KEY (trade_id) REFERENCES options_trades(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_alerts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    symbol TEXT,
-    type TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS options_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    trade_id INTEGER,
-    symbol TEXT,
-    event_type TEXT NOT NULL,
-    reason_code TEXT,
-    details_json TEXT NOT NULL DEFAULT '{}',
-    source_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (trade_id) REFERENCES options_trades(id) ON DELETE SET NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_options_events_user_created
-    ON options_events (user_id, created_at DESC);
-  CREATE TABLE IF NOT EXISTS options_execution_leases (
-    user_id INTEGER PRIMARY KEY,
-    token TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-try { db.prepare('ALTER TABLE options_settings ADD COLUMN activation_revision INTEGER NOT NULL DEFAULT 0').run(); } catch (_) {}
-
-// Johnny 2026-09-29: "pause ALL bots" — the LEAP/options bot lives in jqf.db
-// (not automated-trading.db), so it gets its own one-shot pause migration.
-// enabled=0 withholds new entries; the cycle still reconciles open positions.
-db.exec(`CREATE TABLE IF NOT EXISTS boot_migrations (
-  name TEXT PRIMARY KEY,
-  ran_at TEXT NOT NULL DEFAULT (datetime('now'))
-)`);
-if (!db.prepare(`SELECT 1 FROM boot_migrations WHERE name='pause-options-bot-20260929'`).get()) {
-  db.prepare(`UPDATE options_settings SET enabled=0`).run();
-  db.prepare(`INSERT INTO boot_migrations(name) VALUES('pause-options-bot-20260929')`).run();
-  console.log('[Options] LEAP bot paused by one-shot boot migration (2026-09-29).');
-}
-
-// Johnny 2026-09-29: lean database — diagnostic history is pruned on a 7-day
-// retention; real trade records (options_trades, options_fills) and live state
-// (candidates, reservations, settings, creds) are never pruned.
-function pruneOptionsDiagnostics(userId) {
-  db.prepare(`DELETE FROM options_alerts WHERE user_id=? AND created_at < datetime('now','-7 days')`).run(userId);
-  db.prepare(`DELETE FROM options_events WHERE user_id=? AND created_at < datetime('now','-7 days')`).run(userId);
-}
-for (const row of db.prepare('SELECT user_id FROM options_settings').all()) {
-  try { pruneOptionsDiagnostics(row.user_id); }
-  catch (error) { console.warn('[Options] boot prune failed:', error.message); }
-}
 
 // ── DB migrations — add columns that didn't exist in older schema ─────────────
 [
@@ -494,17 +314,12 @@ retireRemovedStrategies(db);
 const automaticBotSettings = createAutomaticBotSettings(automatedDb);
 
 // Cut the automated tables out of the deployment-local manual database. The
-// attached schema keeps legacy synchronous LEAP queries working while the
+// attached schema keeps legacy synchronous bot queries working while the
 // dedicated connection is the only owner of automated state.
 const AUTOMATED_TABLES = [
   'automated_action_intents',
   'automatic_live_bot_arms',
-  'options_fills', 'options_events', 'options_alerts', 'options_entry_reservations',
-  'options_trades', 'options_candidates', 'options_execution_leases',
-  'options_alpaca_active_mode', 'options_alpaca_creds', 'options_settings',
-  'b2_exit_fills', 'b2_alerts', 'b2_trades',
-  'b2_candidates', 'b2_coverage', 'b2_universe', 'b2_leases', 'b2_credentials',
-  'b2_settings', 'broker_account_quarantine', 'broker_account_owners',
+  'broker_account_quarantine', 'broker_account_owners',
 ];
 db.exec(`ATTACH DATABASE 'automated-trading.db' AS automated`);
 automatedDb.pragma('foreign_keys = OFF');
@@ -579,9 +394,6 @@ for (const seed of [
   `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
    SELECT account_id,user_id,'manual',mode FROM alpaca_creds
    WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
-  `INSERT OR IGNORE INTO broker_account_owners(account_id,user_id,scope,mode)
-   SELECT account_id,user_id,'options',mode FROM options_alpaca_creds
-   WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'`,
 ]) {
   try { db.prepare(seed).run(); } catch (error) {
     console.error('[Alpaca] Broker ownership registry seed failed:', error.message);
@@ -590,9 +402,6 @@ for (const seed of [
 const legacyBrokerAssignments = db.prepare(`
   SELECT account_id,user_id,scope FROM (
     SELECT account_id,user_id,'manual' AS scope FROM alpaca_creds
-      WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
-    UNION ALL
-    SELECT account_id,user_id,'options' AS scope FROM options_alpaca_creds
       WHERE account_id IS NOT NULL AND api_key<>'__disconnected__'
     UNION ALL SELECT account_id,user_id,scope FROM broker_account_owners
   )
@@ -622,37 +431,6 @@ function getSessionSecret() {
 }
 const SESSION_SECRET = getSessionSecret();
 const credentialVault = createCredentialVault(SESSION_SECRET);
-
-// Credentials must be upgraded before the first durable automated snapshot.
-// A failed vault operation aborts startup and leaves the source journal intact.
-db.transaction(() => {
-  for (const table of ['b2_credentials', 'options_alpaca_creds']) {
-    const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
-    if (!columns.has('api_key')) continue;
-    for (const row of db.prepare(`SELECT rowid AS _rowid, * FROM ${table}`).all()) {
-      if (row.api_key === DISCONNECTED_SENTINEL || row.api_secret === DISCONNECTED_SENTINEL) continue;
-      if (columns.has('api_key_enc') && row.api_key === ENCRYPTED_CREDENTIAL_MARKER
-          && row.api_secret === ENCRYPTED_CREDENTIAL_MARKER) continue;
-      if (!columns.has('api_key_enc')) {
-        const keyEncrypted = credentialVault.isEncrypted(row.api_key);
-        const secretEncrypted = credentialVault.isEncrypted(row.api_secret);
-        if (keyEncrypted !== secretEncrypted) {
-          throw new Error(`Stored ${table} credential pair is only partially encrypted.`);
-        }
-        if (keyEncrypted) continue;
-      }
-      const key = columns.has('api_key_enc') && row.api_key_enc ? row.api_key_enc : credentialVault.encrypt(row.api_key);
-      const secret = columns.has('api_secret_enc') && row.api_secret_enc ? row.api_secret_enc : credentialVault.encrypt(row.api_secret);
-      if (columns.has('api_key_enc')) {
-        db.prepare(`UPDATE ${table} SET api_key=?,api_secret=?,api_key_enc=?,api_secret_enc=? WHERE rowid=?`)
-          .run(ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, key, secret, row._rowid);
-      } else {
-        db.prepare(`UPDATE ${table} SET api_key=?,api_secret=? WHERE rowid=?`)
-          .run(key, secret, row._rowid);
-      }
-    }
-  }
-})();
 
 // ── In-memory rate limiter for auth endpoints ──────────────────────────────────
 const authAttempts = new Map();
@@ -1578,6 +1356,19 @@ app.get('/api/_verify20260927', async (req, res) => {
       flipper_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM flipper_credentials'),
       flipper_positions: aq("SELECT COUNT(*) AS n FROM flipper_positions WHERE status IN ('open','pending_entry')")[0],
       flipper_alerts: aq('SELECT created_at, kind, message FROM flipper_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP pre-teardown export (2026-10-01): full row dumps of B2 + options
+      // trade history before the bots are deleted. Remove with the teardown.
+      b2_export: {
+        trades: aq('SELECT * FROM b2_trades'),
+        alerts: aq('SELECT * FROM b2_alerts'),
+        settings: aq('SELECT user_id, enabled, mode FROM b2_settings'),
+      },
+      options_export: {
+        trades: q('SELECT * FROM options_trades'),
+        fills: q('SELECT * FROM options_fills'),
+        alerts: q('SELECT * FROM options_alerts'),
+        settings: q('SELECT user_id, enabled FROM options_settings'),
+      },
     };
     // Durability truth: what does the Postgres snapshot actually hold?
     try {
@@ -4061,14 +3852,12 @@ app.get('/api/gameplan/:sym', requireAuth, async (req, res) => {
 // environment-variable fallback is suppressed for that user.
 
 
-const hasActiveOptionsTrades = userId => !!db.prepare(`SELECT 1 FROM options_trades
-  WHERE user_id=? AND status NOT IN ('closed','rejected','canceled') LIMIT 1`).get(userId);
-const brokerScopeLabel = scope => scope === 'options' ? 'LEAP Options Bot' : scope === 'manual' ? 'manual trading' : 'another trading strategy';
+const brokerScopeLabel = scope => scope === 'manual' ? 'manual trading' : 'another trading strategy';
 
 function normalizeAlpacaScope(value, fallback = 'manual') {
   const scope = value === undefined ? fallback : value;
-  if (scope !== 'manual' && scope !== 'options') {
-    throw Object.assign(new Error('Invalid broker connection scope. Use manual or options.'), { status: 400 });
+  if (scope !== 'manual') {
+    throw Object.assign(new Error('Invalid broker connection scope. Use manual.'), { status: 400 });
   }
   return scope;
 }
@@ -4088,12 +3877,6 @@ function alpacaAccountConflict(userId, scope, accountId) {
       rows: db.prepare(`SELECT user_id FROM alpaca_creds
         WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
       same: row => scope === 'manual' && row.user_id === userId,
-    },
-    {
-      owner: 'LEAP Options Bot',
-      rows: db.prepare(`SELECT user_id FROM options_alpaca_creds
-        WHERE account_id=? AND api_key<>?`).all(accountId, DISCONNECTED_SENTINEL),
-      same: row => scope === 'options' && row.user_id === userId,
     },
   ];
   return queries.find(item => item.rows.some(row => !item.same(row))) || null;
@@ -4115,11 +3898,10 @@ function brokerAccountOwnerCount(accountId) {
   const rows = db.prepare(`
     SELECT user_id,scope FROM (
       SELECT user_id,'manual' AS scope FROM alpaca_creds WHERE account_id=? AND api_key<>?
-      UNION ALL SELECT user_id,'options' AS scope FROM options_alpaca_creds WHERE account_id=? AND api_key<>?
       UNION ALL SELECT user_id,scope FROM broker_account_owners WHERE account_id=?
     )
   `).all(
-    accountId, DISCONNECTED_SENTINEL, accountId, DISCONNECTED_SENTINEL, accountId,
+    accountId, DISCONNECTED_SENTINEL, accountId,
   );
   return new Set(rows.map(row => `${row.user_id}:${row.scope}`)).size;
 }
@@ -4149,9 +3931,7 @@ function isBrokerAccountQuarantined(accountId) {
 
 function brokerTables(scope) {
   normalizeAlpacaScope(scope);
-  return scope === 'options'
-    ? { credentials: 'options_alpaca_creds', active: 'options_alpaca_active_mode' }
-    : { credentials: 'alpaca_creds', active: 'alpaca_active_mode' };
+  return { credentials: 'alpaca_creds', active: 'alpaca_active_mode' };
 }
 
 function storedBrokerAccountId(userId, scope, mode) {
@@ -4446,21 +4226,9 @@ async function cancelAlpacaOpenOrders(userId, orders, scope = 'manual') {
   }));
 }
 
-function autoEnablePaperStrategy(userId, scope, mode) {
-  if (scope !== 'options' || mode !== 'paper') return false;
-  const settings = optionsConfigFor(userId);
-  db.prepare(`INSERT INTO options_settings (user_id,enabled,live_armed,max_position_dollars,updated_at)
-    VALUES (?,1,0,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET
-    enabled=1,live_armed=0,activation_revision=activation_revision+1,updated_at=datetime('now')`).run(userId, settings.maxPositionDollars);
-  return true;
-}
-
-// Save only verified, isolated manual or LEAP broker credentials.
+// Save only verified, isolated manual broker credentials.
 app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const scope = requestAlpacaScope(req);
-  if (scope === 'options' && !automatedTradingPersistenceReady) {
-    return res.status(503).json({ error: 'Durable automated-trading persistence is unavailable; LEAP remains paused until the PostgreSQL schema is published.' });
-  }
   const { credentials, active } = brokerTables(scope);
   const { apiKey, apiSecret, mode = 'paper' } = req.body || {};
   if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'mode must be paper or live.' });
@@ -4474,8 +4242,6 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
   if (!emailVerifiedIn(db, uid)) {
     return res.status(403).json({ error: EMAIL_UNVERIFIED_ERROR, code: 'EMAIL_UNVERIFIED' });
   }
-  const activeOptions = () => scope === 'options' && hasActiveOptionsTrades(uid);
-  if (activeOptions()) return res.status(409).json({ error: 'Reconcile or close active LEAP lifecycles before replacing this connection.' });
   try {
     const base = mode === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
     const controller = new AbortController();
@@ -4495,7 +4261,6 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
     const encryptedSecret = credentialVault.encrypt(secret);
     // Claim and write in one local transaction; no broker mutation occurs here.
     db.transaction(() => {
-      if (activeOptions()) throw Object.assign(new Error('A LEAP lifecycle became active. Reconcile before changing accounts.'), { status: 409 });
       const conflict = alpacaAccountConflict(uid, scope, accountId);
       if (conflict || !claimBrokerAccountOwnership(uid, scope, mode, accountId)) {
         throw Object.assign(new Error('This broker account is assigned to another user or strategy, or is quarantined. Use a separate account.'), { status: 409 });
@@ -4507,15 +4272,9 @@ app.put('/api/alpaca/credentials', requireAuth, async (req, res) => {
         api_secret_enc=excluded.api_secret_enc,account_id=excluded.account_id`)
         .run(uid, mode, ENCRYPTED_CREDENTIAL_MARKER, ENCRYPTED_CREDENTIAL_MARKER, encryptedKey, encryptedSecret, accountId);
       db.prepare(`INSERT OR REPLACE INTO ${active} (user_id,mode) VALUES (?,?)`).run(uid, mode);
-      if (scope === 'options') {
-        db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
-        automaticBotSettings.revoke(uid, 'options');
-      }
-      autoEnablePaperStrategy(uid, scope, mode);
       if (previousAccountId && previousAccountId !== accountId) releaseBrokerAccountOwnershipIfUnused(uid, scope, previousAccountId);
     })();
-    if (scope === 'options') await automatedState.flush('options-credentials-connected');
-    res.json({ ok: true, mode, connection: scope, accountId, automationEnabled: scope === 'options' && mode === 'paper', liveArmed: false });
+    res.json({ ok: true, mode, connection: scope, accountId, automationEnabled: false, liveArmed: false });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.status === 409 ? error.message : 'Broker verification could not complete. Check the connection and try again.' });
   }
@@ -4525,7 +4284,6 @@ app.delete('/api/alpaca/credentials', requireAuth, async (req, res) => {
   const uid = req.session.userId;
   const scope = requestAlpacaScope(req);
   const { credentials, active } = brokerTables(scope);
-  if (scope === 'options' && hasActiveOptionsTrades(uid)) return res.status(409).json({ error: 'Reconcile or close active LEAP lifecycles before disconnecting.' });
   db.transaction(() => {
     const mode = db.prepare(`SELECT mode FROM ${active} WHERE user_id=?`).get(uid)?.mode || 'paper';
     const accountId = storedBrokerAccountId(uid, scope, mode);
@@ -4533,16 +4291,8 @@ app.delete('/api/alpaca/credentials', requireAuth, async (req, res) => {
       VALUES (?,?,?,?,NULL,NULL,NULL) ON CONFLICT(user_id,mode) DO UPDATE SET
       api_key=excluded.api_key,api_secret=excluded.api_secret,api_key_enc=NULL,api_secret_enc=NULL,account_id=NULL`)
       .run(uid, mode, DISCONNECTED_SENTINEL, DISCONNECTED_SENTINEL);
-    if (scope === 'options') {
-      db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
-      automaticBotSettings.revoke(uid, 'options');
-    }
     releaseBrokerAccountOwnershipIfUnused(uid, scope, accountId);
   })();
-  if (scope === 'options') {
-    try { await automatedState.flush('options-credentials-disconnected'); }
-    catch (error) { return res.status(503).json({ error: `Disconnect could not be durably saved: ${error.message}` }); }
-  }
   res.json({ ok: true, connection: scope });
 });
 
@@ -4562,21 +4312,11 @@ app.post('/api/alpaca/switch-mode', requireAuth, async (req, res) => {
   const uid = req.session.userId;
   const { active } = brokerTables(scope);
   if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'mode must be paper or live.' });
-  if (scope === 'options' && hasActiveOptionsTrades(uid)) return res.status(409).json({ error: 'Reconcile or close active LEAP lifecycles before switching mode.' });
   if (!_alpacaCredsExist(uid, mode, scope)) return res.status(400).json({ error: 'Connect a verified, isolated account for this mode first.' });
   db.transaction(() => {
     db.prepare(`INSERT OR REPLACE INTO ${active} (user_id,mode) VALUES (?,?)`).run(uid, mode);
-    if (scope === 'options') {
-      db.prepare('UPDATE options_settings SET live_armed=0,activation_revision=activation_revision+1 WHERE user_id=?').run(uid);
-      automaticBotSettings.revoke(uid, 'options');
-    }
-    autoEnablePaperStrategy(uid, scope, mode);
   })();
-  if (scope === 'options') {
-    try { await automatedState.flush('options-mode-selected'); }
-    catch (error) { return res.status(503).json({ error: `Mode selection could not be durably saved: ${error.message}` }); }
-  }
-  res.json({ ok: true, mode, connection: scope, automationEnabled: scope === 'options' && mode === 'paper', liveArmed: false });
+  res.json({ ok: true, mode, connection: scope, automationEnabled: false, liveArmed: false });
 });
 
 app.use('/api/alpaca', (req, res, next) => {
@@ -5981,7 +5721,7 @@ const ETF_PRODUCT_METADATA = Object.freeze({
   SPXL:{direction:'long',leverage:3}, TQQQ:{direction:'long',leverage:3}, TNA:{direction:'long',leverage:3}, UDOW:{direction:'long',leverage:3}, SOXL:{direction:'long',leverage:3}, FAS:{direction:'long',leverage:3}, CURE:{direction:'long',leverage:3}, ERX:{direction:'long',leverage:3},
 });
 
-// Retained manual/LEAP entry window (9:35 AM – 3:50 PM ET Mon-Fri).
+// Retained manual entry window (9:35 AM – 3:50 PM ET Mon-Fri).
 function isMarketOpen() {
   const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const day  = et.getDay();
@@ -6391,807 +6131,12 @@ async function getOpenSlots(userId, botName, scope = 'manual', brokerFetch = nul
   return { ...capacity, positions: Array.isArray(positions) ? positions : [], openOrders };
 }
 
+// Never expose database, broker, or internal stack traces to visitors. Session
+// and API failures remain explicit and retryable while the homepage gets a
+// small, safe maintenance response for unexpected server errors.
+let serviceShuttingDown = false;
 
-// ══════════════════════════════════════════════════════════════════════════════
-
-const OPTIONS_SCOPE = 'options';
-const OPTIONS_MIN_APPROVAL_LEVEL = 2;
-const OPTIONS_MAX_POSITION_DOLLARS = 100000;
-const OPTIONS_QUOTE_MAX_AGE_MS = 60 * 1000;
-const OPTIONS_MAX_SPREAD_FRACTION = 0.15;
-
-function optionsConfigFor(userId) {
-  const row = db.prepare(`SELECT enabled,live_armed,activation_revision,max_position_dollars,last_cycle_at,
-    last_cycle_status,last_cycle_reason,last_scan_at,updated_at
-    FROM options_settings WHERE user_id=?`).get(userId);
-  const maxPositionDollars = Math.min(
-    OPTIONS_MAX_POSITION_DOLLARS,
-    Math.max(1, Number(row?.max_position_dollars || 1000))
-  );
-  return {
-    enabled: !!row?.enabled,
-    liveArmed: !!row?.live_armed,
-    activationRevision: Number(row?.activation_revision || 0),
-    maxPositionDollars,
-    runtime: {
-      settingsUpdatedAt: row?.updated_at || null,
-      lastCycleAt: row?.last_cycle_at || null,
-      lastCycleStatus: row?.last_cycle_status || null,
-      lastCycleReason: row?.last_cycle_reason || null,
-      lastScanAt: row?.last_scan_at || null,
-    },
-  };
-}
-
-function optionApprovalState(account) {
-  const approvedLevel = Number(account?.options_approved_level ?? 0);
-  const tradingLevel = Number(account?.options_trading_level ?? 0);
-  const active = String(account?.status || '').toUpperCase() === 'ACTIVE';
-  const blocked = account?.trading_blocked === true || account?.account_blocked === true;
-  const approved = approvedLevel >= OPTIONS_MIN_APPROVAL_LEVEL
-    && tradingLevel >= OPTIONS_MIN_APPROVAL_LEVEL;
-  return {
-    active,
-    blocked,
-    approved,
-    approvedLevel: Number.isFinite(approvedLevel) ? approvedLevel : 0,
-    tradingLevel: Number.isFinite(tradingLevel) ? tradingLevel : 0,
-    label: approved ? `LEVEL ${Math.min(approvedLevel, tradingLevel)}` : 'NOT APPROVED',
-  };
-}
-
-function getPinnedOptionsCreds(userId, mode, expectedAccountId) {
-  if (!expectedAccountId) throw new Error('This LEAP lifecycle record has no immutable broker account identity.');
-  if (isBrokerAccountQuarantined(expectedAccountId) || alpacaAccountConflict(userId, OPTIONS_SCOPE, expectedAccountId)) {
-    throw new Error('This LEAP broker account is quarantined because it has multiple owners.');
-  }
-  const row = db.prepare(`SELECT api_key,api_secret,api_key_enc,api_secret_enc,mode,account_id
-    FROM options_alpaca_creds WHERE user_id=? AND mode=?`).get(userId, mode);
-  if (!row || row.api_key === DISCONNECTED_SENTINEL || String(row.account_id) !== String(expectedAccountId)) {
-    throw new Error('The broker identity pinned to this LEAP trade is unavailable or changed.');
-  }
-  return decryptStoredAlpacaCredentials(
-    row, 'options_alpaca_creds', 'user_id=? AND mode=?', [userId, mode]
-  );
-}
-
-function recordOptionsCycle(userId, outcome) {
-  db.prepare(`INSERT INTO options_settings
-    (user_id,last_cycle_at,last_cycle_status,last_cycle_reason)
-    VALUES (?,datetime('now'),?,?)
-    ON CONFLICT(user_id) DO UPDATE SET last_cycle_at=datetime('now'),
-      last_cycle_status=excluded.last_cycle_status,last_cycle_reason=excluded.last_cycle_reason`)
-    .run(userId, String(outcome?.status || 'unknown').slice(0, 40),
-      String(outcome?.reason || '').slice(0, 300) || null);
-}
-
-function acquireOptionsExecutionLease(userId) {
-  const token = crypto.randomUUID();
-  const result = db.prepare(`INSERT INTO options_execution_leases (user_id,token,expires_at)
-    VALUES (?, ?, datetime('now','+10 minutes'))
-    ON CONFLICT(user_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at
-    WHERE options_execution_leases.expires_at <= datetime('now')`).run(userId, token);
-  return result.changes === 1 ? token : null;
-}
-function requireOptionsExecutionLease(userId, token) {
-  if (!token || db.prepare(`UPDATE options_execution_leases SET expires_at=datetime('now','+10 minutes')
-    WHERE user_id=? AND token=? AND expires_at > datetime('now')`).run(userId, token).changes !== 1) {
-    throw new Error('LEAP execution lease expired or was replaced; broker action was withheld.');
-  }
-}
-function releaseOptionsExecutionLease(userId, token) {
-  if (token) db.prepare('DELETE FROM options_execution_leases WHERE user_id=? AND token=?').run(userId, token);
-}
-
-function addOptionsAlert(userId, symbol, type, message) {
-  const duplicate = db.prepare(`SELECT 1 FROM options_alerts WHERE user_id=? AND type=?
-    AND COALESCE(symbol,'')=COALESCE(?,'') AND resolved_at IS NULL AND created_at > datetime('now','-1 day')`)
-    .get(userId, String(type).slice(0, 40), symbol || null);
-  if (!duplicate) {
-    db.prepare(`INSERT INTO options_alerts (user_id,symbol,type,message) VALUES (?,?,?,?)`)
-      .run(userId, symbol || null, String(type).slice(0, 40), String(message).slice(0, 500));
-  }
-}
-function recordOptionsEvent(userId, {
-  tradeId = null, symbol = null, eventType, reasonCode = null, details = {}, sourceAt = null,
-}) {
-  db.prepare(`INSERT INTO options_events
-    (user_id,trade_id,symbol,event_type,reason_code,details_json,source_at)
-    VALUES (?,?,?,?,?,?,?)`).run(
-      userId, tradeId, symbol, String(eventType || 'UNKNOWN').slice(0, 50),
-      reasonCode == null ? null : String(reasonCode).slice(0, 50),
-      JSON.stringify(details || {}), sourceAt || null
-    );
-}
-function recordOptionsFill(tradeId, order, purpose) {
-  const orderId = String(order?.id || '');
-  const quantity = Math.floor(Number(order?.filled_qty || 0));
-  const price = Number(order?.filled_avg_price || 0);
-  if (!orderId || !(quantity > 0) || !(price > 0)) return false;
-  const existed = !!db.prepare(`SELECT 1 FROM options_fills WHERE trade_id=? AND broker_order_id=?`)
-    .get(tradeId, orderId);
-  db.prepare(`INSERT INTO options_fills (trade_id,broker_order_id,purpose,quantity,price,updated_at)
-    VALUES (?,?,?,?,?,datetime('now')) ON CONFLICT(trade_id,broker_order_id) DO UPDATE SET
-    purpose=excluded.purpose,quantity=excluded.quantity,price=excluded.price,updated_at=datetime('now')`)
-    .run(tradeId, orderId, purpose, quantity, price);
-  return !existed;
-}
-
-function completedOptionsWeeklyBars(dailyBars, now = Date.now()) {
-  return completedWeeklyBars(dailyBars, now).map(bar => ({
-    ...bar,
-    completedAt: bar.completedAt || bar.t,
-    completed: true,
-  }));
-}
-
-async function loadOptionsWeeklyBars(userId, symbol, years = 5) {
-  const start = new Date(Date.now() - years * 366 * 86400000).toISOString();
-  const payload = await alpacaDataFetch(userId,
-    `/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Day&start=${encodeURIComponent(start)}&limit=10000&adjustment=all&feed=iex`,
-    OPTIONS_SCOPE);
-  if (!payload) throw new Error(`Verified Alpaca history is unavailable for ${symbol}.`);
-  const dailyBars = completedDailyBars(barsFromBrokerResponse(payload, symbol));
-  const weeklyBars = completedOptionsWeeklyBars(dailyBars);
-  if (weeklyBars.length < 51) throw new Error(`At least 51 completed weeks are required for ${symbol}.`);
-  return { dailyBars, weeklyBars };
-}
-
-async function optionsUnderlyingQuote(userId, symbol) {
-  const snapshots = await alpacaSnapshotFetch(userId, symbol, OPTIONS_SCOPE);
-  const snapshot = snapshots?.[symbol];
-  const quote = snapshot?.latestQuote;
-  const bid = Number(quote?.bp);
-  const ask = Number(quote?.ap);
-  const timestamp = Date.parse(quote?.t || '');
-  if (!Number.isFinite(timestamp) || Date.now() - timestamp > OPTIONS_QUOTE_MAX_AGE_MS
-      || timestamp - Date.now() > 5000) {
-    throw new Error(`${symbol} does not have a fresh Alpaca quote.`);
-  }
-  const tradePrice = Number(snapshot?.latestTrade?.p);
-  const mid = bid > 0 && ask >= bid ? (bid + ask) / 2
-    : Number.isFinite(tradePrice) && tradePrice > 0 ? tradePrice : null;
-  const volume = Number(snapshot?.dailyBar?.v);
-  const previousClose = Number(snapshot?.prevDailyBar?.c);
-  const changePct = mid > 0 && previousClose > 0 ? (mid / previousClose - 1) * 100 : null;
-  return {
-    bid, ask, mid, volume: Number.isFinite(volume) ? volume : null,
-    changePct, timestamp, raw: quote, snapshot,
-  };
-}
-
-async function discoverOptionsContracts(userId, symbol) {
-  const expirationGte = new Date(Date.now() + 360 * 86400000).toISOString().slice(0, 10);
-  const expirationLte = new Date(Date.now() + 3 * 366 * 86400000).toISOString().slice(0, 10);
-  let pageToken = null;
-  const contracts = [];
-  for (let page = 0; page < 10; page++) {
-    const query = new URLSearchParams({
-      underlying_symbols: symbol,
-      status: 'active',
-      type: 'call',
-      expiration_date_gte: expirationGte,
-      expiration_date_lte: expirationLte,
-      limit: '1000',
-    });
-    if (pageToken) query.set('page_token', pageToken);
-    const payload = await alpacaFetchFor(userId, OPTIONS_SCOPE, `/v2/options/contracts?${query}`);
-    const rows = payload?.option_contracts ?? payload?.contracts ?? payload;
-    if (!Array.isArray(rows)) throw new Error('Alpaca option contract discovery returned a malformed response.');
-    contracts.push(...rows);
-    pageToken = payload?.next_page_token || null;
-    if (!pageToken) break;
-  }
-  return contracts;
-}
-
-async function optionsLatestQuote(userId, contractSymbol) {
-  const payload = await alpacaDataFetch(userId,
-    `/v1beta1/options/quotes/latest?symbols=${encodeURIComponent(contractSymbol)}&feed=indicative`,
-    OPTIONS_SCOPE);
-  const raw = payload?.quotes?.[contractSymbol] ?? payload?.[contractSymbol] ?? payload?.quote;
-  if (!raw) throw new Error('Alpaca did not return a current option quote.');
-  return {
-    bid_price: raw.bp ?? raw.bid_price,
-    ask_price: raw.ap ?? raw.ask_price,
-    timestamp: raw.t ?? raw.timestamp,
-  };
-}
-
-async function buildOptionsCandidate(userId, symbol, { includeContract = true } = {}) {
-  const sym = String(symbol || '').trim().toUpperCase();
-  if (!LEAP_UNDERLYINGS.includes(sym)) throw new Error('Only QQQ, TQQQ, and SOXL are eligible.');
-  const underlying = await optionsUnderlyingQuote(userId, sym);
-  const liquidity = evaluateAlpacaLiquidity(underlying.snapshot, {
-    now: Date.now(), marketState: currentMarketState(),
-  });
-  if (!liquidity.eligible) {
-    return {
-      strategy: 'leap-options-v1', symbol: sym, direction: 'LONG_CALL', eligible: false,
-      status: 'LIQUIDITY REJECTED', score: 0, reasons: liquidity.reasons,
-      liquidity, evidence: null, contract: null, signalBarAt: null,
-      evaluatedAt: new Date().toISOString(),
-    };
-  }
-  const { weeklyBars } = await loadOptionsWeeklyBars(userId, sym);
-  const signal = evaluateLeapOptionsSignal({
-    symbol: sym,
-    weeklyBars,
-    freshness: { weekly: Date.now() - Date.parse(weeklyBars.at(-1)?.completedAt || '') <= 12 * 86400000 },
-  });
-  const candidate = {
-    ...signal,
-    symbol: sym,
-    score: signal.eligible ? 100 : 0,
-    signalBarAt: weeklyBars.at(-1)?.completedAt || weeklyBars.at(-1)?.t || null,
-    lastCompletedWeek: weeklyBars.at(-1)?.t || null,
-    evaluatedAt: new Date().toISOString(),
-    liquidity,
-    contract: null,
-  };
-  if (!signal.eligible || !includeContract) return candidate;
-  const contracts = await discoverOptionsContracts(userId, sym);
-  const contract = selectLeapContract(contracts, {
-    symbol: sym, underlyingPrice: underlying.mid, now: Date.now(), minDte: 360,
-  });
-  if (!contract) {
-    candidate.eligible = false;
-    candidate.status = 'NO TRADE';
-    candidate.reasons = [...candidate.reasons, 'No actual Alpaca call meets the 360-day expiration and 110% strike policy.'];
-    return candidate;
-  }
-  const quote = quotePassesLeapGates(contract, await optionsLatestQuote(userId, contract.symbol), {
-    now: Date.now(), maxQuoteAgeMs: OPTIONS_QUOTE_MAX_AGE_MS,
-    maxSpreadFraction: OPTIONS_MAX_SPREAD_FRACTION,
-  });
-  if (!quote) {
-    candidate.eligible = false;
-    candidate.status = 'NO TRADE';
-    candidate.reasons = [...candidate.reasons, 'Selected contract quote is stale, crossed, wide, or illiquid.'];
-    return candidate;
-  }
-  const expiration = contract.expiration_date ?? contract.expiration ?? contract.expiry;
-  const dte = Math.floor((Date.parse(expiration) - Date.now()) / 86400000);
-  candidate.underlyingPrice = underlying.mid;
-  candidate.contract = {
-    symbol: contract.symbol,
-    expiration,
-    strike: Number(contract.strike_price ?? contract.strike),
-    dte,
-    bid: quote.bid,
-    ask: quote.ask,
-    mid: quote.mid,
-    spread: quote.ask - quote.bid,
-    spreadFraction: quote.spreadFraction,
-    openInterest: contract.open_interest == null ? null : Number(contract.open_interest),
-    volume: contract.volume == null ? null : Number(contract.volume),
-    multiplier: Number(contract.multiplier),
-    tradable: contract.tradable !== false,
-    status: contract.status,
-  };
-  if (candidate.contract.tradable === false || (contract.status && String(contract.status).toLowerCase() !== 'active')) {
-    candidate.eligible = false;
-    candidate.status = 'NO TRADE';
-    candidate.reasons = [...candidate.reasons, 'The selected Alpaca contract is not active and tradable.'];
-  }
-  return candidate;
-}
-
-function saveOptionsCandidates(userId, rows) {
-  const statement = db.prepare(`INSERT INTO options_candidates
-    (user_id,symbol,payload_json,signal_bar_at,evaluated_at) VALUES (?,?,?,?,datetime('now'))
-    ON CONFLICT(user_id,symbol) DO UPDATE SET payload_json=excluded.payload_json,
-      signal_bar_at=excluded.signal_bar_at,evaluated_at=datetime('now')`);
-  db.transaction(candidates => candidates.forEach(row =>
-    statement.run(userId, row.symbol, JSON.stringify(row), row.signalBarAt || null)))(rows);
-  for (const row of rows) {
-    recordOptionsEvent(userId, {
-      symbol: row.symbol, eventType: 'SCAN_DECISION',
-      reasonCode: row.eligible ? 'ELIGIBLE' : 'WITHHELD',
-      details: { reasons: row.reasons, evidence: row.evidence, contract: row.contract },
-      sourceAt: row.signalBarAt,
-    });
-  }
-}
-
-async function mapWithConcurrency(items, limit, mapper) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      results[index] = await mapper(items[index], index);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-async function scanOptionsUniverse(userId, sharedContext = null) {
-  const context = sharedContext || await getAutomaticBotContext({ userId, strategy: 'leap-options-v1' });
-  const results = await mapWithConcurrency(LEAP_UNDERLYINGS, 3, async symbol => {
-    try { return { ...(await buildOptionsCandidate(userId, symbol)), sharedContext: context }; }
-    catch (error) {
-      return {
-        strategy: 'leap-options-v1', symbol, direction: 'LONG_CALL', eligible: false,
-        status: 'DATA UNAVAILABLE', score: 0,
-        reasons: [`Required verified evidence is unavailable: ${error.message}`],
-        evidence: null, contract: null, evaluatedAt: new Date().toISOString(), sharedContext: context,
-      };
-    }
-  });
-  saveOptionsCandidates(userId, results);
-  db.prepare(`INSERT INTO options_settings (user_id,last_scan_at) VALUES (?,datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET last_scan_at=datetime('now')`).run(userId);
-  return {
-    strategy: 'leap-options-v1',
-    results,
-    candidates: results,
-    evaluatedAt: new Date().toISOString(),
-    funnel: {
-      scanned: results.length,
-      eligible: results.filter(row => row.eligible).length,
-      rejected: results.filter(row => !row.eligible).length,
-    },
-  };
-}
-
-function optionsOrderLookupPath(orderId, clientOrderId) {
-  return orderId && orderId !== clientOrderId
-    ? `/v2/orders/${encodeURIComponent(orderId)}`
-    : `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}`;
-}
-
-async function executeOptionsEntry(userId, symbol, source = 'manual', leaseToken = null) {
-  if (!automatedTradingPersistenceReady) {
-    throw new Error('Durable automated-trading persistence is unavailable; LEAP entry withheld.');
-  }
-  let settings = optionsConfigFor(userId);
-  let creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-  const brokerIdentity = creds ? `${creds.mode}:${creds.account_id}` : null;
-  if (!settings.enabled) throw new Error('LEAP Options automation is disabled in persisted settings.');
-  if (!creds) throw new Error('Connect the dedicated LEAP Options Alpaca account first.');
-  if (creds.mode === 'live' && !settings.liveArmed) throw new Error('Live LEAP option orders are not explicitly armed.');
-  if (creds.mode === 'live' && automaticBotSettings.owner(userId)?.strategy !== 'options') {
-    throw new Error('Another strategy owns this user’s Live authorization.');
-  }
-  if (!isMarketOpen()) throw new Error('LEAP option entries are submitted only during the regular session.');
-  let candidate = await buildOptionsCandidate(userId, symbol);
-  saveOptionsCandidates(userId, [candidate]);
-  if (!candidate.eligible || !candidate.signalBarAt || !candidate.contract) {
-    const error = new Error('LEAP setup is not eligible after fresh signal, contract, and quote checks.');
-    error.candidate = candidate;
-    throw error;
-  }
-  const [account, positions, openOrders] = await Promise.all([
-    alpacaFetchFor(userId, OPTIONS_SCOPE, '/v2/account'),
-    alpacaFetchFor(userId, OPTIONS_SCOPE, '/v2/positions'),
-    alpacaFetchFor(userId, OPTIONS_SCOPE, '/v2/orders?status=open&limit=500'),
-  ]);
-  const approval = optionApprovalState(account);
-  if (!approval.active || approval.blocked || !approval.approved) {
-    throw new Error('Alpaca account must be active, unblocked, and approved to trade long calls.');
-  }
-  if (!Array.isArray(positions) || !Array.isArray(openOrders)) throw new Error('Broker position and order capacity is unavailable.');
-  const active = db.prepare(`SELECT * FROM options_trades WHERE user_id=?
-    AND status NOT IN ('closed','rejected','canceled')`).all(userId);
-  if (active.some(row => row.underlying_symbol === symbol)) {
-    throw new Error(`${symbol} already has an active or unresolved LEAP lifecycle.`);
-  }
-  const ownedContracts = new Set(active.map(row => row.contract_symbol));
-  const foreignOptionPositions = positions.filter(row =>
-    String(row.asset_class || '').toLowerCase().includes('option')
-      && !ownedContracts.has(String(row.symbol || '')));
-  if (foreignOptionPositions.length) {
-    throw new Error('The dedicated LEAP account contains an unowned option position; entry capacity is withheld.');
-  }
-  const foreignOptionOrders = openOrders.filter(order =>
-    String(order.symbol || '').includes(symbol)
-      && !String(order.client_order_id || '').startsWith('jqf-leap-'));
-  if (foreignOptionOrders.length) throw new Error('An unowned option order is open in the dedicated LEAP account.');
-  const limitPrice = Math.ceil(Number(candidate.contract.ask) * 100) / 100;
-  const quantity = calculateLeapContracts({
-    equity: Number(account.equity),
-    maxPositionDollars: settings.maxPositionDollars,
-    premium: limitPrice,
-    multiplier: candidate.contract.multiplier,
-  });
-  if (!(quantity >= 1)) throw new Error('The 5% equity and maximum-dollar caps cannot afford one contract.');
-  settings = optionsConfigFor(userId);
-  creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-  if (!settings.enabled || !creds || (creds.mode === 'live' && (!settings.liveArmed
-        || automaticBotSettings.owner(userId)?.strategy !== 'options'))
-      || `${creds.mode}:${creds.account_id}` !== brokerIdentity) {
-    throw new Error('LEAP authorization or broker identity changed during final preflight.');
-  }
-  const pinnedCreds = { ...creds };
-  const finalAccount = await alpacaFetchWithCredentials(pinnedCreds, '/v2/account');
-  const finalApproval = optionApprovalState(finalAccount);
-  if (!finalApproval.active || finalApproval.blocked || !finalApproval.approved) {
-    throw new Error('Final Alpaca approval check failed; no order was submitted.');
-  }
-  requireOptionsExecutionLease(userId, leaseToken);
-  const nonce = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-  const entryClientId = immutableLeapClientOrderId({
-    symbol, contractSymbol: candidate.contract.symbol, purpose: 'entry', nonce,
-  });
-  const tradeId = Number(db.transaction(() => {
-    const reservation = db.prepare(`INSERT OR IGNORE INTO options_entry_reservations
-      (user_id,symbol,signal_bar_at) VALUES (?,?,?)`).run(userId, symbol, candidate.signalBarAt);
-    if (reservation.changes !== 1) throw new Error('This completed weekly LEAP signal is already reserved.');
-    const inserted = db.prepare(`INSERT INTO options_trades
-      (user_id,underlying_symbol,contract_symbol,mode,account_id,status,requested_contracts,
-       strike_price,expiration_date,multiplier,signal_bar_at,setup_json,entry_client_order_id)
-      VALUES (?,?,?,?,?,'entry_intent',?,?,?,?,?,?,?)`).run(
-        userId, symbol, candidate.contract.symbol, pinnedCreds.mode, pinnedCreds.account_id,
-        quantity, candidate.contract.strike, candidate.contract.expiration,
-        candidate.contract.multiplier, candidate.signalBarAt, JSON.stringify(candidate), entryClientId
-      );
-    db.prepare(`UPDATE options_entry_reservations SET trade_id=?
-      WHERE user_id=? AND symbol=? AND signal_bar_at=?`)
-      .run(inserted.lastInsertRowid, userId, symbol, candidate.signalBarAt);
-    return inserted.lastInsertRowid;
-  })());
-  recordOptionsEvent(userId, {
-    tradeId, symbol, eventType: 'ENTRY_INTENT', reasonCode: 'FRESH_WEEKLY_SIGNAL_RESERVED',
-    details: { contract: candidate.contract, quantity, limitPrice, source },
-    sourceAt: candidate.signalBarAt,
-  });
-  const orderBody = buildLeapEntryOrder({
-    contractSymbol: candidate.contract.symbol,
-    quantity,
-    limitPrice,
-    clientOrderId: entryClientId,
-  });
-  beginAlpacaOrderRequest(userId);
-  try {
-    const order = await alpacaFetchWithCredentials(pinnedCreds, '/v2/orders', {
-      method: 'POST', body: JSON.stringify(orderBody),
-    });
-    db.prepare(`UPDATE options_trades SET status='pending_entry',entry_order_id=?,updated_at=datetime('now')
-      WHERE id=?`).run(order?.id || entryClientId, tradeId);
-    recordOptionsEvent(userId, {
-      tradeId, symbol, eventType: 'ENTRY_SUBMITTED', reasonCode: 'BOUNDED_LIMIT',
-      details: { brokerOrderId: order?.id || null, clientOrderId: entryClientId, quantity, limitPrice },
-    });
-    return { ok: true, tradeId, candidate, order: { id: order?.id, status: order?.status } };
-  } catch (error) {
-    db.prepare(`UPDATE options_trades SET status='entry_unknown',exit_reason=?,updated_at=datetime('now')
-      WHERE id=?`).run('Entry outcome is unknown; replacement is prohibited until client-ID reconciliation.', tradeId);
-    addOptionsAlert(userId, symbol, 'ENTRY_UNKNOWN',
-      'Entry acknowledgement is unknown. Capacity remains reserved and no replacement will be submitted.');
-    recordOptionsEvent(userId, {
-      tradeId, symbol, eventType: 'ENTRY_UNKNOWN', reasonCode: 'BROKER_POST_UNCONFIRMED',
-      details: { clientOrderId: entryClientId, error: error.message },
-    });
-    throw error;
-  } finally {
-    endAlpacaOrderRequest(userId);
-  }
-}
-
-async function submitOptionsClosingOrder(userId, trade, pinnedCreds, leaseToken, {
-  purpose, quantity, type = 'market', limitPrice = null,
-}) {
-  const revision = Number(trade.target_revision || 0) + 1;
-  const clientOrderId = immutableLeapClientOrderId({
-    symbol: trade.underlying_symbol,
-    contractSymbol: trade.contract_symbol,
-    purpose,
-    nonce: `${trade.id}-${revision}`,
-  });
-  const body = type === 'limit'
-    ? buildLeapTargetOrder({
-      contractSymbol: trade.contract_symbol,
-      quantity,
-      averageEntryPremium: limitPrice / 2,
-      clientOrderId,
-    })
-    : {
-      symbol: trade.contract_symbol, qty: String(quantity), side: 'sell',
-      type: 'market', time_in_force: 'day', client_order_id: clientOrderId,
-    };
-  requireOptionsExecutionLease(userId, leaseToken);
-  if (purpose === 'target') {
-    db.prepare(`UPDATE options_trades SET target_client_order_id=?,target_order_id=?,
-      target_price=?,target_revision=?,status='target_intent',updated_at=datetime('now') WHERE id=?`)
-      .run(clientOrderId, clientOrderId, limitPrice, revision, trade.id);
-  } else {
-    db.prepare(`UPDATE options_trades SET thesis_exit_client_order_id=?,thesis_exit_order_id=?,
-      target_revision=?,status='thesis_exit_intent',exit_reason='WEEKLY_THESIS_INVALIDATED',
-      updated_at=datetime('now') WHERE id=?`)
-      .run(clientOrderId, clientOrderId, revision, trade.id);
-  }
-  recordOptionsEvent(userId, {
-    tradeId: trade.id, symbol: trade.underlying_symbol,
-    eventType: purpose === 'target' ? 'TARGET_INTENT' : 'THESIS_EXIT_INTENT',
-    reasonCode: 'INTENT_RESERVED_BEFORE_POST',
-    details: { quantity, clientOrderId, limitPrice },
-  });
-  beginAlpacaOrderRequest(userId);
-  try {
-    const order = await alpacaFetchWithCredentials(pinnedCreds, '/v2/orders', {
-      method: 'POST', body: JSON.stringify(body),
-    });
-    if (purpose === 'target') {
-      db.prepare(`UPDATE options_trades SET target_client_order_id=?,target_order_id=?,
-        target_price=?,target_revision=?,status='open',updated_at=datetime('now') WHERE id=?`)
-        .run(clientOrderId, order?.id || clientOrderId, limitPrice, revision, trade.id);
-    } else {
-      db.prepare(`UPDATE options_trades SET thesis_exit_client_order_id=?,thesis_exit_order_id=?,
-        target_revision=?,status='thesis_exit_pending',exit_reason='WEEKLY_THESIS_INVALIDATED',
-        updated_at=datetime('now') WHERE id=?`)
-        .run(clientOrderId, order?.id || clientOrderId, revision, trade.id);
-    }
-    recordOptionsEvent(userId, {
-      tradeId: trade.id, symbol: trade.underlying_symbol,
-      eventType: purpose === 'target' ? 'TARGET_SUBMITTED' : 'THESIS_EXIT_SUBMITTED',
-      reasonCode: purpose.toUpperCase(),
-      details: { quantity, clientOrderId, brokerOrderId: order?.id || null, limitPrice },
-    });
-    return order;
-  } catch (error) {
-    db.prepare(`UPDATE options_trades SET status=?,updated_at=datetime('now') WHERE id=?`)
-      .run(purpose === 'target' ? 'target_unknown' : 'thesis_exit_unknown', trade.id);
-    addOptionsAlert(userId, trade.underlying_symbol, `${purpose.toUpperCase()}_UNKNOWN`,
-      `${purpose} submission outcome is unknown and must be resolved by immutable client ID.`);
-    throw error;
-  } finally {
-    endAlpacaOrderRequest(userId);
-  }
-}
-
-async function reconcileOptionsTrades(userId, leaseToken) {
-  const trades = db.prepare(`SELECT * FROM options_trades WHERE user_id=?
-    AND status NOT IN ('closed','rejected','canceled') ORDER BY id`).all(userId);
-  if (!trades.length) return [];
-  const events = [];
-  for (const trade of trades) {
-    requireOptionsExecutionLease(userId, leaseToken);
-    const pinnedCreds = getPinnedOptionsCreds(userId, trade.mode, trade.account_id);
-    const brokerPositions = await alpacaFetchWithCredentials(pinnedCreds, '/v2/positions');
-    if (!Array.isArray(brokerPositions)) throw new Error('Alpaca option positions are unavailable.');
-    const position = brokerPositions.find(row => String(row.symbol) === trade.contract_symbol);
-    const positionQty = Math.max(0, Math.floor(Number(position?.qty || 0)));
-    for (const unexpected of brokerPositions.filter(row =>
-      LEAP_UNDERLYINGS.includes(String(row.symbol || '').toUpperCase())
-        && String(row.asset_class || '').toLowerCase() === 'us_equity')) {
-      addOptionsAlert(userId, unexpected.symbol, 'UNEXPECTED_UNDERLYING_POSITION',
-        'An underlying share position exists in the dedicated Options account. The bot will not modify it.');
-    }
-    let entryOrder;
-    try {
-      entryOrder = await alpacaFetchWithCredentials(pinnedCreds,
-        optionsOrderLookupPath(trade.entry_order_id, trade.entry_client_order_id));
-      assertLeapOwnedOrder(entryOrder, {
-        clientOrderId: trade.entry_client_order_id,
-        contractSymbol: trade.contract_symbol,
-        side: 'buy',
-        quantity: trade.requested_contracts,
-      });
-    } catch (error) {
-      if (error.alpacaStatus === 404) {
-        const oldEnough = Date.now() - Date.parse(`${trade.created_at}Z`) > 15 * 60 * 1000;
-        if (oldEnough) {
-          db.prepare(`UPDATE options_trades SET status='rejected',exit_reason='ENTRY_NOT_FOUND_BY_CLIENT_ID',
-            closed_at=datetime('now'),updated_at=datetime('now') WHERE id=?`).run(trade.id);
-          addOptionsAlert(userId, trade.underlying_symbol, 'ENTRY_MISSING',
-            'Entry was not found by immutable client ID after the reconciliation window.');
-          continue;
-        }
-      }
-      throw error;
-    }
-    if (recordOptionsFill(trade.id, entryOrder, 'ENTRY')) {
-      recordOptionsEvent(userId, {
-        tradeId: trade.id, symbol: trade.underlying_symbol, eventType: 'ENTRY_FILL',
-        reasonCode: Number(entryOrder.filled_qty) < trade.requested_contracts ? 'PARTIAL' : 'COMPLETE',
-        details: { quantity: Number(entryOrder.filled_qty), price: Number(entryOrder.filled_avg_price) },
-      });
-    }
-    let targetOrder = null;
-    let targetLookupMissing = false;
-    if (trade.target_client_order_id) {
-      try {
-        targetOrder = await alpacaFetchWithCredentials(pinnedCreds,
-          optionsOrderLookupPath(trade.target_order_id, trade.target_client_order_id));
-        if (!brokerOrderMatchesIntent(targetOrder, trade.target_client_order_id)
-            || String(targetOrder.symbol) !== trade.contract_symbol
-            || String(targetOrder.side).toLowerCase() !== 'sell') {
-          throw new Error('Broker target does not match the owned LEAP exit intent.');
-        }
-        if (recordOptionsFill(trade.id, targetOrder, 'TARGET')) {
-          recordOptionsEvent(userId, {
-            tradeId: trade.id, symbol: trade.underlying_symbol, eventType: 'EXIT_FILL',
-            reasonCode: 'PREMIUM_TARGET', details: {
-              quantity: Number(targetOrder.filled_qty), price: Number(targetOrder.filled_avg_price),
-            },
-          });
-        }
-      } catch (error) {
-        if (error.alpacaStatus !== 404) throw error;
-        targetLookupMissing = true;
-        addOptionsAlert(userId, trade.underlying_symbol, 'TARGET_MISSING',
-          'Owned target was not found. No replacement is submitted until broker state is unambiguous.');
-      }
-    }
-    let thesisExitOrder = null;
-    let thesisExitLookupMissing = false;
-    if (trade.thesis_exit_client_order_id) {
-      try {
-        thesisExitOrder = await alpacaFetchWithCredentials(pinnedCreds,
-          optionsOrderLookupPath(trade.thesis_exit_order_id, trade.thesis_exit_client_order_id));
-        if (!brokerOrderMatchesIntent(thesisExitOrder, trade.thesis_exit_client_order_id)
-            || String(thesisExitOrder.symbol) !== trade.contract_symbol
-            || String(thesisExitOrder.side).toLowerCase() !== 'sell') {
-          throw new Error('Broker thesis exit does not match the owned LEAP exit intent.');
-        }
-        if (recordOptionsFill(trade.id, thesisExitOrder, 'THESIS_EXIT')) {
-          recordOptionsEvent(userId, {
-            tradeId: trade.id, symbol: trade.underlying_symbol, eventType: 'EXIT_FILL',
-            reasonCode: 'WEEKLY_THESIS_INVALIDATED', details: {
-              quantity: Number(thesisExitOrder.filled_qty), price: Number(thesisExitOrder.filled_avg_price),
-            },
-          });
-        }
-      } catch (error) {
-        if (error.alpacaStatus !== 404) throw error;
-        thesisExitLookupMissing = true;
-        addOptionsAlert(userId, trade.underlying_symbol, 'THESIS_EXIT_MISSING',
-          'Owned thesis-exit intent was not found. Replacement remains prohibited until broker state is unambiguous.');
-      }
-    }
-    const fills = db.prepare(`SELECT purpose,quantity,price FROM options_fills WHERE trade_id=?`).all(trade.id);
-    const entryFill = fills.find(fill => fill.purpose === 'ENTRY');
-    const entryQty = Math.max(0, Number(entryFill?.quantity || entryOrder?.filled_qty || 0));
-    const entryPrice = Number(entryFill?.price || entryOrder?.filled_avg_price || 0) || null;
-    const exitFills = fills.filter(fill => fill.purpose !== 'ENTRY');
-    const exitedQty = exitFills.reduce((sum, fill) => sum + Number(fill.quantity || 0), 0);
-    const modeledRemaining = Math.max(0, entryQty - exitedQty);
-    const remaining = Math.min(modeledRemaining, positionQty || modeledRemaining);
-    const pnl = entryPrice == null ? null : exitFills.reduce((sum, fill) =>
-      sum + (Number(fill.price) - entryPrice) * Number(fill.quantity) * Number(trade.multiplier || 100), 0);
-    if (entryQty > 0 && modeledRemaining > 0 && positionQty === 0
-        && ['filled', 'canceled', 'expired', 'rejected'].includes(String(entryOrder.status).toLowerCase())) {
-      addOptionsAlert(userId, trade.underlying_symbol, 'CONTRACT_LIFECYCLE_CHANGE',
-        'Broker no longer reports the filled option position. Exercise, assignment, expiry, or an external close requires review.');
-      const exitsToCancel = closingOrdersToCancelOnPositionLoss([
-        {
-          purpose: 'target', clientOrderId: trade.target_client_order_id,
-          order: targetOrder, lookupMissing: targetLookupMissing,
-        },
-        {
-          purpose: 'thesis', clientOrderId: trade.thesis_exit_client_order_id,
-          order: thesisExitOrder, lookupMissing: thesisExitLookupMissing,
-        },
-      ]);
-      for (const ownedExit of exitsToCancel) {
-        requireOptionsExecutionLease(userId, leaseToken);
-        await alpacaFetchWithCredentials(pinnedCreds,
-          `/v2/orders/${encodeURIComponent(ownedExit.order.id)}`, { method: 'DELETE' });
-      }
-      db.prepare(`UPDATE options_trades SET status='lifecycle_review',filled_contracts=?,
-        contracts_remaining=?,entry_price=?,pnl=NULL,exit_reason='BROKER_POSITION_REMOVED_UNVERIFIED',
-        closed_at=NULL,updated_at=datetime('now') WHERE id=?`)
-        .run(entryQty, modeledRemaining, entryPrice, trade.id);
-      recordOptionsEvent(userId, {
-        tradeId: trade.id, symbol: trade.underlying_symbol,
-        eventType: 'LIFECYCLE_REVIEW_REQUIRED',
-        reasonCode: 'BROKER_POSITION_REMOVED_UNVERIFIED',
-        details: {
-          modeledRemaining,
-          targetStatus: targetOrder?.status || (targetLookupMissing ? 'lookup_missing' : null),
-          thesisExitStatus: thesisExitOrder?.status || (thesisExitLookupMissing ? 'lookup_missing' : null),
-          cancellationRequested: exitsToCancel.map(item => item.purpose),
-        },
-      });
-      events.push({ id: trade.id, event: 'broker option position removed; lifecycle held for review' });
-      continue;
-    }
-    if (entryQty > 0 && modeledRemaining <= 0) {
-      db.prepare(`UPDATE options_trades SET status='closed',filled_contracts=?,contracts_remaining=0,
-        entry_price=?,pnl=?,closed_at=datetime('now'),updated_at=datetime('now') WHERE id=?`)
-        .run(entryQty, entryPrice, pnl, trade.id);
-      events.push({ id: trade.id, event: 'all broker-confirmed contracts closed' });
-      continue;
-    }
-    let thesis = { invalidated: false };
-    if (entryQty > 0) {
-      try {
-        const { weeklyBars } = await loadOptionsWeeklyBars(userId, trade.underlying_symbol);
-        thesis = leapThesisInvalidated({ weeklyBars });
-      } catch (error) {
-        addOptionsAlert(userId, trade.underlying_symbol, 'THESIS_EVIDENCE_UNAVAILABLE',
-          'Completed weekly thesis evidence is unavailable. No discretionary exit assumption was made.');
-        recordOptionsEvent(userId, {
-          tradeId: trade.id, symbol: trade.underlying_symbol,
-          eventType: 'THESIS_CHECK_UNAVAILABLE', reasonCode: 'DATA_UNAVAILABLE',
-          details: { error: error.message },
-        });
-      }
-    }
-    const targetState = classifyExitIntent({
-      clientOrderId: trade.target_client_order_id,
-      order: targetOrder,
-      lookupMissing: targetLookupMissing,
-    });
-    const thesisExitState = classifyExitIntent({
-      clientOrderId: trade.thesis_exit_client_order_id,
-      order: thesisExitOrder,
-      lookupMissing: thesisExitLookupMissing,
-    });
-    const targetRemaining = targetOrder
-      ? Math.max(0, Number(targetOrder.qty || 0) - Number(targetOrder.filled_qty || 0)) : null;
-    const action = decideLeapExitAction({
-      remaining,
-      thesisInvalidated: thesis.invalidated,
-      target: targetState,
-      thesisExit: thesisExitState,
-      targetRemaining,
-    });
-    let stateOverride = null;
-    if (action.action === 'CANCEL_TARGET') {
-      if (!targetOrder?.id) {
-        stateOverride = 'target_unknown';
-      } else {
-        requireOptionsExecutionLease(userId, leaseToken);
-        await alpacaFetchWithCredentials(pinnedCreds,
-          `/v2/orders/${encodeURIComponent(targetOrder.id)}`, { method: 'DELETE' });
-        stateOverride = thesis.invalidated ? 'thesis_exit_canceling' : 'target_repair_canceling';
-        db.prepare(`UPDATE options_trades SET status=?,exit_reason=?,updated_at=datetime('now') WHERE id=?`)
-          .run(stateOverride, thesis.invalidated ? 'WEEKLY_THESIS_INVALIDATED' : trade.exit_reason, trade.id);
-        addOptionsAlert(userId, trade.underlying_symbol,
-          thesis.invalidated ? 'THESIS_EXIT_PENDING' : 'TARGET_RESIZE_PENDING',
-          thesis.invalidated
-            ? 'Completed weekly structure invalidated the thesis. The owned target must be broker-confirmed canceled before a full close.'
-            : 'The owned target quantity is being canceled and will be replaced only after broker confirmation.');
-      }
-    } else if (action.action === 'SUBMIT_THESIS_EXIT' && isMarketOpen()) {
-      await submitOptionsClosingOrder(userId, trade, pinnedCreds, leaseToken, {
-        purpose: 'thesis', quantity: remaining, type: 'market',
-      });
-      stateOverride = 'thesis_exit_pending';
-    } else if (action.action === 'SUBMIT_TARGET' && entryPrice > 0) {
-      await submitOptionsClosingOrder(userId, trade, pinnedCreds, leaseToken, {
-        purpose: 'target', quantity: remaining, type: 'limit', limitPrice: entryPrice * 2,
-      });
-      stateOverride = 'open';
-    } else if (action.action === 'WAIT' && (
-      targetState.state === 'UNRESOLVED' || targetState.state === 'CANCEL_PENDING'
-      || thesisExitState.state === 'UNRESOLVED' || thesisExitState.state === 'CANCEL_PENDING'
-    )) {
-      stateOverride = thesis.invalidated ? 'thesis_exit_waiting' : 'target_waiting';
-    }
-    const nextStatus = stateOverride || (entryQty > 0
-      ? (thesis.invalidated ? 'thesis_exit_pending' : 'open')
-      : ['canceled', 'rejected', 'expired'].includes(String(entryOrder.status).toLowerCase()) ? 'canceled'
-        : String(entryOrder.status).toLowerCase() === 'partially_filled' ? 'partial_entry' : 'pending_entry');
-    db.prepare(`UPDATE options_trades SET status=?,filled_contracts=?,contracts_remaining=?,
-      entry_price=?,target_price=?,pnl=?,closed_at=CASE WHEN ?='canceled' THEN datetime('now') ELSE closed_at END,
-      updated_at=datetime('now') WHERE id=?`).run(
-        nextStatus, entryQty, remaining, entryPrice, entryPrice ? entryPrice * 2 : null,
-        pnl, nextStatus, trade.id
-      );
-    recordOptionsEvent(userId, {
-      tradeId: trade.id, symbol: trade.underlying_symbol, eventType: 'RECONCILIATION',
-      reasonCode: nextStatus, details: {
-        entryQty, exitedQty, positionQty, remaining, targetState: targetState.state,
-        thesisExitState: thesisExitState.state, action, thesisInvalidated: thesis.invalidated, pnl,
-      },
-    });
-  }
-  return events;
-}
-
-function optionsTradeRows(userId) {
-  return db.prepare(`SELECT id,underlying_symbol AS symbol,contract_symbol AS contractSymbol,mode,status,
-    requested_contracts AS requestedContracts,filled_contracts AS filledContracts,
-    contracts_remaining AS contractsRemaining,entry_price AS entryPrice,target_price AS targetPrice,
-    strike_price AS strikePrice,expiration_date AS expirationDate,exit_reason AS exitReason,
-    pnl,created_at AS createdAt,closed_at AS closedAt
-    FROM options_trades WHERE user_id=? ORDER BY id DESC LIMIT 100`).all(userId);
-}
-
+// ── Day-trading comparison report ─────────────────────────────────────────────
 app.get('/api/strategy-comparison/day-trading', requireAuth, (_req, res) => {
   try {
     const evidencePath = path.join(__dirname, 'reports', 'day-trading-comparison-evidence.json');
@@ -7201,351 +6146,6 @@ app.get('/api/strategy-comparison/day-trading', requireAuth, (_req, res) => {
     res.status(503).json({ error: `Day-trading comparison evidence is unavailable: ${error.message}` });
   }
 });
-
-app.get('/api/options/settings', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const settings = optionsConfigFor(userId);
-    res.set('Cache-Control', 'no-store').json({
-      enabled: settings.enabled, liveArmed: settings.liveArmed,
-      maxPositionDollars: settings.maxPositionDollars,
-    });
-  } catch (_) { res.status(503).json({ error: 'Options settings are temporarily unavailable.' }); }
-});
-
-app.put('/api/options/settings', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    if (req.body?.enabled === true && !automatedTradingPersistenceReady) {
-      return res.status(503).json({ error: 'Durable automated-trading persistence is unavailable; LEAP entries remain paused until the PostgreSQL schema is published.' });
-    }
-    // Enabling LEAP automation requires a verified email (pre-deploy users grandfathered).
-    if (req.body?.enabled === true && !emailVerifiedIn(db, userId)) {
-      return res.status(403).json({ error: EMAIL_UNVERIFIED_ERROR, code: 'EMAIL_UNVERIFIED' });
-    }
-    db.prepare('INSERT OR IGNORE INTO options_settings(user_id) VALUES (?)').run(userId);
-    const prior = optionsConfigFor(userId);
-    const maxPositionDollars = Math.min(OPTIONS_MAX_POSITION_DOLLARS,
-      Math.max(1, Number(req.body?.maxPositionDollars ?? prior.maxPositionDollars)));
-    if (!Number.isFinite(maxPositionDollars)) return res.status(400).json({ error: 'Maximum position dollars must be finite.' });
-    const creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-    const expectedBrokerIdentity = creds ? `${creds.mode}:${creds.account_id}` : null;
-    let liveArmed = false;
-    if (req.body?.liveArmed === true) {
-      if (creds?.mode !== 'live') return res.status(400).json({ error: 'Select the dedicated Live Options account before arming.' });
-      const approval = optionApprovalState(await alpacaFetchFor(userId, OPTIONS_SCOPE, '/v2/account'));
-      if (!approval.active || approval.blocked || !approval.approved) {
-        return res.status(400).json({ error: 'Alpaca must confirm an active, unblocked, long-call-approved account before Live arming.' });
-      }
-      liveArmed = true;
-    }
-    const enabled = req.body?.enabled === true;
-    if (!enabled) liveArmed = false;
-    const activationIsCurrent = () => {
-      const current = optionsConfigFor(userId);
-      const currentCreds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-      const currentBrokerIdentity = currentCreds ? `${currentCreds.mode}:${currentCreds.account_id}` : null;
-      return current.activationRevision === prior.activationRevision
-        && currentBrokerIdentity === expectedBrokerIdentity;
-    };
-    const persist = () => {
-      const saved = db.prepare(`UPDATE options_settings SET enabled=?,live_armed=?,max_position_dollars=?,
-        activation_revision=activation_revision+1,updated_at=datetime('now')
-        WHERE user_id=? AND activation_revision=?`).run(
-        enabled ? 1 : 0, liveArmed ? 1 : 0, maxPositionDollars, userId, prior.activationRevision
-      );
-      if (saved.changes !== 1) {
-        const error = new Error('Options authorization changed while broker verification was pending.');
-        error.status = 409;
-        throw error;
-      }
-    };
-    if (liveArmed && enabled) automaticBotSettings.arm(userId, 'options', persist, activationIsCurrent);
-    else {
-      if (!activationIsCurrent()) {
-        const error = new Error('Options settings changed in another browser tab. Refresh and retry.');
-        error.status = 409;
-        throw error;
-      }
-      persist();
-      automaticBotSettings.revoke(userId, 'options');
-    }
-    const fleet = automaticBotSettings.status(userId, 'options', {
-      mode: creds?.mode || 'paper', enabled, liveArmed,
-    });
-    await automatedState.flush('options-settings-saved');
-    res.json({ ok: true, enabled, liveArmed, maxPositionDollars, ...fleet });
-  } catch (error) { res.status(error.status || 503).json({ error: `Options settings could not be saved: ${error.message}` }); }
-});
-
-app.get('/api/options/readiness', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const settings = optionsConfigFor(userId);
-    const creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-    let account = null;
-    let brokerError = null;
-    if (creds) {
-      try { account = await alpacaFetchFor(userId, OPTIONS_SCOPE, '/v2/account'); }
-      catch (error) { brokerError = error.message; }
-    }
-    const approval = optionApprovalState(account);
-    const brokerReady = !!creds && !!account && approval.active && !approval.blocked && approval.approved;
-    const blockers = [];
-    if (!creds) blockers.push('A dedicated LEAP Options Alpaca account is not connected.');
-    else if (!account) blockers.push(`Broker readiness failed: ${brokerError || 'Alpaca did not respond.'}`);
-    else {
-      if (!approval.active) blockers.push('Alpaca reports that the Options account is not active.');
-      if (approval.blocked) blockers.push('Alpaca reports that trading is blocked.');
-      if (!approval.approved) blockers.push(`Long-call approval level ${OPTIONS_MIN_APPROVAL_LEVEL} is required.`);
-    }
-    if (!settings.enabled) blockers.push('LEAP Options automation is paused.');
-    if (creds?.mode === 'live' && !settings.liveArmed) blockers.push('Live LEAP option orders are not explicitly armed.');
-    const fleet = automaticBotSettings.status(userId, 'options', {
-      mode: creds?.mode || 'paper', enabled: settings.enabled, liveArmed: settings.liveArmed,
-    });
-    if (creds?.mode === 'live' && settings.liveArmed && fleet.liveOwner !== 'options') {
-      blockers.push('Another strategy owns this user’s Live authorization.');
-    }
-    if (!isMarketOpen()) blockers.push('New entries wait for the next regular-session window.');
-    res.set('Cache-Control', 'no-store').json({
-      connected: !!creds,
-      accountId: creds?.account_id || null,
-      mode: creds?.mode || 'paper',
-      enabled: settings.enabled,
-      liveArmed: settings.liveArmed,
-      posture: fleet.posture,
-      liveOwner: fleet.liveOwner,
-      ready: brokerReady && settings.enabled && (creds?.mode !== 'live' || (settings.liveArmed && fleet.liveOwner === 'options')),
-      reconciliationReady: !!creds && !!account && approval.active && !approval.blocked,
-      entryReadyNow: brokerReady && settings.enabled && isMarketOpen()
-        && (creds?.mode !== 'live' || (settings.liveArmed && fleet.liveOwner === 'options')),
-      optionsApproval: approval.label,
-      optionsApprovedLevel: approval.approvedLevel,
-      optionsTradingLevel: approval.tradingLevel,
-      broker: {
-        reachable: !!account, active: approval.active,
-        tradingBlocked: account?.trading_blocked === true,
-        accountBlocked: account?.account_blocked === true,
-      },
-      scheduler: {
-        status: settings.runtime.lastCycleStatus || 'WAITING',
-        lastCycleAt: settings.runtime.lastCycleAt,
-        lastReason: settings.runtime.lastCycleReason,
-      },
-      blockers,
-      riskPolicy: {
-        equityCapFraction: 0.05,
-        maxPositionDollars: settings.maxPositionDollars,
-        contractMultiplier: 100,
-        premiumTargetMultiple: 2,
-      },
-      ...settings.runtime,
-    });
-  } catch (_) { res.status(503).json({ error: 'Options readiness could not be verified.' }); }
-});
-
-app.post('/api/options/scan', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    if (!getAlpacaCreds(userId, OPTIONS_SCOPE)) {
-      return res.status(400).json({ error: 'Connect the dedicated Options Alpaca account to scan.' });
-    }
-    res.set('Cache-Control', 'no-store').json(await scanOptionsUniverse(userId));
-  } catch (error) { res.status(503).json({ error: `Options scan unavailable: ${error.message}` }); }
-});
-
-app.get('/api/options/candidates', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const stored = db.prepare(`SELECT payload_json,evaluated_at FROM options_candidates
-      WHERE user_id=? ORDER BY evaluated_at DESC LIMIT 3`).all(userId);
-    const results = stored.map(row => {
-      try { return JSON.parse(row.payload_json); } catch (_) { return null; }
-    }).filter(Boolean);
-    res.set('Cache-Control', 'no-store').json({
-      strategy: 'leap-options-v1', results, candidates: results,
-      evaluatedAt: stored[0]?.evaluated_at || null,
-    });
-  } catch (_) { res.status(503).json({ error: 'Stored Options candidates could not be loaded.' }); }
-});
-
-app.post('/api/options/execute', requireAuth, async (req, res) => {
-  res.status(409).json({ error: 'LEAP Options entries are submitted only by the server automation scheduler.' });
-});
-
-app.get('/api/options/trades', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    res.json({ trades: optionsTradeRows(userId) });
-  } catch (_) { res.status(503).json({ error: 'Options broker journal could not be loaded.' }); }
-});
-
-app.get('/api/options/alerts', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const alerts = db.prepare(`SELECT id,symbol,type,message,created_at AS createdAt FROM options_alerts
-      WHERE user_id=? AND resolved_at IS NULL ORDER BY id DESC LIMIT 50`).all(userId);
-    res.json({ alerts });
-  } catch (_) { res.status(503).json({ error: 'Options alerts could not be loaded.' }); }
-});
-
-app.get('/api/options/performance', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const values = db.prepare(`SELECT pnl FROM options_trades
-      WHERE user_id=? AND status='closed' AND pnl IS NOT NULL`).all(userId)
-      .map(row => Number(row.pnl)).filter(Number.isFinite);
-    res.json({ metrics: {
-      trades: values.length,
-      closedTrades: values.length,
-      winRate: values.length ? values.filter(value => value > 0).length / values.length : null,
-      netPnl: values.reduce((sum, value) => sum + value, 0),
-      averagePnl: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
-    } });
-  } catch (_) { res.status(503).json({ error: 'Options performance could not be loaded.' }); }
-});
-
-app.post('/api/options/reconcile', requireAuth, async (req, res) => {
-  let userId;
-  try { userId = await ensureSessionUserInTradingStore(req); }
-  catch (_) { return res.status(503).json({ error: 'Options trading identity could not be verified.' }); }
-  if (!acquireExecutionLock(userId)) return res.status(409).json({ error: 'Another broker order cycle is in progress.' });
-  const lease = acquireOptionsExecutionLease(userId);
-  if (!lease) { releaseExecutionLock(userId); return res.status(409).json({ error: 'Another Options cycle is still reconciling.' }); }
-  try {
-    if (!getAlpacaCreds(userId, OPTIONS_SCOPE)) throw new Error('Connect the dedicated Options Alpaca account first.');
-    const reconciled = await reconcileOptionsTrades(userId, lease);
-    res.json({ ok: true, reconciled, trades: optionsTradeRows(userId) });
-  } catch (error) { res.status(400).json({ error: error.message }); }
-  finally { releaseOptionsExecutionLease(userId, lease); releaseExecutionLock(userId); }
-});
-
-app.get('/api/options/simulation', requireAuth, async (req, res) => {
-  try {
-    const userId = await ensureSessionUserInTradingStore(req);
-    const symbol = String(req.query.symbol || 'QQQ').trim().toUpperCase();
-    if (!LEAP_UNDERLYINGS.includes(symbol)) return res.status(400).json({ error: 'Only QQQ, TQQQ, and SOXL are eligible.' });
-    if (!getAlpacaCreds(userId, OPTIONS_SCOPE)) {
-      return res.status(400).json({ error: 'Connect the dedicated Options Alpaca account to load verified history.' });
-    }
-    const { weeklyBars } = await loadOptionsWeeklyBars(userId, symbol, 10);
-    const replay = simulateLeapOptionsStrategy({ symbol, weeklyBars });
-    res.json({
-      strategy: replay.strategy,
-      symbol,
-      insufficientEvidence: replay.summary.signals < 20,
-      note: 'Completed-week signal chronology only. Historical option-premium results are unavailable unless verified contract bars exist; none are synthesized.',
-      historicalOptionResults: replay.summary.historicalOptionResults,
-      metrics: {
-        trades: replay.summary.signals,
-        signals: replay.summary.signals,
-        winRate: null,
-        expectancyR: null,
-      },
-      records: replay.records.slice(-100),
-    });
-  } catch (error) { res.status(503).json({ error: `Options simulation unavailable: ${error.message}` }); }
-});
-
-app.get('/api/options/execution-quality', requireAuth, (req, res) => {
-  const fixtureNow = Date.parse('2026-01-01T15:00:00Z');
-  const fixtureContract = {
-    symbol: 'QQQ270115C00550000', underlying_symbol: 'QQQ', type: 'call',
-    strike_price: '550', expiration_date: '2027-01-15', multiplier: '100',
-  };
-  const checks = [
-    { name: 'Fixed underlying universe', status: LEAP_UNDERLYINGS.join(',') === 'QQQ,TQQQ,SOXL' ? 'PASS' : 'FAIL' },
-    { name: '360-day actual contract selection', status: selectLeapContract([fixtureContract], { symbol: 'QQQ', underlyingPrice: 500, now: fixtureNow }) ? 'PASS' : 'FAIL' },
-    { name: '100x integer premium sizing', status: calculateLeapContracts({ equity: 100000, maxPositionDollars: 5000, premium: 10, multiplier: 100 }) === 5 ? 'PASS' : 'FAIL' },
-    { name: 'Stale quote rejection', status: quotePassesLeapGates(fixtureContract, { bid: 9, ask: 10, t: '2025-12-01T15:00:00Z' }, { now: fixtureNow }) == null ? 'PASS' : 'FAIL' },
-    { name: 'Wide quote rejection', status: quotePassesLeapGates(fixtureContract, { bid: 5, ask: 10, t: '2026-01-01T14:59:50Z' }, { now: fixtureNow }) == null ? 'PASS' : 'FAIL' },
-    { name: 'Immutable client-order ownership', status: 'PASS' },
-    { name: 'Partial-fill target sizing', status: summarizeLeapFills({ filled_qty: 2 }, [{ id: 'x', status: 'new', qty: 2, filled_qty: 0 }]).targetCovered ? 'PASS' : 'FAIL' },
-    { name: '100% premium target math', status: buildLeapTargetOrder({ contractSymbol: fixtureContract.symbol, quantity: 1, averageEntryPremium: 10, clientOrderId: 'jqf-leap-test' }).limit_price === '20.00' ? 'PASS' : 'FAIL' },
-    { name: 'Timeout replacement prohibition', status: 'PASS' },
-    { name: 'Completed-week thesis exits', status: 'PASS' },
-    { name: 'Live-arm reset on broker changes', status: 'PASS' },
-    { name: 'Verified option-history availability', status: 'INSUFFICIENT' },
-  ];
-  res.json({
-    generatedAt: new Date().toISOString(),
-    environment: 'DETERMINISTIC_POLICY_HARNESS',
-    checks,
-    note: 'PASS validates deterministic safety contracts only. It does not claim a live fill or fabricate historical option performance.',
-  });
-});
-
-async function runOptionsCycle(userId, source = 'server-scheduler') {
-  const outcome = { bot: 'options', source, status: 'skipped', reconciled: 0, submitted: false };
-  const finish = details => {
-    const result = { ...outcome, ...details };
-    recordOptionsCycle(userId, result);
-    return result;
-  };
-  const creds = getAlpacaCreds(userId, OPTIONS_SCOPE);
-  const settings = optionsConfigFor(userId);
-  if (!creds) return finish({ reason: 'Dedicated Options broker account is not connected.' });
-  if (!acquireExecutionLock(userId)) return finish({ status: 'busy', reason: 'Another broker cycle is in progress.' });
-  const lease = acquireOptionsExecutionLease(userId);
-  if (!lease) {
-    releaseExecutionLock(userId);
-    return finish({ status: 'busy', reason: 'Options reconciliation is already in progress.' });
-  }
-  try {
-    const events = await reconcileOptionsTrades(userId, lease);
-    outcome.reconciled = events.length;
-    if (!automatedTradingPersistenceReady) return finish({
-      status: 'reconciled_persistence_blocked',
-      reason: 'Durable automated-trading PostgreSQL schema is unavailable; existing lifecycles were reconciled and new entries were withheld.',
-    });
-    if (!settings.enabled) return finish({
-      status: 'reconciled_paused',
-      reason: 'Automation is paused; broker-confirmed option positions and owned exits were still reconciled.',
-    });
-    if (creds.mode === 'live' && !settings.liveArmed) return finish({
-      status: 'reconciled_live_unarmed',
-      reason: 'Live entries are unarmed; existing option positions and exits were still reconciled.',
-    });
-    if (creds.mode === 'live' && automaticBotSettings.owner(userId)?.strategy !== 'options') return finish({
-      status: 'reconciled_live_shadowing',
-      reason: 'Another strategy owns Live authorization; existing option positions and exits were still reconciled.',
-    });
-    if (!isMarketOpen()) return finish({ status: 'market_closed', reason: 'New option entries wait for the regular session.' });
-    const lastScan = Date.parse(settings.runtime.lastScanAt || '');
-    if (Number.isFinite(lastScan) && Date.now() - lastScan < 6 * 60 * 60 * 1000) {
-      return finish({ status: 'reconciled', reason: 'Existing LEAP lifecycles reconciled; the next fixed-universe scan is not due.' });
-    }
-    const sharedContext = await getAutomaticBotContext({ userId, strategy: 'leap-options-v1' });
-    const scan = await scanOptionsUniverse(userId, sharedContext);
-    const eligible = scan.results.filter(row => row.eligible);
-    if (!eligible.length) return finish({
-      status: 'no_entry', reason: 'No QQQ, TQQQ, or SOXL completed-week signal currently qualifies.',
-    });
-    for (const candidate of eligible) {
-      const active = db.prepare(`SELECT 1 FROM options_trades WHERE user_id=? AND underlying_symbol=?
-        AND status NOT IN ('closed','rejected','canceled') LIMIT 1`).get(userId, candidate.symbol);
-      if (!active) {
-        await executeOptionsEntry(userId, candidate.symbol, source, lease);
-        return finish({
-          status: 'submitted', submitted: true, symbol: candidate.symbol,
-          reason: `Submitted a bounded long-call LEAP entry intent for ${candidate.symbol}.`,
-        });
-      }
-    }
-    return finish({ status: 'no_capacity', reason: 'Every qualifying underlying already has an active LEAP lifecycle.' });
-  } catch (error) {
-    console.warn(`[Options] user ${userId} cycle withheld: ${error.message}`);
-    addOptionsAlert(userId, null, 'CYCLE_WITHHELD', String(error.message || 'Options cycle was withheld.'));
-    return finish({ status: 'withheld', reason: String(error.message || 'Safety gates withheld the cycle.').slice(0, 300) });
-  } finally {
-    releaseOptionsExecutionLease(userId, lease);
-    if (automatedTradingPersistenceReady) {
-      await automatedState.flush('options-cycle-final');
-    }
-    releaseExecutionLock(userId);
-  }
-}
 
 // ── Global trading settings (position size + leverage) ───────────────────────
 db.prepare(`
@@ -7583,62 +6183,8 @@ app.put('/api/trade-settings', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Helper: group daily OHLCV bars into weekly bars (ISO Mon–Fri) ─────────────
-
-
-// LEAP reconciliation runs independently of browser sessions and continues for
-// open broker lifecycles even when new entries are paused.
-let optionsSchedulerRunning = false;
-let optionsSchedulerStarted = false;
-let optionsSchedulerTimer = null;
-let optionsSchedulerCycle = Promise.resolve();
-function startOptionsScheduler() {
-  if (optionsSchedulerStarted) return;
-  optionsSchedulerStarted = true;
-  optionsSchedulerTimer = setInterval(() => {
-    if (!automatedTradingPersistenceReady || optionsSchedulerRunning) return;
-    optionsSchedulerRunning = true;
-    optionsSchedulerCycle = (async () => {
-      const users = db.prepare(`SELECT user_id FROM options_settings WHERE enabled=1
-        UNION SELECT DISTINCT user_id FROM options_trades
-        WHERE status NOT IN ('closed','rejected','canceled')`).all();
-      for (const { user_id: userId } of users) {
-        try { pruneOptionsDiagnostics(userId); } catch (_) { /* Prune is best-effort. */ }
-        await runOptionsCycle(userId);
-      }
-    })().catch(error => {
-      console.error('[Options] scheduler cycle failed safely:', error.message);
-    }).finally(() => {
-      optionsSchedulerRunning = false;
-    });
-  }, 2 * 60 * 1000);
-  optionsSchedulerTimer.unref?.();
-}
-async function stopOptionsScheduler() {
-  optionsSchedulerStarted = false;
-  if (optionsSchedulerTimer) clearInterval(optionsSchedulerTimer);
-  optionsSchedulerTimer = null;
-  await optionsSchedulerCycle;
-}
-// Preserve the established two-minute reconciliation cadence from process
-// startup. The callback remains inert until durable persistence is ready.
-startOptionsScheduler();
-
-// Never expose database, broker, or internal stack traces to visitors. Session
-// and API failures remain explicit and retryable while the homepage gets a
-// small, safe maintenance response for unexpected server errors.
-const b2Service = mountB2({
-  app, db: automatedDb, requireAuth, ensureSessionUserInTradingStore,
-  vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-  emailVerified: uid => emailVerifiedIn(automatedDb, uid),
-});
-let b2SchedulerStarted = false;
-let serviceShuttingDown = false;
-
-// Warrior is wired next to B2: own tables, own scheduler, own lease. The
-// deleted S&D bot is not restored. Proposals never auto-submit.
+// Warrior: own tables, own scheduler, own lease. The deleted S&D bot is not
+// restored. Proposals never auto-submit.
 const warriorService = createWarriorService({
   db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
@@ -7669,12 +6215,7 @@ mountFlipper({ app, service: flipperService, requireAuth, ensureSessionUserInTra
 let flipperSchedulerStarted = false;
 
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
-// runs even while the bots are paused. In-cycle prunes (B2 tick, Warrior and
-// Crypto scan loops) keep it lean once re-enabled.
-for (const row of automatedDb.prepare('SELECT user_id FROM b2_settings').all()) {
-  try { b2Service.pruneDiagnostics(row.user_id); }
-  catch (error) { console.warn('[B2] boot prune failed:', error.message); }
-}
+// runs even while the bots are paused.
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
   try { warriorService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
@@ -7688,6 +6229,20 @@ for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').al
   catch (error) { console.warn('[Flipper] boot prune failed:', error.message); }
 }
 
+// Johnny 2026-10-01: B2 and LEAP/options bots deleted. Drop their tables from
+// the durable automated database (idempotent; runs every boot until the
+// Postgres snapshot no longer carries them).
+for (const table of [
+  'b2_settings', 'b2_credentials', 'b2_leases', 'b2_universe', 'b2_coverage',
+  'b2_candidates', 'b2_priority', 'b2_trades', 'b2_exit_fills', 'b2_alerts',
+  'options_settings', 'options_alpaca_creds', 'options_alpaca_active_mode',
+  'options_candidates', 'options_entry_reservations', 'options_trades',
+  'options_fills', 'options_alerts', 'options_events', 'options_execution_leases',
+]) {
+  try { automatedDb.exec(`DROP TABLE IF EXISTS "${table}"`); }
+  catch (error) { console.warn(`[Teardown] drop ${table} failed:`, error.message); }
+}
+
 // Readiness verifies the live PostgreSQL fence and all scheduler loops without
 // exposing account, credential, owner, or strategy details.
 app.get('/readyz', async (_req, res) => {
@@ -7697,15 +6252,9 @@ app.get('/readyz', async (_req, res) => {
   } catch (error) {
     console.warn('[Health] PostgreSQL readiness probe failed:', error.message);
   }
-  const b2Lifecycle = b2Service.lifecycleStatus();
-  const optionsScheduled = optionsSchedulerStarted && optionsSchedulerTimer !== null;
   const ready = !serviceShuttingDown
     && automatedTradingPersistenceReady
     && databaseReady
-    && optionsScheduled
-    && b2SchedulerStarted
-    && b2Lifecycle.running
-    && b2Lifecycle.scheduled
     && warriorSchedulerStarted
     && cryptoSchedulerStarted
     && flipperSchedulerStarted;
@@ -7714,8 +6263,6 @@ app.get('/readyz', async (_req, res) => {
     database: databaseReady ? 'ready' : 'unavailable',
     fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
     schedulers: {
-      options: optionsScheduled ? 'started' : 'stopped',
-      b2: b2Lifecycle.running && b2Lifecycle.scheduled ? 'started' : 'stopped',
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
       crypto: cryptoSchedulerStarted ? 'started' : 'stopped',
       flipper: flipperSchedulerStarted ? 'started' : 'stopped',
@@ -7758,19 +6305,16 @@ async function stopAutomatedState(signal) {
   serviceShuttingDown = true;
   let failed = false;
   try {
-    b2SchedulerStarted = false;
     warriorSchedulerStarted = false;
     cryptoSchedulerStarted = false;
     flipperSchedulerStarted = false;
     const cryptoDrain = cryptoService.drain();
     const warriorDrain = warriorService.drain();
     const flipperDrain = flipperService.drain();
-    const b2Drain = b2Service.drain();
-    const optionsDrain = stopOptionsScheduler();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([cryptoDrain, warriorDrain, flipperDrain, b2Drain, optionsDrain]);
+    await Promise.all([cryptoDrain, warriorDrain, flipperDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -7788,9 +6332,7 @@ process.once('SIGINT', () => { void stopAutomatedState('SIGINT'); });
 function startServer() {
   httpServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);
-  b2Service.start();
-  b2SchedulerStarted = true;
-  warriorService.start(); // first run delayed ~30s, staggered from B2
+  warriorService.start(); // first run delayed ~30s
   warriorSchedulerStarted = true;
   // Crypto first run is delayed by the service itself (~45s), staggered after
   // Warrior's ~30s; crypto trades 24/7 with no market-hours gating.

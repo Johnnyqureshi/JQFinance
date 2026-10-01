@@ -6,6 +6,7 @@ const {
   DEFAULT_ORB_RULES,
   parseWatchlist,
   computeOpeningRange,
+  computeRsi,
   classifyRegime,
   scoreSetup,
   evaluateEntry,
@@ -49,14 +50,19 @@ function minuteBars(startHm, count, fn, dateStr = D) {
   return out;
 }
 
-// Canonical 15-min OR: high 100.50 (bar 4), low 99.50 (bar 9).
+// Canonical 15-min OR: high 100.50 (bar 4), low 99.50 (bar 9). Closes carry
+// small two-sided variance (a perfectly flat close series makes RSI(14)
+// degenerate — any uptick reads 100 — which would trip the maxRsiLong
+// entry filter in every fixture). Highs/lows are unchanged, so the OR
+// levels and all stop/target math are identical to the flat version.
+const OR_CLOSES = [100.00, 99.85, 100.12, 99.88, 100.10, 99.86, 100.08, 99.90, 100.06, 99.92, 100.04, 99.94, 100.02, 99.96, 100.00];
 function orBars() {
   return minuteBars('09:30', 15, (t, i) => ({
     t,
     o: 99.90,
     h: i === 4 ? 100.50 : 100.10 + (i % 5) * 0.05,
     l: i === 9 ? 99.50 : 99.80 - (i % 3) * 0.05,
-    c: 100.00,
+    c: OR_CLOSES[i],
     v: 20000,
   }));
 }
@@ -167,10 +173,11 @@ test('DEFAULT_ORB_RULES carries every spec setting with spec defaults', () => {
   assert.equal(r.stopPct, 1.5);
   assert.equal(r.atrStopMult, 1.5);
   assert.equal(r.dollarRisk, 25);
-  assert.deepEqual(r.targets.map(t => ({ ...t })), [{ r: 1.5, pct: 50 }, { r: 3, pct: 50 }]);
+  assert.deepEqual(r.targets.map(t => ({ ...t })), [{ r: 2, pct: 25 }]);
   assert.equal(r.breakevenR, 1);
-  assert.equal(r.trailMode, 'none');
-  assert.equal(r.orWidthTargets, true);
+  assert.equal(r.trailMode, 'atr');
+  assert.equal(r.orWidthTargets, false);
+  assert.equal(r.maxRsiLong, 75);
   assert.equal(r.maxDailyLossDollars, 200);
   assert.equal(r.maxTradesPerDay, 10);
   assert.equal(r.maxConsecLosses, 3);
@@ -403,13 +410,11 @@ test('evaluateEntry: happy-path long enters with full plan and WHY', () => {
   assert.deepEqual(res.rejectReasons, []);
   assert.equal(res.entry, 100.75);
   assert.equal(res.stop, 100.15); // ATR 1.5x: 100.75 - 1.5*0.40
-  assert.ok(Array.isArray(res.targets) && res.targets.length === 4);
-  assert.ok(res.targets.some(t => t.type === 'or-width'));
-  // OR-width projections: long = OR high + 1x/2x width
-  const ow = res.targets.filter(t => t.type === 'or-width');
-  assert.ok(ow.some(t => t.price === 101.50));
-  assert.ok(ow.some(t => t.price === 102.50));
-  assert.equal(res.rr, 1.5);
+  // Let-winners-run exits (Johnny 2026-10-01): one 25% partial at 2R, no
+  // OR-width targets by default — the rest rides breakeven + ATR trail.
+  assert.ok(Array.isArray(res.targets) && res.targets.length === 1);
+  assert.deepEqual(res.targets[0], { r: 2, pct: 25, price: 101.95, type: 'rr' });
+  assert.equal(res.rr, 2);
   assert.deepEqual(res.size, { shares: 4, notional: 403.00, riskDollars: 2.40 });
   assert.ok(res.why.includes('ENTER-LONG') && res.why.includes('AAPL'), res.why);
   assert.ok(res.why.includes('87/100'), res.why);
@@ -421,9 +426,9 @@ test('evaluateEntry: happy-path short mirrors the long', () => {
   assert.equal(res.score, 87);
   assert.equal(res.entry, 99.25);
   assert.equal(res.stop, 99.85); // 99.25 + 1.5*0.40
-  assert.ok(res.targets.some(t => t.type === 'or-width' && t.price === 98.50)); // OR low - width
-  assert.ok(res.targets.some(t => t.type === 'or-width' && t.price === 97.50)); // OR low - 2x width
-  assert.equal(res.rr, 1.5);
+  assert.ok(res.targets.every(t => t.type === 'rr')); // no OR-width targets by default
+  assert.deepEqual(res.targets[0], { r: 2, pct: 25, price: 98.05, type: 'rr' });
+  assert.equal(res.rr, 2);
   assert.ok(res.why.includes('ENTER-SHORT'));
 });
 
@@ -821,6 +826,109 @@ test('planExit: missing data holds safely', () => {
   assert.equal(p.action, 'hold');
 });
 
+test('planExit: let-winners-run profile — 25% at 2R only, runner rides the ATR trail', () => {
+  // New factory exits (Johnny 2026-10-01): targets [{r:2,pct:25}],
+  // trailMode 'atr', breakevenR 1. 1R = $1 (entry 100, stop 99).
+  const pos = {
+    direction: 'long', entry: 100, stop: 99,
+    targets: [{ r: 2, pct: 25 }], partialsTaken: [], breakevenR: 1,
+    trailMode: 'atr', trailAtrMult: 1.5,
+  };
+  // At +1.5R the only action is the breakeven move — no partial before 2R.
+  const at15 = planExit(pos, { price: 101.50, atr: 0.40 });
+  assert.equal(at15.action, 'breakeven');
+  // At +2R exactly one partial fires, for exactly 25%.
+  const at2 = planExit(pos, { price: 102.00, atr: 0.40 });
+  assert.equal(at2.action, 'partial');
+  assert.equal(at2.target.r, 2);
+  assert.equal(at2.target.pct, 25);
+  // At +3R (the OLD second target) nothing is sold: with the partial taken
+  // and breakeven set, the runner only trails (103.50 − 1.5×0.40 = 102.90).
+  const at3 = planExit({ ...pos, partialsTaken: [2], breakevenAt: true }, { price: 103.50, atr: 0.40 });
+  assert.equal(at3.action, 'trail');
+  assert.equal(at3.newStop, 102.90);
+  // When volume/price fades into the trailed stop, the runner exits there.
+  const faded = planExit(
+    { ...pos, partialsTaken: [2], breakevenAt: true, stop: 102.90 },
+    { price: 102.85, atr: 0.40 },
+  );
+  assert.equal(faded.action, 'exit');
+});
+
+// ---------------------------------------------------------------------------
+// computeRsi + the maxRsiLong entry filter (Johnny 2026-10-01)
+// ---------------------------------------------------------------------------
+test('computeRsi: Wilder RSI values, edges, and uncomputable input', () => {
+  // 15 closes → 14 changes: 11 gains of +1, 3 losses of −1 → RS 11/3 → 78.57.
+  const up = [100, 101, 102, 101, 102, 103, 102, 103, 104, 105, 104, 105, 106, 107, 108];
+  assert.ok(Math.abs(computeRsi(up) - 78.57) < 0.01, `got ${computeRsi(up)}`);
+  // 10 gains, 4 losses → RS 2.5 → 71.43 (allowed under the 75 cap).
+  const mixed = [100, 101, 100, 101, 102, 101, 102, 103, 102, 103, 104, 103, 104, 105, 106];
+  assert.ok(Math.abs(computeRsi(mixed) - 71.43) < 0.01, `got ${computeRsi(mixed)}`);
+  // Monotonic series pin the extremes; flat reads 50.
+  assert.equal(computeRsi(Array.from({ length: 20 }, (_, i) => 100 + i)), 100);
+  assert.equal(computeRsi(Array.from({ length: 20 }, (_, i) => 100 - i)), 0);
+  assert.equal(computeRsi(Array.from({ length: 20 }, () => 100)), 50);
+  // Fewer than 15 closes → null (filter skips, never blocks).
+  assert.equal(computeRsi([100, 101, 102, 103, 104, 105, 106, 107, 108, 109]), null);
+  assert.equal(computeRsi([]), null);
+  assert.equal(computeRsi(null), null);
+});
+
+// Strictly rising closes all morning → RSI(14) = 100 at the decision bar.
+function risingCtx(overrides = {}) {
+  const orPart = minuteBars('09:30', 15, (t, i) => {
+    const c = 99.30 + i * 0.05;
+    return {
+      t, o: c - 0.02,
+      h: i === 4 ? 100.50 : c + 0.10,
+      l: i === 9 ? 99.50 : c - 0.10,
+      c, v: 20000,
+    };
+  });
+  const post = [
+    bar('09:45', 100.03, 100.15, 99.98, 100.10, 22000),
+    bar('09:46', 100.12, 100.25, 100.05, 100.20, 25000),
+    bar('09:47', 100.65, 100.75, 100.64, 100.70, 60000), // breakout bar
+    bar('09:48', 100.72, 100.82, 100.68, 100.78, 30000),
+    bar('09:49', 100.80, 100.90, 100.76, 100.85, 28000),
+    bar('09:50', 100.87, 100.95, 100.83, 100.90, 26000),
+  ];
+  const bars = orPart.concat(post);
+  return {
+    symbol: 'AAPL', direction: 'long', bars,
+    or: computeOpeningRange(bars, 15),
+    vwap: 100.20, rvol: 2.5, avgVolume: 2000000, spreadPct: 0.10,
+    relStrengthVsSpy: 0.8, regime: 'bullish', atr: 0.40,
+    premarket: { trend: 'up', gapPct: 0.5 },
+    levels: { priorHigh: 102.50, priorLow: 98.00 },
+    lastAttempts: [], accountEquity: 25000, trendAligned: true,
+    rules: {},
+    ...overrides,
+  };
+}
+
+test('evaluateEntry: RSI filter blocks an overbought long with rsi_overbought', () => {
+  const res = evaluateEntry(risingCtx());
+  assert.equal(res.decision, 'wait');
+  assert.ok(res.rejectReasons.some(r => r.startsWith('rsi_overbought:')),
+    `expected rsi_overbought, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('evaluateEntry: RSI filter honors the cap, the disable switch, and longs-only', () => {
+  // Canonical long runs RSI ≈ 64: allowed at the default 75 cap…
+  assert.equal(evaluateEntry(goodLongCtx()).decision, 'enter-long');
+  // …blocked when the cap is tightened below it, with the journal reason.
+  expectReject(goodLongCtx({ rules: { maxRsiLong: 60 } }), 'rsi_overbought');
+  // Disabled (0) lets even a RSI-100 grind enter.
+  const off = evaluateEntry(risingCtx({ rules: { maxRsiLong: 0 } }));
+  assert.equal(off.decision, 'enter-long', off.why);
+  assert.ok(!off.rejectReasons.some(r => r.startsWith('rsi_overbought')));
+  // Shorts are never touched by the rule, even with the cap at 1.
+  const short = evaluateEntry(goodShortCtx({ rules: { maxRsiLong: 1 } }));
+  assert.equal(short.decision, 'enter-short', short.why);
+});
+
 // ---------------------------------------------------------------------------
 // checkDailyLocks
 // ---------------------------------------------------------------------------
@@ -919,7 +1027,7 @@ test('validateConfig: catches every class of misconfiguration', () => {
     entryMode: 'yolo',
     sizingMode: 'vibes',
     stopMode: 'hope',
-    targets: [{ r: 1, pct: 40 }],
+    targets: [{ r: 1, pct: 60 }, { r: 2, pct: 60 }], // pct allocations sum to 120 > 100
     trailMode: 'moon',
     maxTradesPerDay: 0,
     maxWickPct: 150,

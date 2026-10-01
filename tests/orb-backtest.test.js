@@ -81,9 +81,20 @@ const METRICS_RULES = {
 //   9:47 re-breakout -> long 100 @ $10.35, stop $10.2465, target $10.557.
 //   9:48 stop hit -> -$10.35 (-1R).
 //   9:49+ flat: maxAttemptsPerSymbol=2 blocks further entries.
+// Trade-day OR segment: highs/lows identical to the flat version, but closes
+// alternate 10.03/10.07 — a perfectly flat close series makes RSI(14)
+// degenerate (any uptick reads 100) and would trip the maxRsiLong filter.
+function orSegment(dateStr) {
+  const out = [];
+  for (let m = 570; m <= 584; m++) {
+    out.push(bar(dateStr, m, 10.00, 10.10, 9.95, m % 2 === 0 ? 10.03 : 10.07, 10000));
+  }
+  return out;
+}
+
 function aaaDay() {
   return [
-    ...flatRange('2026-09-30', 570, 584, 10.00, 10.10, 9.95, 10.05, 10000),
+    ...orSegment('2026-09-30'),
     bar('2026-09-30', 585, 10.05, 10.35, 10.04, 10.25, 100000),
     bar('2026-09-30', 586, 10.25, 10.50, 10.24, 10.48, 20000),
     bar('2026-09-30', 587, 10.48, 10.49, 10.30, 10.35, 20000),
@@ -96,7 +107,7 @@ function aaaDay() {
 // (500 vs 10k prior-bar average) -> VOLUME_FADING / WEAK_VOLUME rejection.
 function weakDay() {
   return [
-    ...flatRange('2026-09-30', 570, 584, 10.00, 10.10, 9.95, 10.05, 10000),
+    ...orSegment('2026-09-30'),
     bar('2026-09-30', 585, 10.05, 10.35, 10.04, 10.25, 500),
     bar('2026-09-30', 586, 10.25, 10.50, 10.24, 10.48, 20000),
     bar('2026-09-30', 587, 10.48, 10.49, 10.30, 10.35, 20000),
@@ -159,6 +170,52 @@ describe('orb backtester', () => {
     assert.strictEqual(t2.pnl, -10.35);
     assert.strictEqual(t2.rMultiple, -1);
     assert.strictEqual(t2.exitReason, 'stop');
+  });
+
+  it('let-winners-run exits: 25% at 2R, nothing at 3R, EOD flatten closes the runner', () => {
+    // Johnny 2026-10-01 exit profile on the permissive metrics rule base:
+    // single 25% partial at 2R, breakeven at 1R, ATR trail, no 2nd target.
+    // Entry: 100 @ 10.25 (9:45 breakout), stop 10.1475 (1%), R = 0.1025,
+    // 2R target = 10.455. 9:46 tags 2R (h 10.50) → 25 shares off @ 10.455.
+    // 9:47 runs THROUGH the old 3R level (10.5575) to 10.70 — nothing more
+    // is sold. Price then drifts sideways (10.65 closes, trailed stop ≈
+    // 10.43–10.48, never touched) until the 15:55 flatten sells the
+    // remaining 75 @ the 10.65 open.
+    const day = [
+      ...orSegment('2026-09-30'),
+      bar('2026-09-30', 585, 10.05, 10.35, 10.04, 10.25, 100000),
+      bar('2026-09-30', 586, 10.25, 10.50, 10.24, 10.48, 20000),
+      bar('2026-09-30', 587, 10.48, 10.75, 10.47, 10.70, 20000),
+      ...flatRange('2026-09-30', 588, 954, 10.65, 10.70, 10.60, 10.65, 5000),
+      bar('2026-09-30', 955, 10.65, 10.68, 10.62, 10.66, 5000),
+    ];
+    const res = runBacktest({
+      barsBySymbol: { AAA: [...historyDay('2026-09-29'), ...day] },
+      indexData: IDX,
+      startDate: '2026-09-30',
+      endDate: '2026-09-30',
+      rules: {
+        ...METRICS_RULES,
+        targets: [{ r: 2, pct: 25 }],
+        breakevenR: 1,
+        trailMode: 'atr',
+      },
+      slippageBps: 0,
+      commissionPerShare: 0,
+    });
+    assert.strictEqual(res.trades.length, 1);
+    const t = res.trades[0];
+    assert.strictEqual(t.shares, 100);
+    assert.strictEqual(t.entryPrice, 10.25);
+    // The final leg is the EOD flatten — proof the runner was NOT dumped
+    // at the old 3R target (or at 2R in full).
+    assert.strictEqual(t.exitReason, 'eod-flatten');
+    assert.strictEqual(t.exitTime, etMs('2026-09-30', '15:55'));
+    // Blended exit = (25 × 10.455 + 75 × 10.65) / 100 = 10.60125 — only
+    // reachable if exactly 25% came off at the 2R target.
+    assert.ok(Math.abs(t.exitPrice - 10.6013) < 0.001, `exitPrice ${t.exitPrice}`);
+    // P&L = 25 × 0.205 + 75 × 0.40 = 35.125.
+    assert.ok(Math.abs(t.pnl - 35.125) < 0.01, `pnl ${t.pnl}`);
   });
 
   it('no-look-ahead: a post-window favorable move is not traded', () => {

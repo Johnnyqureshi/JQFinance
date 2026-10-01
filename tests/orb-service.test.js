@@ -63,10 +63,13 @@ function minuteBarsAAA() {
   }
   // Breakout bar 9:45 ET: close 10.055 beyond OR high 10.05
   m1(15, 10.03, 10.06, 10.02, 10.055, 150000);
-  // Drift up to 10.07 by 10:29 ET
+  // Drift up to 10.07 by 10:29 ET — two-sided steps (a one-way grind pins
+  // RSI(14) near 90 and would trip the maxRsiLong entry filter).
+  let driftClose = 10.055;
   for (let i = 16; i < 60; i++) {
-    const f = (i - 15) / 44;
-    const c = 10.055 + f * 0.015;
+    const j = i - 15;
+    driftClose += (j % 3 === 0) ? -0.003 : 0.0018;
+    const c = i === 59 ? 10.07 : +driftClose.toFixed(4);
     m1(i, c - 0.003, c + 0.005, c - 0.008, c, 120000);
   }
   return bars;
@@ -155,6 +158,35 @@ function fixture(options = {}) {
   return { db, service, world };
 }
 
+// Builds a fixture whose orb_settings row (with the given stored rules)
+// already exists BEFORE the service is constructed — the only way the
+// constructor's one-shot migrations can see it.
+function fixtureWithStoredRules(storedRules) {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE users(id INTEGER PRIMARY KEY);
+    INSERT OR IGNORE INTO users(id) VALUES (1);
+    CREATE TABLE broker_account_owners(account_id TEXT PRIMARY KEY, user_id INTEGER, scope TEXT, mode TEXT, claimed_at TEXT);
+    CREATE TABLE broker_account_quarantine(account_id TEXT PRIMARY KEY, resolved_at TEXT);
+    CREATE TABLE orb_settings (
+      user_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+      mode TEXT NOT NULL DEFAULT 'paper', rules TEXT NOT NULL DEFAULT '{}',
+      scheduler_status TEXT NOT NULL DEFAULT 'idle', scheduler_reason TEXT,
+      revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT);
+  `);
+  db.prepare('INSERT INTO orb_settings(user_id, rules) VALUES (1, ?)')
+    .run(JSON.stringify(storedRules));
+  const vault = createCredentialVault('test-only-secret-never-a-real-credential-987654321');
+  const service = createOrbService({
+    db, vault,
+    fetch: async () => { throw new Error('no network in migration tests'); },
+    now: () => NOW,
+    persistenceReady: () => true, durability: null,
+    exitPoll: { tries: 3, intervalMs: 0 },
+  });
+  return { db, service };
+}
+
 async function connectPaper(f) {
   return f.service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8) });
 }
@@ -232,8 +264,11 @@ test('engine validation rejects bad config values', async () => {
     service.setSettings(1, { rules: { minScore: 200 } }),
     /Invalid ORB configuration.*minScore/);
   await assert.rejects(
-    service.setSettings(1, { rules: { targets: [{ r: 1, pct: 50 }] } }),
-    /Invalid ORB configuration.*sum to 100/);
+    service.setSettings(1, { rules: { targets: [{ r: 1, pct: 60 }, { r: 2, pct: 60 }] } }),
+    /Invalid ORB configuration.*at most 100/);
+  await assert.rejects(
+    service.setSettings(1, { rules: { maxRsiLong: 140 } }),
+    /Invalid ORB configuration.*maxRsiLong/);
   await assert.rejects(
     service.setSettings(1, { rules: { minPrice: 20, maxPrice: 1 } }),
     /Invalid ORB configuration.*maxPrice/);
@@ -247,6 +282,45 @@ test('valid settings round-trip through getSettings', async () => {
   assert.equal(view.rules.minScore, 80);
   assert.equal(view.rules.maxPositions, 2);
   assert.equal(view.revision, 1);
+});
+
+test('maxRsiLong round-trips and the new exit defaults are the factory profile', async () => {
+  const { service } = fixture();
+  const fresh = service.getSettings(1);
+  assert.deepEqual(fresh.rules.targets, [{ r: 2, pct: 25 }]);
+  assert.equal(fresh.rules.trailMode, 'atr');
+  assert.equal(fresh.rules.orWidthTargets, false);
+  assert.equal(fresh.rules.maxRsiLong, 75);
+  await service.setSettings(1, { rules: { maxRsiLong: 80 } });
+  assert.equal(service.getSettings(1).rules.maxRsiLong, 80);
+  await service.setSettings(1, { rules: { maxRsiLong: 0 } }); // 0 = filter off
+  assert.equal(service.getSettings(1).rules.maxRsiLong, 0);
+});
+
+// --- factory-exit migration (Johnny 2026-10-01) -----------------------------
+test('factory-exit migration patches stored factory exits, preserves the rest', async () => {
+  const { service } = fixtureWithStoredRules({
+    targets: [{ r: 1.5, pct: 50 }, { r: 3, pct: 50 }],
+    trailMode: 'none', orWidthTargets: true, minScore: 80,
+  });
+  const rules = service.getSettings(1).rules;
+  assert.deepEqual(rules.targets, [{ r: 2, pct: 25 }]);
+  assert.equal(rules.trailMode, 'atr');
+  assert.equal(rules.orWidthTargets, false);
+  assert.equal(rules.minScore, 80); // unrelated customization preserved
+});
+
+test('factory-exit migration leaves deliberate customizations untouched', async () => {
+  // Custom targets (even with trailMode still 'none') → untouched.
+  const a = fixtureWithStoredRules({ targets: [{ r: 1, pct: 100 }], trailMode: 'none' });
+  assert.deepEqual(a.service.getSettings(1).rules.targets, [{ r: 1, pct: 100 }]);
+  assert.equal(a.service.getSettings(1).rules.trailMode, 'none');
+  // Factory targets but a trail mode already chosen → untouched.
+  const b = fixtureWithStoredRules({
+    targets: [{ r: 1.5, pct: 50 }, { r: 3, pct: 50 }], trailMode: 'vwap',
+  });
+  assert.deepEqual(b.service.getSettings(1).rules.targets, [{ r: 1.5, pct: 50 }, { r: 3, pct: 50 }]);
+  assert.equal(b.service.getSettings(1).rules.trailMode, 'vwap');
 });
 
 // --- connect / disconnect ---------------------------------------------------

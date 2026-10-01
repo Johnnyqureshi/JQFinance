@@ -78,7 +78,7 @@
       ['atrStopMult', 'ATR stop multiplier', 'number', 0.1],
       ['dollarRisk', 'Dollar risk per trade ($)', 'number', 1] ] },
     { group: 'Targets & Management', fields: [
-      ['targets', 'Targets (e.g. 1R,2R)', 'text'],
+      ['targets', 'Targets — R:pct% per partial, comma-separated (e.g. 2R:25%)', 'targets'],
       ['breakevenR', 'Move stop to breakeven at (R)', 'number', 0.5],
       ['trailMode', 'Trailing mode', 'select', ['none', 'atr', 'vwap']],
       ['orWidthTargets', 'Use OR-width targets (1×/2×)', 'checkbox'] ] },
@@ -443,6 +443,10 @@
       if (type === 'time') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="time" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
       if (type === 'text') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="text" maxlength="32" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
       if (type === 'watchlist') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><textarea id="${id}" data-rule="${key}" rows="5" placeholder="SOUN, UUUU, SMR, …">${esc(value ?? '')}</textarea></label>`;
+      if (type === 'targets') {
+        const text = Array.isArray(value) ? value.map(t => `${t.r}R:${t.pct}%`).join(', ') : '';
+        return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="text" maxlength="64" data-rule="${key}" value="${esc(text)}"></label>`;
+      }
       return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="number" step="${stepOrOptions}" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
     };
     el.innerHTML = `
@@ -466,6 +470,19 @@
     }
     document.querySelectorAll('#orbSettings [data-rule]').forEach(input => {
       const key = input.dataset.rule;
+      if (key === 'targets') {
+        // Parse "2R:25%, 3R:50%" back into [{r, pct}]. Unparseable text
+        // leaves the merged current value untouched (server validates).
+        const parsed = [];
+        let ok = input.value.trim() !== '';
+        for (const part of input.value.split(',')) {
+          const m = part.trim().match(/^([\d.]+)\s*R?\s*[:x]\s*([\d.]+)\s*%?$/i);
+          if (!m) { ok = false; break; }
+          parsed.push({ r: Number(m[1]), pct: Number(m[2]) });
+        }
+        if (ok && parsed.length) setPath(rules, key, parsed);
+        return;
+      }
       if (input.type === 'checkbox') setPath(rules, key, input.checked);
       else if (input.tagName === 'SELECT') setPath(rules, key, input.value);
       else if (input.type === 'time' || input.type === 'text') { if (input.value.trim() !== '') setPath(rules, key, input.value.trim()); }

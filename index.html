@@ -41,6 +41,7 @@
   </script>
   <link rel="stylesheet" href="/public/css/style.css?v=20260929d"/>
   <link rel="stylesheet" href="/public/css/warrior.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/orb.css?v=20261001b"/>
   <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
   <link rel="stylesheet" href="/public/css/home-pulse.css?v=20261001a"/>
 </head>
@@ -130,6 +131,9 @@
     </button><button class="nav-link" data-page="flipper">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
       <span class="nav-label">Flipper</span>
+    </button><button class="nav-link" data-page="orb">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+      <span class="nav-label">ORB</span>
     </button><button class="nav-link" data-page="crypto">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
       <span class="nav-label">Crypto</span>
@@ -259,6 +263,18 @@
               <div><span>Open positions</span><strong class="hp-bot-num" id="hpWarriorOpen">—</strong></div>
             </div>
             <button class="hp-view" id="hpWarriorView" type="button">View →</button>
+          </article>
+          <article class="hp-bot" aria-label="ORB bot status">
+            <div class="hp-bot-head">
+              <h3>ORB<span class="hp-bot-sub">Opening range breakout</span></h3>
+              <span class="hp-pill hp-pill-paused" id="hpOrbPill">…</span>
+            </div>
+            <p class="hp-bot-blocker" id="hpOrbBlocker" style="display:none"></p>
+            <div class="hp-bot-stats">
+              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpOrbPnl">—</strong></div>
+              <div><span>Open positions</span><strong class="hp-bot-num" id="hpOrbOpen">—</strong></div>
+            </div>
+            <button class="hp-view" id="hpOrbView" type="button">View →</button>
           </article>
         </div>
       </div>
@@ -820,6 +836,7 @@
 
 <div class="page" id="page-warrior"></div>
 <div class="page" id="page-flipper"></div>
+<div class="page" id="page-orb"></div>
 <div class="page" id="page-crypto"></div>
 
 
@@ -863,8 +880,8 @@
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
-<script src="/js/app.js?v=20261001a"></script>
-<script src="/js/home-pulse.js?v=20261001a"></script>
+<script src="/js/app.js?v=20261001b"></script>
+<script src="/js/home-pulse.js?v=20261001b"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
 <script src="/js/gameplan.js?v=20260929d"></script>
@@ -875,6 +892,7 @@
 <script src="/js/agent.js?v=20260929d"></script>
 <script src="/js/warrior.js?v=20261001a"></script>
 <script src="/js/flipper.js?v=20261001a"></script>
+<script src="/js/orb.js?v=20261001b"></script>
 <script src="/js/crypto.js?v=20261001a"></script>
 
 <!-- MOBILE BOTTOM NAV -->
@@ -900,6 +918,9 @@
   </button><button class="mobile-nav-btn nav-link" data-page="flipper" aria-label="Flipper Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
     <span>Flipper</span>
+  </button><button class="mobile-nav-btn nav-link" data-page="orb" aria-label="ORB Bot">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+    <span>ORB</span>
   </button><button class="mobile-nav-btn nav-link" data-page="crypto" aria-label="Crypto Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
     <span>Crypto</span>

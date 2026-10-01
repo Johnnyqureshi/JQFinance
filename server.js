@@ -23,6 +23,7 @@ const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
 const { createCryptoService, mountCrypto } = require('./lib/crypto/service');
 const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
+const { createOrbService, mountOrb } = require('./lib/orb/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -6214,6 +6215,17 @@ const flipperService = createFlipperService({
 mountFlipper({ app, service: flipperService, requireAuth, ensureSessionUserInTradingStore });
 let flipperSchedulerStarted = false;
 
+// ORB "Opening Range Breakout" bot is wired next to Flipper: own tables,
+// own scheduler, own lease. Ships DISABLED and paper-first — never enable it
+// for Johnny; he connects and enables bots himself.
+const orbService = createOrbService({
+  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
+mountOrb({ app, service: orbService, requireAuth, ensureSessionUserInTradingStore });
+let orbSchedulerStarted = false;
+
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
 // runs even while the bots are paused.
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
@@ -6227,6 +6239,10 @@ for (const row of automatedDb.prepare('SELECT user_id FROM crypto_settings').all
 for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').all()) {
   try { flipperService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Flipper] boot prune failed:', error.message); }
+}
+for (const row of automatedDb.prepare("SELECT user_id FROM orb_settings").all()) {
+  try { orbService.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[ORB] boot prune failed:', error.message); }
 }
 
 // Johnny 2026-10-01: B2 and LEAP/options bots deleted. Drop their tables from
@@ -6257,7 +6273,8 @@ app.get('/readyz', async (_req, res) => {
     && databaseReady
     && warriorSchedulerStarted
     && cryptoSchedulerStarted
-    && flipperSchedulerStarted;
+    && flipperSchedulerStarted
+    && orbSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
@@ -6266,6 +6283,7 @@ app.get('/readyz', async (_req, res) => {
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
       crypto: cryptoSchedulerStarted ? 'started' : 'stopped',
       flipper: flipperSchedulerStarted ? 'started' : 'stopped',
+      orb: orbSchedulerStarted ? 'started' : 'stopped',
     },
   });
 });
@@ -6308,13 +6326,15 @@ async function stopAutomatedState(signal) {
     warriorSchedulerStarted = false;
     cryptoSchedulerStarted = false;
     flipperSchedulerStarted = false;
+    orbSchedulerStarted = false;
     const cryptoDrain = cryptoService.drain();
     const warriorDrain = warriorService.drain();
     const flipperDrain = flipperService.drain();
+    const orbDrain = orbService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([cryptoDrain, warriorDrain, flipperDrain]);
+    await Promise.all([cryptoDrain, warriorDrain, flipperDrain, orbDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6342,6 +6362,10 @@ function startServer() {
   // after crypto. Ships disabled: the loop idles until Johnny enables it.
   flipperService.start();
   flipperSchedulerStarted = true;
+  // ORB first run is delayed by the service itself (~120s), staggered
+  // after flipper. Ships disabled: the loop idles until Johnny enables it.
+  orbService.start();
+  orbSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

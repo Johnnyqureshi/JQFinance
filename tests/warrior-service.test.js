@@ -164,7 +164,7 @@ function fixture(options = {}) {
         if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         const symbols = (query.get('symbols') || '').split(',');
         const t = new Date(world.time - (world.latestStale ? 120000 : 0)).toISOString();
-        return response({ bars: Object.fromEntries(symbols.map(s => [s, { DailyBar: { t, c: world.latestPrice } }])) });
+        return response({ bars: Object.fromEntries(symbols.map(s => [s, { t, c: world.latestPrice }])) });
       }
     }
     return response({ message: `unexpected ${host}${path}` }, 500);
@@ -273,6 +273,18 @@ test('approveProposal submits exactly one broker order with idempotent client_or
   const position = f.db.prepare("SELECT * FROM warrior_positions WHERE proposal_id=?").get(proposal.proposal_id);
   assert.ok(position, 'position row created');
   assert.equal(position.status, 'pending_entry');
+});
+
+test('approveProposal blocks on data_fresh when the latest bar is genuinely stale', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  // bars/latest returns the bar object directly per symbol; a 120s-old bar
+  // exceeds the 60s freshness window and must still block the approval.
+  f.world.latestStale = true;
+  const proposal = insertProposal(f.db);
+  await assert.rejects(() => f.service.approveProposal(1, proposal.proposal_id), /data_fresh/);
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 0, 'stale-data approval must not reach the broker');
 });
 
 test('approveProposal is idempotent — a second approval reconciles, never resubmits', async () => {

@@ -509,6 +509,12 @@ const automatedStartup = automatedState.init()
   // instance owns the fence (sole writer) so the startup checkpoint's
   // optimistic generation check passes.
   .then(() => automatedState.refreshGeneration())
+  // Disk-full recovery (Johnny 2026-10-01): the snapshot table's file
+  // bloated past 3 GB from full-image checkpoint rewrites and Postgres ran
+  // out of disk. One-shot: truncate the snapshot store now that the local
+  // image is restored and the fence is held; the startup checkpoint below
+  // writes a fresh snapshot from the restored local database. Never throws.
+  .then(() => automatedState.truncateSnapshotsOnce())
   // Singles & Doubles was deleted: drop its tables before the startup
   // checkpoint so the drop propagates into the durable snapshot.
   .then(() => automatedState.dropRetiredSdTables())

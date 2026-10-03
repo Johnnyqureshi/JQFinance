@@ -84,7 +84,7 @@ function fixture(options = {}) {
         account_blocked: false, trade_suspended_by_user: false,
         equity: '100000', buying_power: '100000',
       });
-      if (path === '/v2/calendar') return response([{ date: TODAY, open: '09:30', close: '16:00' }]);
+      if (path === '/v2/calendar') return response(world.calendar !== undefined ? world.calendar : [{ date: TODAY, open: '09:30', close: '16:00' }]);
       if (path === '/v2/clock') return response({ is_open: true, timestamp: new Date(world.time).toISOString() });
       if (path === '/v2/assets') return response(world.assets);
       if (path === '/v2/positions') {
@@ -644,6 +644,39 @@ test('a failed positions fetch pauses reconciliation without touching local stat
   assert.equal(trades, 0, 'nothing is journaled');
   const settings = f.db.prepare('SELECT scheduler_status FROM warrior_settings WHERE user_id=1').get();
   assert.equal(settings.scheduler_status, 'error');
+});
+
+test('an empty calendar (weekend/holiday) settles the scheduler idle instead of erroring', async () => {
+  const f = fixture({ calendar: [] });
+  await connectAndGet(f);
+  // Saturday 2026-10-03, noon ET: Alpaca returns a clean empty calendar.
+  f.world.time = Date.parse('2026-10-03T16:00:00Z');
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, 'market-closed');
+  const settings = f.db.prepare('SELECT scheduler_status,scheduler_reason FROM warrior_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'idle');
+  assert.equal(settings.scheduler_reason, 'Market is closed.');
+  const alerts = f.db.prepare("SELECT COUNT(*) c FROM warrior_alerts WHERE user_id=1 AND message LIKE '%scan failed%'").get().c;
+  assert.equal(alerts, 0, 'a closed day must not raise scan-failed alerts');
+});
+
+test('a malformed (non-array) calendar response is still a hard broker-data error', async () => {
+  const f = fixture({ calendar: { message: 'unexpected shape' } });
+  await connectAndGet(f);
+  await assert.rejects(() => f.service.run(1), /Broker calendar is unavailable/);
+});
+
+test('approval on a closed day is withheld as window-closed, not a broker failure', async () => {
+  const f = fixture({ calendar: [] });
+  await connectAndGet(f);
+  const sat = Date.parse('2026-10-03T16:00:00Z'); // Saturday noon ET
+  f.world.time = sat;
+  insertProposal(f.db, {
+    created_at: new Date(sat).toISOString(),
+    expires_at: new Date(sat + 30 * 60000).toISOString(),
+  });
+  await assert.rejects(() => f.service.approveProposal(1, 'prop-test-1'), /Market window is closed; approval withheld/);
 });
 
 test('a partial exit banks realized P&L and re-protects the exact remainder', async () => {

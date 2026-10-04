@@ -357,3 +357,133 @@ test('startup bypasses the throttle and the shutdown checkpoint settles a pendin
   db.close();
 });
 
+// Lease-aware fake pool for the fence-recovery tests: unlike the pools
+// above, its heartbeat UPDATE and health SELECT enforce lease_until the
+// way real Postgres does (lease_until > NOW()), and the control surface
+// can expire the lease (platform stall) or hand it to another owner.
+function leasePool() {
+  let owner = null;
+  let epoch = 0;
+  let leaseUntil = 0;
+  let snapshot = null;
+  let insertCount = 0;
+  const control = {
+    expireLease() { leaseUntil = 0; },
+    takeover() { owner = 'intruder'; epoch += 1; leaseUntil = Date.now() + 30_000; },
+    insertCount: () => insertCount,
+  };
+  const pool = {
+    on() {},
+    async query(sql, params = []) {
+      if (/to_regclass/.test(sql)) {
+        return { rows: [{ snapshots: 'automated_trading_snapshots', fences: 'automated_trading_fences' }] };
+      }
+      if (/INSERT INTO automated_trading_fences/.test(sql)) {
+        const nextOwner = params[0];
+        if (owner && leaseUntil > Date.now() && owner !== nextOwner) return { rowCount: 0, rows: [] };
+        owner = nextOwner; epoch += 1; leaseUntil = Date.now() + 30_000;
+        return { rowCount: 1, rows: [{ epoch }] };
+      }
+      if (/UPDATE automated_trading_fences/.test(sql)) {
+        if (/lease_until=NOW\(\)/.test(sql)) { leaseUntil = 0; return { rowCount: 1, rows: [] }; }
+        return { rowCount: owner === params[1] && epoch === params[2] && leaseUntil > Date.now() ? 1 : 0, rows: [] };
+      }
+      if (/^\s*SELECT 1\s+FROM automated_trading_fences/.test(sql)) {
+        return { rowCount: owner === params[0] && epoch === params[1] && leaseUntil > Date.now() ? 1 : 0, rows: [] };
+      }
+      if (/INSERT INTO automated_trading_snapshots/.test(sql)) {
+        if (owner !== params[6] || epoch !== params[5] || leaseUntil <= Date.now()) return { rowCount: 0, rows: [] };
+        insertCount += 1;
+        snapshot = { generation: params[1] };
+        return { rowCount: 1, rows: [{ generation: params[1] }] };
+      }
+      if (/SELECT generation, schema_version/.test(sql)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (/SELECT generation FROM automated_trading_snapshots/.test(sql)) {
+        return snapshot ? { rowCount: 1, rows: [{ generation: snapshot.generation }] } : { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected SQL in lease pool: ${sql.slice(0, 70)}`);
+    },
+    async end() {},
+  };
+  return { pool, control };
+}
+
+test('lost fence latches fail-closed, then recoverFence re-acquires via the lease and resumes', async () => {
+  const { pool, control } = leasePool();
+  const db = new Database(':memory:');
+  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
+  await state.init();
+  const firstEpoch = await state.acquireFence();
+  await state.flush('startup');
+  assert.equal(state.isReady(), true);
+
+  // Recovery is a no-op while the fence is held.
+  assert.equal(await state.recoverFence(), false);
+  assert.equal(state.epoch(), firstEpoch);
+
+  // Platform stall: Postgres unreachable longer than the 30s lease.
+  control.expireLease();
+  assert.equal(await state.heartbeat(), false); // heartbeat discovers the loss
+  assert.equal(state.isReady(), false);
+  assert.deepEqual(await state.health(), { ready: false });
+  await assert.rejects(state.flush('startup'), /fence is not active/);
+
+  // Once Postgres answers again, the same lease protocol re-acquires it
+  // and a recovery checkpoint proves sole-writer state.
+  const insertsBefore = control.insertCount();
+  assert.equal(await state.recoverFence(), true);
+  assert.ok(state.epoch() > firstEpoch);
+  assert.ok(control.insertCount() > insertsBefore);
+  assert.equal(state.isReady(), true);
+  assert.deepEqual(await state.health(), { ready: true });
+
+  await state.releaseFence();
+  await state.close();
+  db.close();
+});
+
+test('recoverFence never displaces another live fence holder', async () => {
+  const { pool, control } = leasePool();
+  const db = new Database(':memory:');
+  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
+  await state.init();
+  await state.acquireFence();
+  await state.flush('startup');
+
+  control.takeover(); // a different VM now holds a live lease
+  assert.equal(await state.heartbeat(), false);
+  assert.equal(await state.recoverFence(), false); // cannot steal a live lease
+  assert.equal(state.isReady(), false);
+  await assert.rejects(state.flush('startup'), /fence is not active/);
+
+  await state.close();
+  db.close();
+});
+
+test('a hung PostgreSQL query times out instead of wedging the state machine', async () => {
+  const hangingPool = {
+    on() {},
+    async query(sql) {
+      if (/to_regclass/.test(sql)) {
+        return { rows: [{ snapshots: 'automated_trading_snapshots', fences: 'automated_trading_fences' }] };
+      }
+      if (/INSERT INTO automated_trading_fences/.test(sql)) {
+        return new Promise(() => {}); // frozen database: never settles
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    async end() {},
+  };
+  const db = new Database(':memory:');
+  const state = createAutomatedState({ db, injectedPool: hangingPool, ownerId: 'test-owner', queryTimeoutMs: 100 });
+  await state.init();
+  const startedAt = Date.now();
+  await assert.rejects(state.acquireFence(), /timed out/);
+  assert.ok(Date.now() - startedAt < 5_000, 'timeout must fire promptly');
+  await state.close();
+  db.close();
+});

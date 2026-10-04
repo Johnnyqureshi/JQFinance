@@ -482,6 +482,8 @@ const automatedState = createAutomatedState({
   db: automatedDb,
 });
 let automatedTradingPersistenceReady = false;
+let automatedStartupComplete = false;
+let automatedRecoveryInFlight = false;
 // Railway rolling deploys boot the new container while the old instance still
 // owns the 30s dispatch fence. Retry acquisition (bounded) instead of
 // fail-closing on the first attempt: the old instance releases the fence on
@@ -543,6 +545,7 @@ const automatedStartup = automatedState.init()
     throw error;
   }))
   .then(() => {
+  automatedStartupComplete = true;
   automatedTradingPersistenceReady = automatedState.isReady();
   if (automatedTradingPersistenceReady) {
     console.log('[AutomatedState] Durable snapshot, fence, and startup checkpoint verified.');
@@ -553,15 +556,46 @@ const automatedStartup = automatedState.init()
   console.error('[AutomatedState] Durable snapshot state unavailable; automated entries remain paused:', error.message);
   throw error;
 });
+// Self-healing heartbeat (revised 2026-10-04): a Railway platform stall
+// that froze Postgres longer than the 30s fence lease used to latch the
+// bots off until a manual redeploy — the lost lease set readiness flags
+// that nothing ever set back. Now a lost fence triggers re-acquisition
+// attempts through the SAME lease protocol (automatedState.recoverFence
+// only wins a free/expired/self lease and proves itself with a recovery
+// checkpoint, so a second dispatcher is impossible), and readiness is
+// restored only once the fence verifiably holds again. Fail-closed on
+// every path until then.
+async function automatedHeartbeatTick() {
+  let alive = false;
+  try {
+    alive = await automatedState.heartbeat();
+  } catch (error) {
+    console.error('[AutomatedState] fence heartbeat failed; automated actions withheld:', error.message);
+  }
+  if (alive) {
+    automatedTradingPersistenceReady = true;
+    return;
+  }
+  automatedTradingPersistenceReady = false;
+  if (!automatedStartupComplete || automatedRecoveryInFlight) return;
+  automatedRecoveryInFlight = true;
+  try {
+    if (await automatedState.recoverFence()) {
+      automatedTradingPersistenceReady = automatedState.isReady();
+      if (automatedTradingPersistenceReady) {
+        console.log('[AutomatedState] Dispatch fence recovered; durable checkpoint verified, automated trading resumed.');
+      }
+    }
+  } catch (error) {
+    console.error('[AutomatedState] fence recovery failed; remaining fail-closed:', error.message);
+  } finally {
+    automatedRecoveryInFlight = false;
+  }
+}
 const automatedHeartbeatTimer = setInterval(() => {
-  automatedState.heartbeat()
-    .then(alive => {
-      if (!alive) automatedTradingPersistenceReady = false;
-    })
-    .catch(error => {
-      automatedTradingPersistenceReady = false;
-      console.error('[AutomatedState] fence heartbeat failed; automated actions withheld:', error.message);
-    });
+  automatedHeartbeatTick().catch(error => {
+    console.error('[AutomatedState] heartbeat tick failed:', error.message);
+  });
 }, 10_000);
 let authStoreInitError = null;
 let authStoreInitialized = false;

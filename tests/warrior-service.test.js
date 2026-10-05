@@ -100,6 +100,12 @@ function fixture(options = {}) {
         return response([...world.orders.values()].filter(o => !['filled', 'canceled', 'expired', 'rejected'].includes(o.status)));
       }
       if (path === '/v2/orders' && init.method === 'POST') {
+        // Mirror Alpaca: sub-penny order prices are rejected (422) on
+        // symbols priced $1+ — the rule the OCO tick bug violated live.
+        const pxFields = [body.limit_price, body.stop_price, body.take_profit?.limit_price, body.stop_loss?.stop_price];
+        if (pxFields.some(px => px != null && Number(px) >= 1 && Math.abs(Number(px) * 100 - Math.round(Number(px) * 100)) > 1e-9)) {
+          return response({ message: 'invalid price: sub-penny not allowed' }, 422);
+        }
         world.sequence++;
         const order = {
           id: `ord-${world.sequence}`, client_order_id: body.client_order_id,
@@ -563,6 +569,29 @@ test('a confirmed entry fill attaches ONE broker OCO, never two independent legs
   const pos = f.db.prepare('SELECT * FROM warrior_positions WHERE proposal_id=?').get(proposal.proposal_id);
   assert.equal(pos.status, 'open');
   assert.ok(pos.exit_oco_id, 'exit_oco_id records the protection parent');
+});
+
+test('protection prices land on the penny tick for a $1+ stock (BBD 2026-10-05 regression)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  // BBD's live geometry: entry 4.36, stop 4.34, target 4.50. The old 5bps
+  // padding at 4 decimals produced 4.3422 / 4.4978 — sub-penny, and Alpaca
+  // rejected every protection attach with HTTP 422, leaving fills naked.
+  const proposal = insertProposal(f.db, { symbol: 'BBD', entry: 4.36, stop: 4.34, target: 4.50, shares_recommended: 115 });
+  await f.service.approveProposal(1, proposal.proposal_id);
+  const entry = f.world.orders.get(proposal.proposal_id);
+  entry.status = 'filled'; entry.filled_qty = '115'; entry.filled_avg_price = '4.36';
+  f.world.positions = [{ symbol: 'BBD', qty: '115', avg_entry_price: '4.36', current_price: '4.37' }];
+  await f.service.run(1);
+  const ocos = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST' && c.body?.order_class === 'oco');
+  assert.equal(ocos.length, 1, 'one OCO parent attached after the fill');
+  assert.equal(ocos[0].body.stop_loss.stop_price, 4.34, 'stop leg rounded to the penny tick');
+  assert.equal(ocos[0].body.take_profit.limit_price, 4.5, 'target leg rounded to the penny tick');
+  const pos = f.db.prepare('SELECT * FROM warrior_positions WHERE proposal_id=?').get(proposal.proposal_id);
+  assert.equal(pos.status, 'open');
+  assert.ok(pos.exit_oco_id, 'protection parent recorded');
+  const riskAlerts = f.db.prepare("SELECT COUNT(*) c FROM warrior_alerts WHERE user_id=1 AND message LIKE '%UNPROTECTED%'").get().c;
+  assert.equal(riskAlerts, 0, 'no unprotected-position alert may fire');
 });
 
 test('breakeven ratchets the stop only after the broker confirms the replacement OCO', async () => {

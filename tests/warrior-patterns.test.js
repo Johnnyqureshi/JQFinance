@@ -35,15 +35,34 @@ const cocPos = () => setup([...bg(45), [104.5, 105.0, 104.3, 104.7], [104.7, 105
 
 test('CandleOverCandle fires on a high break with volume, VWAP and MACD', () => {
   const { candles, ind } = cocPos();
-  const r = detectCandleOverCandle({ candles, ind, levels: { resistances: [112] } });
+  const r = detectCandleOverCandle({ candles, ind, levels: { resistances: [111] } });
   assertShape(r);
   assert.equal(r.pattern_name, 'CandleOverCandle');
   assert.equal(r.pattern_valid, true);
   assert.equal(r.entry_price, 105.5);
   assert.equal(r.stop_price, 104.3);
-  assert.equal(r.target_price, 112);
+  assert.equal(r.target_price, 111);
   assert.ok(r.risk_reward >= 2);
   assert.ok(r.pattern_start_time < r.pattern_completion_time);
+});
+
+test('CandleOverCandle with a far target over a healthy stop is invalid (rr > 5 cap)', () => {
+  const { candles, ind } = cocPos();
+  // entry 105.5, stop 104.3 → risk 1.2 (1.14%, above the noise floor);
+  // resistance at 112 → rr 5.42 exceeds the 5 maximum.
+  const r = detectCandleOverCandle({ candles, ind, levels: { resistances: [112] } });
+  assert.equal(r.pattern_valid, false);
+  assert.match(r.explanation, /exceeds the 5 maximum/);
+  assert.ok(r.risk_reward > 5);
+});
+
+test('CandleOverCandle with a stop inside the noise floor is invalid', () => {
+  // A low sits pennies under B's close: entry 105.5, stop 105.28 → 0.21%
+  // stop distance, inside the 0.75% noise floor (the BBD/ITUB failure mode).
+  const { candles, ind } = setup([...bg(45), [105.3, 105.4, 105.28, 105.35], [105.35, 105.6, 105.3, 105.5, 1800]]);
+  const r = detectCandleOverCandle({ candles, ind, levels: { resistances: [112] } });
+  assert.equal(r.pattern_valid, false);
+  assert.match(r.explanation, /noise floor/);
 });
 
 test('CandleOverCandle returns null when B does not break A high', () => {
@@ -70,7 +89,7 @@ const mpPos = () => setup([...bg(45),
 
 test('MicroPullback fires on impulse + controlled pullback + continuation', () => {
   const { candles, ind } = mpPos();
-  const r = detectMicroPullback({ candles, ind, levels: { resistances: [112] } });
+  const r = detectMicroPullback({ candles, ind, levels: { resistances: [111] } });
   assertShape(r);
   assert.equal(r.pattern_valid, true);
   assert.equal(r.entry_price, 106.4);

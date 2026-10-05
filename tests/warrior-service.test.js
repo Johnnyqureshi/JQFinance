@@ -428,6 +428,25 @@ test('scoreSymbol duplicate protection blocks repeat proposals and positions', a
   assert.equal(dupPosition.stage, 'duplicate');
 });
 
+test('scoreSymbol rejects a name that already ran past the chase limit', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // Same synthetic tape as the eligible case, but the prior close sits far
+  // below the current price — today is already +18% (the BBD/ITUB/RXRX
+  // failure mode: all entered at +13–20% on the day).
+  const daily = mappedDaily();
+  const prev = daily[daily.length - 2];
+  prev.c = 8.94; prev.o = 8.84; prev.h = 9.04; prev.l = 8.79;
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'rejected');
+  assert.equal(r.stage, 'momentum');
+  assert.match(r.reason, /chase limit/);
+});
+
 test('run() auto-approves proposals at the fixed dollar size when autoApprove is on', async () => {
   const f = fixture();
   await connectAndGet(f);

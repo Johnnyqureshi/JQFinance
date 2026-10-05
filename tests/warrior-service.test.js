@@ -163,7 +163,7 @@ function fixture(options = {}) {
       if (path === '/v2/stocks/bars/latest') {
         if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         const symbols = (query.get('symbols') || '').split(',');
-        const t = new Date(world.time - (world.latestStale ? 120000 : 0)).toISOString();
+        const t = new Date(world.time - (world.latestStale ? 180000 : 0)).toISOString();
         return response({ bars: Object.fromEntries(symbols.map(s => [s, { t, c: world.latestPrice }])) });
       }
     }
@@ -278,8 +278,8 @@ test('approveProposal submits exactly one broker order with idempotent client_or
 test('approveProposal blocks on data_fresh when the latest bar is genuinely stale', async () => {
   const f = fixture();
   await connectAndGet(f);
-  // bars/latest returns the bar object directly per symbol; a 120s-old bar
-  // exceeds the 60s freshness window and must still block the approval.
+  // bars/latest returns the bar object directly per symbol; a 180s-old bar
+  // exceeds the 120s freshness window and must still block the approval.
   f.world.latestStale = true;
   const proposal = insertProposal(f.db);
   await assert.rejects(() => f.service.approveProposal(1, proposal.proposal_id), /data_fresh/);

@@ -114,7 +114,13 @@ function fixture(options = {}) {
     ...options,
   };
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => clone(value) });
-  const sipBlocked = url => world.sipForbidden && url.includes('feed=sip');
+  // REAL Alpaca behavior (verified live 2026-10-05): the v1beta3 crypto
+  // endpoints reject ANY feed query parameter with HTTP 400. The mock
+  // mirrors that exactly so a feed parameter can never sneak back in
+  // behind a mock that tolerates it (the Warrior .DailyBar lesson).
+  const feedRejected = url => {
+    try { return new URL(url).searchParams.has('feed'); } catch (_) { return false; }
+  };
   async function fakeFetch(url, init = {}) {
     const parsed = new URL(url);
     const path = parsed.pathname;
@@ -171,7 +177,7 @@ function fixture(options = {}) {
       }
     }
     if (host === 'data.alpaca.markets') {
-      if (sipBlocked(url)) return response({ message: 'sip entitlement required' }, 403);
+      if (feedRejected(url)) return response({ message: 'unexpected query parameter(s): feed' }, 400);
       if (path === '/v1beta3/crypto/us/bars') {
         const symbols = (query.get('symbols') || '').split(',').filter(Boolean);
         const tf = query.get('timeframe');
@@ -189,7 +195,8 @@ function fixture(options = {}) {
         for (const s of symbols) {
           const mid = s === BREAKOUT_SYMBOL ? world.entryPrice : s === 'BTC/USD' ? 67000 : 100;
           const t = new Date(world.time).toISOString();
-          quotes[s] = { bp: String(mid * 0.9995), ap: String(mid * 1.0005), t };
+          // Real response shape (live-verified): numeric bp/ap + bs/as + t.
+          quotes[s] = { bp: +(mid * 0.9995).toFixed(6), bs: 0.01, ap: +(mid * 1.0005).toFixed(6), as: 0.01, t };
         }
         return response({ quotes });
       }
@@ -503,16 +510,18 @@ test('emergency stop flattens positions with MANUAL_EXIT and halts new entries',
   assert.equal((await f.service.status(1)).emergencyStop, false);
 });
 
-test('SIP 403 falls back to IEX for crypto data (regression)', async () => {
-  const f = fixture({ sipForbidden: true });
+test('crypto data requests are feed-less (regression: Alpaca 400s any feed param on v1beta3 crypto)', async () => {
+  const f = fixture();
   await connectAndGet(f);
   const result = await f.service.run(1);
-  assert.equal(result.ok, true, 'scan succeeds via the IEX fallback');
-  const sipCalls = f.world.calls.filter(c => c.url.includes('feed=sip'));
-  const iexCalls = f.world.calls.filter(c => c.url.includes('feed=iex'));
-  assert.ok(sipCalls.length > 0, 'SIP was attempted first');
-  assert.ok(iexCalls.length > 0, 'IEX fallback was used after the 403');
-  assert.equal(result.entry.entered, 1, 'the entry still fired through the fallback feed');
+  assert.equal(result.ok, true, 'full scan/entry cycle succeeds against the real-shaped API');
+  assert.equal(result.entry.entered, 1, 'the entry fired with feed-less data requests');
+  const dataCalls = f.world.calls.filter(c => c.url.startsWith('https://data.alpaca.markets'));
+  assert.ok(dataCalls.length > 0, 'data endpoints were exercised');
+  for (const c of dataCalls) {
+    assert.ok(!new URL(c.url).searchParams.has('feed'),
+      `crypto data request must not carry a feed parameter: ${c.url}`);
+  }
 });
 
 test('backtest fails closed when the broker is not connected', async () => {

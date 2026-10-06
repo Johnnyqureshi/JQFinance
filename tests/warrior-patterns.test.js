@@ -6,6 +6,7 @@ const { computeIntraday } = require('../lib/warrior/indicators');
 const {
   detectCandleOverCandle, detectMicroPullback, detectBullFlag, detectABCD,
   detectCupAndHandle, detectInvertedHeadAndShoulders, detectVwapReclaim,
+  detectPremarketBreak,
   detectAll,
 } = require('../lib/warrior/patterns');
 
@@ -286,4 +287,69 @@ test('detectors are deterministic: same input, same output', () => {
   const a = detectAll({ candles, ind, levels: { resistances: [112] } });
   const b = detectAll({ candles, ind, levels: { resistances: [112] } });
   assert.deepEqual(a, b);
+});
+
+// --- Premarket break (Johnny 2026-10-06) ------------------------------------
+// Premarket range 08:00–09:29 ET tops at 10.20; regular bars build under it,
+// then a break bar closes above it on heavy volume. 2026-09-28 is EDT:
+// 08:00 ET = 12:00 UTC, 09:30 ET = 13:30 UTC.
+function pmTape({ crossAtMin = 15, stale = false, cross = true } = {}) {
+  const bars = [];
+  const preStart = Date.UTC(2026, 8, 28, 12, 0);
+  for (let m = 0; m < 90; m += 1) {
+    bars.push({ t: preStart + m * 60000, o: 10.02, h: 10.20, l: 9.98, c: 10.05, v: 2000 });
+  }
+  const open = Date.UTC(2026, 8, 28, 13, 30);
+  for (let m = 0; m < crossAtMin; m += 1) {
+    bars.push({ t: open + m * 60000, o: 10.05, h: 10.14, l: 10.00, c: 10.10, v: 20000 });
+  }
+  if (cross) bars.push({ t: open + crossAtMin * 60000, o: 10.12, h: 10.38, l: 10.10, c: 10.35, v: 90000 });
+  if (stale) bars.push({ t: open + (crossAtMin + 1) * 60000, o: 10.35, h: 10.45, l: 10.30, c: 10.42, v: 95000 });
+  return { candles: bars, ind: computeIntraday(bars) };
+}
+const PM_LEVELS = { premarketHigh: 10.20, resistances: [10.95] };
+
+test('PremarketBreak fires on a fresh break of the premarket high in the early window', () => {
+  const { candles, ind } = pmTape();
+  const r = detectPremarketBreak({ candles, ind, levels: PM_LEVELS });
+  assertShape(r);
+  assert.equal(r.pattern_name, 'PremarketBreak');
+  assert.equal(r.pattern_valid, true);
+  assert.equal(r.entry_price, 10.35);
+  assert.equal(r.stop_price, 10.20, 'stop sits at the premarket high — the break fails if the level is lost');
+  assert.equal(r.target_price, 10.95);
+  assert.equal(r.risk_reward, 4);
+  const all = detectAll({ candles, ind, levels: PM_LEVELS });
+  assert.ok(all.some(p => p.pattern_name === 'PremarketBreak'), 'detectAll surfaces the new detector');
+});
+
+test('PremarketBreak ignores the still-forming opening-range high as its target', () => {
+  // Service buildLevels passes openingRangeHigh from the first 30 minutes,
+  // which mid-formation IS the break bar's own high (10.38) — 3 cents over
+  // entry. The detector must not target it; the 2R fallback applies instead.
+  const { candles, ind } = pmTape();
+  const r = detectPremarketBreak({ candles, ind, levels: { premarketHigh: 10.20, openingRangeHigh: 10.38 } });
+  assert.ok(r && r.pattern_valid);
+  assert.equal(r.target_price, 10.65, 'fallback target entry + 2R, not the forming OR high');
+  assert.equal(r.risk_reward, 2);
+});
+
+test('PremarketBreak is silent after the early window closes', () => {
+  const { candles, ind } = pmTape({ crossAtMin: 135 }); // break at 11:45 ET
+  assert.equal(detectPremarketBreak({ candles, ind, levels: PM_LEVELS }), null);
+  // ...and fires on the same tape when the window is widened past it.
+  const r = detectPremarketBreak({ candles, ind, levels: PM_LEVELS }, { earlyBreakWindowMinutes: 180 });
+  assert.ok(r && r.pattern_valid, 'the window is rule-driven, not hardcoded');
+});
+
+test('PremarketBreak needs a premarket level and a fresh cross', () => {
+  const noLevel = pmTape();
+  assert.equal(detectPremarketBreak({ candles: noLevel.candles, ind: noLevel.ind, levels: {} }), null,
+    'no premarket high, no break trade');
+  const noCross = pmTape({ cross: false });
+  assert.equal(detectPremarketBreak({ candles: noCross.candles, ind: noCross.ind, levels: PM_LEVELS }), null,
+    'still under the level, no break');
+  const stale = pmTape({ stale: true });
+  assert.equal(detectPremarketBreak({ candles: stale.candles, ind: stale.ind, levels: PM_LEVELS }), null,
+    'previous bar already closed above the level — an extension, not a break');
 });

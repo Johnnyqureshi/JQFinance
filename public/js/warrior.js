@@ -31,7 +31,8 @@
       ['minScoreBull', 'Min score — bull regime', 'number', 1], ['minScoreNeutral', 'Min score — neutral regime', 'number', 1],
       ['minScoreBear', 'Min score — bear regime', 'number', 1], ['highQuality', 'High-quality score (alerts)', 'number', 1],
       ['minRR', 'Minimum R:R', 'number', 0.1], ['strongRvol', 'Strong RVOL (x)', 'number', 0.1],
-      ['veryStrongRvol', 'Very strong RVOL (x)', 'number', 0.1] ] },
+      ['veryStrongRvol', 'Very strong RVOL (x)', 'number', 0.1],
+      ['earlyBreakWindowMinutes', 'Early-break window after open (min)', 'number', 5] ] },
     { group: 'Position sizing', fields: [
       ['riskPerTradePct', 'Risk per trade (%)', 'number', 0.1], ['maxRiskPerTradePct', 'Max risk per trade (%)', 'number', 0.1],
       ['autoApprove', 'Auto-approve proposals (skip manual size approval)', 'checkbox'],

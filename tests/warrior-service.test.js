@@ -486,6 +486,55 @@ test('run() auto-approves proposals at the fixed dollar size when autoApprove is
   assert.equal(Number(posts[0].body.qty), expectedShares, 'order qty matches the auto-approve size');
 });
 
+// --- Premarket-break early entries (Johnny 2026-10-06) ----------------------
+// Tape: a flat premarket range topping at 10.20, regular bars building under
+// it, and a 09:59 ET break bar closing 10.35 on heavy volume. NOW is
+// 10:00 ET — inside the default 60-minute early-break window.
+function pmBreakBars() {
+  const bars = [];
+  const pre = Date.parse('2026-09-29T12:00:00Z'); // 08:00 ET
+  for (let m = 0; m < 90; m++) {
+    bars.push({ t: new Date(pre + m * 60000).toISOString(), o: 10.02, h: 10.20, l: 9.98, c: 10.05, v: 20000 });
+  }
+  const open = Date.parse('2026-09-29T13:30:00Z'); // 09:30 ET
+  for (let m = 0; m < 29; m++) {
+    bars.push({ t: new Date(open + m * 60000).toISOString(), o: 10.05, h: 10.14, l: 10.00, c: 10.10, v: 600000 });
+  }
+  bars.push({ t: new Date(open + 29 * 60000).toISOString(), o: 10.12, h: 10.38, l: 10.10, c: 10.35, v: 2400000 });
+  return bars;
+}
+const ONLY_PREMARKET_BREAK = {
+  CandleOverCandle: false, MicroPullback: false, BullFlag: false, ABCD: false,
+  CupAndHandle: false, InvertedHeadAndShoulders: false, VwapReclaim: false,
+  PremarketBreak: true,
+};
+
+test('run() proposes a PremarketBreak entry on a fresh break of the premarket high', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => pmBreakBars();
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_PREMARKET_BREAK });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 1, 'the break produced exactly one proposal');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].pattern_name, 'PremarketBreak');
+  assert.equal(Number(pending[0].entry), 10.35);
+  assert.equal(Number(pending[0].stop), 10.20, 'stop at the premarket high');
+});
+
+test('the early-break window rule gates the service path', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => pmBreakBars();
+  // Break bar is 29 minutes after the open; a 5-minute window must miss it.
+  await f.service.setSettings(1, { rules: { autoApprove: false, earlyBreakWindowMinutes: 5 }, allowedPatterns: ONLY_PREMARKET_BREAK });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 0, 'outside the configured window the break is not taken');
+});
+
 test('run() keeps the manual-approval invariant when autoApprove is off', async () => {
   const f = fixture();
   await connectAndGet(f);

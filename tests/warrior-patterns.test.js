@@ -6,7 +6,7 @@ const { computeIntraday } = require('../lib/warrior/indicators');
 const {
   detectCandleOverCandle, detectMicroPullback, detectBullFlag, detectABCD,
   detectCupAndHandle, detectInvertedHeadAndShoulders, detectVwapReclaim,
-  detectPremarketBreak,
+  detectPremarketBreak, detectSecondLeg,
   detectAll,
 } = require('../lib/warrior/patterns');
 
@@ -340,6 +340,58 @@ test('PremarketBreak is silent after the early window closes', () => {
   // ...and fires on the same tape when the window is widened past it.
   const r = detectPremarketBreak({ candles, ind, levels: PM_LEVELS }, { earlyBreakWindowMinutes: 180 });
   assert.ok(r && r.pattern_valid, 'the window is rule-driven, not hardcoded');
+});
+
+// --- Second leg (Johnny 2026-10-06) -----------------------------------------
+// Regular session: 20 bars run 10.00 → 10.98 (peak high 11.00), a pullback
+// to 10.44 (-5.1%), a 3-bar base, then a re-break bar closing 11.12.
+function slTape({ shallow = false, stale = false, cross = true, noPullback = false } = {}) {
+  const bars = [];
+  const open = Date.UTC(2026, 8, 28, 13, 30); // 09:30 ET
+  const push = (m, o, h, l, c, v = 20000) => bars.push({ t: open + m * 60000, o, h, l, c, v });
+  if (noPullback) {
+    for (let m = 0; m < 29; m += 1) { const c = 10.00 + m * 0.037; push(m, c - 0.02, c + 0.02, c - 0.04, c); }
+    push(29, 11.05, 11.15, 11.00, 11.12, 90000);
+    return { candles: bars, ind: computeIntraday(bars) };
+  }
+  for (let m = 0; m < 20; m += 1) {
+    const c = 10.00 + m * (0.98 / 19);
+    push(m, c - 0.02, m === 19 ? 11.00 : c + 0.02, c - 0.04, c);
+  }
+  const pbCloses = shallow ? [10.97, 10.95, 10.93, 10.92, 10.91, 10.92] : [10.88, 10.76, 10.64, 10.55, 10.48, 10.50];
+  pbCloses.forEach((c, j) => push(20 + j, c + 0.02, c + (shallow ? 0.02 : 0.05), shallow ? c - 0.01 : (j === 4 ? 10.44 : c - 0.03), c));
+  (shallow ? [10.93, 10.94, 10.95] : [10.53, 10.56, 10.59]).forEach((c, j) => push(26 + j, c - 0.01, c + 0.03, c - 0.03, c));
+  if (cross) push(29, 10.60, 11.15, 10.58, 11.12, 90000);
+  else push(29, 10.60, 10.98, 10.55, 10.95, 90000);
+  if (stale) push(30, 11.12, 11.25, 11.08, 11.20, 95000);
+  return { candles: bars, ind: computeIntraday(bars) };
+}
+
+test('SecondLeg fires on a re-break of the first-leg high after a real pullback', () => {
+  const { candles, ind } = slTape();
+  const r = detectSecondLeg({ candles, ind, levels: { resistances: [11.60] } });
+  assertShape(r);
+  assert.equal(r.pattern_name, 'SecondLeg');
+  assert.equal(r.pattern_valid, true);
+  assert.equal(r.entry_price, 11.12);
+  assert.equal(r.stop_price, 11.00, 'stop at the re-broken first-leg high');
+  assert.equal(r.target_price, 11.60);
+  assert.equal(r.risk_reward, 4);
+});
+
+test('SecondLeg needs the pullback, the base, and a fresh cross', () => {
+  const noPullback = slTape({ noPullback: true });
+  assert.equal(detectSecondLeg({ candles: noPullback.candles, ind: noPullback.ind, levels: {} }), null,
+    'a straight-line run is a chase, not a second leg');
+  const shallow = slTape({ shallow: true });
+  assert.equal(detectSecondLeg({ candles: shallow.candles, ind: shallow.ind, levels: {} }), null,
+    'a 0.9% dip is not a pullback');
+  const noCross = slTape({ cross: false });
+  assert.equal(detectSecondLeg({ candles: noCross.candles, ind: noCross.ind, levels: {} }), null,
+    'still under the first-leg high');
+  const stale = slTape({ stale: true });
+  assert.equal(detectSecondLeg({ candles: stale.candles, ind: stale.ind, levels: {} }), null,
+    'previous bar already closed above the high — extension, not a break');
 });
 
 test('PremarketBreak needs a premarket level and a fresh cross', () => {

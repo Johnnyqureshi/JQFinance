@@ -535,6 +535,75 @@ test('the early-break window rule gates the service path', async () => {
   assert.equal(result.scan.funnel.proposals, 0, 'outside the configured window the break is not taken');
 });
 
+// --- Second-leg chase exception (Johnny 2026-10-06) ------------------------
+// Minute tape: run to a first-leg high of 11.00, pullback to 10.44, base,
+// re-break closing 11.12 at 09:59 ET. Daily tape puts the day at +25.8% —
+// far past the 10% chase cap, inside the 60% second-leg ceiling.
+function secondLegBars() {
+  const bars = [];
+  const open = Date.parse('2026-09-29T13:30:00Z'); // 09:30 ET
+  const push = (m, o, h, l, c, v = 600000) => bars.push({ t: new Date(open + m * 60000).toISOString(), o, h, l, c, v });
+  for (let m = 0; m < 20; m++) { const c = 10.00 + m * (0.98 / 19); push(m, c - 0.02, m === 19 ? 11.00 : c + 0.02, c - 0.04, c); }
+  [10.88, 10.76, 10.64, 10.55, 10.48, 10.50].forEach((c, j) => push(20 + j, c + 0.02, c + 0.05, j === 4 ? 10.44 : c - 0.03, c));
+  [10.53, 10.56, 10.59].forEach((c, j) => push(26 + j, c - 0.01, c + 0.03, c - 0.03, c));
+  push(29, 10.60, 11.15, 10.58, 11.12, 2400000);
+  return bars;
+}
+function secondLegDaily(prevClose) {
+  const bars = [];
+  let date = Date.parse('2026-09-29T13:30:00Z');
+  for (let i = 0; i < 45; i++) {
+    const last = i === 0;
+    const c = last ? 11.12 : (i === 1 ? prevClose : prevClose - i * 0.01);
+    bars.unshift({ t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15, c, v: last ? 3000000 : 1000000 });
+    date -= 86400000;
+  }
+  return bars;
+}
+const ONLY_SECOND_LEG = { ...ONLY_PREMARKET_BREAK, PremarketBreak: false, SecondLeg: true };
+
+test('second-leg exception: a re-break past the chase cap still proposes', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => secondLegBars();
+  f.world.dailyBarsOverride = secondLegDaily(8.84); // +25.8% day
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_SECOND_LEG });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 1, 'the re-break opened the chase door exactly once');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].pattern_name, 'SecondLeg');
+  assert.equal(Number(pending[0].entry), 11.12);
+  assert.equal(Number(pending[0].stop), 11.00, 'stop at the re-broken first-leg high');
+});
+
+test('second-leg exception: without the pattern the chase cap still bars the same tape', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => secondLegBars();
+  f.world.dailyBarsOverride = secondLegDaily(8.84);
+  // Every pattern EXCEPT SecondLeg is enabled — the door must stay shut.
+  await f.service.setSettings(1, {
+    rules: { autoApprove: false },
+    allowedPatterns: { CandleOverCandle: true, MicroPullback: true, BullFlag: true, ABCD: true, CupAndHandle: true, InvertedHeadAndShoulders: true, VwapReclaim: true, PremarketBreak: true, SecondLeg: false },
+  });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 0, 'no second-leg structure, no entry past the cap');
+});
+
+test('second-leg exception: the ceiling still bars a parabolic day', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => secondLegBars();
+  f.world.dailyBarsOverride = secondLegDaily(6.18); // +80% day — past the 60% ceiling
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_SECOND_LEG });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 0, 'past the ceiling even a re-break is a lottery ticket');
+});
+
 test('run() keeps the manual-approval invariant when autoApprove is off', async () => {
   const f = fixture();
   await connectAndGet(f);

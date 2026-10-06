@@ -388,6 +388,26 @@ test('daily-loss halt blocks approval and surfaces in status blockers', async ()
   assert.equal(posts.length, 0, 'halted approval must not reach the broker');
 });
 
+test('a prior-day loss streak does NOT halt a new day; a same-day streak does', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  // Four straight losses YESTERDAY (2026-09-28): the streak is a daily limit
+  // and must reset overnight, or a halted bot can never trade its way out
+  // (live failure 2026-10-06: Monday's losses still had Warrior halted Tuesday).
+  const ins = f.db.prepare(`INSERT INTO warrior_trades(user_id,ticker,date,exitedAt,pnl,created_at) VALUES (1,'AAA',?,?,?,?)`);
+  for (let i = 0; i < 4; i++) {
+    ins.run('2026-09-28', new Date(Date.parse('2026-09-28T19:00:00Z') + i * 60000).toISOString(), '-10', new Date(NOW).toISOString());
+  }
+  let status = await f.service.status(1);
+  assert.ok(!status.blockers.some(b => /consecutive/i.test(b)), `prior-day streak must not block: ${status.blockers}`);
+  // Three losses TODAY still trip the guard — the daily limit itself is intact.
+  for (let i = 0; i < 3; i++) {
+    ins.run(TODAY, new Date(NOW - (10 - i) * 60000).toISOString(), '-10', new Date(NOW).toISOString());
+  }
+  status = await f.service.status(1);
+  assert.ok(status.blockers.some(b => /consecutive/i.test(b)), `same-day streak must block: ${status.blockers}`);
+});
+
 test('paper is the default mode; incomplete LIVE authorization is refused loudly', async () => {
   const f = fixture();
   await connectAndGet(f);

@@ -529,6 +529,9 @@ const automatedStartup = automatedState.init()
   .then(() => automatedState.dropRetiredCryptoJournal())
   // Warrior $0.10–$20 price band (Johnny 2026-09-29) — before the checkpoint.
   .then(() => automatedState.applyWarriorPriceBand())
+  // Crypto $25k liquidity floor (2026-10-07) — the $1M default rejected every
+  // asset on Alpaca's venue; patch untouched defaults before the checkpoint.
+  .then(() => automatedState.applyCryptoLiquidityFloor())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.

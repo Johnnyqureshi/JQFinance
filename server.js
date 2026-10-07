@@ -535,6 +535,9 @@ const automatedStartup = automatedState.init()
   // Crypto activity + risk pass (Johnny 2026-10-07) — patch untouched
   // defaults to the livelier rule set before the checkpoint.
   .then(() => automatedState.applyCryptoActivity())
+  // Crypto full-activity pass (Johnny 2026-10-07, "go full degenerate") —
+  // chains after the activity pass, before the checkpoint.
+  .then(() => automatedState.applyCryptoDegen())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.

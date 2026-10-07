@@ -624,3 +624,26 @@ test('disconnect is blocked while a position is open', async () => {
   seedOpenPosition(f.db);
   await assert.rejects(() => f.service.disconnect(1), /flatten/i);
 });
+
+test('entryGates: bearish-regime pump carve-out (2026-10-07)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const base = {
+    uid: 1, rules: DEFAULT_CRYPTO_RULES,
+    stats: { dayPnl: 0, consecutiveLosses: 0, openPositions: 0, tradesLastHour: 0, equity: 100000 },
+    account: { equity: 100000 }, quote: { mid: 50, bid: 49.99, ask: 50.01 },
+    symbol: 'SOL/USD', notional: 750, spreadPct: 0.1,
+  };
+  // Ordinary alt setup in a bearish regime: still withheld.
+  const plain = f.service.entryGates({ ...base, regime: 'bearish', score: 70, rvol: 1.8 });
+  assert.ok(plain.reasons.some(r => /altcoin longs withheld/.test(r)));
+  // Exceptional pump (score >= highQuality, rvol >= rvolStrong): allowed.
+  const pump = f.service.entryGates({ ...base, regime: 'bearish', score: 90, rvol: 3.5 });
+  assert.ok(!pump.reasons.some(r => /altcoin longs withheld/.test(r)));
+  // High volatility stays fully blocked, even for an exceptional setup.
+  const chaos = f.service.entryGates({ ...base, regime: 'high_volatility', score: 95, rvol: 5 });
+  assert.ok(chaos.reasons.some(r => /altcoin longs withheld/.test(r)));
+  // BTC itself is never regime-blocked.
+  const btc = f.service.entryGates({ ...base, symbol: 'BTC/USD', regime: 'bearish', score: 70, rvol: 1.8 });
+  assert.ok(!btc.reasons.some(r => /altcoin longs withheld/.test(r)));
+});

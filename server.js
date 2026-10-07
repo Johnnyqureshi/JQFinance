@@ -532,6 +532,9 @@ const automatedStartup = automatedState.init()
   // Crypto $25k liquidity floor (2026-10-07) — the $1M default rejected every
   // asset on Alpaca's venue; patch untouched defaults before the checkpoint.
   .then(() => automatedState.applyCryptoLiquidityFloor())
+  // Crypto activity + risk pass (Johnny 2026-10-07) — patch untouched
+  // defaults to the livelier rule set before the checkpoint.
+  .then(() => automatedState.applyCryptoActivity())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.

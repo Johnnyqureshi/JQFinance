@@ -144,6 +144,10 @@ function fixture(options = {}) {
         return order ? response(order) : response({}, 404);
       }
       if (path === '/v2/orders' && (init.method || 'GET') === 'GET') {
+        // Mirror Alpaca: status=closed returns terminal orders, anything
+        // else returns the open list.
+        if (query.get('status') === 'closed')
+          return response([...world.orders.values()].filter(o => ['filled', 'canceled', 'expired', 'rejected'].includes(o.status)));
         return response([...world.orders.values()].filter(o => !['filled', 'canceled', 'expired', 'rejected'].includes(o.status)));
       }
       if (path === '/v2/orders' && init.method === 'POST') {
@@ -646,4 +650,47 @@ test('entryGates: bearish-regime pump carve-out (2026-10-07)', async () => {
   // BTC itself is never regime-blocked.
   const btc = f.service.entryGates({ ...base, symbol: 'BTC/USD', regime: 'bearish', score: 70, rvol: 1.8 });
   assert.ok(!btc.reasons.some(r => /altcoin longs withheld/.test(r)));
+});
+
+test('broker errors surface the Alpaca code and message (2026-10-07)', async () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec(`
+    CREATE TABLE users(id INTEGER PRIMARY KEY);
+    INSERT OR IGNORE INTO users(id) VALUES (1);
+    CREATE TABLE broker_account_owners(account_id TEXT PRIMARY KEY, user_id INTEGER, scope TEXT, mode TEXT, claimed_at TEXT);
+    CREATE TABLE broker_account_quarantine(account_id TEXT PRIMARY KEY, resolved_at TEXT);
+    CREATE TABLE automated_action_intents(id INTEGER PRIMARY KEY AUTOINCREMENT, strategy TEXT, user_id INTEGER,
+      account_id TEXT, mode TEXT, method TEXT, path TEXT, purpose TEXT, client_order_id TEXT,
+      request_json TEXT, state TEXT, broker_order_id TEXT, last_error TEXT, updated_at TEXT);
+  `);
+  const vault = createCredentialVault('test-only-secret-never-a-real-credential-123456789');
+  const service = createCryptoService({
+    db, vault,
+    fetch: async () => ({ ok: false, status: 403, json: async () => ({ code: 40310000, message: 'crypto trading is not permitted for this account' }) }),
+    persistenceReady: () => true, durability: null,
+  });
+  await assert.rejects(
+    () => service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8) }),
+    /HTTP 403.*crypto trading is not permitted for this account \(code 40310000\)/);
+});
+
+test('reconcile recovers a vanished position exit from broker order history', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const pos = seedOpenPosition(f.db);
+  f.world.positions = []; // broker is flat — the position vanished
+  // A filled sell for the full quantity sits in order history under a
+  // foreign client id (e.g. the position was closed outside the bot).
+  f.world.orders.set('external-close-1', {
+    id: 'ord-ext-1', client_order_id: 'external-close-1', symbol: BREAKOUT_SYMBOL,
+    side: 'sell', type: 'market', status: 'filled',
+    filled_qty: String(pos.qty), filled_avg_price: '99.25',
+  });
+  await f.service.run(1);
+  const trades = f.service.trades(1).trades;
+  assert.equal(trades.length, 1);
+  assert.equal(Number(trades[0].exitPrice), 99.25);
+  assert.equal(trades[0].exitReason, 'MANUAL_EXIT');
+  assert.ok(/recovered from broker order history/.test(trades[0].exitDetail || ''));
 });

@@ -259,9 +259,11 @@ function fixture(scenario = 'riskon', options = {}) {
     }
     return response({ code: 50010000, message: `unexpected host ${parsed.hostname}` }, 500);
   }
+  const fetchImpl = options.wrapFetch ? options.wrapFetch(fakeFetch, world) : fakeFetch;
   const service = createKiaanService({
-    db, vault, fetch: fakeFetch, now: () => world.time,
+    db, vault, fetch: fetchImpl, now: () => world.time,
     persistenceReady: () => true, durability: options.durability || null,
+    timeoutMs: options.timeoutMs,
     exitPoll: { tries: 3, intervalMs: 0 },
   });
   return { db, service, world };
@@ -550,4 +552,60 @@ test('DEFAULT_KIAAN_RULES is paper-only and the error keeps broker code+message'
   const err = new KiaanError('Broker request failed (HTTP 422) [42210000]: sub-penny', 502);
   assert.match(err.message, /42210000/);
   assert.match(err.message, /sub-penny/);
+});
+
+// --- day-scoped caching + GET timeout retry (2026-10-08 timeout fix) --------
+test('second scan cycle on the same trade date reuses the cached assets catalog and daily bars', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  f.world.calls.length = 0;
+  await f.service._scanCycle(1);
+  const assetsCalls = f.world.calls.filter(c => c.path === '/v2/assets');
+  const dailyCalls = f.world.calls.filter(c => c.path === '/v2/stocks/bars' && c.url.includes('timeframe=1Day'));
+  assert.equal(assetsCalls.length, 0, 'assets catalog must be cached per trade date');
+  assert.equal(dailyCalls.length, 0, 'daily bars must be cached per trade date');
+  // Fresh work still happens every cycle: minute bars are re-fetched.
+  const minuteCalls = f.world.calls.filter(c => c.path === '/v2/stocks/bars' && c.url.includes('timeframe=1Min'));
+  assert.ok(minuteCalls.length >= 1, 'minute bars stay fresh each cycle');
+});
+
+test('a timed-out GET is retried once and can succeed (connect account read)', async () => {
+  let accountGets = 0;
+  const f = fixture('riskon', {
+    timeoutMs: 50,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/account'
+        && (init.method || 'GET') === 'GET') {
+        accountGets++;
+        if (accountGets === 1) return new Promise(() => {}); // hang → 50ms timeout
+      }
+      return inner(url, init);
+    },
+  });
+  const out = await connectPaper(f);
+  assert.equal(out.ok, true);
+  assert.equal(accountGets, 2, 'first GET timed out, the single retry succeeded');
+});
+
+test('a timed-out POST (order) is NEVER retried — reconciliation semantics preserved', async () => {
+  let orderPosts = 0;
+  const f = fixture('riskon', {
+    timeoutMs: 50,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/orders' && init.method === 'POST') {
+        orderPosts++;
+        return new Promise(() => {}); // hang → timeout, outcome unknown
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  assert.equal(orderPosts, 1, 'a timed-out entry POST must not be re-sent');
+  assert.equal(f.world.orderPosts.length, 0, 'the broker never recorded the order');
+  const alert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE user_id=1 AND message LIKE '%AAA%'").get();
+  assert.ok(alert, 'the withheld entry is alerted, not silently dropped');
 });

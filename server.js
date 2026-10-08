@@ -21,7 +21,6 @@ const {
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
-const { createCryptoService, mountCrypto } = require('./lib/crypto/service');
 const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
 const { createOrbService, mountOrb } = require('./lib/orb/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
@@ -529,15 +528,10 @@ const automatedStartup = automatedState.init()
   .then(() => automatedState.dropRetiredCryptoJournal())
   // Warrior $0.10–$20 price band (Johnny 2026-09-29) — before the checkpoint.
   .then(() => automatedState.applyWarriorPriceBand())
-  // Crypto $25k liquidity floor (2026-10-07) — the $1M default rejected every
-  // asset on Alpaca's venue; patch untouched defaults before the checkpoint.
-  .then(() => automatedState.applyCryptoLiquidityFloor())
-  // Crypto activity + risk pass (Johnny 2026-10-07) — patch untouched
-  // defaults to the livelier rule set before the checkpoint.
-  .then(() => automatedState.applyCryptoActivity())
-  // Crypto full-activity pass (Johnny 2026-10-07, "go full degenerate") —
-  // chains after the activity pass, before the checkpoint.
-  .then(() => automatedState.applyCryptoDegen())
+  // Crypto bot DELETED 2026-10-07 on Johnny's order ("gut it, make it
+  // disappear"): drop its tables and broker-account claim before the
+  // startup checkpoint so the removal persists into the durable snapshot.
+  .then(() => automatedState.dropCryptoBot())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.
@@ -1397,10 +1391,6 @@ app.get('/api/_verify20260927', async (req, res) => {
       warrior_positions: aq("SELECT COUNT(*) AS n FROM warrior_positions WHERE status='open'")[0],
       warrior_alerts: aq('SELECT created_at, kind, message FROM warrior_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
-      crypto_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM crypto_settings'),
-      crypto_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM crypto_credentials'),
-      crypto_positions: aq("SELECT COUNT(*) AS n FROM crypto_positions WHERE status='open'")[0],
-      crypto_alerts: aq('SELECT created_at, kind, message FROM crypto_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Flipper visibility (2026-09-30) — keep B2/Warrior/Crypto fields untouched above
       flipper_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM flipper_settings'),
       flipper_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM flipper_credentials'),
@@ -6243,17 +6233,7 @@ const warriorService = createWarriorService({
 mountWarrior({ app, service: warriorService, requireAuth, ensureSessionUserInTradingStore });
 let warriorSchedulerStarted = false;
 
-// Crypto breakout bot is wired next to Warrior: own tables, own scheduler, own
-// lease. Runs 24/7 — no market-hours logic anywhere in the wiring.
-const cryptoService = createCryptoService({
-  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-});
-mountCrypto({ app, service: cryptoService, requireAuth, ensureSessionUserInTradingStore });
-let cryptoSchedulerStarted = false;
-
-// Flipper "Invisible Wall Reversal" bot is wired next to Crypto: own tables,
+// Flipper "Invisible Wall Reversal" bot is wired next to Warrior: own tables,
 // own scheduler, own lease. Ships DISABLED and paper-first — never enable it
 // for Johnny; he connects and enables bots himself.
 const flipperService = createFlipperService({
@@ -6280,10 +6260,6 @@ let orbSchedulerStarted = false;
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
   try { warriorService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
-}
-for (const row of automatedDb.prepare('SELECT user_id FROM crypto_settings').all()) {
-  try { cryptoService.pruneDiagnostics(row.user_id); }
-  catch (error) { console.warn('[Crypto] boot prune failed:', error.message); }
 }
 for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').all()) {
   try { flipperService.pruneDiagnostics(row.user_id); }
@@ -6321,7 +6297,6 @@ app.get('/readyz', async (_req, res) => {
     && automatedTradingPersistenceReady
     && databaseReady
     && warriorSchedulerStarted
-    && cryptoSchedulerStarted
     && flipperSchedulerStarted
     && orbSchedulerStarted;
   res.status(ready ? 200 : 503).json({
@@ -6330,7 +6305,6 @@ app.get('/readyz', async (_req, res) => {
     fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
     schedulers: {
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
-      crypto: cryptoSchedulerStarted ? 'started' : 'stopped',
       flipper: flipperSchedulerStarted ? 'started' : 'stopped',
       orb: orbSchedulerStarted ? 'started' : 'stopped',
     },
@@ -6373,17 +6347,15 @@ async function stopAutomatedState(signal) {
   let failed = false;
   try {
     warriorSchedulerStarted = false;
-    cryptoSchedulerStarted = false;
     flipperSchedulerStarted = false;
     orbSchedulerStarted = false;
-    const cryptoDrain = cryptoService.drain();
     const warriorDrain = warriorService.drain();
     const flipperDrain = flipperService.drain();
     const orbDrain = orbService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([cryptoDrain, warriorDrain, flipperDrain, orbDrain]);
+    await Promise.all([warriorDrain, flipperDrain, orbDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6403,12 +6375,8 @@ function startServer() {
   console.log(`Qureshi Finance on :${PORT}`);
   warriorService.start(); // first run delayed ~30s
   warriorSchedulerStarted = true;
-  // Crypto first run is delayed by the service itself (~45s), staggered after
-  // Warrior's ~30s; crypto trades 24/7 with no market-hours gating.
-  cryptoService.start();
-  cryptoSchedulerStarted = true;
   // Flipper first run is delayed by the service itself (~90s), staggered
-  // after crypto. Ships disabled: the loop idles until Johnny enables it.
+  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
   flipperService.start();
   flipperSchedulerStarted = true;
   // ORB first run is delayed by the service itself (~120s), staggered

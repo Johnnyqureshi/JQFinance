@@ -686,8 +686,6 @@ function goPage(page) {
   else if (window.flipperBot) flipperBot.pause();
   if (page==='orb') { if (window.orbBot) orbBot.open(); }
   else if (window.orbBot) orbBot.pause();
-  if (page==='crypto') { if (window.cryptoBot) cryptoBot.open(); }
-  else if (window.cryptoBot) cryptoBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

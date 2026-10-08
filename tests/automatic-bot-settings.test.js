@@ -13,27 +13,28 @@ db.exec(`
 
 const settings = createAutomaticBotSettings(db);
 
-// B2 and LEAP/options were deleted 2026-10-01: they are no longer known strategies.
-for (const dead of ['b2', 'options']) {
+// B2 and LEAP/options were deleted 2026-10-01 and the crypto bot on
+// 2026-10-07: they are no longer known strategies.
+for (const dead of ['b2', 'options', 'crypto']) {
   assert.throws(() => settings.arm(1, dead, () => {}), /Unknown automatic trading strategy/);
   assert.throws(() => settings.revoke(1, dead), /Unknown automatic trading strategy/);
   assert.throws(() => settings.status(1, dead, { mode: 'paper', enabled: true, liveArmed: false }), /Unknown automatic trading strategy/);
 }
 
-// Warrior / crypto / flipper are registered paper-only strategies.
+// Warrior / orb / flipper are registered paper-only strategies.
 settings.arm(1, 'warrior', () => {});
 assert.deepEqual(settings.owner(1).strategy, 'warrior');
 
 // Revoking another strategy must not clear the live-arm owner.
-settings.revoke(1, 'crypto');
+settings.revoke(1, 'orb');
 assert.deepEqual(settings.owner(1).strategy, 'warrior',
-  "Revoking crypto must not clear another strategy's live arm");
-assert.equal(settings.status(1, 'crypto', { mode: 'paper', enabled: true, liveArmed: false }).posture, 'active');
-assert.equal(settings.status(1, 'crypto', { mode: 'paper', enabled: false, liveArmed: false }).posture, 'paused');
+  "Revoking orb must not clear another strategy's live arm");
+assert.equal(settings.status(1, 'orb', { mode: 'paper', enabled: true, liveArmed: false }).posture, 'active');
+assert.equal(settings.status(1, 'orb', { mode: 'paper', enabled: false, liveArmed: false }).posture, 'paused');
 
-settings.arm(1, 'crypto', () => {});
-assert.deepEqual(settings.owner(1).strategy, 'crypto');
-settings.revoke(1, 'crypto');
+settings.arm(1, 'orb', () => {});
+assert.deepEqual(settings.owner(1).strategy, 'orb');
+settings.revoke(1, 'orb');
 assert.equal(settings.owner(1), null);
 
 settings.arm(1, 'flipper', () => {});
@@ -45,9 +46,9 @@ assert.equal(settings.owner(1), null);
 // Paper-only strategies have no-op invalidate: arming one never throws and
 // never disturbs another user's stored arm.
 settings.arm(1, 'warrior', () => {});
-settings.arm(2, 'crypto', () => {});
+settings.arm(2, 'orb', () => {});
 assert.deepEqual(settings.owner(1).strategy, 'warrior');
-assert.deepEqual(settings.owner(2).strategy, 'crypto');
+assert.deepEqual(settings.owner(2).strategy, 'orb');
 
 async function delayedArmIsRejectedAfterNewerAction() {
   db.exec(`INSERT OR IGNORE INTO users(id) VALUES (3)`);

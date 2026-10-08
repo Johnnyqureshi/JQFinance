@@ -23,6 +23,7 @@ const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
 const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
 const { createOrbService, mountOrb } = require('./lib/orb/service');
+const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -1396,6 +1397,11 @@ app.get('/api/_verify20260927', async (req, res) => {
       flipper_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM flipper_credentials'),
       flipper_positions: aq("SELECT COUNT(*) AS n FROM flipper_positions WHERE status IN ('open','pending_entry')")[0],
       flipper_alerts: aq('SELECT created_at, kind, message FROM flipper_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Kiaan Bot visibility (2026-10-08) — stage-2 wiring verification
+      kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),
+      kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
+      kiaan_positions: aq("SELECT COUNT(*) AS n FROM kiaan_positions WHERE status IN ('open','pending_entry')")[0],
+      kiaan_alerts: aq('SELECT created_at, kind, message FROM kiaan_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP pre-teardown export (2026-10-01): full row dumps of B2 + options
       // trade history before the bots are deleted. Remove with the teardown.
       b2_export: {
@@ -6255,6 +6261,18 @@ const orbService = createOrbService({
 mountOrb({ app, service: orbService, requireAuth, ensureSessionUserInTradingStore });
 let orbSchedulerStarted = false;
 
+// Kiaan Bot (regime-first, Johnny 2026-10-08) is wired next to ORB: own
+// kiaan_* tables, own scheduler, own lease. Paper-only by design and ships
+// DISABLED — never enable it for Johnny; he connects and enables bots
+// himself, on a dedicated new paper account.
+const kiaanService = createKiaanService({
+  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
+  persistenceReady: () => automatedTradingPersistenceReady,
+  durability: automatedState,
+});
+mountKiaan({ app, service: kiaanService, requireAuth, ensureSessionUserInTradingStore });
+let kiaanSchedulerStarted = false;
+
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
 // runs even while the bots are paused.
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
@@ -6268,6 +6286,10 @@ for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').al
 for (const row of automatedDb.prepare("SELECT user_id FROM orb_settings").all()) {
   try { orbService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[ORB] boot prune failed:', error.message); }
+}
+for (const row of automatedDb.prepare("SELECT user_id FROM kiaan_settings").all()) {
+  try { kiaanService.pruneDiagnostics(row.user_id); }
+  catch (error) { console.warn('[Kiaan] boot prune failed:', error.message); }
 }
 
 // Johnny 2026-10-01: B2 and LEAP/options bots deleted. Drop their tables from
@@ -6298,7 +6320,8 @@ app.get('/readyz', async (_req, res) => {
     && databaseReady
     && warriorSchedulerStarted
     && flipperSchedulerStarted
-    && orbSchedulerStarted;
+    && orbSchedulerStarted
+    && kiaanSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
@@ -6307,6 +6330,7 @@ app.get('/readyz', async (_req, res) => {
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
       flipper: flipperSchedulerStarted ? 'started' : 'stopped',
       orb: orbSchedulerStarted ? 'started' : 'stopped',
+      kiaan: kiaanSchedulerStarted ? 'started' : 'stopped',
     },
   });
 });
@@ -6349,13 +6373,15 @@ async function stopAutomatedState(signal) {
     warriorSchedulerStarted = false;
     flipperSchedulerStarted = false;
     orbSchedulerStarted = false;
+    kiaanSchedulerStarted = false;
     const warriorDrain = warriorService.drain();
     const flipperDrain = flipperService.drain();
     const orbDrain = orbService.drain();
+    const kiaanDrain = kiaanService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([warriorDrain, flipperDrain, orbDrain]);
+    await Promise.all([warriorDrain, flipperDrain, orbDrain, kiaanDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6383,6 +6409,10 @@ function startServer() {
   // after flipper. Ships disabled: the loop idles until Johnny enables it.
   orbService.start();
   orbSchedulerStarted = true;
+  // Kiaan Bot first run is delayed by the service itself (~150s), staggered
+  // after ORB. Ships disabled: the loop idles until Johnny enables it.
+  kiaanService.start();
+  kiaanSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open
   getSPYLevels().then(lvl => {
     if (lvl) console.log(`[SPY-Gate] Pre-loaded at startup — FLOOR $${lvl.floor}  MAX PAIN $${lvl.maxPain}  ROOF $${lvl.roof}  (${lvl.expiry})`);

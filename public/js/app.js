@@ -686,6 +686,8 @@ function goPage(page) {
   else if (window.flipperBot) flipperBot.pause();
   if (page==='orb') { if (window.orbBot) orbBot.open(); }
   else if (window.orbBot) orbBot.pause();
+  if (page==='kiaan') { if (window.kiaanBot) kiaanBot.open(); }
+  else if (window.kiaanBot) kiaanBot.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

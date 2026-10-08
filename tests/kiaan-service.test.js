@@ -261,7 +261,7 @@ function fixture(scenario = 'riskon', options = {}) {
   }
   const service = createKiaanService({
     db, vault, fetch: fakeFetch, now: () => world.time,
-    persistenceReady: () => true, durability: null,
+    persistenceReady: () => true, durability: options.durability || null,
     exitPoll: { tries: 3, intervalMs: 0 },
   });
   return { db, service, world };
@@ -489,6 +489,30 @@ test('disabled bot idles: no broker order calls, scheduler state idle', async ()
   assert.equal(f.world.orderPosts.length, 0);
   const settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
   assert.equal(settings.scheduler_status, 'idle');
+});
+
+test('regression: a hanging durability flush must not hold the kiaan lease (disabled cycle)', async () => {
+  // flush() with a non-exempt reason resolves only at the next throttled
+  // mutation checkpoint in production (up to 60s+; 2026-10-05 fleet
+  // lesson). Simulate the worst case — a flush promise that NEVER
+  // resolves — and prove the disabled scan cycle still completes promptly
+  // and frees the op-lease, so the user's next Resume (setSettings) is
+  // not blocked with a "reconciling this account" error.
+  const hangingDurability = { flush: () => new Promise(() => {}) };
+  const f = fixture('riskon', { durability: hangingDurability });
+  await connectPaper(f);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('scanCycle hung on the prune flush')), 2000);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([f.service._scanCycle(1), timeout]);
+  } finally { clearTimeout(timer); }
+  // Lease must be free immediately after the cycle.
+  const view = await f.service.setSettings(1, { enabled: true });
+  assert.equal(view.enabled, true);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_leases').get().n, 0);
 });
 
 // --- routes -------------------------------------------------------------------

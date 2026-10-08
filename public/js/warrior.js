@@ -33,7 +33,8 @@
       ['minRR', 'Minimum R:R', 'number', 0.1], ['strongRvol', 'Strong RVOL (x)', 'number', 0.1],
       ['veryStrongRvol', 'Very strong RVOL (x)', 'number', 0.1],
       ['earlyBreakWindowMinutes', 'Early-break window after open (min)', 'number', 5],
-      ['secondLegMaxChasePct', 'Second-leg chase ceiling (%)', 'number', 5] ] },
+      ['secondLegMaxChasePct', 'Second-leg chase ceiling (%)', 'number', 5],
+      ['premarketBreakMaxChasePct', 'Premarket-break chase ceiling (%)', 'number', 5] ] },
     { group: 'Position sizing', fields: [
       ['riskPerTradePct', 'Risk per trade (%)', 'number', 0.1], ['maxRiskPerTradePct', 'Max risk per trade (%)', 'number', 0.1],
       ['autoApprove', 'Auto-approve proposals (skip manual size approval)', 'checkbox'],

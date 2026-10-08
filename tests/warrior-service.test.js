@@ -604,6 +604,50 @@ test('second-leg exception: the ceiling still bars a parabolic day', async () =>
   assert.equal(result.scan.funnel.proposals, 0, 'past the ceiling even a re-break is a lottery ticket');
 });
 
+// --- Premarket-break chase exemption (Johnny 2026-10-08) -------------------
+// Same break tape as the base PremarketBreak test (premarket high 10.20,
+// break closes 10.35 in the early window), but the daily tape puts the day
+// at +50% — JZ's shape on 2026-10-08 (+50% at the first close, +116% day):
+// the chase guard previously had no door for it at all.
+function pmBreakDaily(prevClose) {
+  const bars = [];
+  let date = Date.parse('2026-09-29T13:30:00Z');
+  for (let i = 0; i < 45; i++) {
+    const last = i === 0;
+    const c = last ? 10.35 : (i === 1 ? prevClose : prevClose - i * 0.01);
+    bars.unshift({ t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15, c, v: last ? 3000000 : 1000000 });
+    date -= 86400000;
+  }
+  return bars;
+}
+
+test('premarket-break exemption: an early break past the chase cap still proposes', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => pmBreakBars();
+  f.world.dailyBarsOverride = pmBreakDaily(6.90); // +50% day — past the 10% cap, under the 60% PM ceiling
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_PREMARKET_BREAK });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 1, 'the early break opened the chase door exactly once');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].pattern_name, 'PremarketBreak');
+  assert.equal(Number(pending[0].entry), 10.35);
+  assert.equal(Number(pending[0].stop), 10.20, 'stop at the premarket high');
+});
+
+test('premarket-break exemption: the ceiling still bars a parabolic day', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => pmBreakBars();
+  f.world.dailyBarsOverride = pmBreakDaily(5.18); // +99.8% day — past the 60% PM ceiling
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_PREMARKET_BREAK });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 0, 'past the premarket-break ceiling, no entry');
+});
+
 test('run() keeps the manual-approval invariant when autoApprove is off', async () => {
   const f = fixture();
   await connectAndGet(f);

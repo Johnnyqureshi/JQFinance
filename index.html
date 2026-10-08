@@ -125,6 +125,9 @@
     <button class="nav-link" data-page="scanner">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
       <span class="nav-label">Scanner</span>
+    </button><button class="nav-link" data-page="kiaan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/></svg>
+      <span class="nav-label">Kiaan</span>
     </button><button class="nav-link" data-page="warrior">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
       <span class="nav-label">Warrior</span>
@@ -249,6 +252,18 @@
       <div class="hp-bots">
         <span class="hp-eyebrow">Bot command center</span>
         <div class="hp-bot-grid">
+          <article class="hp-bot" aria-label="Kiaan bot status">
+            <div class="hp-bot-head">
+              <h3>Kiaan<span class="hp-bot-sub">Regime-first · reads the whole board</span></h3>
+              <span class="hp-pill hp-pill-paused" id="hpKiaanPill">ENGINE READY</span>
+            </div>
+            <p class="hp-bot-blocker" id="hpKiaanBlocker" style="display:none"></p>
+            <div class="hp-bot-stats">
+              <div><span>Today&rsquo;s regime</span><strong class="hp-bot-num" id="hpKiaanPnl">Risk-off tilt</strong></div>
+              <div><span>Status</span><strong class="hp-bot-num" id="hpKiaanOpen">Wiring next</strong></div>
+            </div>
+            <button class="hp-view" id="hpKiaanView" type="button">View →</button>
+          </article>
           <article class="hp-bot" aria-label="Warrior bot status">
             <div class="hp-bot-head">
               <h3>Warrior<span class="hp-bot-sub">Manual-approval intraday</span></h3>
@@ -843,6 +858,7 @@
 
 </div>
 
+<div class="page" id="page-kiaan"></div>
 <div class="page" id="page-warrior"></div>
 <div class="page" id="page-flipper"></div>
 <div class="page" id="page-orb"></div>
@@ -889,7 +905,7 @@
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
 <script src="/js/app.js?v=20261001b"></script>
-<script src="/js/home-pulse.js?v=20261001c"></script>
+<script src="/js/home-pulse.js?v=20261008a"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
 <script src="/js/gameplan.js?v=20260929d"></script>
@@ -898,6 +914,7 @@
 
 <script src="/js/alpacatrader.js?v=20261001a"></script>
 <script src="/js/agent.js?v=20260929d"></script>
+<script src="/js/kiaan.js?v=20261008a"></script>
 <script src="/js/warrior.js?v=20261008a"></script>
 <script src="/js/flipper.js?v=20261001a"></script>
 <script src="/js/orb.js?v=20261001f"></script>
@@ -919,6 +936,9 @@
   <button class="mobile-nav-btn nav-link" data-page="scanner" aria-label="Scanner">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scanner</span>
+  </button><button class="mobile-nav-btn nav-link" data-page="kiaan" aria-label="Kiaan Bot">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/></svg>
+    <span>Kiaan</span>
   </button><button class="mobile-nav-btn nav-link" data-page="warrior" aria-label="Warrior Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
     <span>Warrior</span>

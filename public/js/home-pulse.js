@@ -258,6 +258,8 @@
 
   function init() {
     if (!$('homeEmpty') || !$('hpTiles')) return;
+    var kiaanview = $('hpKiaanView');
+    if (kiaanview) kiaanview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('kiaan'); });
     var warriorview = $('hpWarriorView');
     if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
     var flipperview = $('hpFlipperView');

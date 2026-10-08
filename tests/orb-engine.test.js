@@ -78,6 +78,9 @@ function goodLongCtx(overrides = {}) {
     bar('09:50', 100.72, 100.85, 100.62, 100.75, 26000),
   ];
   const bars = orBars().concat(post);
+  // These canonical fixtures were written for the scored gate stack;
+  // two-break behavior has its own dedicated tests below.
+  const { rules: ruleOverrides, ...rest } = overrides;
   return {
     symbol: 'AAPL',
     direction: 'long',
@@ -95,8 +98,8 @@ function goodLongCtx(overrides = {}) {
     lastAttempts: [],
     accountEquity: 25000,
     trendAligned: true,
-    rules: {},
-    ...overrides,
+    ...rest,
+    rules: { triggerMode: 'scored', ...(ruleOverrides || {}) },
   };
 }
 
@@ -111,6 +114,7 @@ function goodShortCtx(overrides = {}) {
     bar('09:50', 99.28, 99.38, 99.12, 99.25, 26000),
   ];
   const bars = orBars().concat(post);
+  const { rules: ruleOverrides, ...rest } = overrides;
   return {
     symbol: 'AAPL',
     direction: 'short',
@@ -128,8 +132,8 @@ function goodShortCtx(overrides = {}) {
     lastAttempts: [],
     accountEquity: 25000,
     trendAligned: true,
-    rules: {},
-    ...overrides,
+    ...rest,
+    rules: { triggerMode: 'scored', ...(ruleOverrides || {}) },
   };
 }
 
@@ -430,6 +434,53 @@ test('evaluateEntry: happy-path short mirrors the long', () => {
   assert.deepEqual(res.targets[0], { r: 2, pct: 25, price: 98.05, type: 'rr' });
   assert.equal(res.rr, 2);
   assert.ok(res.why.includes('ENTER-SHORT'));
+});
+
+// ---------------------------------------------------------------------------
+// evaluateEntry — simple two-break trigger (Johnny 2026-10-08)
+// ---------------------------------------------------------------------------
+test('two-break: default rules enter after two conviction closes beyond the OR high', () => {
+  const ctx = goodLongCtx();
+  ctx.rules = {}; // factory default is now two-break
+  const res = evaluateEntry(ctx);
+  assert.equal(res.decision, 'enter-long');
+  assert.equal(res.entry, 100.75);
+  assert.equal(res.stop, 100.15); // same ATR stop machinery as scored mode
+  assert.ok(res.why.includes('2 closes beyond the OR high'), res.why);
+});
+
+test('two-break: scored gates no longer block (bearish regime, tiny intraday RVOL)', () => {
+  const res = evaluateEntry(goodLongCtx({
+    regime: 'bearish', rvol: 0.01,
+    rules: { triggerMode: 'two-break' },
+  }));
+  assert.equal(res.decision, 'enter-long');
+});
+
+test('two-break: one conviction close is not enough', () => {
+  const ctx = goodLongCtx({ rules: { triggerMode: 'two-break' } });
+  ctx.bars = ctx.bars.slice(0, 18); // through the first breakout bar only
+  const res = evaluateEntry(ctx);
+  assert.equal(res.decision, 'wait');
+  assert.ok(res.rejectReasons.some(r => r.startsWith('FIRST_BREAK_ONLY:')),
+    `expected FIRST_BREAK_ONLY, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('two-break: closes beyond the line without conviction volume do not count', () => {
+  const ctx = goodLongCtx({ rules: { triggerMode: 'two-break' } });
+  ctx.bars = ctx.bars.map((b, i) => (i >= 15 ? { ...b, v: 20000 } : b)); // post-OR volume = OR average
+  const res = evaluateEntry(ctx);
+  assert.equal(res.decision, 'wait');
+  assert.ok(res.rejectReasons.some(r => r.startsWith('NO_CONVICTION_BREAK:')),
+    `expected NO_CONVICTION_BREAK, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('two-break: short side mirrors — two conviction closes below the OR low', () => {
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break' } }));
+  assert.equal(res.decision, 'enter-short');
+  assert.equal(res.entry, 99.25);
+  assert.equal(res.stop, 99.85);
+  assert.ok(res.why.includes('2 closes beyond the OR low'), res.why);
 });
 
 test('evaluateEntry: targets sorted nearest-first, OR-width included', () => {
@@ -895,6 +946,7 @@ function risingCtx(overrides = {}) {
     bar('09:50', 100.87, 100.95, 100.83, 100.90, 26000),
   ];
   const bars = orPart.concat(post);
+  const { rules: ruleOverrides, ...rest } = overrides;
   return {
     symbol: 'AAPL', direction: 'long', bars,
     or: computeOpeningRange(bars, 15),
@@ -903,8 +955,8 @@ function risingCtx(overrides = {}) {
     premarket: { trend: 'up', gapPct: 0.5 },
     levels: { priorHigh: 102.50, priorLow: 98.00 },
     lastAttempts: [], accountEquity: 25000, trendAligned: true,
-    rules: {},
-    ...overrides,
+    ...rest,
+    rules: { triggerMode: 'scored', ...(ruleOverrides || {}) },
   };
 }
 
@@ -1116,10 +1168,11 @@ test('parseWatchlist accepts an array and an empty/absent list', () => {
   assert.deepEqual(parseWatchlist({}), []);
   assert.deepEqual(parseWatchlist(null), []);
 });
-test('validateConfig accepts the default 86-symbol watchlist and rejects junk types', () => {
+test('validateConfig accepts the default 87-symbol watchlist and rejects junk types', () => {
   const ok = validateConfig({ watchlist: DEFAULT_ORB_RULES.watchlist });
   assert.equal(ok.ok, true, JSON.stringify(ok.errors));
-  assert.equal(parseWatchlist(DEFAULT_ORB_RULES).length, 86, 'default holds Johnny\'s 86');
+  assert.equal(parseWatchlist(DEFAULT_ORB_RULES).length, 87, 'default holds Johnny\'s 87');
+  assert.ok(parseWatchlist(DEFAULT_ORB_RULES).includes('TSDD'), 'TSDD added 2026-10-08');
   const bad = validateConfig({ watchlist: 123 });
   assert.equal(bad.ok, false, 'numeric watchlist is invalid');
   assert.ok(bad.errors.some(e => e.startsWith('watchlist:')), 'error names the field');

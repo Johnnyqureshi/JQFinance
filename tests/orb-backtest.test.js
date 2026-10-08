@@ -50,6 +50,7 @@ const IDX = {
 // Hand-computable rules: fixed 100-share sizing, 1% stop, single 2R target,
 // no slippage/commission (set on the runBacktest call), permissive gates.
 const METRICS_RULES = {
+  triggerMode: 'scored',
   orMinutes: 15,
   entryMode: 'direct',
   minScore: 0,

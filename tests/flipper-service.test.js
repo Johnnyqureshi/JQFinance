@@ -105,6 +105,25 @@ function minuteBars() {
   return bars;
 }
 
+// Minute tape for the $9.85 C1-low penny-tick regression (2026-10-08):
+//   C1 (13:30-13:44Z): low prints exactly $9.85 — the structure stop's raw
+//     value is 9.85 * 0.999 = 9.84015, sub-penny at $1+.
+//   C2 (13:45-13:59Z): green confirmation, high $9.86.
+//   C3 (14:00Z): closes $9.87, breaking the C2 high — the entry limit's raw
+//     value is 9.87 * 1.002 = 9.88974, also sub-penny.
+// Both raw prices must reach the mock broker (which 422s sub-penny at $1+,
+// like Alpaca) tick-clean: stop 9.84, entry limit 9.89.
+function pennyMinuteBars() {
+  return [
+    m1('2026-09-30T13:30:00Z', 9.95, 10.00, 9.90, 9.92, 100000),
+    m1('2026-09-30T13:36:00Z', 9.90, 9.92, 9.85, 9.88, 100000),
+    m1('2026-09-30T13:44:00Z', 9.88, 9.94, 9.87, 9.93, 100000),
+    m1('2026-09-30T13:45:00Z', 9.80, 9.84, 9.78, 9.82, 100000),
+    m1('2026-09-30T13:59:00Z', 9.83, 9.86, 9.82, 9.85, 100000),
+    m1('2026-09-30T14:00:00Z', 9.82, 9.87, 9.81, 9.87, 60000),
+  ];
+}
+
 function fixture(options = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
@@ -115,23 +134,77 @@ function fixture(options = {}) {
     CREATE TABLE broker_account_quarantine(account_id TEXT PRIMARY KEY, resolved_at TEXT);
   `);
   const vault = createCredentialVault('test-only-secret-never-a-real-credential-987654321');
-  const world = { time: NOW, calls: [], ...options };
+  const world = { time: NOW, calls: [], orders: new Map(), positions: [], sequence: 0, ...options };
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => clone(value) });
   async function fakeFetch(url, init = {}) {
     const parsed = new URL(url);
     const path = parsed.pathname;
     const query = parsed.searchParams;
-    world.calls.push({ url, path, method: init.method || 'GET' });
+    const body = init.body ? JSON.parse(init.body) : null;
+    world.calls.push({ url, path, method: init.method || 'GET', body });
     if (parsed.hostname === 'paper-api.alpaca.markets') {
       if (path === '/v2/account') return response({
         id: 'acct-flipper-test', status: 'ACTIVE', trading_blocked: false,
         account_blocked: false, trade_suspended_by_user: false,
         equity: '100000', buying_power: '100000', last_equity: '100000',
       });
+      if (path === '/v2/calendar') return response([{ date: TRADE_DATE, open: '09:30', close: '16:00' }]);
+      if (path === '/v2/clock') return response({ timestamp: iso(world.time), is_open: true });
+      if (path === '/v2/positions') return response(world.positions);
+      if (path.startsWith('/v2/orders:by_client_order_id')) {
+        const order = world.orders.get(query.get('client_order_id'));
+        return order ? response(order) : response({}, 404);
+      }
+      if (path === '/v2/orders' && (init.method || 'GET') === 'GET') {
+        return response([...world.orders.values()]
+          .filter(o => !['filled', 'canceled', 'expired', 'rejected', 'replaced'].includes(o.status)));
+      }
+      if (path === '/v2/orders' && init.method === 'POST') {
+        // Mirror Alpaca: sub-penny order prices are rejected (422) on
+        // symbols priced $1+ — the rule the Flipper tick bug violated live.
+        const pxFields = [body.limit_price, body.stop_price,
+          body.take_profit?.limit_price, body.stop_loss?.stop_price,
+          ...((body.legs || []).flatMap(leg => [leg.limit_price, leg.stop_price]))];
+        if (pxFields.some(px => px != null && Number(px) >= 1 && Math.abs(Number(px) * 100 - Math.round(Number(px) * 100)) > 1e-9)) {
+          return response({ message: 'invalid price: sub-penny not allowed' }, 422);
+        }
+        world.sequence++;
+        const order = {
+          id: `ord-${world.sequence}`, client_order_id: body.client_order_id,
+          symbol: body.symbol, qty: String(body.qty), side: body.side,
+          type: body.type, order_class: body.order_class || 'simple', status: 'new',
+          filled_qty: '0', limit_price: body.limit_price ?? null, stop_price: body.stop_price ?? null,
+          legs: body.legs || null,
+        };
+        if (!body.order_class) {
+          // Simple orders fill immediately at the limit (or last) price and
+          // move the fake broker's held position, like a real fill would.
+          const held = world.positions.find(p => p.symbol === body.symbol);
+          const fillPrice = body.limit_price ?? (held ? Number(held.current_price) : 10);
+          order.status = 'filled';
+          order.filled_qty = String(body.qty);
+          order.filled_avg_price = String(fillPrice);
+          order.filled_at = iso(world.time);
+          const delta = body.side === 'buy' ? Number(body.qty) : -Number(body.qty);
+          if (held) held.qty = String(Number(held.qty) + delta);
+          else if (delta > 0) world.positions.push({ symbol: body.symbol, qty: String(delta), avg_entry_price: String(fillPrice), current_price: String(fillPrice) });
+        }
+        world.orders.set(body.client_order_id, order);
+        return response(order);
+      }
+      if (path.startsWith('/v2/orders/') && init.method === 'GET') {
+        const order = [...world.orders.values()].find(o => o.id === path.split('/').pop());
+        return order ? response(order) : response({}, 404);
+      }
+      if (path.startsWith('/v2/orders/') && init.method === 'DELETE') {
+        for (const o of world.orders.values()) if (o.id === path.split('/').pop()) o.status = 'canceled';
+        return response(null, 204);
+      }
     }
     if (parsed.hostname === 'data.alpaca.markets' && path === '/v2/stocks/bars') {
       const symbols = (query.get('symbols') || '').split(',').filter(Boolean);
-      const bars = query.get('timeframe') === '1Min' ? minuteBars() : dailyBars();
+      const bars = query.get('timeframe') === '1Min'
+        ? (world.customMinuteBars || minuteBars()) : (world.customDailyBars || dailyBars());
       return response({ bars: Object.fromEntries(symbols.map(s => [s, bars])), next_page_token: null });
     }
     return response({ message: `unexpected ${parsed.hostname}${path}` }, 500);
@@ -386,4 +459,54 @@ test('synthetic backtest smoke: one winning long trade through the real engine',
   const fetched = f.service.getBacktest(1, backtestId);
   assert.equal(fetched.trades.length, 1);
   assert.equal(f.service.getBacktests(1).backtests.length, 1);
+});
+
+// --- penny-tick regression (2026-10-08) --------------------------------------
+test('live entry from a $9.85 C1 low reaches the broker tick-clean (no sub-penny 422)', async () => {
+  const f = fixture({ customMinuteBars: pennyMinuteBars() });
+  await connectPaper(f);
+  // Today's walls: range low $9.85 (the wall C1 tested), range high $10.50
+  // (the full target). Walls are pre-market state, seeded directly.
+  f.db.prepare(`INSERT INTO flipper_walls(user_id,symbol,trade_date,range_high,range_low,flip_high,flip_low,created_at)
+    VALUES (1,'AAA',?,?,?,?,?,?)`).run(TRADE_DATE, 10.5, 9.85, null, null, iso(NOW));
+  // A C1 wall-test setup awaiting C2 confirmation; the live tick computes
+  // its stop from the session C1 low (9.85) and then triggers the entry.
+  f.service._recordSetup(1, TRADE_DATE, 'AAA',
+    { direction: 'long', wallType: 'range_low', wallPrice: 9.85 },
+    { o: 9.95, h: 10.00, l: 9.85, c: 9.93 });
+  await f.service.setSettings(1, { enabled: true });
+  await f.service._scanCycle(1);
+
+  const settings = f.db.prepare('SELECT scheduler_status FROM flipper_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'ok', 'scan cycle completes without a broker rejection');
+
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 2, 'exactly the entry order and one OCO protection order are posted');
+
+  // Entry: raw limit 9.87 * 1.002 = 9.88974 must be posted as 9.89.
+  const entry = posts.find(c => c.body?.type === 'limit' && !c.body?.order_class);
+  assert.ok(entry, 'entry limit order posted');
+  assert.equal(entry.body.limit_price, 9.89);
+
+  // Protection: raw stop 9.85 * 0.999 = 9.84015 must be posted as 9.84;
+  // the $10.50 wall target stays 10.5.
+  const oco = posts.find(c => c.body?.order_class === 'oco');
+  assert.ok(oco, 'OCO protection order posted');
+  const stopLeg = oco.body.legs.find(leg => leg.type === 'stop');
+  const targetLeg = oco.body.legs.find(leg => leg.type === 'limit');
+  assert.equal(stopLeg.stop_price, 9.84);
+  assert.equal(targetLeg.limit_price, 10.5);
+
+  // The position survives protection attach: a 422 here would have run the
+  // protection-rejected path and flattened it instantly.
+  const position = f.db.prepare('SELECT * FROM flipper_positions WHERE user_id=1').get();
+  assert.ok(position, 'position row exists');
+  assert.equal(position.status, 'open');
+  assert.equal(position.entry_price, 9.89);
+  assert.equal(position.stop_price, 9.84);
+  assert.equal(position.target_price, 10.5);
+  const rejected = f.db.prepare("SELECT COUNT(*) AS n FROM flipper_alerts WHERE user_id=1 AND message LIKE '%REJECTED%'").get().n;
+  assert.equal(rejected, 0, 'no protection-rejected alert may fire');
+  const setup = f.db.prepare('SELECT state FROM flipper_setups WHERE user_id=1').get();
+  assert.equal(setup.state, 'entered');
 });

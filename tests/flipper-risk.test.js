@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  sizePosition, computeStop, computeTarget, priorityScore, rejectionStrength, DEFAULT_RISK_RULES,
+  sizePosition, computeStop, computeTarget, priorityScore, rejectionStrength, DEFAULT_RISK_RULES, tickPrice,
 } = require('../lib/flipper/risk');
 
 test('DEFAULT_RISK_RULES match the pinned architecture values', () => {
@@ -75,10 +75,39 @@ test('sizePosition returns 0 on invalid inputs', () => {
 
 test('computeStop structure: long below C1 low, short above C1 high, with buffer', () => {
   const c1 = { o: 10, h: 10.3, l: 9.8, c: 10.1 };
+  // Raw stops are 9.8*0.999 = 9.7902 and 10.3*1.001 = 10.3103 — sub-penny,
+  // so the tick-clean outputs land on the whole cent (see tickPrice tests).
   const longStop = computeStop({ direction: 'long', c1, entryPrice: 10.15 });
-  assert.ok(Math.abs(longStop - 9.8 * (1 - 0.001)) < 1e-9);
+  assert.equal(longStop, 9.79);
   const shortStop = computeStop({ direction: 'short', c1, entryPrice: 9.9 });
-  assert.ok(Math.abs(shortStop - 10.3 * (1 + 0.001)) < 1e-9);
+  assert.equal(shortStop, 10.31);
+});
+
+// --- tickPrice / penny-tick rounding (Alpaca 422 regression) ---
+
+test('tickPrice rounds to 2dp at $1+ and 4dp below $1 (Warrior parity)', () => {
+  assert.equal(tickPrice(9.88974), 9.89);
+  assert.equal(tickPrice(9.84015), 9.84);
+  assert.equal(tickPrice(10.5), 10.5);
+  assert.equal(tickPrice(0.8514477), 0.8514);
+  assert.ok(Number.isNaN(tickPrice(NaN)));
+});
+
+test('computeStop structure: the $9.85 C1-low case rounds to the penny tick', () => {
+  // Johnny's live case: C1 low $9.85, 0.1% structure buffer -> raw stop
+  // 9.85 * 0.999 = 9.84015. Alpaca rejects that at $1+ (HTTP 422); the
+  // stop that reaches the broker must be 9.84.
+  const stop = computeStop({ direction: 'long', c1: { o: 9.95, h: 10, l: 9.85, c: 9.93 }, entryPrice: 9.87 });
+  assert.equal(stop, 9.84);
+});
+
+test('computeStop percent mode and sub-$1 stops are tick-clean too', () => {
+  // 9.87 * 0.98 = 9.6726 raw -> 9.67 on the penny tick.
+  assert.equal(
+    computeStop({ direction: 'long', c1: {}, entryPrice: 9.87, rules: { stopMode: 'percent' } }), 9.67);
+  // Below $1 sub-penny is allowed to 4dp: 0.8523 * 0.999 = 0.8514477 -> 0.8514.
+  assert.equal(
+    computeStop({ direction: 'long', c1: { o: 0.86, h: 0.87, l: 0.8523, c: 0.865 }, entryPrice: 0.87 }), 0.8514);
 });
 
 test('computeStop percent and dollar modes, long and short', () => {

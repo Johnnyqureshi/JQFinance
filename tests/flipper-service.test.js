@@ -510,3 +510,61 @@ test('live entry from a $9.85 C1 low reaches the broker tick-clean (no sub-penny
   const setup = f.db.prepare('SELECT state FROM flipper_setups WHERE user_id=1').get();
   assert.equal(setup.state, 'entered');
 });
+
+// --- stale-trigger-tape regressions (2026-10-08) ------------------------------
+function seedWaitingC2Setup(f) {
+  f.service._recordSetup(1, TRADE_DATE, 'AAA',
+    { direction: 'long', wallType: 'range_low', wallPrice: 100 },
+    { o: 101, h: 101.6, l: 99.9, c: 101.3 });
+  const row = f.db.prepare('SELECT setup_id FROM flipper_setups WHERE user_id=1 AND symbol=?').get('AAA');
+  f.db.prepare('UPDATE flipper_setups SET state=?,c2_json=? WHERE setup_id=?')
+    .run('waiting_c2', JSON.stringify({ o: 101.3, h: 102.5, l: 101, c: 102.2 }), row.setup_id);
+  return row.setup_id;
+}
+
+test('trigger phase keeps a waiting setup when no trigger bar has published yet', async () => {
+  const f = fixture({ customMinuteBars: [] });
+  await connectPaper(f);
+  const setupId = seedWaitingC2Setup(f);
+  await f.service.setSettings(1, { enabled: true });
+
+  await f.service._scanCycle(1);
+  let setup = f.db.prepare('SELECT state,why FROM flipper_setups WHERE setup_id=?').get(setupId);
+  assert.equal(setup.state, 'waiting_c2');
+  assert.doesNotMatch(setup.why, /Trigger tape is stale/);
+
+  // It remains available for the next tick instead of being cancelled on
+  // the first tick of the trigger window.
+  f.world.time = NOW + 60000;
+  await f.service._scanCycle(1);
+  setup = f.db.prepare('SELECT state,why FROM flipper_setups WHERE setup_id=?').get(setupId);
+  assert.equal(setup.state, 'waiting_c2');
+  assert.doesNotMatch(setup.why, /Trigger tape is stale/);
+});
+
+test('trigger phase cancels when bars exist but the latest is stale', async () => {
+  const staleBar = m1('2026-09-30T14:00:00Z', 102.2, 102.4, 102.0, 102.3, 100000);
+  const f = fixture({ customMinuteBars: [staleBar] });
+  f.world.time = Date.parse('2026-09-30T14:11:00Z');
+  await connectPaper(f);
+  const setupId = seedWaitingC2Setup(f);
+  await f.service.setSettings(1, { enabled: true });
+
+  await f.service._scanCycle(1);
+  const setup = f.db.prepare('SELECT state,why FROM flipper_setups WHERE setup_id=?').get(setupId);
+  assert.equal(setup.state, 'cancelled');
+  assert.match(setup.why, /Trigger tape is stale/);
+});
+
+test('trigger phase closes a waiting setup when the window ends with no tape', async () => {
+  const f = fixture({ customMinuteBars: [] });
+  f.world.time = Date.parse('2026-09-30T14:15:00Z');
+  await connectPaper(f);
+  const setupId = seedWaitingC2Setup(f);
+  await f.service.setSettings(1, { enabled: true });
+
+  await f.service._scanCycle(1);
+  const setup = f.db.prepare('SELECT state,why FROM flipper_setups WHERE setup_id=?').get(setupId);
+  assert.equal(setup.state, 'cancelled');
+  assert.match(setup.why, /Trigger window ended before any trigger tape arrived/);
+});

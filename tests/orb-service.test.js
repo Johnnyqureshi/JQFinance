@@ -134,17 +134,40 @@ function fixture(options = {}) {
           SPY: dailyIndex(770, 773.1),
           QQQ: dailyIndex(690, 693.5),
           IWM: dailyIndex(240, 240.85),
+          ...(world.dailyBySymbol || {}),
         };
         const bars = query.get('timeframe') === '1Min'
-          ? { AAA: minuteBarsAAA() }
+          ? Object.fromEntries(symbols.map(s => [s, (world.minuteBySymbol || {})[s] || (s === 'AAA' ? minuteBarsAAA() : [])]))
           : Object.fromEntries(symbols.map(s => [s, bySymbol[s] || []]));
         return response({ bars, next_page_token: null });
       }
       if (path === '/v2/stocks/bars/latest') {
-        return response({ bars: { AAA: { c: 10.07, t: iso(world.time) } } });
+        return response({ bars: { AAA: { c: 10.07, t: iso(world.time) }, ...(world.latestBySymbol || {}) } });
       }
       if (path === '/v2/stocks/quotes/latest') {
-        return response({ quotes: { AAA: { bp: 10.065, ap: 10.075, t: iso(world.time) } } });
+        return response({ quotes: { AAA: { bp: 10.065, ap: 10.075, t: iso(world.time) }, ...(world.quoteBySymbol || {}) } });
+      }
+      if (path.startsWith('/v1beta1/screener/')) {
+        // Market-mode screener. Unconfigured → HTTP 500 (the failure path).
+        // world.screener = { actives, gainers, losers, fail: [pathPart],
+        // hangOnce: path } shapes the feed per test.
+        const scr = world.screener;
+        if (!scr) return response({ message: 'screener not configured' }, 500);
+        if (scr.hangOnce === path && !world._screenerHung) {
+          world._screenerHung = true;
+          return new Promise(() => {}); // never resolves — the service timeout fires
+        }
+        if ((scr.fail || []).some(part => path.includes(part))) return response({ message: 'screener down' }, 500);
+        if (path === '/v1beta1/screener/stocks/most-actives') {
+          return response({ most_actives: (scr.actives || []).map(symbol => ({ symbol, volume: 1000000 })) });
+        }
+        if (path === '/v1beta1/screener/stocks/movers') {
+          return response({
+            gainers: (scr.gainers || []).map(symbol => ({ symbol, percent_change: 5 })),
+            losers: (scr.losers || []).map(symbol => ({ symbol, percent_change: -5 })),
+          });
+        }
+        return response({ message: 'unexpected screener path' }, 500);
       }
       return response({ message: `unexpected ${parsed.hostname}${path}` }, 500);
     }
@@ -153,6 +176,7 @@ function fixture(options = {}) {
   const service = createOrbService({
     db, vault, fetch: fakeFetch, now: () => world.time,
     persistenceReady: () => true, durability: null,
+    timeoutMs: world.timeoutMs || 10000,
     exitPoll: { tries: 3, intervalMs: 0 },
   });
   return { db, service, world };
@@ -658,4 +682,109 @@ test('mountOrb registers all 13 routes', async () => {
   }
   assert.equal(mounted.routes.length, 13);
   assert.throws(() => mountOrb({ app, service }), /requireAuth/);
+});
+
+// --- market universe (Johnny 2026-10-09: ORB opens to the full market) -------
+test('universeMode defaults to market, round-trips, and rejects junk', async () => {
+  const { service } = fixture();
+  assert.equal(service.getSettings(1).rules.universeMode, 'market');
+  assert.equal(DEFAULT_ORB_RULES.universeMode, 'market');
+  await service.setSettings(1, { rules: { universeMode: 'watchlist' } });
+  assert.equal(service.getSettings(1).rules.universeMode, 'watchlist');
+  await assert.rejects(
+    service.setSettings(1, { rules: { universeMode: 'everything' } }),
+    /must be one of/);
+});
+
+test('universe migration persists market mode on stored rows, preserves a watchlist choice', async () => {
+  const a = fixtureWithStoredRules({ minScore: 80 });
+  const storedA = JSON.parse(a.db.prepare('SELECT rules FROM orb_settings WHERE user_id=1').get().rules);
+  assert.equal(storedA.universeMode, 'market', 'the stored row itself flips to market');
+  assert.equal(storedA.minScore, 80, 'unrelated rules preserved');
+  assert.equal(a.service.getSettings(1).rules.universeMode, 'market');
+  const b = fixtureWithStoredRules({ universeMode: 'watchlist' });
+  const storedB = JSON.parse(b.db.prepare('SELECT rules FROM orb_settings WHERE user_id=1').get().rules);
+  assert.equal(storedB.universeMode, 'watchlist', 'a deliberate watchlist choice is untouched');
+});
+
+test('mergeUniverseSymbols: watchlist first, deduped, capped, screener rows accepted', async () => {
+  const { service } = fixture();
+  const merge = service._mergeUniverseSymbols;
+  assert.deepEqual(
+    merge(['BBB', 'AAA'], ['AAA', 'CCC', { symbol: 'DDD' }, 'bbb']),
+    ['BBB', 'AAA', 'CCC', 'DDD']);
+  assert.deepEqual(merge(['BBB'], ['CCC', 'DDD'], 2), ['BBB', 'CCC'],
+    'cap enforced — the watchlist wins the slots');
+  const many = Array.from({ length: 250 }, (_, i) => `S${i}`);
+  const capped = merge(['W1', 'W2'], many);
+  assert.equal(capped.length, 200, 'default cap is 200');
+  assert.deepEqual(capped.slice(0, 2), ['W1', 'W2'], 'watchlist always present at the front');
+});
+
+test('screener failure degrades to watchlist-only and the cycle still trades the watchlist', async () => {
+  const f = fixture(); // no screener configured → the data API 500s on screener paths
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'AAA' } });
+  await f.service._scanCycle(1);
+  assert.ok(f.world.calls.some(c => c.path.includes('/v1beta1/screener/')), 'screener was attempted');
+  const alertRow = f.db.prepare("SELECT * FROM orb_alerts WHERE kind='system' ORDER BY id DESC LIMIT 1").get();
+  assert.ok(alertRow && /screener unavailable/i.test(alertRow.message), 'degradation is alerted');
+  assert.equal(f.world.orderPosts.length, 1, 'watchlist entry still fires without the screener');
+  assert.equal(f.world.orderPosts[0].symbol, 'AAA');
+  const sched = f.db.prepare('SELECT scheduler_status FROM orb_settings WHERE user_id=1').get();
+  assert.equal(sched.scheduler_status, 'ok', 'cycle completes healthy');
+});
+
+test('market mode: a two-break entry fires on a screener symbol that is not on the watchlist', async () => {
+  const quote = { bp: 10.065, ap: 10.075, t: iso(NOW) };
+  const latest = { c: 10.07, t: iso(NOW) };
+  const f = fixture({
+    screener: { actives: ['MKT'], gainers: ['GGG'], losers: ['LLL'] },
+    dailyBySymbol: { MKT: dailyAAA(), GGG: dailyAAA(), LLL: dailyAAA() },
+    minuteBySymbol: { MKT: minuteBarsAAA() },
+    latestBySymbol: { MKT: latest, GGG: latest, LLL: latest },
+    quoteBySymbol: { MKT: quote, GGG: quote, LLL: quote },
+  });
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'ZZZ' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 1, 'exactly one entry — the screener name');
+  assert.equal(f.world.orderPosts[0].symbol, 'MKT');
+  const positions = f.db.prepare('SELECT * FROM orb_positions').all();
+  assert.equal(positions.length, 1);
+  assert.equal(positions[0].symbol, 'MKT');
+  assert.equal(positions[0].status, 'open');
+  const candidates = f.db.prepare('SELECT symbol FROM orb_candidates WHERE trade_date=?').all(TRADE_DATE).map(r => r.symbol);
+  assert.ok(candidates.includes('MKT'), 'most-active scanned');
+  assert.ok(candidates.includes('GGG'), 'gainer scanned');
+  assert.ok(candidates.includes('LLL'), 'loser scanned — both mover directions join the universe');
+  assert.ok(!candidates.includes('ZZZ'), 'watchlist name without data is filtered before evaluation');
+});
+
+test('screener universe is cached within the TTL — one fetch across two cycles', async () => {
+  const f = fixture({ screener: { actives: ['MKT'], gainers: [], losers: [] } });
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'ZZZ' } });
+  await f.service._scanCycle(1);
+  await f.service._scanCycle(1);
+  const screenerCalls = f.world.calls.filter(c => c.path.includes('/v1beta1/screener/'));
+  assert.equal(screenerCalls.length, 2, 'most-actives + movers fetched once, then served from cache');
+});
+
+test('a timed-out screener GET is retried exactly once and recovers', async () => {
+  const f = fixture({
+    timeoutMs: 50,
+    screener: {
+      actives: ['MKT'], gainers: ['GGG'], losers: [],
+      hangOnce: '/v1beta1/screener/stocks/most-actives',
+    },
+  });
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'ZZZ' } });
+  await f.service._scanCycle(1);
+  const activesCalls = f.world.calls.filter(c => c.path === '/v1beta1/screener/stocks/most-actives');
+  assert.equal(activesCalls.length, 2, 'one original attempt + exactly one retry');
+  const alertRow = f.db.prepare(
+    "SELECT * FROM orb_alerts WHERE kind='system' AND message LIKE '%screener unavailable%'").get();
+  assert.equal(alertRow, undefined, 'retry recovered — no degradation alert');
 });

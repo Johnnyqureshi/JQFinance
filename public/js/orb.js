@@ -90,7 +90,8 @@
       ['maxExposureDollars', 'Max total exposure ($)', 'number', 100],
       ['maxTradesPerSymbol', 'Max trades per symbol/day', 'number', 1] ] },
     { group: 'Universe & Liquidity', fields: [
-      ['watchlist', 'Fixed watchlist — comma-separated (overrides universe; price band ignored for these)', 'watchlist'],
+      ['universeMode', 'Universe mode — market (watchlist + most actives & movers) or watchlist only', 'select', ['market', 'watchlist']],
+      ['watchlist', 'Fixed watchlist — comma-separated (always scanned; price band ignored for these)', 'watchlist'],
       ['maxRsiLong', 'Max RSI(14) for long entries (0 = off)', 'number', 1],
       ['minPrice', 'Min price ($)', 'number', 0.1],
       ['maxPrice', 'Max price ($)', 'number', 1],

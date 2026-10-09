@@ -1177,3 +1177,12 @@ test('validateConfig accepts the default 87-symbol watchlist and rejects junk ty
   assert.equal(bad.ok, false, 'numeric watchlist is invalid');
   assert.ok(bad.errors.some(e => e.startsWith('watchlist:')), 'error names the field');
 });
+
+test('validateConfig: universeMode defaults to market and rejects junk', () => {
+  assert.equal(DEFAULT_ORB_RULES.universeMode, 'market');
+  assert.equal(validateConfig({}).ok, true);
+  assert.equal(validateConfig({ universeMode: 'watchlist' }).ok, true);
+  const bad = validateConfig({ universeMode: 'everything' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some(e => e.startsWith('universeMode:')), 'error names the field');
+});

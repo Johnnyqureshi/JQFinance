@@ -222,7 +222,7 @@ test('orb schema creates every orb_* table', async () => {
     .all().map(r => r.name);
   for (const expected of ['orb_settings', 'orb_credentials', 'orb_leases', 'orb_positions',
     'orb_trades', 'orb_alerts', 'orb_rejected', 'orb_backtests', 'orb_backtest_trades',
-    'orb_day_state', 'orb_candidates']) {
+    'orb_day_state', 'orb_candidates', 'orb_candidates_best']) {
     assert.ok(names.includes(expected), `missing table ${expected}`);
   }
 });
@@ -769,6 +769,107 @@ test('screener universe is cached within the TTL — one fetch across two cycles
   await f.service._scanCycle(1);
   const screenerCalls = f.world.calls.filter(c => c.path.includes('/v1beta1/screener/'));
   assert.equal(screenerCalls.length, 2, 'most-actives + movers fetched once, then served from cache');
+});
+
+// --- best-evaluation persistence (Johnny 2026-10-08 "Fix both") --------------
+// orb_candidates keeps the LAST tick; orb_candidates_best keeps exactly one
+// row per symbol/day — the evaluation closest to firing — so a day can be
+// reconstructed after the close. Record-keeping only: no trading path reads
+// the best table, and the scan-cycle tests above/below pin the decisions.
+test('candidateCloseness ranks two-break conviction, then scored score, fired on top', async () => {
+  const { service } = fixture();
+  const rank = service._candidateCloseness;
+  const notBeyond = rank({ decision: 'wait', score: 0, rejectReasons: ['NOT_BEYOND: last close $10.01 is inside the OR (needs a close above $10.05)'] });
+  const noConviction = rank({ decision: 'wait', score: 0, rejectReasons: ['NO_CONVICTION_BREAK: no close beyond $10.05 on ≥1.5x range-bar volume'] });
+  const firstBreak = rank({ decision: 'wait', score: 0, rejectReasons: ['FIRST_BREAK_ONLY: 1 conviction close(s) beyond $10.05 — need 2'] });
+  assert.ok(firstBreak > noConviction, '1 conviction close outranks a beyond close without conviction');
+  assert.ok(noConviction > notBeyond, 'a beyond close outranks never beyond the line');
+  assert.ok(rank({ decision: 'wait', score: 62, rejectReasons: [] })
+    > rank({ decision: 'wait', score: 41, rejectReasons: [] }), 'scored mode: highest score wins');
+  assert.equal(
+    rank({ decision: 'wait', score: 0, rejectReasons: ['LOW_SCORE: score 68/100 < minScore 75'] }), 68,
+    'scored mode: a LOW_SCORE reject reason supplies its score when the wait score is 0');
+  assert.ok(rank({ decision: 'enter-long', score: 10, rejectReasons: [] }) > firstBreak,
+    'a fired evaluation outranks every non-firing one');
+});
+
+test('best record: a stronger mid-day evaluation survives later weaker ticks while latest still updates (two-break)', async () => {
+  const f = fixture();
+  const upsert = f.service._upsertCandidate;
+  upsert(1, TRADE_DATE, 'AAA', {
+    direction: 'long', decision: 'wait', score: 0, why: 'first break only',
+    rejectReasons: ['FIRST_BREAK_ONLY: 1 conviction close(s) beyond $10.05 — need 2'],
+  });
+  upsert(1, TRADE_DATE, 'AAA', {
+    direction: null, decision: 'wait', score: 0, why: 'fell back inside',
+    rejectReasons: ['NOT_BEYOND: last close $10.01 is inside the OR (needs a close above $10.05)'],
+  });
+  const latest = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates WHERE symbol=?').get('AAA').data);
+  assert.equal(latest.why, 'fell back inside', 'latest row still tracks the most recent tick');
+  const bestRows = f.db.prepare('SELECT * FROM orb_candidates_best WHERE symbol=?').all('AAA');
+  assert.equal(bestRows.length, 1, 'exactly one best row per symbol/day — no per-tick history');
+  const best = JSON.parse(bestRows[0].data);
+  assert.equal(best.why, 'first break only', 'the stronger evaluation survives in the best record');
+  assert.deepEqual(best.rejectReasons,
+    ['FIRST_BREAK_ONLY: 1 conviction close(s) beyond $10.05 — need 2'],
+    'the best record keeps its reject reason');
+  assert.ok(bestRows[0].closeness > 1000, 'closeness carries the conviction tier');
+  const viaService = f.service.bestCandidates(1, TRADE_DATE);
+  assert.equal(viaService.candidatesBest.length, 1);
+  assert.equal(viaService.candidatesBest[0].symbol, 'AAA');
+  assert.equal(viaService.candidatesBest[0].why, 'first break only');
+  const dash = await f.service.dashboard(1);
+  assert.equal(dash.candidatesBest.length, 1, 'dashboard exposes the best record');
+  assert.equal(dash.candidatesBest[0].why, 'first break only');
+  // A strictly stronger (fired) evaluation replaces the best; a weaker one after it does not.
+  upsert(1, TRADE_DATE, 'AAA', { direction: 'long', decision: 'enter-long', score: 88, why: 'fired', rejectReasons: [] });
+  upsert(1, TRADE_DATE, 'AAA', {
+    direction: null, decision: 'wait', score: 0, why: 'weak again',
+    rejectReasons: ['FIRST_BREAK_ONLY: 1 conviction close(s) beyond $10.05 — need 2'],
+  });
+  const best2 = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates_best WHERE symbol=?').get('AAA').data);
+  assert.equal(best2.why, 'fired', 'the fired evaluation is the best of the day');
+  const latest2 = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates WHERE symbol=?').get('AAA').data);
+  assert.equal(latest2.why, 'weak again', 'latest still updates after the best is set');
+});
+
+test('best record: the highest score survives later weaker ticks in scored mode', async () => {
+  const f = fixture();
+  const upsert = f.service._upsertCandidate;
+  upsert(1, TRADE_DATE, 'BBB', { direction: null, decision: 'wait', score: 62, why: 'score 62', rejectReasons: ['LOW_SCORE: score 62/100 < minScore 75'] });
+  upsert(1, TRADE_DATE, 'BBB', { direction: null, decision: 'wait', score: 41, why: 'score 41', rejectReasons: [] });
+  upsert(1, TRADE_DATE, 'BBB', { direction: null, decision: 'wait', score: 71, why: 'score 71', rejectReasons: ['LOW_SCORE: score 71/100 < minScore 75'] });
+  upsert(1, TRADE_DATE, 'BBB', { direction: null, decision: 'wait', score: 55, why: 'score 55', rejectReasons: [] });
+  const best = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates_best WHERE symbol=?').get('BBB').data);
+  assert.equal(best.score, 71, 'best keeps the highest score of the day');
+  assert.equal(best.why, 'score 71');
+  const latest = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates WHERE symbol=?').get('BBB').data);
+  assert.equal(latest.score, 55, 'latest keeps the most recent score');
+});
+
+test('best record: the engineered scan-cycle entry is preserved as best and the trading decision is unchanged', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 1, 'exactly one entry order — decision unchanged by best persistence');
+  assert.equal(f.world.orderPosts[0].symbol, 'AAA');
+  assert.equal(f.world.orderPosts[0].qty, 49, 'sizing unchanged');
+  const bestRows = f.db.prepare('SELECT * FROM orb_candidates_best WHERE trade_date=?').all(TRADE_DATE);
+  assert.equal(bestRows.length, 1);
+  const best = JSON.parse(bestRows[0].data);
+  assert.equal(best.decision, 'enter-long');
+  const latest = JSON.parse(f.db.prepare('SELECT data FROM orb_candidates WHERE trade_date=?').get(TRADE_DATE).data);
+  assert.deepEqual(best, latest, 'on a firing tick the best record equals the latest record');
+});
+
+test('pruneDiagnostics prunes past-date best rows and keeps today\'s', async () => {
+  const f = fixture();
+  f.service._upsertCandidate(1, '2026-09-30', 'OLD', { decision: 'wait', score: 50, rejectReasons: [] });
+  f.service._upsertCandidate(1, TRADE_DATE, 'NEW', { decision: 'wait', score: 50, rejectReasons: [] });
+  await f.service.pruneDiagnostics(1);
+  assert.equal(f.db.prepare("SELECT COUNT(*) n FROM orb_candidates_best WHERE symbol='OLD'").get().n, 0);
+  assert.equal(f.db.prepare("SELECT COUNT(*) n FROM orb_candidates_best WHERE symbol='NEW'").get().n, 1);
 });
 
 test('a timed-out screener GET is retried exactly once and recovers', async () => {

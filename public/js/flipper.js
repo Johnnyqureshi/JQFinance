@@ -1,7 +1,8 @@
 /* Flipper Bot — "Invisible Wall Reversal" trading controls.
  * The bot watches four pre-market walls (yesterday's range high/low + the
  * nearest significant prior swing high/low) and trades 3-candle reversals
- * when price tests a wall in the first 45 minutes after the 9:30 ET open.
+ * when price tests a wall in one of the first two 15-minute candles after
+ * the 9:30 ET open (the confirmation candle follows the touch candle).
  * PAPER is the default; live orders require all three live gates
  * (tradingMode=LIVE + both live switches) and are refused loudly otherwise.
  * Reuses the shared warrior skin classes (war-*) — warrior.css is global.
@@ -43,7 +44,8 @@
       ['swingLookback', 'Swing lookback N (2N+1 fractal)', 'number', 1],
       ['flipGapPct', 'Flip-wall min gap from range wall (%)', 'number', 0.1],
       ['flipLookbackBars', 'Flip swing search (daily bars)', 'number', 10],
-      ['wallTolerancePct', 'Wall touch tolerance (%)', 'number', 0.05] ] },
+      ['wallTolerancePct', 'Wall touch tolerance (%)', 'number', 0.05],
+      ['touchWindowCandles', 'Touch window (15-min candles after 9:30)', 'number', 1] ] },
     { group: 'Entry filters', fields: [
       ['minC1MovePct', 'Min Candle-1 move (%)', 'number', 0.25],
       ['breakoutCancelPct', 'Breakout cancel beyond wall (%)', 'number', 0.05] ] },
@@ -104,7 +106,7 @@
     const page = $('page-flipper');
     if (!page || $('flpRoot')) return;
     page.innerHTML = `<section class="war-shell" id="flpRoot" aria-labelledby="flpTitle">
-      <header class="war-hero"><div><span class="war-eyebrow">INVISIBLE WALL REVERSAL</span><h1 id="flpTitle">Flipper Bot <em>wait for the wall</em></h1><p>Four pre-market walls — yesterday&rsquo;s range high/low plus the nearest significant prior swing high/low. The bot waits for price to reach a wall, confirms rejection on three 15-minute candles after the 9:30 ET open, and enters only on the Candle-2 trigger break. No wall touch, no trade.</p></div><span class="war-auto-label" id="flpModeBadge">PAPER ONLY</span></header>
+      <header class="war-hero"><div><span class="war-eyebrow">INVISIBLE WALL REVERSAL</span><h1 id="flpTitle">Flipper Bot <em>wait for the wall</em></h1><p>Four pre-market walls — yesterday&rsquo;s range high/low plus the nearest significant prior swing high/low. The bot waits for price to reach a wall in one of the first two 15-minute candles after the 9:30 ET open, confirms rejection on the next candle, and enters only on the confirmation-candle trigger break. No wall touch, no trade.</p></div><span class="war-auto-label" id="flpModeBadge">PAPER ONLY</span></header>
       <div class="war-notice" id="flpNotice" role="status" aria-live="polite"></div>
       <section class="war-status" aria-label="Flipper system status">
         <div><span>Status</span><strong id="flpPill">CHECKING</strong><small id="flpTradeDate">Trade date —</small></div>
@@ -160,7 +162,7 @@
     $('flpMandateCopy').textContent = !connected
       ? 'Connect a dedicated Alpaca paper account. Flipper ships disabled — enable trading when you are ready.'
       : status.enabled
-        ? 'The server watches the four walls during the 9:30–10:15 ET setup window and manages open positions the rest of the session.'
+        ? 'The server watches the four walls during the 9:30–10:30 ET setup window and manages open positions the rest of the session.'
         : 'Trading is paused. Existing positions remain under automatic management. New entries stay withheld until you resume.';
     $('flpBlockers').textContent = (status.blockers || []).join(' · ');
     const toggle = $('flpEnabledToggle');
@@ -177,7 +179,7 @@
     const statusText = typeof data?.status === 'string' && data.status ? ` · ${esc(data.status)}` : '';
     $('flpSetupMeta').textContent = items.length ? `${meta}${items.length} tracked` : 'No setups yet';
     if (data?.tradeDate) $('flpTradeDate').textContent = `Trade date ${data.tradeDate}${statusText ? ' · ' + data.status : ''}`;
-    if (!items.length) { el.innerHTML = '<p class="war-empty">No setups — no data yet. The scanner builds walls pre-market and tracks each liquid symbol through the 9:30–10:15 ET window.</p>'; return; }
+    if (!items.length) { el.innerHTML = '<p class="war-empty">No setups — no data yet. The scanner builds walls pre-market and tracks each liquid symbol through the 9:30–10:30 ET window.</p>'; return; }
     el.innerHTML = items.map(s => {
       const dir = String(s.direction || '').toLowerCase();
       const dirClass = dir === 'long' ? 'war-good' : dir === 'short' ? 'war-bad' : '';
@@ -304,7 +306,7 @@
       settingsView = await api('/api/flipper/settings');
       status = await api('/api/flipper/status');
       renderStatus(); renderSettings();
-      notice(status.enabled ? 'Flipper trading resumed — the 9:30–10:15 ET window is watched when the market opens.' : 'Flipper trading paused. Existing positions remain under automatic management.');
+      notice(status.enabled ? 'Flipper trading resumed — the 9:30–10:30 ET window is watched when the market opens.' : 'Flipper trading paused. Existing positions remain under automatic management.');
     } catch (error) { notice(`Toggle failed: ${error.message}`, true); }
     finally { changing = false; renderStatus(); }
   }

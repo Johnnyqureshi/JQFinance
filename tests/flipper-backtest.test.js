@@ -408,3 +408,48 @@ describe('flipper backtest — report and happy path', () => {
     assert.ok(t.pnl > 0, 'net winner');
   });
 });
+
+
+describe('flipper backtest — two-candle touch window (2026-10-10)', () => {
+  // C1 (570) never touches a wall. The SECOND candle (585) touches range
+  // low 100 (low 99.95), the third candle (600) confirms green, and the
+  // trigger window follows the confirmation: 615–630 ET 1-min bars, where
+  // the 615 bar breaks the confirmation high (103) and 616 fills.
+  function candle2SessionM15() {
+    return [
+      C(D, 570, 102, 102.5, 101.0, 101.8),  // C1 — no wall touch
+      C(D, 585, 102, 102.5, 99.95, 101.5),  // C2 — touches range low, rejects
+      C(D, 600, 101.5, 103, 101.2, 102.8),  // C3 — green confirmation
+      C(D, 615, 102.8, 103.2, 102.5, 103),  // C4 — trigger-window candle
+    ];
+  }
+  function candle2WinnerM1() {
+    return [
+      C(D, 615, 102.9, 103.5, 102.8, 103.2), // trigger: high breaks 103
+      C(D, 616, 103.4, 103.6, 103.2, 103.5), // fill @ 103.4 open
+      C(D, 617, 103.5, 104.0, 103.4, 103.9),
+      C(D, 618, 103.9, 105.3, 103.8, 105.0), // target 105 hit
+    ];
+  }
+  it('touch in candle 2 confirms on candle 3 and triggers in the following window', () => {
+    const { report, trades } = runBacktest({
+      barsBySymbol: { SYM: { daily: dailyBars(), m15: candle2SessionM15(), m1: candle2WinnerM1() } },
+      config: { targetMode: 'full' },
+    });
+    assert.equal(trades.length, 1, `expected 1 trade, got ${trades.length}`);
+    assert.equal(trades[0].direction, 'long');
+    assert.equal(trades[0].wallType, 'range_low');
+    assert.equal(trades[0].entryTimestamp, etBarMs(D, 616), 'filled on the bar after the 615 trigger bar');
+    assert.equal(trades[0].exitReason, 'target');
+    assert.ok(trades[0].pnl > 0);
+    assert.equal(report.totalTrades, 1);
+  });
+
+  it('old behaviour preserved with touchWindowCandles set back to 1: the candle-2 touch is ignored', () => {
+    const { trades } = runBacktest({
+      barsBySymbol: { SYM: { daily: dailyBars(), m15: candle2SessionM15(), m1: candle2WinnerM1() } },
+      config: { targetMode: 'full', rules: { touchWindowCandles: 1 } },
+    });
+    assert.equal(trades.length, 0);
+  });
+});

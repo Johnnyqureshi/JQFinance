@@ -650,3 +650,17 @@ test('a timed-out POST (order) is NEVER retried — reconciliation semantics pre
   const alert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE user_id=1 AND message LIKE '%AAA%'").get();
   assert.ok(alert, 'the withheld entry is alerted, not silently dropped');
 });
+
+// --- breadth wiring (2026-10-10) ----------------------------------------------
+test('breadth vote is computed from the bot universe and journaled on the session row', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
+  assert.equal(session.regime, 'risk-on');
+  const data = JSON.parse(session.data);
+  // AAA is the only universe symbol with a usable prior close + live price
+  // in this scenario, and it is advancing: breadth = 100%.
+  assert.equal(data.inputs.breadthAdvancersPct, 100);
+  assert.match(session.reasons, /BREADTH_STRONG/);
+});

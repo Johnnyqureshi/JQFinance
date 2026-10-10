@@ -568,3 +568,58 @@ test('trigger phase closes a waiting setup when the window ends with no tape', a
   assert.equal(setup.state, 'cancelled');
   assert.match(setup.why, /Trigger window ended before any trigger tape arrived/);
 });
+
+// --- two-candle touch window, live path (2026-10-10) -------------------------
+// C1 (9:30-9:45) never touches a wall. The touch lands in the SECOND candle
+// (9:45-10:00, low $99.90 vs range low $100 — inside the doubled band), the
+// NEXT candle (10:00-10:15) confirms green, and the trigger window follows
+// the confirmation: at 10:16 ET the 10:15 bar's close ($102.60) breaks the
+// confirmation high ($102.50) and the entry fires in the same scan cycle.
+function candle2MinuteBars() {
+  return [
+    m1('2026-09-30T13:30:00Z', 102.0, 102.5, 101.5, 101.8, 100000), // C1: no touch
+    m1('2026-09-30T13:45:00Z', 101.8, 102.0, 99.90, 101.3, 100000), // C2: touch range low
+    m1('2026-09-30T14:00:00Z', 101.3, 102.5, 101.0, 102.2, 100000), // C3: green confirmation
+    m1('2026-09-30T14:15:00Z', 102.2, 102.7, 102.0, 102.6, 60000),  // trigger window bar
+  ];
+}
+
+test('live entry: touch in candle 2 confirms on candle 3 and triggers in the following window', async () => {
+  const f = fixture({ customMinuteBars: candle2MinuteBars() });
+  f.world.time = Date.parse('2026-09-30T14:16:00Z'); // 10:16 ET
+  await connectPaper(f);
+  f.db.prepare(`INSERT INTO flipper_walls(user_id,symbol,trade_date,range_high,range_low,flip_high,flip_low,created_at)
+    VALUES (1,'AAA',?,?,?,?,?,?)`).run(TRADE_DATE, 105, 100, null, null, iso(NOW));
+  await f.service.setSettings(1, { enabled: true });
+  await f.service._scanCycle(1);
+
+  const settings = f.db.prepare('SELECT scheduler_status FROM flipper_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'ok');
+  const setup = f.db.prepare('SELECT * FROM flipper_setups WHERE user_id=1').get();
+  assert.ok(setup, 'a setup was recorded from the candle-2 touch');
+  assert.equal(setup.state, 'entered');
+  assert.match(setup.why, /C2 \(9:45-10:00 ET\) tested the range low wall/);
+  assert.equal(JSON.parse(setup.c1_json).l, 99.9, 'the stored touch candle is the 9:45 candle');
+  const entry = f.world.calls.find(c => c.path === '/v2/orders' && c.method === 'POST' && c.body?.type === 'limit' && !c.body?.order_class);
+  assert.ok(entry, 'entry limit order posted');
+  assert.equal(entry.body.limit_price, 102.81); // 102.60 * 1.002, tick-rounded
+  const position = f.db.prepare('SELECT * FROM flipper_positions WHERE user_id=1').get();
+  assert.ok(position, 'position opened');
+  assert.equal(position.status, 'open');
+  assert.equal(position.stop_price, 99.8); // touch-candle low 99.90 * 0.999, tick-rounded
+  assert.equal(position.target_price, 105);
+});
+
+test('live entry: touchWindowCandles set back to 1 restores the old single-candle behaviour', async () => {
+  const f = fixture({ customMinuteBars: candle2MinuteBars() });
+  f.world.time = Date.parse('2026-09-30T14:16:00Z'); // 10:16 ET
+  await connectPaper(f);
+  f.db.prepare(`INSERT INTO flipper_walls(user_id,symbol,trade_date,range_high,range_low,flip_high,flip_low,created_at)
+    VALUES (1,'AAA',?,?,?,?,?,?)`).run(TRADE_DATE, 105, 100, null, null, iso(NOW));
+  await f.service.setSettings(1, { enabled: true, rules: { touchWindowCandles: 1 } });
+  await f.service._scanCycle(1);
+  const setups = f.db.prepare('SELECT COUNT(*) AS n FROM flipper_setups WHERE user_id=1').get().n;
+  assert.equal(setups, 0, 'the candle-2 touch is not a setup under the old window');
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 0, 'no orders under the old window');
+});

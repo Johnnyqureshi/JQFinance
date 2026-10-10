@@ -313,3 +313,86 @@ test('validateConfig accepts the defaults and rejects nonsense', () => {
   assert.ok(bad.errors.some(e => e.startsWith('maxPositions:')));
   assert.ok(bad.errors.some(e => e.startsWith('atrStopMult:')));
 });
+
+// --- regime reach ±2 + real breadth vote (2026-10-10) -------------------------
+// A market whose scored votes sum to exactly +1 before breadth: SPY trend
+// up (+1), everything else inside its band.
+const PLUS_ONE = {
+  spy: { dayChangePct: 0.2, trend: 'up' },
+  qqq: { dayChangePct: 0.1, trend: 'flat' },
+  vix: { level: 17.5, dayChangePct: 1 },
+};
+const MINUS_ONE = {
+  spy: { dayChangePct: -0.2, trend: 'down' },
+  qqq: { dayChangePct: -0.1, trend: 'flat' },
+  vix: { level: 17.5, dayChangePct: 1 },
+};
+
+test('regime defaults: the bar is ±2 (was ±3)', () => {
+  assert.equal(DEFAULT_KIAAN_RULES.riskOnScore, 2);
+  assert.equal(DEFAULT_KIAAN_RULES.riskOffScore, -2);
+  // Rules set back to ±3 restore the old reach exactly.
+  const on = classifyRegime(PLUS_ONE, { riskOnScore: 3, riskOffScore: -3 });
+  assert.equal(on.regime, 'chop');
+});
+
+test('breadth vote moves a +1 day to risk-on at the new ±2 bar', () => {
+  const bare = classifyRegime(PLUS_ONE);
+  assert.equal(bare.score, 1);
+  assert.equal(bare.regime, 'chop'); // +1 alone still does not reach ±2
+  const withBreadth = classifyRegime({ ...PLUS_ONE, breadth: { advancersPct: 65 } });
+  assert.equal(withBreadth.score, 2);
+  assert.equal(withBreadth.regime, 'risk-on');
+  assert.equal(withBreadth.tradable, true);
+  assert.equal(withBreadth.inputs.breadthAdvancersPct, 65);
+  assert.ok(withBreadth.reasons.some(r => r.startsWith('BREADTH_STRONG:')));
+  // And the session/candidate gates follow the classification.
+  const s = evaluateSession({ market: { ...PLUS_ONE, breadth: { advancersPct: 65 } }, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-longs');
+  const d = evaluateCandidate(
+    ctxFor({ ...PLUS_ONE, breadth: { advancersPct: 65 } }), { ...GOOD_LONG });
+  assert.equal(d.decision, 'enter-long');
+});
+
+test('breadth vote moves a −1 day to risk-off at the new ±2 bar', () => {
+  const bare = classifyRegime(MINUS_ONE);
+  assert.equal(bare.score, -1);
+  assert.equal(bare.regime, 'chop');
+  const withBreadth = classifyRegime({ ...MINUS_ONE, breadth: { advancersPct: 35 } });
+  assert.equal(withBreadth.score, -2);
+  assert.equal(withBreadth.regime, 'risk-off');
+  assert.ok(withBreadth.reasons.some(r => r.startsWith('BREADTH_WEAK:')));
+});
+
+test('missing breadth leaves classification working (vote 0, never unknown)', () => {
+  const res = classifyRegime({ ...PLUS_ONE, breadth: undefined });
+  assert.equal(res.score, 1);
+  assert.equal(res.regime, 'chop');
+  assert.equal(res.inputs.breadthAdvancersPct, null);
+  assert.ok(!res.reasons.some(r => r.startsWith('CONTEXT_MISSING:')));
+  const on = classifyRegime(RISK_ON); // no breadth key at all
+  assert.equal(on.regime, 'risk-on');
+  // A mixed breadth (between 40 and 60) also votes 0 and is journaled.
+  const mixed = classifyRegime({ ...PLUS_ONE, breadth: { advancersPct: 50 } });
+  assert.equal(mixed.score, 1);
+  assert.ok(mixed.reasons.some(r => r.startsWith('BREADTH_MIXED:')));
+});
+
+test('hard overrides still force risk-off at the new bar', () => {
+  const panic = classifyRegime({
+    spy: { dayChangePct: 1.2, trend: 'up' },
+    qqq: { dayChangePct: 1.0, trend: 'up' },
+    vix: { level: 38, dayChangePct: 20 },
+    breadth: { advancersPct: 90 },
+  });
+  assert.equal(panic.regime, 'risk-off');
+  assert.ok(panic.reasons.some(r => r.startsWith('VIX_PANIC:')));
+  const hardDown = classifyRegime({
+    spy: { dayChangePct: -1.6, trend: 'down' },
+    qqq: { dayChangePct: -1.7, trend: 'down' },
+    vix: { level: 18, dayChangePct: 0 },
+    breadth: { advancersPct: 90 },
+  });
+  assert.equal(hardDown.regime, 'risk-off');
+  assert.ok(hardDown.reasons.some(r => r.startsWith('INDEXES_HARD_DOWN:')));
+});

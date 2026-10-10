@@ -122,7 +122,8 @@ test('local DEFAULT_FLIPPER_RULES matches the pinned contract values', () => {
   assert.equal(DEFAULT_FLIPPER_RULES.swingLookback, 3);
   assert.equal(DEFAULT_FLIPPER_RULES.flipGapPct, 1.0);
   assert.equal(DEFAULT_FLIPPER_RULES.flipLookbackBars, 120);
-  assert.equal(DEFAULT_FLIPPER_RULES.wallTolerancePct, 0.15);
+  assert.equal(DEFAULT_FLIPPER_RULES.wallTolerancePct, 0.30);
+  assert.equal(DEFAULT_FLIPPER_RULES.touchWindowCandles, 2);
   assert.equal(DEFAULT_FLIPPER_RULES.minC1MovePct, 0.75);
   assert.equal(DEFAULT_FLIPPER_RULES.breakoutCancelPct, 0.25);
   assert.equal(DEFAULT_FLIPPER_RULES.minPrice, 1);

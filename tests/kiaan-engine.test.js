@@ -124,6 +124,29 @@ test('risk-off allows a confirming inverse ETF from the hedge list', () => {
   assert.ok(hasReason(d, 'HEDGE_CONFIRM_PATH'));
 });
 
+test('risk-off: hedge list is exempt from the $20 maxPrice cap (diagnosis 2026-10-09 §5a)', () => {
+  // SQQQ at Thursday 2026-10-08's stack-trigger price — above the cap
+  // that made 4 of 6 hedges untradeable.
+  const d = evaluateCandidate(ctxFor(RISK_OFF), {
+    ...GOOD_HEDGE, price: 32.62, vwap: 32.00, orHigh: 32.20, orLow: 31.60, atr: 0.90,
+  });
+  assert.equal(d.decision, 'enter-long', `hedge over $20 must trade on confirmation, got ${JSON.stringify(d.reasons)}`);
+  assert.equal(d.entry, 32.62);
+  assert.ok(hasReason(d, 'HEDGE_PRICE_BAND_EXEMPT'));
+  // The floor still applies to hedges.
+  const floored = evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_HEDGE, price: 0.50 });
+  assert.equal(floored.decision, 'no-trade');
+  assert.ok(hasReason(floored, 'PRICE_BAND'));
+});
+
+test('the $20 maxPrice cap still binds ordinary longs', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), {
+    ...GOOD_LONG, price: 25.00, vwap: 24.50, orHigh: 24.80, orLow: 24.00,
+  });
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'PRICE_BAND'));
+});
+
 test('risk-off still blocks a hedge ETF that does not confirm', () => {
   const d = evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_HEDGE, rvol: 0.9 });
   assert.equal(d.decision, 'no-trade');

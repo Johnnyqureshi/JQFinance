@@ -136,6 +136,36 @@ const SCENARIOS = {
   },
 };
 
+// Liquidity-sort regression scenario (diagnosis 2026-10-09 §5b): 405
+// illiquid names (100k avg volume, below the 500k floor) sit BEFORE AAA
+// in API order. The retired first-400 slice dropped AAA before any
+// liquidity sorting, so AAA could never be evaluated.
+SCENARIOS.manylow = (() => {
+  const assets = [];
+  const daily = {};
+  for (let i = 0; i < 405; i++) {
+    const sym = `L${String(i).padStart(3, '0')}`;
+    assets.push(sym);
+    daily[sym] = dailyFlat(5, 100000);
+  }
+  assets.push('AAA');
+  daily.AAA = dailyAAA();
+  daily.SPY = dailyIndex(770, 776);
+  daily.QQQ = dailyIndex(690, 694);
+  return {
+    assets,
+    daily,
+    minutes: {
+      AAA: minutesAAA(),
+      SPY: driftMinutes({ open: 770.5, last: 776.2, vol: 100000 }),
+      QQQ: driftMinutes({ open: 690.5, last: 694.2, vol: 100000 }),
+    },
+    latest: { AAA: 10.07 },
+    quotes: { AAA: [10.065, 10.075] },
+    yahoo: { '^VIX': [16, 14], '^TNX': [5.3, 5.35], 'CL=F': [92, 93] },
+  };
+})();
+
 function decimalsOf(n) {
   const s = String(n);
   const idx = s.indexOf('.');
@@ -393,6 +423,17 @@ test('risk-on scan enters the confirming leader and attaches OCO + stop protecti
   const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
   assert.equal(session.decision, 'seek-longs');
   assert.equal(session.regime, 'risk-on');
+  const cand = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='AAA'").get();
+  assert.equal(cand.decision, 'enter-long');
+});
+
+test('universe is liquidity-sorted before the cap: a liquid name past API position 400 is evaluated', async () => {
+  const f = fixture('manylow');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy');
+  assert.equal(buys.length, 1, `AAA (API position 406) must be reached, got ${buys.length} buys`);
+  assert.equal(buys[0].symbol, 'AAA');
   const cand = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='AAA'").get();
   assert.equal(cand.decision, 'enter-long');
 });

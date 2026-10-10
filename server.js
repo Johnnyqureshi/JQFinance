@@ -1402,6 +1402,13 @@ app.get('/api/_verify20260927', async (req, res) => {
       kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
       kiaan_positions: aq("SELECT COUNT(*) AS n FROM kiaan_positions WHERE status IN ('open','pending_entry')")[0],
       kiaan_alerts: aq('SELECT created_at, kind, message FROM kiaan_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP ORB visibility (2026-10-10) — ORB's enabled state was not
+      // server-verifiable before this section (diagnosis orb-report §C.2).
+      // Credential key LENGTH only, never key material.
+      orb_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM orb_settings'),
+      orb_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM orb_credentials'),
+      orb_positions: aq("SELECT COUNT(*) AS n FROM orb_positions WHERE status IN ('open','pending_entry')")[0],
+      orb_alerts: aq('SELECT created_at, kind, message FROM orb_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP pre-teardown export (2026-10-01): full row dumps of B2 + options
       // trade history before the bots are deleted. Remove with the teardown.
       b2_export: {

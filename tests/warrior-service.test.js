@@ -10,7 +10,7 @@ const { test } = require('node:test');
 const Database = require('better-sqlite3');
 const {
   createWarriorService, WarriorError, DEFAULT_WARRIOR_RULES,
-  PRE_TRADE_CHECKS, assessOrderFlow, preTradeInputs,
+  PRE_TRADE_CHECKS, assessOrderFlow, preTradeInputs, paceRvol,
 } = require('../lib/warrior/service');
 const { createCredentialVault } = require('../lib/credential-vault');
 
@@ -1098,6 +1098,47 @@ function wakingDailyBars(todayVolume) {
   }
   return bars.map(b => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
 }
+
+test('paceRvol is time-of-day scaled: normal pace reads 1.0x at any time of day', () => {
+  // Average day = 390,000 shares = 1,000/min over a 390-minute session.
+  const at1000 = Date.parse('2026-09-29T14:00:00Z'); // 10:00 ET, 30 min elapsed
+  assert.equal(paceRvol(45000, 390000, at1000), 1.5); // 1,500/min = 1.5x pace
+  assert.equal(paceRvol(30000, 390000, at1000), 1.0); // exactly normal pace
+  // The same 45,000 shares under the retired full-day ratio read 0.12x.
+  assert.ok(45000 / 390000 < 1.5);
+  // Elapsed clamps: 1 minute floor at the open, 390 cap at/after the close.
+  assert.equal(paceRvol(1000, 390000, Date.parse('2026-09-29T13:30:00Z')), 1.0);
+  assert.equal(paceRvol(390000, 390000, Date.parse('2026-09-29T20:00:00Z')), 1.0);
+  assert.equal(paceRvol(100, 0, at1000), null);
+  assert.equal(paceRvol(100, null, at1000), null);
+});
+
+test('scoreSymbol pace gate: a strong morning pace passes even when the full-day ratio cannot', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // Today 400k shares vs 1M average day: full-day RVOL 0.40x (the retired
+  // gate killed this shape all week). At the last bar (10:29 ET, 59 min
+  // elapsed) the pace is (400k/59)/(1M/390) = 2.64x — eligible.
+  const daily = mappedDaily();
+  daily[daily.length - 1].v = 400000;
+  const paced = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(paced.outcome, 'eligible', `strong pace must pass, got ${JSON.stringify(paced).slice(0, 300)}`);
+  // Today 50k shares: pace (50k/59)/(1M/390) = 0.33x — still rejected,
+  // at the momentum stage, by the pace gate.
+  const slowDaily = mappedDaily();
+  slowDaily[slowDaily.length - 1].v = 50000;
+  const slow = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: slowDaily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(slow.outcome, 'rejected');
+  assert.equal(slow.stage, 'momentum');
+  assert.match(slow.reason, /pace relative volume/i);
+});
 
 test("scoreSymbol admits a waking name on today's volume alone", async () => {
   const f = fixture();

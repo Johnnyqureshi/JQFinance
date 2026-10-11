@@ -9,6 +9,8 @@ const {
   evaluateSession,
   evaluateCandidate,
   checkDailyLocks,
+  atr15OfBars,
+  intradayExitGeometry,
   validateConfig,
 } = require('../lib/kiaan/engine');
 
@@ -140,9 +142,11 @@ test('risk-off: hedge list is exempt from the $20 maxPrice cap (diagnosis 2026-1
 });
 
 test('the $20 maxPrice cap still binds ordinary longs', () => {
+  // hedgeOnly off: this test pins the long-side band behavior (with the
+  // mode on, the same candidate is refused earlier with HEDGE_ONLY_MODE).
   const d = evaluateCandidate(ctxFor(RISK_ON), {
     ...GOOD_LONG, price: 25.00, vwap: 24.50, orHigh: 24.80, orLow: 24.00,
-  });
+  }, { hedgeOnly: false });
   assert.equal(d.decision, 'no-trade');
   assert.ok(hasReason(d, 'PRICE_BAND'));
 });
@@ -174,7 +178,7 @@ test('chop means stand aside — for candidates and for the session', () => {
 // --- the happy path -----------------------------------------------------------
 
 test('risk-on breakout with relative strength and volume passes end to end', () => {
-  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG });
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }, { hedgeOnly: false });
   assert.equal(d.decision, 'enter-long');
   assert.equal(d.side, 'long');
   assert.equal(d.entry, 10.50);
@@ -192,17 +196,17 @@ test('risk-on breakout with relative strength and volume passes end to end', () 
 test('VWAP reclaim is an accepted structure when there is no OR break', () => {
   const d = evaluateCandidate(ctxFor(RISK_ON), {
     ...GOOD_LONG, brokeOrHigh: false, reclaimedVwap: true, price: 10.32, vwap: 10.20,
-  });
+  }, { hedgeOnly: false });
   assert.equal(d.decision, 'enter-long');
   assert.ok(hasReason(d, 'STRUCTURE_RECLAIM'));
 });
 
 test('weak relative strength and missing structure are each rejected plainly', () => {
-  const weak = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, dayChangePct: 1.3 }); // RS +0.2
+  const weak = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, dayChangePct: 1.3 }, { hedgeOnly: false }); // RS +0.2
   assert.equal(weak.decision, 'no-trade');
   assert.ok(hasReason(weak, 'WEAK_RS'));
 
-  const noStruct = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, brokeOrHigh: false, price: 10.10 });
+  const noStruct = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, brokeOrHigh: false, price: 10.10 }, { hedgeOnly: false });
   assert.equal(noStruct.decision, 'no-trade');
   assert.ok(hasReason(noStruct, 'NO_STRUCTURE'));
 });
@@ -212,7 +216,7 @@ test('weak relative strength and missing structure are each rejected plainly', (
 test('anti-chase rejects a name already extended past the trigger', () => {
   const d = evaluateCandidate(ctxFor(RISK_ON), {
     ...GOOD_LONG, price: 11.30, dayChangePct: 5.5, vwap: 10.60, rvol: 2.5,
-  }); // (11.30 - 10.40) / 0.30 = 3.0 ATR beyond the OR high > 2 ATR cap
+  }, { hedgeOnly: false }); // (11.30 - 10.40) / 0.30 = 3.0 ATR beyond the OR high > 2 ATR cap
   assert.equal(d.decision, 'no-trade');
   assert.ok(hasReason(d, 'CHASE_EXTENDED'));
 });
@@ -220,7 +224,7 @@ test('anti-chase rejects a name already extended past the trigger', () => {
 test('anti-chase rejects a name already up more than the day-gain cap', () => {
   const d = evaluateCandidate(ctxFor(RISK_ON), {
     ...GOOD_LONG, dayChangePct: 24, relStrengthPct: 22.9, price: 10.55,
-  });
+  }, { hedgeOnly: false });
   assert.equal(d.decision, 'no-trade');
   assert.ok(hasReason(d, 'CHASE_DAY_GAIN'));
 });
@@ -239,11 +243,11 @@ test('missing market context fails closed: unknown regime, no trade', () => {
 });
 
 test('missing candidate data fails closed (ATR, spread, volume)', () => {
-  const noAtr = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, atr: null });
+  const noAtr = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, atr: null }, { hedgeOnly: false });
   assert.equal(noAtr.decision, 'no-trade');
   assert.ok(hasReason(noAtr, 'ATR_MISSING'));
 
-  const noSpread = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, spreadPct: null });
+  const noSpread = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, spreadPct: null }, { hedgeOnly: false });
   assert.equal(noSpread.decision, 'no-trade');
   assert.ok(hasReason(noSpread, 'SPREAD_UNKNOWN'));
 });
@@ -272,11 +276,11 @@ test('daily locks halt everything: loss limit, loss streak, position cap', () =>
 
 test('every decision carries journal-ready explanation fields', () => {
   const scenarios = [
-    evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }), // enter
+    evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }, { hedgeOnly: false }), // enter
     evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_LONG }), // regime block
     evaluateCandidate(ctxFor(CHOP), { ...GOOD_LONG }), // chop
     evaluateCandidate({ market: {}, nowMs: NOW, dayState: {} }, { ...GOOD_LONG }), // unknown
-    evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, price: 11.30, dayChangePct: 5.5, vwap: 10.60 }), // chase
+    evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, price: 11.30, dayChangePct: 5.5, vwap: 10.60 }, { hedgeOnly: false }), // chase
   ];
   for (const d of scenarios) {
     assert.ok(d.decision === 'enter-long' || d.decision === 'no-trade');
@@ -347,10 +351,12 @@ test('breadth vote moves a +1 day to risk-on at the new ±2 bar', () => {
   assert.equal(withBreadth.inputs.breadthAdvancersPct, 65);
   assert.ok(withBreadth.reasons.some(r => r.startsWith('BREADTH_STRONG:')));
   // And the session/candidate gates follow the classification.
-  const s = evaluateSession({ market: { ...PLUS_ONE, breadth: { advancersPct: 65 } }, dayState: { ...CLEAN_DAY } });
+  // (hedgeOnly off: with the 2026-10-11 default ON, a risk-on day is
+  // stand-aside by design — covered in the hedge-only block below.)
+  const s = evaluateSession({ market: { ...PLUS_ONE, breadth: { advancersPct: 65 } }, dayState: { ...CLEAN_DAY } }, { hedgeOnly: false });
   assert.equal(s.stance, 'seek-longs');
   const d = evaluateCandidate(
-    ctxFor({ ...PLUS_ONE, breadth: { advancersPct: 65 } }), { ...GOOD_LONG });
+    ctxFor({ ...PLUS_ONE, breadth: { advancersPct: 65 } }), { ...GOOD_LONG }, { hedgeOnly: false });
   assert.equal(d.decision, 'enter-long');
 });
 
@@ -465,9 +471,9 @@ test('relief-bounce guard: only one level blocked → normal risk-on, longs allo
   const yieldClear = { ...GUARD_DAY, rates: { tenYearChangeBps: 2, tenYearLevel: 5.10 } };
   assert.equal(classifyRegime(yieldClear).guardActive, false);
 
-  const s = evaluateSession({ market: brentClear, dayState: { ...CLEAN_DAY } });
+  const s = evaluateSession({ market: brentClear, dayState: { ...CLEAN_DAY } }, { hedgeOnly: false });
   assert.equal(s.stance, 'seek-longs');
-  const long = evaluateCandidate(ctxFor(brentClear), { ...GOOD_LONG });
+  const long = evaluateCandidate(ctxFor(brentClear), { ...GOOD_LONG }, { hedgeOnly: false });
   assert.equal(long.decision, 'enter-long');
   const hedge = evaluateCandidate(ctxFor(brentClear), { ...GOOD_HEDGE });
   assert.equal(hedge.decision, 'no-trade');
@@ -481,14 +487,14 @@ test('relief-bounce guard: missing Brent or missing yield level → guard uneval
   assert.equal(cls.guardActive, false);
   assert.ok(hasReason(cls, 'RELIEF_BOUNCE_GUARD_UNEVALUATED'));
   assert.match(cls.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD_UNEVALUATED:')), /Brent/);
-  assert.equal(evaluateCandidate(ctxFor(noBrent), { ...GOOD_LONG }).decision, 'enter-long');
+  assert.equal(evaluateCandidate(ctxFor(noBrent), { ...GOOD_LONG }, { hedgeOnly: false }).decision, 'enter-long');
 
   const noYield = { ...GUARD_DAY, rates: { tenYearChangeBps: 2 } };
   const clsY = classifyRegime(noYield);
   assert.equal(clsY.guardActive, false);
   assert.ok(hasReason(clsY, 'RELIEF_BOUNCE_GUARD_UNEVALUATED'));
   assert.match(clsY.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD_UNEVALUATED:')), /10Y/);
-  assert.equal(evaluateCandidate(ctxFor(noYield), { ...GOOD_LONG }).decision, 'enter-long');
+  assert.equal(evaluateCandidate(ctxFor(noYield), { ...GOOD_LONG }, { hedgeOnly: false }).decision, 'enter-long');
 });
 
 test('relief-bounce guard: a true risk-off day is untouched (score ≤ −2 still risk-off)', () => {
@@ -550,4 +556,120 @@ test('relief-bounce guard: thresholds are rules — raising them disarms the gua
   assert.equal(classifyRegime(GUARD_DAY, { guardYieldMin: 5.30 }).guardActive, false);
   assert.equal(classifyRegime(GUARD_DAY, { guardBrentMin: 110 }).guardActive, false);
   assert.equal(classifyRegime(GUARD_DAY, { guardYieldMin: 5.20, guardBrentMin: 104 }).guardActive, true);
+});
+
+// --- hedge-only mode + intraday exit geometry (2026-10-11 rebuild) ----------
+// Strategy-lab Test 3 is the design now shipped: hedge-only entries +
+// 15m-ATR managed geometry. The lab numbers: 19 trades, +$10.72,
+// expectancy +$0.56, 4.29 profitable/week — vs −$120.23 for the full
+// design and −$49.91 for exit-repair alone.
+
+test('hedge-only rebuild: the shipped defaults are hedgeOnly ON and exitAtrTimeframe 15m', () => {
+  assert.equal(DEFAULT_KIAAN_RULES.hedgeOnly, true);
+  assert.equal(DEFAULT_KIAAN_RULES.exitAtrTimeframe, '15m');
+  assert.equal(mergedKiaanRules({}).hedgeOnly, true);
+  assert.equal(mergedKiaanRules({ hedgeOnly: false }).hedgeOnly, false);
+  assert.equal(mergedKiaanRules({ hedgeOnly: true }).hedgeOnly, true);
+  assert.equal(mergedKiaanRules({}).exitAtrTimeframe, '15m');
+  assert.equal(mergedKiaanRules({ exitAtrTimeframe: 'daily' }).exitAtrTimeframe, 'daily');
+  const bad = validateConfig({ exitAtrTimeframe: '1h' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some(e => e.startsWith('exitAtrTimeframe:')));
+});
+
+test('hedge-only ON: a passing ordinary long on a risk-on day is refused with HEDGE_ONLY_MODE', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }); // default rules — mode ON
+  assert.equal(d.decision, 'no-trade');
+  assert.equal(d.hedgeOnly, true);
+  assert.ok(hasReason(d, 'HEDGE_ONLY_MODE'));
+  assert.equal(d.entry, null);
+  assert.equal(d.size, null);
+
+  // The session explains the day: risk-on score, but no trade is sought.
+  const s = evaluateSession({ market: RISK_ON, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.regime, 'risk-on');
+  assert.equal(s.stance, 'stand-aside');
+  assert.equal(s.hedgeOnly, true);
+  assert.ok(hasReason(s, 'HEDGE_ONLY_MODE'));
+  assert.match(s.why, /hedge-only mode is ON/);
+});
+
+test('hedge-only ON: hedges still enter on risk-off days and on guard days', () => {
+  const off = evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_HEDGE });
+  assert.equal(off.decision, 'enter-long');
+  const guard = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_HEDGE });
+  assert.equal(guard.decision, 'enter-long');
+  const s = evaluateSession({ market: RISK_OFF, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-hedges');
+  assert.ok(hasReason(s, 'HEDGE_ONLY_MODE'));
+  assert.ok(hasReason(s, 'HEDGES_ONLY'));
+  // Chop still stands aside entirely — hedge-only opens nothing there.
+  const chop = evaluateCandidate(ctxFor(CHOP), { ...GOOD_HEDGE });
+  assert.equal(chop.decision, 'no-trade');
+  assert.ok(hasReason(chop, 'REGIME_CHOP'));
+});
+
+test('hedgeOnly:false restores the previous long-side behavior exactly', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }, { hedgeOnly: false });
+  assert.equal(d.decision, 'enter-long');
+  assert.equal(d.hedgeOnly, false);
+  assert.equal(d.entry, 10.50);
+  assert.equal(d.stop, 10.05); // the pre-rebuild daily-ATR geometry
+  assert.deepEqual(d.targets.map(t => t.price), [11.40, 11.85]);
+  assert.equal(d.size.shares, 47);
+  const s = evaluateSession({ market: RISK_ON, dayState: { ...CLEAN_DAY } }, { hedgeOnly: false });
+  assert.equal(s.stance, 'seek-longs');
+  assert.ok(!hasReason(s, 'HEDGE_ONLY_MODE'));
+});
+
+// 15m bar series with binary-exact arithmetic: closes step +0.25,
+// h = c + 0.5, l = c − 0.5 → every TR is exactly max(1.0, 0.75, 0.25)
+// = 1.0, so ATR(14) on 15m bars is exactly 1.0.
+function bars15Exact({ days = ['2026-10-06', '2026-10-07'], perDay = 26, startClose = 10 } = {}) {
+  const bars = [];
+  let close = startClose;
+  for (const day of days) {
+    const base = etMs(day, '09:30');
+    for (let i = 0; i < perDay; i++) {
+      close += 0.25;
+      bars.push({ t: base + i * 15 * 60000, o: close, h: close + 0.5, l: close - 0.5, c: close, v: 1000 });
+    }
+  }
+  return bars;
+}
+
+test('atr15OfBars: ATR(14) over completed regular-session 15m bars only', () => {
+  const bars = bars15Exact();
+  const afterClose = etMs('2026-10-07', '16:00');
+  assert.equal(atr15OfBars(bars, afterClose), 1.0);
+  // A still-forming bar (ends after the decision time) with wild values
+  // must not move the ATR.
+  const forming = { t: etMs('2026-10-08', '09:30'), o: 50, h: 500, l: 1, c: 50, v: 1 };
+  assert.equal(atr15OfBars([...bars, forming], etMs('2026-10-08', '09:40')), 1.0);
+  // A premarket bar is outside the regular-session series entirely.
+  const premarket = { t: etMs('2026-10-07', '08:00'), o: 50, h: 500, l: 1, c: 50, v: 1 };
+  assert.equal(atr15OfBars([premarket, ...bars], afterClose), 1.0);
+  // Fewer than 15 completed bars (< 14 TRs) → null (the fallback case).
+  assert.equal(atr15OfBars(bars15Exact({ days: ['2026-10-07'], perDay: 14 }), afterClose), null);
+  assert.equal(atr15OfBars([], afterClose), null);
+  assert.equal(atr15OfBars(bars, null), null);
+});
+
+test('intradayExitGeometry: stop/targets equal entry ∓ 1.5×ATR15 / +2R / +3R', () => {
+  const g = intradayExitGeometry({ entry: 20, atr15: 1, rules: {} });
+  assert.equal(g.stop, 18.5); // 20 − 1.5 × 1.0
+  assert.equal(g.risk, 1.5);
+  assert.deepEqual(g.targets, [
+    { r: 2, pct: 50, price: 23 }, // +2R
+    { r: 3, pct: 50, price: 24.5 }, // +3R
+  ]);
+  assert.equal(g.atr15, 1);
+  // The rules' own target tranches and stop multiplier are honored.
+  const custom = intradayExitGeometry({ entry: 20, atr15: 1, rules: { atrStopMult: 2, targets: [{ r: 1.5, pct: 100 }] } });
+  assert.equal(custom.stop, 18);
+  assert.deepEqual(custom.targets, [{ r: 1.5, pct: 100, price: 23 }]);
+  // Unusable inputs produce no geometry — the caller falls back to daily.
+  assert.equal(intradayExitGeometry({ entry: 20, atr15: null, rules: {} }), null);
+  assert.equal(intradayExitGeometry({ entry: 20, atr15: 0, rules: {} }), null);
+  assert.equal(intradayExitGeometry({ entry: 0.1, atr15: 1, rules: {} }), null); // stop would be ≤ 0
 });

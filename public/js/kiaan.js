@@ -47,6 +47,9 @@
 
   /* Every DEFAULT_KIAAN_RULES key the settings form exposes, grouped. */
   const RULE_SCHEMA = [
+    { group: 'Strategy mode — hedge-only rebuild (2026-10-11)', fields: [
+      ['hedgeOnly', 'Hedge-only mode — ordinary longs NEVER entered; hedge list only, on risk-off / guard days', 'boolselect'],
+      ['exitAtrTimeframe', 'Exit geometry — ATR timeframe for the managed stop/targets (sizing unchanged)', 'select', ['15m', 'daily']] ] },
     { group: 'Session', fields: [
       ['orMinutes', 'Opening range duration (min)', 'select', [5, 15, 30]],
       ['entryWindowStart', 'Entry window start (ET)', 'time'],
@@ -266,6 +269,7 @@
     const field = (key, label, type, stepOrOptions) => {
       const value = rules[key];
       const id = `kiaanRule_${key}`;
+      if (type === 'boolselect') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><select id="${id}" data-rule="${key}" data-bool="1"><option value="true" ${value === true ? 'selected' : ''}>On</option><option value="false" ${value === true ? '' : 'selected'}>Off</option></select></label>`;
       if (type === 'select') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><select id="${id}" data-rule="${key}">${stepOrOptions.map(o => `<option value="${esc(o)}" ${String(value) === String(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
       if (type === 'time') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="time" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
       if (type === 'text') return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="text" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
@@ -306,7 +310,8 @@
         if (ok && parsed.length) rules[key] = parsed;
         return;
       }
-      if (input.tagName === 'SELECT') rules[key] = /^\d+$/.test(input.value) ? Number(input.value) : input.value;
+      if (input.dataset.bool === '1') rules[key] = input.value === 'true';
+      else if (input.tagName === 'SELECT') rules[key] = /^\d+$/.test(input.value) ? Number(input.value) : input.value;
       else if (input.type === 'time' || input.type === 'text') { if (input.value.trim() !== '') rules[key] = input.value.trim(); }
       else if (input.value !== '') rules[key] = Number(input.value);
     });

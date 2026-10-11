@@ -75,6 +75,42 @@ function dailySQQQ() {
   bars.push({ t: iso(Date.parse('2026-10-01T13:30:00Z')), o: 10.0, h: 10.3, l: 9.95, c: 10.3, v: 900000 });
   return bars;
 }
+// Wide-range daily bars for SQQQ: every TR is exactly 2.0, so the
+// daily ATR is 2.0 and the daily-geometry stop (10.30 − 1.5×2.0 = 7.30)
+// makes the $50 risk cap bind hard: floor(50/3.0) = 16 shares. That is
+// what proves share sizing still comes from the DAILY stop after the
+// 15m geometry rebase (the intraday R is only 0.15 — sizing off it
+// would allow the full floor($500/$10.30) = 48 shares).
+function dailyWideSQQQ() {
+  const bars = [];
+  let dayMs = Date.parse('2026-09-01T13:30:00Z');
+  for (let i = 0; i < 29; i++) {
+    bars.push({ t: iso(dayMs), o: 9.9, h: 10.9, l: 8.9, c: 9.9, v: 2000000 });
+    dayMs += 86400000;
+  }
+  bars.push({ t: iso(Date.parse('2026-10-01T13:30:00Z')), o: 10.0, h: 11.0, l: 9.0, c: 10.3, v: 900000 });
+  return bars;
+}
+// 15-minute bars for SQQQ (the hedge15m scenario): two prior sessions
+// plus today's first four buckets, closes stepping +0.02 with
+// h = c + 0.05 / l = c − 0.05, so every true range is 0.10 and
+// ATR(14) on 15m bars is 0.10 at the 10:30 ET decision time.
+function bars15SQQQ() {
+  const bars = [];
+  let close = 9.0;
+  for (const day of ['2026-09-29', '2026-09-30', '2026-10-01']) {
+    const base = Date.parse(`${day}T13:30:00Z`); // 09:30 ET
+    const count = day === '2026-10-01' ? 4 : 26;
+    for (let i = 0; i < count; i++) {
+      close = +(close + 0.02).toFixed(4);
+      bars.push({
+        t: iso(base + i * 15 * 60000),
+        o: close, h: +(close + 0.05).toFixed(4), l: +(close - 0.05).toFixed(4), c: close, v: 50000,
+      });
+    }
+  }
+  return bars;
+}
 function minutesPEN() {
   return driftMinutes({ open: 0.495, last: 0.5055, orHigh: 0.5, orLow: 0.488, vol: 20000, orVol: 30000, breakVol: 40000 });
 }
@@ -151,6 +187,25 @@ const SCENARIOS = {
     quotes: { PEN: [0.505, 0.506] },
     yahoo: { '^VIX': [16, 14], '^TNX': [5.3, 5.35], 'CL=F': [92, 93] },
   },
+};
+
+// Intraday exit-geometry scenario (2026-10-11): the riskoff tape, but
+// SQQQ carries wide daily bars (daily ATR 2.0 → risk-capped sizing of
+// 16 shares) AND a full 15m series (ATR15 = 0.10 → managed stop 10.15,
+// targets 10.60 / 10.75 on the intraday R of 0.15).
+SCENARIOS.hedge15m = {
+  assets: ['AAA', 'SQQQ'],
+  daily: { AAA: dailyAAA(), SQQQ: dailyWideSQQQ(), SPY: dailyIndex(770, 758), QQQ: dailyIndex(690, 679) },
+  minutes: {
+    AAA: minutesAAA(),
+    SQQQ: minutesSQQQ(),
+    SPY: driftMinutes({ open: 769, last: 758.2, vol: 100000 }),
+    QQQ: driftMinutes({ open: 689, last: 679.3, vol: 100000 }),
+  },
+  latest: { AAA: 10.07, SQQQ: 10.3 },
+  quotes: { AAA: [10.065, 10.075], SQQQ: [10.29, 10.31] },
+  yahoo: { '^VIX': [24, 28], '^TNX': [5.3, 5.36], 'CL=F': [92, 93] },
+  bars15: { SQQQ: bars15SQQQ() },
 };
 
 // Liquidity-sort regression scenario (diagnosis 2026-10-09 §5b): 405
@@ -287,7 +342,8 @@ function fixture(scenario = 'riskon', options = {}) {
     if (parsed.hostname === 'data.alpaca.markets') {
       if (path === '/v2/stocks/bars') {
         const symbols = (query.get('symbols') || '').split(',').filter(Boolean);
-        const source = query.get('timeframe') === '1Min' ? sc.minutes : sc.daily;
+        const tf = query.get('timeframe');
+        const source = tf === '1Min' ? sc.minutes : tf === '15Min' ? (sc.bars15 || {}) : sc.daily;
         return response({ bars: Object.fromEntries(symbols.map(s => [s, source[s] || []])), next_page_token: null });
       }
       if (path === '/v2/stocks/bars/latest') {
@@ -414,6 +470,9 @@ test('disconnect is blocked while a position is open', async () => {
 test('risk-on scan enters the confirming leader and attaches OCO + stop protection', async () => {
   const f = fixture('riskon');
   await connectAndEnable(f);
+  // Long-side mechanics test: hedge-only OFF + daily exit geometry
+  // restore the pre-2026-10-11 behavior this test pins exactly.
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
   await f.service._scanCycle(1);
   const buys = f.world.orderPosts.filter(o => o.side === 'buy');
   assert.equal(buys.length, 1);
@@ -447,6 +506,7 @@ test('risk-on scan enters the confirming leader and attaches OCO + stop protecti
 test('universe is liquidity-sorted before the cap: a liquid name past API position 400 is evaluated', async () => {
   const f = fixture('manylow');
   await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false } });
   await f.service._scanCycle(1);
   const buys = f.world.orderPosts.filter(o => o.side === 'buy');
   assert.equal(buys.length, 1, `AAA (API position 406) must be reached, got ${buys.length} buys`);
@@ -517,7 +577,7 @@ test('relief-bounce guard day: risk-on score with blocked levels → long refuse
 test('sub-penny name: entry + protection prices are tick-rounded, broker never 422s', async () => {
   const f = fixture('penny');
   await connectPaper(f);
-  await f.service.setSettings(1, { enabled: true, rules: { minPrice: 0.1 } });
+  await f.service.setSettings(1, { enabled: true, rules: { minPrice: 0.1, hedgeOnly: false, exitAtrTimeframe: 'daily' } });
   await f.service._scanCycle(1);
   assert.equal(f.world.subPennyRejections, 0);
   const buys = f.world.orderPosts.filter(o => o.side === 'buy' && o.symbol === 'PEN');
@@ -547,6 +607,7 @@ test('daily locks halt entries and the lock is journaled on the session row', as
 test('EOD flatten cancels protection and market-closes the position', async () => {
   const f = fixture('riskon');
   await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
   await f.service._scanCycle(1);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1);
   f.world.brokerPositions = [{ symbol: 'AAA', qty: '49' }];
@@ -683,11 +744,87 @@ test('a timed-out POST (order) is NEVER retried — reconciliation semantics pre
     },
   });
   await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false } });
   await f.service._scanCycle(1);
   assert.equal(orderPosts, 1, 'a timed-out entry POST must not be re-sent');
   assert.equal(f.world.orderPosts.length, 0, 'the broker never recorded the order');
   const alert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE user_id=1 AND message LIKE '%AAA%'").get();
   assert.ok(alert, 'the withheld entry is alerted, not silently dropped');
+});
+
+// --- hedge-only rebuild + intraday exit geometry (2026-10-11) ----------------
+test('hedge-only is the shipped default: a risk-on day refuses the ordinary long and stands aside', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  // No rule overrides — DEFAULT_KIAAN_RULES as shipped (hedgeOnly ON).
+  const view = await f.service.getSettings(1);
+  assert.equal(view.rules.hedgeOnly, true);
+  assert.equal(view.rules.exitAtrTimeframe, '15m');
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 0, 'no orders on a hedge-only risk-on day');
+  const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
+  assert.equal(session.regime, 'risk-on'); // the score still reads risk-on
+  assert.equal(session.decision, 'stand-aside'); // but hedge-only mode does not trade it
+  assert.match(session.reasons, /HEDGE_ONLY_MODE/);
+  assert.equal(JSON.parse(session.data).hedgeOnly, true);
+});
+
+test('settings: hedgeOnly must be a boolean and exitAtrTimeframe one of 15m/daily', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  await assert.rejects(() => f.service.setSettings(1, { rules: { hedgeOnly: 'yes' } }), /hedgeOnly must be a boolean/);
+  await assert.rejects(() => f.service.setSettings(1, { rules: { exitAtrTimeframe: '1h' } }), /exitAtrTimeframe must be one of 15m, daily/);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
+  const view = await f.service.getSettings(1);
+  assert.equal(view.rules.hedgeOnly, false);
+  assert.equal(view.rules.exitAtrTimeframe, 'daily');
+});
+
+test('15m exit geometry: hedge entry is managed on ATR(14) 15m while sizing stays daily-ATR', async () => {
+  const f = fixture('hedge15m');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy');
+  assert.equal(buys.length, 1);
+  assert.equal(buys[0].symbol, 'SQQQ');
+  // Sizing proof: the daily stop (10.30 − 1.5×2.0 = 7.30, R $3.00) caps
+  // the position at floor($50/$3.00) = 16 shares. Sizing off the
+  // intraday stop (R $0.15) would have allowed 48.
+  assert.equal(buys[0].qty, 16);
+  const pos = f.db.prepare("SELECT * FROM kiaan_positions WHERE user_id=1 AND symbol='SQQQ'").get();
+  assert.ok(pos, 'SQQQ position opened');
+  assert.equal(pos.status, 'open');
+  assert.equal(pos.stop_price, 10.15); // 10.30 − 1.5 × ATR15 0.10
+  assert.equal(pos.initial_stop_price, 10.15);
+  assert.deepEqual(JSON.parse(pos.targets_json).map(t => t.price), [10.6, 10.75]); // +2R / +3R on R 0.15
+  // Broker protection carries the intraday geometry, tick-rounded.
+  const oco = f.world.orderPosts.find(o => o.order_class === 'oco');
+  assert.ok(oco, 'OCO protection posted');
+  assert.equal(oco.stop_loss.stop_price, 10.16); // tickPrice(10.15 × 1.0005)
+  assert.equal(oco.take_profit.limit_price, 10.59); // tickPrice(10.60 × 0.9995)
+  assert.equal(f.world.subPennyRejections, 0);
+  // The journaled candidate decision carries the managed geometry.
+  const cand = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='SQQQ'").get();
+  assert.equal(cand.decision, 'enter-long');
+  assert.match(cand.reasons, /EXIT_GEOMETRY_15M/);
+  const data = JSON.parse(cand.data);
+  assert.equal(data.stop, 10.15);
+  assert.equal(data.size.shares, 16);
+  assert.equal(data.exitGeometry.source, '15m');
+  assert.equal(data.exitGeometry.atr15, 0.1);
+});
+
+test('15m exit geometry fallback: no 15m bars → daily-ATR geometry stands, fallback journaled', async () => {
+  const f = fixture('riskoff'); // scenario carries no bars15 — the 15Min read returns empty
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const pos = f.db.prepare("SELECT * FROM kiaan_positions WHERE user_id=1 AND symbol='SQQQ'").get();
+  assert.ok(pos, 'SQQQ position opened');
+  assert.equal(pos.stop_price, 9.9786); // daily geometry: 10.30 − 1.5 × ATR(14) daily 0.2143
+  const cand = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='SQQQ'").get();
+  assert.equal(cand.decision, 'enter-long');
+  assert.match(cand.reasons, /EXIT_GEOMETRY_FALLBACK/);
+  assert.equal(JSON.parse(cand.data).exitGeometry.source, 'daily-fallback');
 });
 
 // --- breadth wiring (2026-10-10) ----------------------------------------------

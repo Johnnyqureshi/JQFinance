@@ -68,7 +68,9 @@
       ['breadthStrongPct', 'Breadth strong (% advancing)', 'number', 1],
       ['breadthWeakPct', 'Breadth weak (% advancing)', 'number', 1],
       ['oilSpikePct', 'Oil spike = macro stress (%)', 'number', 0.1],
-      ['yieldSpikeBps', '10Y spike = macro stress (bps)', 'number', 1] ] },
+      ['yieldSpikeBps', '10Y spike = macro stress (bps)', 'number', 1],
+      ['guardYieldMin', 'Relief-bounce guard — 10Y at/above (%) (with Brent, blocks longs; hedges only)', 'number', 0.05],
+      ['guardBrentMin', 'Relief-bounce guard — Brent at/above ($) (with 10Y, blocks longs; hedges only)', 'number', 1] ] },
     { group: 'Confirmation — all three legs', fields: [
       ['minRelStrengthPct', 'Min relative strength vs SPY (pts)', 'number', 0.1],
       ['minRvol', 'Min relative volume (pace, ×)', 'number', 0.1],

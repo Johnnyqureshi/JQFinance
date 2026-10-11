@@ -396,3 +396,158 @@ test('hard overrides still force risk-off at the new bar', () => {
   assert.equal(hardDown.regime, 'risk-off');
   assert.ok(hardDown.reasons.some(r => r.startsWith('INDEXES_HARD_DOWN:')));
 });
+
+// --- relief-bounce guard (Johnny, approved 2026-10-11) ----------------------
+// The score tape is RISK_ON (+6), but BOTH absolute levels are still
+// blocked: 10Y 5.24% ≥ guardYieldMin 5.15% and Brent $104.72 ≥
+// guardBrentMin $100. The regime still computes risk-on; the guard is a
+// stance layer that makes the day hedge-only.
+const GUARD_DAY = {
+  spy: { dayChangePct: 1.1, trend: 'up' },
+  qqq: { dayChangePct: 1.4, trend: 'up' },
+  vix: { level: 14, dayChangePct: -6 },
+  rates: { tenYearChangeBps: 2, tenYearLevel: 5.24 },
+  oil: { dayChangePct: 0.8, brentLevel: 104.72 },
+};
+
+test('relief-bounce guard: thresholds ship as named rule defaults', () => {
+  assert.equal(DEFAULT_KIAAN_RULES.guardYieldMin, 5.15);
+  assert.equal(DEFAULT_KIAAN_RULES.guardBrentMin, 100);
+});
+
+test('relief-bounce guard: both levels blocked on a risk-on score → hedge-only day', () => {
+  const cls = classifyRegime(GUARD_DAY);
+  assert.equal(cls.regime, 'risk-on'); // score/regime computation untouched
+  assert.ok(cls.score >= 2);
+  assert.equal(cls.guardActive, true);
+  assert.equal(cls.guard.tenYearLevel, 5.24);
+  assert.equal(cls.guard.brentLevel, 104.72);
+  assert.equal(cls.inputs.tenYearLevel, 5.24);
+  assert.equal(cls.inputs.brentLevel, 104.72);
+  assert.ok(hasReason(cls, 'RELIEF_BOUNCE_GUARD'));
+
+  const s = evaluateSession({ market: GUARD_DAY, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-hedges');
+  assert.equal(s.guardActive, true);
+  assert.ok(hasReason(s, 'HEDGES_ONLY_GUARD'));
+  assert.match(s.why, /relief-bounce guard/);
+
+  // Ordinary longs are refused with the guard reason, levels included.
+  const long = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_LONG });
+  assert.equal(long.decision, 'no-trade');
+  assert.ok(hasReason(long, 'RELIEF_BOUNCE_GUARD'));
+  assert.match(long.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD:')), /5\.24/);
+  assert.match(long.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD:')), /104\.72/);
+
+  // A hedge-list name passing the full confirmation stack may trade.
+  const hedge = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_HEDGE });
+  assert.equal(hedge.decision, 'enter-long');
+  assert.equal(hedge.guardActive, true);
+  assert.ok(hasReason(hedge, 'HEDGE_CONFIRM_PATH'));
+  assert.match(hedge.why, /relief-bounce guard day/);
+});
+
+test('relief-bounce guard: a hedge failing any stack leg on a guard day is still refused', () => {
+  const weakVol = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_HEDGE, rvol: 1.0 });
+  assert.equal(weakVol.decision, 'no-trade');
+  assert.ok(hasReason(weakVol, 'WEAK_VOLUME'));
+  const weakRs = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_HEDGE, relStrengthPct: 0.2 });
+  assert.equal(weakRs.decision, 'no-trade');
+  assert.ok(hasReason(weakRs, 'WEAK_RS'));
+});
+
+test('relief-bounce guard: only one level blocked → normal risk-on, longs allowed', () => {
+  const brentClear = { ...GUARD_DAY, oil: { dayChangePct: 0.8, brentLevel: 95 } };
+  const clsB = classifyRegime(brentClear);
+  assert.equal(clsB.regime, 'risk-on');
+  assert.equal(clsB.guardActive, false);
+  assert.ok(!hasReason(clsB, 'RELIEF_BOUNCE_GUARD'));
+  const yieldClear = { ...GUARD_DAY, rates: { tenYearChangeBps: 2, tenYearLevel: 5.10 } };
+  assert.equal(classifyRegime(yieldClear).guardActive, false);
+
+  const s = evaluateSession({ market: brentClear, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-longs');
+  const long = evaluateCandidate(ctxFor(brentClear), { ...GOOD_LONG });
+  assert.equal(long.decision, 'enter-long');
+  const hedge = evaluateCandidate(ctxFor(brentClear), { ...GOOD_HEDGE });
+  assert.equal(hedge.decision, 'no-trade');
+  assert.ok(hasReason(hedge, 'REGIME_RISK_ON_HEDGE'));
+});
+
+test('relief-bounce guard: missing Brent or missing yield level → guard unevaluated, day unchanged', () => {
+  const noBrent = { ...GUARD_DAY, oil: { dayChangePct: 0.8 } };
+  const cls = classifyRegime(noBrent);
+  assert.equal(cls.regime, 'risk-on');
+  assert.equal(cls.guardActive, false);
+  assert.ok(hasReason(cls, 'RELIEF_BOUNCE_GUARD_UNEVALUATED'));
+  assert.match(cls.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD_UNEVALUATED:')), /Brent/);
+  assert.equal(evaluateCandidate(ctxFor(noBrent), { ...GOOD_LONG }).decision, 'enter-long');
+
+  const noYield = { ...GUARD_DAY, rates: { tenYearChangeBps: 2 } };
+  const clsY = classifyRegime(noYield);
+  assert.equal(clsY.guardActive, false);
+  assert.ok(hasReason(clsY, 'RELIEF_BOUNCE_GUARD_UNEVALUATED'));
+  assert.match(clsY.reasons.find(r => r.startsWith('RELIEF_BOUNCE_GUARD_UNEVALUATED:')), /10Y/);
+  assert.equal(evaluateCandidate(ctxFor(noYield), { ...GOOD_LONG }).decision, 'enter-long');
+});
+
+test('relief-bounce guard: a true risk-off day is untouched (score ≤ −2 still risk-off)', () => {
+  const off = {
+    ...RISK_OFF,
+    rates: { tenYearChangeBps: 5, tenYearLevel: 5.30 },
+    oil: { dayChangePct: 1.2, brentLevel: 105 },
+  };
+  const cls = classifyRegime(off);
+  assert.equal(cls.regime, 'risk-off');
+  assert.equal(cls.guardActive, false);
+  const s = evaluateSession({ market: off, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-hedges');
+  assert.ok(hasReason(s, 'HEDGES_ONLY'));
+  assert.ok(!hasReason(s, 'HEDGES_ONLY_GUARD'));
+  assert.equal(evaluateCandidate(ctxFor(off), { ...GOOD_HEDGE }).decision, 'enter-long');
+});
+
+test('relief-bounce guard: true chop stays stand-aside — the guard opens no hedges there', () => {
+  const chop = {
+    ...CHOP,
+    rates: { tenYearChangeBps: 1, tenYearLevel: 5.24 },
+    oil: { dayChangePct: 0.5, brentLevel: 104.72 },
+  };
+  const cls = classifyRegime(chop);
+  assert.equal(cls.regime, 'chop');
+  assert.equal(cls.guardActive, false);
+  const s = evaluateSession({ market: chop, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'stand-aside');
+  const hedge = evaluateCandidate(ctxFor(chop), { ...GOOD_HEDGE });
+  assert.equal(hedge.decision, 'no-trade');
+  assert.ok(hasReason(hedge, 'REGIME_CHOP'));
+});
+
+test('relief-bounce guard: hard overrides are unaffected by blocked levels', () => {
+  const panic = classifyRegime({
+    spy: { dayChangePct: 1.2, trend: 'up' },
+    qqq: { dayChangePct: 1.0, trend: 'up' },
+    vix: { level: 38, dayChangePct: 20 },
+    rates: { tenYearChangeBps: 3, tenYearLevel: 5.30 },
+    oil: { dayChangePct: 1.0, brentLevel: 106 },
+  });
+  assert.equal(panic.regime, 'risk-off');
+  assert.equal(panic.guardActive, false);
+  assert.ok(hasReason(panic, 'VIX_PANIC'));
+  const hardDown = classifyRegime({
+    spy: { dayChangePct: -1.6, trend: 'down' },
+    qqq: { dayChangePct: -1.7, trend: 'down' },
+    vix: { level: 18, dayChangePct: 0 },
+    rates: { tenYearChangeBps: 3, tenYearLevel: 5.30 },
+    oil: { dayChangePct: 1.0, brentLevel: 106 },
+  });
+  assert.equal(hardDown.regime, 'risk-off');
+  assert.equal(hardDown.guardActive, false);
+  assert.ok(hasReason(hardDown, 'INDEXES_HARD_DOWN'));
+});
+
+test('relief-bounce guard: thresholds are rules — raising them disarms the guard', () => {
+  assert.equal(classifyRegime(GUARD_DAY, { guardYieldMin: 5.30 }).guardActive, false);
+  assert.equal(classifyRegime(GUARD_DAY, { guardBrentMin: 110 }).guardActive, false);
+  assert.equal(classifyRegime(GUARD_DAY, { guardYieldMin: 5.20, guardBrentMin: 104 }).guardActive, true);
+});

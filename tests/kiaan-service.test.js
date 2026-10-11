@@ -122,6 +122,23 @@ const SCENARIOS = {
     quotes: { AAA: [10.065, 10.075], SQQQ: [10.29, 10.31] },
     yahoo: { '^VIX': [24, 28], '^TNX': [5.3, 5.36], 'CL=F': [92, 93] },
   },
+  // Relief-bounce guard day (2026-10-11): same risk-on tape as 'riskon'
+  // (score +6), but the absolute levels are blocked — ^TNX last close
+  // 5.35% ≥ 5.15 and Brent (BZ=F) last close $104.72 ≥ $100. Ordinary
+  // longs must be refused; the confirming hedge (SQQQ) may enter.
+  guardday: {
+    assets: ['AAA', 'SQQQ'],
+    daily: { AAA: dailyAAA(), SQQQ: dailySQQQ(), SPY: dailyIndex(770, 776), QQQ: dailyIndex(690, 694) },
+    minutes: {
+      AAA: minutesAAA(),
+      SQQQ: minutesSQQQ(),
+      SPY: driftMinutes({ open: 770.5, last: 776.2, vol: 100000 }),
+      QQQ: driftMinutes({ open: 690.5, last: 694.2, vol: 100000 }),
+    },
+    latest: { AAA: 10.07, SQQQ: 10.3 },
+    quotes: { AAA: [10.065, 10.075], SQQQ: [10.29, 10.31] },
+    yahoo: { '^VIX': [16, 14], '^TNX': [5.3, 5.35], 'CL=F': [92, 93], 'BZ=F': [103.5, 104.72] },
+  },
   penny: {
     assets: ['PEN'],
     daily: { PEN: dailyPEN(), SPY: dailyIndex(770, 776), QQQ: dailyIndex(690, 694) },
@@ -473,6 +490,28 @@ test('risk-off: ordinary longs blocked outright, confirming hedge ETF enters', a
   const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
   assert.equal(session.regime, 'risk-off');
   assert.equal(session.decision, 'seek-hedges');
+});
+
+test('relief-bounce guard day: risk-on score with blocked levels → long refused, hedge enters', async () => {
+  const f = fixture('guardday');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy');
+  assert.equal(buys.length, 1);
+  assert.equal(buys[0].symbol, 'SQQQ');
+  const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
+  assert.equal(session.regime, 'risk-on'); // the score still reads risk-on
+  assert.equal(session.decision, 'seek-hedges'); // but the day trades hedge-only
+  assert.match(session.reasons, /RELIEF_BOUNCE_GUARD/);
+  const sdata = JSON.parse(session.data);
+  assert.equal(sdata.guardActive, true);
+  assert.equal(sdata.inputs.tenYearLevel, 5.35);
+  assert.equal(sdata.inputs.brentLevel, 104.72); // BZ=F reached the classifier
+  const aaa = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='AAA'").get();
+  assert.equal(aaa.decision, 'no-trade');
+  assert.match(aaa.reasons, /RELIEF_BOUNCE_GUARD/);
+  const sq = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='SQQQ'").get();
+  assert.equal(sq.decision, 'enter-long');
 });
 
 test('sub-penny name: entry + protection prices are tick-rounded, broker never 422s', async () => {

@@ -1012,13 +1012,25 @@ test('mountWarrior serializes handler results with res.json (regression)', async
   assert.deepEqual(jsonBody, { ok: true, uid: 7 }, 'the handler result reaches res.json');
 });
 
-// --- Live movers feed + today's-volume liquidity gates (Johnny 2026-10-01) --
-// SSM sat flat all morning, then ran +96% from 1:25 PM ET. Two changes so
-// Warrior can catch that class: (1) the screener's top gainers / most
-// actives jump the scan rotation; (2) today's actual volume satisfies the
-// liquidity gates as an alternative to the 20-day average.
+// --- Gainers-anchored scanning (Johnny 2026-10-12) -------------------------
+// "On the Warrior bot screen from the top gainers and lookout for
+// breakouts there. Don't just be all over the place." The candidate set
+// comes from the screener's top-gainers list; a name that appears there
+// joins the day's watched set and keeps being scanned; plain catalog
+// rotation is only the last-resort fallback when the screener fails AND
+// nothing is watched. (Supersedes the 2026-10-01 movers-front-half
+// rotation behavior; the today's-volume liquidity gates from that day
+// are unchanged and tested below.)
 
-test('scan puts live top gainers at the front of the scan queue', async () => {
+function scannedSymbols(f, fromCall = 0) {
+  const dailyCall = f.world.calls.slice(fromCall).find(c => c.path === '/v2/stocks/bars'
+    && new URL(c.url).searchParams.get('timeframe') === '1Day'
+    && !new URL(c.url).searchParams.get('symbols').includes('SPY'));
+  assert.ok(dailyCall, 'daily bars were loaded for the scan');
+  return new URL(dailyCall.url).searchParams.get('symbols').split(',');
+}
+
+test('scan works the top gainers screen only — rotation contributes nothing', async () => {
   const f = fixture({
     assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
     gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
@@ -1028,13 +1040,61 @@ test('scan puts live top gainers at the front of the scan queue', async () => {
   const result = await f.service.run(1);
   assert.equal(result.ok, true);
   assert.ok(f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/gainers-losers'), 'screener was queried');
-  const dailyCall = f.world.calls.find(c => c.path === '/v2/stocks/bars'
-    && new URL(c.url).searchParams.get('timeframe') === '1Day'
-    && !new URL(c.url).searchParams.get('symbols').includes('SPY'));
-  assert.ok(dailyCall, 'daily bars were loaded for the scan');
-  const scanned = new URL(dailyCall.url).searchParams.get('symbols').split(',');
-  assert.equal(scanned.length, 2, 'scan budget respected');
-  assert.equal(scanned[0], 'ZZZ', 'the top gainer is scanned first, ahead of the rotation');
+  assert.ok(!f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/most-actives'), 'most-actives is no longer a candidate source');
+  assert.deepEqual(scannedSymbols(f), ['ZZZ'], 'only the gainer is scanned — the catalog is not rotated into the cycle');
+  assert.equal(result.scan.funnel.fromScreen, 1);
+  assert.equal(result.scan.funnel.fromWatched, 0);
+  assert.equal(result.scan.funnel.fromRotation, 0);
+});
+
+test('a most-active name that is not a top gainer does not qualify on its own', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [],
+    mostActives: [{ symbol: 'ZZZ', volume: 99000000, trade_count: 123456 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(!scannedSymbols(f).includes('ZZZ'), 'most-active alone never reaches the scan');
+  assert.equal(result.scan.funnel.fromScreen, 0);
+  assert.equal(result.scan.funnel.fromRotation, 2, 'empty screen + empty watched set falls back to rotation for that cycle');
+});
+
+test('a name that leaves the gainers screen stays watched for the rest of the day', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const first = await f.service.run(1);
+  assert.equal(first.scan.funnel.fromScreen, 1);
+  const callsAfterFirst = f.world.calls.length;
+  f.world.gainers = []; // ZZZ slips off the screen
+  const second = await f.service.run(1);
+  assert.deepEqual(scannedSymbols(f, callsAfterFirst), ['ZZZ'], 'the watched name keeps being scanned for its breakout');
+  assert.equal(second.scan.funnel.fromScreen, 0);
+  assert.equal(second.scan.funnel.fromWatched, 1);
+  assert.equal(second.scan.funnel.fromRotation, 0);
+});
+
+test('a screener outage falls back to the watched set before rotation', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  await f.service.run(1);
+  const callsAfterFirst = f.world.calls.length;
+  f.world.moversError = true; // screener now 500s
+  const second = await f.service.run(1);
+  assert.equal(second.ok, true);
+  assert.deepEqual(scannedSymbols(f, callsAfterFirst), ['ZZZ'], 'watched set carries the scan through the outage');
+  assert.equal(second.scan.funnel.fromWatched, 1);
+  assert.equal(second.scan.funnel.fromRotation, 0);
 });
 
 test('a screener outage never breaks the scan (fail-soft to rotation)', async () => {
@@ -1044,6 +1104,19 @@ test('a screener outage never breaks the scan (fail-soft to rotation)', async ()
   assert.equal(result.ok, true);
   assert.ok(result.scan, 'a scan ran');
   assert.equal(result.scan.funnel.proposals, 1, 'rotation scan still produces its proposal');
+  assert.ok(result.scan.funnel.fromRotation >= 1, 'the fallback is visible in the funnel');
+});
+
+test('an in-band gainer through the screen path reaches a proposal with all gates intact', async () => {
+  const f = fixture({
+    gainers: [{ symbol: 'AAA', percent_change: 6.5, price: 10.55, change: 0.65 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.fromScreen, 1);
+  assert.equal(result.scan.funnel.proposals, 1, 'the valid pattern + pace on a gainer produces its proposal exactly as before');
 });
 
 function sleepyDailyBars(todayVolume) {
@@ -1208,6 +1281,44 @@ test('premarket movers are boosted to the front of the regular-session rotation'
   for (const row of rows) {
     if (row.symbol !== 'ZZZ') assert.ok(zzz.priority > row.priority, `${row.symbol} must not outrank the premarket mover`);
   }
+});
+
+test('premarket phase-1 survivors join the watched set and are still watched at the open', async () => {
+  // Screener returns nothing premarket (gainers: [] by default): the
+  // fallback rotation scans, and the name that passes phase 1 must not be
+  // forgotten — it is watched at the open even with the screen still empty.
+  const f = fixture();
+  f.world.time = PREMARKET_TIME;
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const pre = await f.service.run(1);
+  assert.equal(pre.ok, true);
+  assert.equal(pre.scan.funnel.fromRotation, 1, 'premarket cycle fell back to rotation with an empty screen');
+  const watched = f.db.prepare("SELECT watched_on FROM warrior_universe WHERE symbol='AAA'").get();
+  assert.equal(watched.watched_on, TODAY, 'the premarket phase-1 survivor is in the day\'s watched set');
+  const callsAfterPre = f.world.calls.length;
+  f.world.time = NOW; // the open — screen still returning nothing
+  const open = await f.service.run(1);
+  assert.equal(open.ok, true);
+  assert.deepEqual(scannedSymbols(f, callsAfterPre), ['AAA'], 'the premarket survivor is scanned at the open');
+  assert.equal(open.scan.funnel.fromWatched, 1, 'it arrived via the watched set, not a fresh rotation');
+  assert.equal(open.scan.funnel.fromRotation, 0);
+});
+
+test('premarket gainers from the screen are candidates and watched immediately', async () => {
+  const f = fixture({
+    assets: ['AAA', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 18.0, price: 3.4, change: 0.52 }],
+  });
+  f.world.time = PREMARKET_TIME;
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.fromScreen, 1, 'the premarket screen name is a candidate in the premarket cycle itself');
+  assert.deepEqual(scannedSymbols(f), ['ZZZ']);
+  const watched = f.db.prepare("SELECT watched_on FROM warrior_universe WHERE symbol='ZZZ'").get();
+  assert.equal(watched.watched_on, TODAY, 'the premarket gainer is watched from that moment on');
 });
 
 test('stored rules from before the premarket feature get scanning switched on once, never re-forced', async () => {

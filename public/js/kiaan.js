@@ -47,8 +47,8 @@
 
   /* Every DEFAULT_KIAAN_RULES key the settings form exposes, grouped. */
   const RULE_SCHEMA = [
-    { group: 'Strategy mode — hedge-only rebuild (2026-10-11)', fields: [
-      ['hedgeOnly', 'Hedge-only mode — ordinary longs NEVER entered; hedge list only, on risk-off / guard days', 'boolselect'],
+    { group: 'Strategy mode — hedge-only rebuild (2026-10-11), long-universe expansion (2026-10-12)', fields: [
+      ['hedgeOnly', 'Hedge-only mode — ordinary longs entered ONLY for the long-universe list, on risk-on days; hedge list only, on risk-off / guard days', 'boolselect'],
       ['exitAtrTimeframe', 'Exit geometry — ATR timeframe for the managed stop/targets (sizing unchanged)', 'select', ['15m', 'daily']] ] },
     { group: 'Session', fields: [
       ['orMinutes', 'Opening range duration (min)', 'select', [5, 15, 30]],
@@ -84,7 +84,8 @@
       ['maxPrice', 'Max price ($)', 'number', 1],
       ['minAvgVolume', 'Min avg daily volume (shares)', 'number', 10000],
       ['maxSpreadPct', 'Max bid/ask spread (%)', 'number', 0.05],
-      ['hedgeSymbols', 'Hedge list — the only longs allowed on risk-off days', 'text'] ] },
+      ['hedgeSymbols', 'Hedge list — the only longs allowed on risk-off days', 'text'],
+      ['longUniverse', 'Long universe — ORB-list names allowed as ordinary longs on risk-on days only (guard off), $20-cap exempt; empty = pure hedge-only', 'text'] ] },
     { group: 'Sizing & risk', fields: [
       ['sizingMode', 'Sizing mode', 'select', ['dollars', 'risk']],
       ['fixedDollars', 'Fixed dollars per trade ($)', 'number', 50],

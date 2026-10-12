@@ -577,20 +577,37 @@ test('hedge-only rebuild: the shipped defaults are hedgeOnly ON and exitAtrTimef
   assert.ok(bad.errors.some(e => e.startsWith('exitAtrTimeframe:')));
 });
 
-test('hedge-only ON: a passing ordinary long on a risk-on day is refused with HEDGE_ONLY_MODE', () => {
-  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }); // default rules — mode ON
+test('hedge-only ON: a passing ordinary long NOT on the long universe is refused on a risk-on day (LONG_NOT_IN_UNIVERSE)', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }); // ACME is not on the 87-name list
   assert.equal(d.decision, 'no-trade');
   assert.equal(d.hedgeOnly, true);
-  assert.ok(hasReason(d, 'HEDGE_ONLY_MODE'));
+  assert.equal(d.inLongUniverse, false);
+  assert.ok(hasReason(d, 'LONG_NOT_IN_UNIVERSE'));
   assert.equal(d.entry, null);
   assert.equal(d.size, null);
 
-  // The session explains the day: risk-on score, but no trade is sought.
+  // The session explains the day: risk-on score, longs sought ONLY in
+  // the long universe (2026-10-12 expansion).
   const s = evaluateSession({ market: RISK_ON, dayState: { ...CLEAN_DAY } });
   assert.equal(s.regime, 'risk-on');
-  assert.equal(s.stance, 'stand-aside');
+  assert.equal(s.stance, 'seek-longs');
   assert.equal(s.hedgeOnly, true);
+  assert.equal(s.longUniverseSize, 87);
   assert.ok(hasReason(s, 'HEDGE_ONLY_MODE'));
+  assert.ok(hasReason(s, 'LONG_UNIVERSE_MODE'));
+  assert.match(s.why, /long universe/);
+});
+
+test('pure hedge-only restored: an EMPTY longUniverse stands aside on risk-on and refuses with HEDGE_ONLY_MODE', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }, { longUniverse: '' });
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'HEDGE_ONLY_MODE'));
+  const uni = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG, symbol: 'SOC' }, { longUniverse: '' });
+  assert.equal(uni.decision, 'no-trade');
+  assert.ok(hasReason(uni, 'HEDGE_ONLY_MODE'));
+  const s = evaluateSession({ market: RISK_ON, dayState: { ...CLEAN_DAY } }, { longUniverse: '' });
+  assert.equal(s.stance, 'stand-aside');
+  assert.equal(s.longUniverseSize, 0);
   assert.match(s.why, /hedge-only mode is ON/);
 });
 
@@ -672,4 +689,77 @@ test('intradayExitGeometry: stop/targets equal entry ∓ 1.5×ATR15 / +2R / +3R'
   assert.equal(intradayExitGeometry({ entry: 20, atr15: null, rules: {} }), null);
   assert.equal(intradayExitGeometry({ entry: 20, atr15: 0, rules: {} }), null);
   assert.equal(intradayExitGeometry({ entry: 0.1, atr15: 1, rules: {} }), null); // stop would be ≤ 0
+});
+
+// --- long-universe expansion (Johnny 2026-10-12: "the same ones as ORB") ----
+// SOC is on ORB's 87-name watchlist and is NOT a hedge-list symbol.
+const GOOD_UNIVERSE = { ...GOOD_LONG, symbol: 'SOC' };
+
+test('longUniverse default is exactly ORB\'s 87-name watchlist, verbatim', () => {
+  const { DEFAULT_ORB_RULES, parseWatchlist } = require('../lib/orb/engine');
+  const orbList = parseWatchlist(DEFAULT_ORB_RULES);
+  assert.equal(orbList.length, 87);
+  const kiaanList = mergedKiaanRules({}).longUniverse.split(',').filter(Boolean);
+  assert.deepEqual(kiaanList, orbList);
+  assert.equal(mergedKiaanRules({}).longUniverse, DEFAULT_KIAAN_RULES.longUniverse);
+  // The hedge list is unchanged by the expansion.
+  assert.equal(mergedKiaanRules({}).hedgeSymbols, 'SQQQ,SPXS,TSDD,SOXS,TECS,LABD');
+});
+
+test('risk-on + watchlist symbol enters through the full confirmation stack (default rules)', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_UNIVERSE });
+  assert.equal(d.decision, 'enter-long', JSON.stringify(d.reasons));
+  assert.equal(d.inLongUniverse, true);
+  assert.equal(d.entry, 10.50);
+  assert.equal(d.stop, 10.05);
+  assert.ok(hasReason(d, 'LONG_UNIVERSE_OK'));
+  assert.ok(hasReason(d, 'STRUCTURE_BREAK'));
+  assert.ok(hasReason(d, 'RS_OK'));
+  assert.ok(hasReason(d, 'VOLUME_OK'));
+});
+
+test('guard day + watchlist symbol is refused — guard days stay hedge-only', () => {
+  const d = evaluateCandidate(ctxFor(GUARD_DAY), { ...GOOD_UNIVERSE });
+  assert.equal(d.decision, 'no-trade');
+  assert.equal(d.inLongUniverse, true);
+  assert.ok(hasReason(d, 'RELIEF_BOUNCE_GUARD'));
+  const s = evaluateSession({ market: GUARD_DAY, dayState: { ...CLEAN_DAY } });
+  assert.equal(s.stance, 'seek-hedges');
+});
+
+test('risk-off + watchlist symbol is refused — wrong stance, distinct code', () => {
+  const d = evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_UNIVERSE });
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'REGIME_RISK_OFF'));
+  assert.ok(!hasReason(d, 'LONG_NOT_IN_UNIVERSE'));
+  assert.ok(!hasReason(d, 'RELIEF_BOUNCE_GUARD'));
+});
+
+test('chop + watchlist symbol still stands aside', () => {
+  const d = evaluateCandidate(ctxFor(CHOP), { ...GOOD_UNIVERSE });
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'REGIME_CHOP'));
+});
+
+test('watchlist name above $20 is cap-exempt and evaluable, but a failing confirmation gate still blocks it', () => {
+  const weak = evaluateCandidate(ctxFor(RISK_ON), {
+    ...GOOD_UNIVERSE, price: 32.50, vwap: 32.00, orHigh: 32.20, orLow: 31.60, atr: 0.90, rvol: 0.9,
+  });
+  assert.equal(weak.decision, 'no-trade');
+  assert.ok(hasReason(weak, 'WEAK_VOLUME'), JSON.stringify(weak.reasons));
+  assert.ok(!hasReason(weak, 'PRICE_BAND'));
+  // The same name with the full stack passing enters above $20.
+  const strong = evaluateCandidate(ctxFor(RISK_ON), {
+    ...GOOD_UNIVERSE, price: 32.50, vwap: 32.00, orHigh: 32.20, orLow: 31.60, atr: 0.90,
+  });
+  assert.equal(strong.decision, 'enter-long', JSON.stringify(strong.reasons));
+  assert.equal(strong.entry, 32.50);
+  assert.ok(hasReason(strong, 'LONG_UNIVERSE_PRICE_BAND_EXEMPT'));
+});
+
+test('a symbol on BOTH lists (SQQQ) is a hedge first: risk-on still refuses it', () => {
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_HEDGE, dayChangePct: 2.8 });
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'REGIME_RISK_ON_HEDGE'));
+  assert.ok(!hasReason(d, 'LONG_UNIVERSE_OK'));
 });

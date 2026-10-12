@@ -1448,6 +1448,31 @@ app.get('/api/_verify20260927', async (req, res) => {
       kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
       kiaan_positions: aq("SELECT COUNT(*) AS n FROM kiaan_positions WHERE status IN ('open','pending_entry')")[0],
       kiaan_alerts: aq('SELECT created_at, kind, message FROM kiaan_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Kiaan longUniverse visibility (2026-10-12): the stored Kiaan
+      // rules' longUniverse + hedge list, and ORB's stored watchlist, so
+      // the Kiaan expansion (Johnny: "the same ones as ORB") is
+      // server-verifiable list-for-list. Symbol lists only, never secrets.
+      kiaan_rules: aq('SELECT user_id, rules FROM kiaan_settings').map(r => {
+        try {
+          const p = JSON.parse(r.rules || '{}');
+          const list = v => Array.isArray(v) ? v.map(s => String(s).trim().toUpperCase()).filter(Boolean)
+            : String(v || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+          return {
+            user_id: r.user_id,
+            longUniverse: p.longUniverse === undefined ? null : list(p.longUniverse),
+            hedgeSymbols: p.hedgeSymbols === undefined ? null : list(p.hedgeSymbols),
+            hedgeOnly: p.hedgeOnly === undefined ? null : p.hedgeOnly,
+          };
+        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
+      }),
+      orb_watchlist: aq('SELECT user_id, rules FROM orb_settings').map(r => {
+        try {
+          const p = JSON.parse(r.rules || '{}');
+          const list = v => Array.isArray(v) ? v.map(s => String(s).trim().toUpperCase()).filter(Boolean)
+            : String(v || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+          return { user_id: r.user_id, watchlist: p.watchlist === undefined ? null : list(p.watchlist) };
+        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
+      }),
       // TEMP ORB visibility (2026-10-10) — ORB's enabled state was not
       // server-verifiable before this section (diagnosis orb-report §C.2).
       // Credential key LENGTH only, never key material.

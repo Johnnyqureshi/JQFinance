@@ -768,20 +768,29 @@ test('a timed-out POST (order) is NEVER retried — reconciliation semantics pre
 });
 
 // --- hedge-only rebuild + intraday exit geometry (2026-10-11) ----------------
-test('hedge-only is the shipped default: a risk-on day refuses the ordinary long and stands aside', async () => {
+test('hedge-only + long universe is the shipped default: a risk-on day refuses a non-universe long but seeks universe longs', async () => {
   const f = fixture('riskon');
   await connectAndEnable(f);
-  // No rule overrides — DEFAULT_KIAAN_RULES as shipped (hedgeOnly ON).
+  // No rule overrides — DEFAULT_KIAAN_RULES as shipped (hedgeOnly ON,
+  // longUniverse = ORB's 87 names since 2026-10-12). AAA is NOT on the
+  // list, so it is refused distinctly and no order is placed.
   const view = await f.service.getSettings(1);
   assert.equal(view.rules.hedgeOnly, true);
   assert.equal(view.rules.exitAtrTimeframe, '15m');
+  assert.equal(view.rules.longUniverse.split(',').length, 87);
   await f.service._scanCycle(1);
-  assert.equal(f.world.orderPosts.length, 0, 'no orders on a hedge-only risk-on day');
+  assert.equal(f.world.orderPosts.length, 0, 'no orders for a non-universe name');
   const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
   assert.equal(session.regime, 'risk-on'); // the score still reads risk-on
-  assert.equal(session.decision, 'stand-aside'); // but hedge-only mode does not trade it
+  assert.equal(session.decision, 'seek-longs'); // longs sought ONLY in the long universe
   assert.match(session.reasons, /HEDGE_ONLY_MODE/);
-  assert.equal(JSON.parse(session.data).hedgeOnly, true);
+  assert.match(session.reasons, /LONG_UNIVERSE_MODE/);
+  const sdata = JSON.parse(session.data);
+  assert.equal(sdata.hedgeOnly, true);
+  assert.equal(sdata.longUniverseSize, 87);
+  const aaa = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='AAA'").get();
+  assert.equal(aaa.decision, 'no-trade');
+  assert.match(aaa.reasons, /LONG_NOT_IN_UNIVERSE/);
 });
 
 test('settings: hedgeOnly must be a boolean and exitAtrTimeframe one of 15m/daily', async () => {
@@ -978,4 +987,76 @@ test('exit dedupe: a held broker exit order blocks stacking a second EOD sell (S
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1, 'position kept while its exit works');
   const alert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%already working at the broker%'").get();
   assert.ok(alert, 'the withheld duplicate is alerted with its reason');
+});
+
+// --- long-universe expansion (2026-10-12) ------------------------------------
+SCENARIOS.riskonUniverse = {
+  assets: ['SOC'],
+  daily: { SOC: dailyAAA(), SPY: dailyIndex(770, 776), QQQ: dailyIndex(690, 694) },
+  minutes: {
+    SOC: minutesAAA(),
+    SPY: driftMinutes({ open: 770.5, last: 776.2, vol: 100000 }),
+    QQQ: driftMinutes({ open: 690.5, last: 694.2, vol: 100000 }),
+  },
+  latest: { SOC: 10.07 },
+  quotes: { SOC: [10.065, 10.075] },
+  yahoo: { '^VIX': [16, 14], '^TNX': [5.3, 5.35], 'CL=F': [92, 93] },
+};
+
+test('long universe: a confirming ORB-list name (SOC) enters on a risk-on day under default rules', async () => {
+  const f = fixture('riskonUniverse');
+  await connectAndEnable(f);
+  // No hedgeOnly override — the shipped default (hedge-only + universe).
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy');
+  assert.equal(buys.length, 1, JSON.stringify(f.world.orderPosts));
+  assert.equal(buys[0].symbol, 'SOC');
+  const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
+  assert.equal(session.decision, 'seek-longs');
+  const cand = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='SOC'").get();
+  assert.equal(cand.decision, 'enter-long');
+  assert.match(cand.reasons, /LONG_UNIVERSE_OK/);
+  const pos = f.db.prepare("SELECT * FROM kiaan_positions WHERE user_id=1 AND symbol='SOC'").get();
+  assert.ok(pos, 'SOC position opened');
+  assert.equal(pos.status, 'open');
+});
+
+test('migration seeds longUniverse into stored rules that predate it, and never overwrites a set value', async () => {
+  const f = fixture();
+  // A stored row from before the expansion (no longUniverse key).
+  f.db.prepare('INSERT INTO kiaan_settings(user_id, rules) VALUES (7, ?)')
+    .run(JSON.stringify({ hedgeOnly: true, minRvol: 2 }));
+  // A row that deliberately emptied the universe (pure hedge-only).
+  f.db.prepare('INSERT INTO kiaan_settings(user_id, rules) VALUES (8, ?)')
+    .run(JSON.stringify({ longUniverse: '' }));
+  // Re-constructing the service on the same db runs the one-shot seed.
+  const { createCredentialVault: mkVault } = require('../lib/credential-vault');
+  createKiaanService({
+    db: f.db, vault: mkVault('test-only-secret-never-a-real-credential-987654321'),
+    fetch: async () => { throw new Error('no network in migration test'); },
+    persistenceReady: () => true, exitPoll: { tries: 1, intervalMs: 0 },
+  });
+  const seeded = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=7').get().rules);
+  assert.equal(seeded.longUniverse.split(',').length, 87);
+  assert.equal(seeded.longUniverse, DEFAULT_KIAAN_RULES.longUniverse);
+  assert.equal(seeded.minRvol, 2, 'existing stored rules are preserved');
+  const emptied = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=8').get().rules);
+  assert.equal(emptied.longUniverse, '', 'a deliberately emptied universe is untouched');
+  // Idempotent: a second construction changes nothing.
+  createKiaanService({
+    db: f.db, vault: mkVault('test-only-secret-never-a-real-credential-987654321'),
+    fetch: async () => { throw new Error('no network in migration test'); },
+    persistenceReady: () => true, exitPoll: { tries: 1, intervalMs: 0 },
+  });
+  const again = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=7').get().rules);
+  assert.equal(again.longUniverse, seeded.longUniverse);
+});
+
+test('settings: longUniverse is a settable text rule and round-trips through getSettings', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  await assert.rejects(() => f.service.setSettings(1, { rules: { longUniverse: 42 } }), /longUniverse must be a short string/);
+  await f.service.setSettings(1, { rules: { longUniverse: 'SOC,SMR' } });
+  const view = await f.service.getSettings(1);
+  assert.equal(view.rules.longUniverse, 'SOC,SMR');
 });

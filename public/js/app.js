@@ -682,8 +682,6 @@ function goPage(page) {
   if (page==='trading')   { alpacaTrader.open(); }
   if (page==='warrior') { if (window.warriorBot) warriorBot.open(); }
   else if (window.warriorBot) warriorBot.pause();
-  if (page==='flipper') { if (window.flipperBot) flipperBot.open(); }
-  else if (window.flipperBot) flipperBot.pause();
   if (page==='orb') { if (window.orbBot) orbBot.open(); }
   else if (window.orbBot) orbBot.pause();
   if (page==='kiaan') { if (window.kiaanBot) kiaanBot.open(); }

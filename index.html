@@ -131,9 +131,6 @@
     </button><button class="nav-link" data-page="warrior">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
       <span class="nav-label">Warrior</span>
-    </button><button class="nav-link" data-page="flipper">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
-      <span class="nav-label">Flipper</span>
     </button><button class="nav-link" data-page="orb">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
       <span class="nav-label">ORB</span>
@@ -275,18 +272,6 @@
               <div><span>Open positions</span><strong class="hp-bot-num" id="hpWarriorOpen">—</strong></div>
             </div>
             <button class="hp-view" id="hpWarriorView" type="button">View →</button>
-          </article>
-          <article class="hp-bot" aria-label="Flipper bot status">
-            <div class="hp-bot-head">
-              <h3>Flipper<span class="hp-bot-sub">Invisible wall reversal</span></h3>
-              <span class="hp-pill hp-pill-paused" id="hpFlipperPill">…</span>
-            </div>
-            <p class="hp-bot-blocker" id="hpFlipperBlocker" style="display:none"></p>
-            <div class="hp-bot-stats">
-              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpFlipperPnl">—</strong></div>
-              <div><span>Open positions</span><strong class="hp-bot-num" id="hpFlipperOpen">—</strong></div>
-            </div>
-            <button class="hp-view" id="hpFlipperView" type="button">View →</button>
           </article>
           <article class="hp-bot" aria-label="ORB bot status">
             <div class="hp-bot-head">
@@ -860,7 +845,6 @@
 
 <div class="page" id="page-kiaan"></div>
 <div class="page" id="page-warrior"></div>
-<div class="page" id="page-flipper"></div>
 <div class="page" id="page-orb"></div>
 
 
@@ -904,8 +888,8 @@
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
-<script src="/js/app.js?v=20261008a"></script>
-<script src="/js/home-pulse.js?v=20261008a"></script>
+<script src="/js/app.js?v=20261012a"></script>
+<script src="/js/home-pulse.js?v=20261012a"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
 <script src="/js/gameplan.js?v=20260929d"></script>
@@ -914,9 +898,8 @@
 
 <script src="/js/alpacatrader.js?v=20261001a"></script>
 <script src="/js/agent.js?v=20260929d"></script>
-<script src="/js/kiaan.js?v=20261011b"></script>
+<script src="/js/kiaan.js?v=20261012a"></script>
 <script src="/js/warrior.js?v=20261008a"></script>
-<script src="/js/flipper.js?v=20261010a"></script>
 <script src="/js/orb.js?v=20261009a"></script>
 
 <!-- MOBILE BOTTOM NAV -->
@@ -942,9 +925,6 @@
   </button><button class="mobile-nav-btn nav-link" data-page="warrior" aria-label="Warrior Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
     <span>Warrior</span>
-  </button><button class="mobile-nav-btn nav-link" data-page="flipper" aria-label="Flipper Bot">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
-    <span>Flipper</span>
   </button><button class="mobile-nav-btn nav-link" data-page="orb" aria-label="ORB Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
     <span>ORB</span>

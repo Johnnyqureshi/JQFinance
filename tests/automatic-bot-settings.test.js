@@ -13,15 +13,16 @@ db.exec(`
 
 const settings = createAutomaticBotSettings(db);
 
-// B2 and LEAP/options were deleted 2026-10-01 and the crypto bot on
-// 2026-10-07: they are no longer known strategies.
-for (const dead of ['b2', 'options', 'crypto']) {
+// B2 and LEAP/options were deleted 2026-10-01, the crypto bot on
+// 2026-10-07, and Flipper on 2026-10-12: they are no longer known
+// strategies.
+for (const dead of ['b2', 'options', 'crypto', 'flipper']) {
   assert.throws(() => settings.arm(1, dead, () => {}), /Unknown automatic trading strategy/);
   assert.throws(() => settings.revoke(1, dead), /Unknown automatic trading strategy/);
   assert.throws(() => settings.status(1, dead, { mode: 'paper', enabled: true, liveArmed: false }), /Unknown automatic trading strategy/);
 }
 
-// Warrior / orb / flipper are registered paper-only strategies.
+// Warrior / orb / kiaan are registered paper-only strategies.
 settings.arm(1, 'warrior', () => {});
 assert.deepEqual(settings.owner(1).strategy, 'warrior');
 
@@ -37,10 +38,10 @@ assert.deepEqual(settings.owner(1).strategy, 'orb');
 settings.revoke(1, 'orb');
 assert.equal(settings.owner(1), null);
 
-settings.arm(1, 'flipper', () => {});
-assert.deepEqual(settings.owner(1).strategy, 'flipper');
-assert.equal(settings.status(1, 'flipper', { mode: 'paper', enabled: true, liveArmed: false }).posture, 'active');
-settings.revoke(1, 'flipper');
+settings.arm(1, 'kiaan', () => {});
+assert.deepEqual(settings.owner(1).strategy, 'kiaan');
+assert.equal(settings.status(1, 'kiaan', { mode: 'paper', enabled: true, liveArmed: false }).posture, 'active');
+settings.revoke(1, 'kiaan');
 assert.equal(settings.owner(1), null);
 
 // Paper-only strategies have no-op invalidate: arming one never throws and

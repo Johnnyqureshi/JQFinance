@@ -306,13 +306,13 @@ test('throttle coalesces rapid mutation checkpoints and lands the latest state',
   const pending = [
     state.flush('warrior-operation'),
     state.flush('warrior-tick'),
-    state.flush('flipper-operation'),
+    state.flush('kiaan-operation'),
   ];
   // Coalesced: nothing new has been written yet.
   assert.equal(pool.control.insertCount, 1);
   const results = await Promise.all(pending);
   assert.equal(pool.control.insertCount, 2);
-  assert.deepEqual(pool.control.reasons, ['warrior-operation', 'flipper-operation']);
+  assert.deepEqual(pool.control.reasons, ['warrior-operation', 'kiaan-operation']);
   for (const result of results) assert.equal(result.generation, 2);
 
   // The landed image is the latest state (v2), restorable end to end.

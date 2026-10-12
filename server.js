@@ -21,7 +21,6 @@ const {
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
-const { createFlipperService, mountFlipper } = require('./lib/flipper/service');
 const { createOrbService, mountOrb } = require('./lib/orb/service');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
@@ -533,6 +532,11 @@ const automatedStartup = automatedState.init()
   // disappear"): drop its tables and broker-account claim before the
   // startup checkpoint so the removal persists into the durable snapshot.
   .then(() => automatedState.dropCryptoBot())
+  // Flipper bot DELETED 2026-10-12 on Johnny's order ("delete one.. pick
+  // whichever one you think is the worst" — Flipper was the pick): drop its
+  // tables and broker-account claim before the startup checkpoint so the
+  // removal persists into the durable snapshot.
+  .then(() => automatedState.dropFlipperBot())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.
@@ -1392,11 +1396,6 @@ app.get('/api/_verify20260927', async (req, res) => {
       warrior_positions: aq("SELECT COUNT(*) AS n FROM warrior_positions WHERE status='open'")[0],
       warrior_alerts: aq('SELECT created_at, kind, message FROM warrior_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
-      // TEMP Flipper visibility (2026-09-30) — keep B2/Warrior/Crypto fields untouched above
-      flipper_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM flipper_settings'),
-      flipper_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM flipper_credentials'),
-      flipper_positions: aq("SELECT COUNT(*) AS n FROM flipper_positions WHERE status IN ('open','pending_entry')")[0],
-      flipper_alerts: aq('SELECT created_at, kind, message FROM flipper_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Kiaan Bot visibility (2026-10-08) — stage-2 wiring verification
       kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),
       kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
@@ -6246,18 +6245,7 @@ const warriorService = createWarriorService({
 mountWarrior({ app, service: warriorService, requireAuth, ensureSessionUserInTradingStore });
 let warriorSchedulerStarted = false;
 
-// Flipper "Invisible Wall Reversal" bot is wired next to Warrior: own tables,
-// own scheduler, own lease. Ships DISABLED and paper-first — never enable it
-// for Johnny; he connects and enables bots himself.
-const flipperService = createFlipperService({
-  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-});
-mountFlipper({ app, service: flipperService, requireAuth, ensureSessionUserInTradingStore });
-let flipperSchedulerStarted = false;
-
-// ORB "Opening Range Breakout" bot is wired next to Flipper: own tables,
+// ORB "Opening Range Breakout" bot is wired next to Warrior: own tables,
 // own scheduler, own lease. Ships DISABLED and paper-first — never enable it
 // for Johnny; he connects and enables bots himself.
 const orbService = createOrbService({
@@ -6285,10 +6273,6 @@ let kiaanSchedulerStarted = false;
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
   try { warriorService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
-}
-for (const row of automatedDb.prepare('SELECT user_id FROM flipper_settings').all()) {
-  try { flipperService.pruneDiagnostics(row.user_id); }
-  catch (error) { console.warn('[Flipper] boot prune failed:', error.message); }
 }
 for (const row of automatedDb.prepare("SELECT user_id FROM orb_settings").all()) {
   try { orbService.pruneDiagnostics(row.user_id); }
@@ -6326,7 +6310,6 @@ app.get('/readyz', async (_req, res) => {
     && automatedTradingPersistenceReady
     && databaseReady
     && warriorSchedulerStarted
-    && flipperSchedulerStarted
     && orbSchedulerStarted
     && kiaanSchedulerStarted;
   res.status(ready ? 200 : 503).json({
@@ -6335,7 +6318,6 @@ app.get('/readyz', async (_req, res) => {
     fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
     schedulers: {
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
-      flipper: flipperSchedulerStarted ? 'started' : 'stopped',
       orb: orbSchedulerStarted ? 'started' : 'stopped',
       kiaan: kiaanSchedulerStarted ? 'started' : 'stopped',
     },
@@ -6378,17 +6360,15 @@ async function stopAutomatedState(signal) {
   let failed = false;
   try {
     warriorSchedulerStarted = false;
-    flipperSchedulerStarted = false;
     orbSchedulerStarted = false;
     kiaanSchedulerStarted = false;
     const warriorDrain = warriorService.drain();
-    const flipperDrain = flipperService.drain();
     const orbDrain = orbService.drain();
     const kiaanDrain = kiaanService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([warriorDrain, flipperDrain, orbDrain, kiaanDrain]);
+    await Promise.all([warriorDrain, orbDrain, kiaanDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6408,12 +6388,8 @@ function startServer() {
   console.log(`Qureshi Finance on :${PORT}`);
   warriorService.start(); // first run delayed ~30s
   warriorSchedulerStarted = true;
-  // Flipper first run is delayed by the service itself (~90s), staggered
-  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
-  flipperService.start();
-  flipperSchedulerStarted = true;
   // ORB first run is delayed by the service itself (~120s), staggered
-  // after flipper. Ships disabled: the loop idles until Johnny enables it.
+  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
   orbService.start();
   orbSchedulerStarted = true;
   // Kiaan Bot first run is delayed by the service itself (~150s), staggered

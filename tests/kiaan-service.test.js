@@ -267,7 +267,7 @@ function fixture(scenario = 'riskon', options = {}) {
   const vault = createCredentialVault('test-only-secret-never-a-real-credential-987654321');
   const world = {
     time: NOW, calls: [], orderPosts: [], orderBook: {}, orderSeq: 0,
-    brokerPositions: [], protectionFills: {}, exitPrice: 10.2,
+    brokerPositions: [], protectionFills: {}, historyOrders: [], exitPrice: 10.2,
     subPennyRejections: 0, macroFails: false, accountId: 'acct-kiaan-test',
     ...options,
   };
@@ -311,8 +311,23 @@ function fixture(scenario = 'riskon', options = {}) {
           return response({ ...order, status: 'filled', filled_qty: order.qty, filled_avg_price: world.exitPrice });
         }
         const pf = world.protectionFills[id];
+        if (pf && pf.raw) return response(clone(pf.raw));
         if (pf) return response({ ...order, status: 'filled', filled_qty: pf.qty ?? order.qty, filled_avg_price: pf.price });
         return response({ ...order });
+      }
+      if (path === '/v2/orders' && method === 'GET') {
+        // Mirror Alpaca: status=closed returns terminal orders, status=open
+        // returns working ones; symbols filters by symbol. Orders placed
+        // through this mock keep their stored status; explicit fixtures
+        // (world.historyOrders) carry their own terminal/working states.
+        const terminal = ['filled', 'canceled', 'cancelled', 'expired', 'rejected'];
+        let all = [...Object.values(world.orderBook), ...world.historyOrders];
+        const statusWanted = query.get('status');
+        if (statusWanted === 'closed') all = all.filter(o => terminal.includes(o.status));
+        else if (statusWanted === 'open') all = all.filter(o => !terminal.includes(o.status));
+        const syms = query.get('symbols');
+        if (syms) { const wanted = syms.split(','); all = all.filter(o => wanted.includes(o.symbol)); }
+        return response(all);
       }
       if (path === '/v2/orders' && method === 'POST') {
         const body = JSON.parse(init.body || '{}');
@@ -839,4 +854,128 @@ test('breadth vote is computed from the bot universe and journaled on the sessio
   // in this scenario, and it is advancing: breadth = 100%.
   assert.equal(data.inputs.breadthAdvancersPct, 100);
   assert.match(session.reasons, /BREADTH_STRONG/);
+});
+
+// --- missing-position reconciliation (2026-10-12 SQQQ/SOXS repair) ----------
+// Live defect: SQQQ entered 14 sh @ $33.55; the t2 stop-only parent filled
+// @ $33.56 and booked (+$0.07), but the t1 OCO stop LEG also filled — an
+// OCO parent is not itself 'filled' when a leg fills — so 7 sh stayed
+// tracked against a flat broker account and the bot alerted
+// "reconciliation required" every tick for hours. SOXS compounded it: an
+// EOD market sell accepted after the close stayed held at the broker and
+// every later tick stacked a fresh sell that Alpaca rejected 403
+// (insufficient qty available). The tests below pin all three repairs.
+
+test('reconcile: OCO leg fill (parent not filled) books the t1 exit and closes a broker-flat position', async () => {
+  const f = fixture('hedge15m');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const pos = f.db.prepare("SELECT * FROM kiaan_positions WHERE user_id=1 AND symbol='SQQQ'").get();
+  assert.ok(pos, 'SQQQ position opened');
+  assert.equal(pos.shares, 16);
+  assert.equal(pos.t1_qty, 8);
+  assert.equal(pos.t2_qty, 8);
+  // t2 stop-only parent reports 'filled' (the path that always worked).
+  f.world.protectionFills[pos.stop_order_id] = { qty: 8, price: 10.05 };
+  // t1 OCO: the STOP LEG filled @ 10.02; the parent itself is canceled
+  // with zero parent fill — exactly how Alpaca reports an OCO leg fill.
+  f.world.protectionFills[pos.oco_id] = { raw: {
+    id: 'ord-oco-parent', client_order_id: pos.oco_id, symbol: 'SQQQ',
+    side: 'sell', type: 'limit', order_class: 'oco', status: 'canceled',
+    filled_qty: 0, filled_avg_price: null,
+    legs: [
+      { type: 'limit', side: 'sell', status: 'canceled', filled_qty: 0, filled_avg_price: null },
+      { type: 'stop', side: 'sell', status: 'filled', filled_qty: '8', filled_avg_price: '10.02' },
+    ],
+  } };
+  f.world.brokerPositions = []; // broker is flat — both tranches exited
+  f.world.time = Date.parse('2026-10-01T19:56:00Z'); // 15:56 ET — manage, no new entries
+  await f.service._scanCycle(1);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 0, 'phantom position resolved');
+  const trade = f.db.prepare('SELECT * FROM kiaan_trades WHERE user_id=1').get();
+  assert.ok(trade.closedAt, 'trade closed');
+  // Blended exit (8 @ 10.02 + 8 @ 10.05) / 16 = 10.035; P&L −4.24.
+  assert.ok(Math.abs(Number(trade.exitPrice) - 10.035) < 0.001, `exitPrice ${trade.exitPrice} ≈ 10.035`);
+  assert.ok(Math.abs(Number(trade.pnl) - -4.24) < 0.01, `pnl ${trade.pnl} ≈ -4.24`);
+  assert.match(trade.exitReason, /broker_protection/);
+  const dayState = JSON.parse(f.db.prepare('SELECT state FROM kiaan_day_state WHERE trade_date=?').get(TRADE_DATE).state);
+  assert.ok(Math.abs(dayState.pnl - -4.24) < 0.01, `day pnl ${dayState.pnl} ≈ -4.24`);
+  assert.equal(dayState.losses, 1);
+  const stuck = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%no broker position found%'").get();
+  assert.equal(stuck, undefined, 'no reconciliation-required alert loop');
+});
+
+test('reconcile: broker-flat position with no protection fill is recovered from closed order history', async () => {
+  const f = fixture('riskoff');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const pos = f.db.prepare("SELECT * FROM kiaan_positions WHERE user_id=1 AND symbol='SQQQ'").get();
+  assert.ok(pos, 'SQQQ position opened');
+  assert.equal(pos.shares, 48);
+  // Neither protection order reports a fill (both lookups come back
+  // 'new'), but the closed-order history holds a filled market sell for
+  // the full quantity (e.g. the position was closed outside the bot).
+  f.world.historyOrders = [{
+    id: 'ord-ext-1', client_order_id: 'external-close-1', symbol: 'SQQQ',
+    side: 'sell', type: 'market', status: 'filled',
+    filled_qty: '48', filled_avg_price: '10.55',
+  }];
+  f.world.brokerPositions = [];
+  f.world.time = Date.parse('2026-10-01T19:56:00Z');
+  await f.service._scanCycle(1);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 0, 'position resolved from history');
+  const trade = f.db.prepare('SELECT * FROM kiaan_trades WHERE user_id=1').get();
+  assert.ok(trade.closedAt, 'trade closed');
+  assert.equal(Number(trade.exitPrice), 10.55);
+  assert.ok(Math.abs(Number(trade.pnl) - 12) < 0.01, `pnl ${trade.pnl} ≈ +12.00`);
+  assert.match(trade.exitReason, /eod_flatten/);
+  const dayState = JSON.parse(f.db.prepare('SELECT state FROM kiaan_day_state WHERE trade_date=?').get(TRADE_DATE).state);
+  assert.equal(dayState.wins, 1);
+  const stuck = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%no broker position found%'").get();
+  assert.equal(stuck, undefined, 'no reconciliation-required alert loop');
+});
+
+test('reconcile: a never-filled entry tracked as open is voided when the broker is flat', async () => {
+  const f = fixture('riskoff');
+  await connectAndEnable(f);
+  // A tracked 'open' row whose entry order died with zero fill.
+  f.world.orderBook['kiaan-void-entry'] = {
+    id: 'ord-void', client_order_id: 'kiaan-void-entry', symbol: 'SQQQ',
+    side: 'buy', type: 'limit', limit_price: 20, qty: 10,
+    status: 'canceled', filled_qty: 0, filled_avg_price: null,
+  };
+  f.db.prepare(`INSERT INTO kiaan_positions(position_id,user_id,trade_id,symbol,direction,entry_client_order_id,
+    entry_price,shares,entry_shares,stop_price,initial_stop_price,targets_json,status,opened_at,updated_at)
+    VALUES ('pos-void',1,NULL,'SQQQ','long','kiaan-void-entry',20,10,10,19,19,'[]','open',?,?)`)
+    .run(iso(NOW), iso(NOW));
+  f.world.brokerPositions = [];
+  await f.service._scanCycle(1);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM kiaan_positions WHERE position_id='pos-void'").get().n, 0, 'phantom row voided');
+  const voidAlert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%never filled at the broker%'").get();
+  assert.ok(voidAlert, 'void is alerted with its reason');
+  const stuck = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%no broker position found%'").get();
+  assert.equal(stuck, undefined, 'no reconciliation-required alert loop');
+});
+
+test('exit dedupe: a held broker exit order blocks stacking a second EOD sell (SOXS pattern)', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1);
+  f.world.brokerPositions = [{ symbol: 'AAA', qty: '49' }];
+  // The first EOD sell was accepted after the close and is HELD by the
+  // broker (working, unfilled) — it already holds all 49 shares.
+  f.world.orderBook['kiaan-held-exit'] = {
+    id: 'ord-held-exit', client_order_id: 'kiaan-held-exit', symbol: 'AAA',
+    side: 'sell', type: 'market', qty: 49, status: 'accepted',
+    filled_qty: 0, filled_avg_price: null,
+  };
+  f.world.time = Date.parse('2026-10-01T19:56:00Z'); // 15:56 ET — EOD flatten window
+  await f.service._scanCycle(1);
+  const marketSells = f.world.orderPosts.filter(o => o.side === 'sell' && o.type === 'market');
+  assert.equal(marketSells.length, 0, 'no duplicate exit stacked on the held order');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1, 'position kept while its exit works');
+  const alert = f.db.prepare("SELECT * FROM kiaan_alerts WHERE message LIKE '%already working at the broker%'").get();
+  assert.ok(alert, 'the withheld duplicate is alerted with its reason');
 });

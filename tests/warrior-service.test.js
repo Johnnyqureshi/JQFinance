@@ -239,7 +239,8 @@ test('warrior schema creates every warrior_* table', async () => {
     .all().map(r => r.name);
   for (const expected of ['warrior_settings', 'warrior_credentials', 'warrior_proposals', 'warrior_positions',
     'warrior_trades', 'warrior_scan_runs', 'warrior_alerts',
-    'warrior_backtests', 'warrior_backtest_trades', 'warrior_universe', 'warrior_leases']) {
+    'warrior_backtests', 'warrior_backtest_trades', 'warrior_universe', 'warrior_leases',
+    'warrior_best_evaluations']) {
     assert.ok(names.includes(expected), `missing table ${expected}`);
   }
 });
@@ -1444,4 +1445,158 @@ test('EOD flatten still flattens a held runner at 15:55 ET', async () => {
   assert.ok(trade, 'the EOD exit is journaled');
   assert.equal(trade.exitReason, 'eod_flatten');
   assert.equal(Number(trade.pnl), 150, 'P&L is the runner leg (120-100)*5 plus the banked partial 50');
+});
+
+// --- Best-evaluation journal (Johnny 2026-10-12) ----------------------------
+// Warrior had NO per-symbol rejection record, so a zero-trade day could not
+// name the gate that killed each name. warrior_best_evaluations now keeps
+// exactly one row per symbol/day — the furthest-progress evaluation, with
+// the killing gate and its measured values. Record-keeping only: no trading
+// path reads the table, and a journal failure must never break a scan.
+
+test('journal records a chase-killed evaluation with its measured day-change', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  const daily = mappedDaily();
+  const prev = daily[daily.length - 2];
+  prev.c = 8.94; prev.o = 8.84; prev.h = 9.04; prev.l = 8.79; // day is +18.0%
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'rejected');
+  assert.equal(r.stage, 'momentum');
+  const rows = f.service.bestEvaluations(1, TODAY);
+  assert.equal(rows.length, 1, 'exactly one journal row for the symbol/day');
+  const row = rows[0];
+  assert.equal(row.symbol, 'AAA');
+  assert.equal(row.stage, 'momentum');
+  assert.equal(row.gate, 'momentum');
+  assert.match(row.reason, /chase limit/);
+  assert.ok(Math.abs(row.dayChangePct - 18.0) < 0.2, `measured day-change recorded, got ${row.dayChangePct}`);
+  assert.ok(row.evaluatedAt, 'evaluation timestamp recorded');
+  assert.ok(Number.isFinite(row.price), 'price at evaluation recorded');
+});
+
+test('journal records a pace-RVOL kill with its measured pace', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  const daily = mappedDaily();
+  daily[daily.length - 1].v = 50000; // pace (50k/59min)/(1M/390min) = 0.33x
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'rejected');
+  assert.equal(r.stage, 'momentum');
+  assert.match(r.reason, /pace relative volume/i);
+  const rows = f.service.bestEvaluations(1, TODAY);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.stage, 'momentum');
+  assert.ok(row.paceRvol != null && row.paceRvol > 0.2 && row.paceRvol < 0.5,
+    `measured pace recorded, got ${row.paceRvol}`);
+  assert.match(row.reason, /0\.33x/, 'the reason carries the measured pace');
+});
+
+test('journal records a pattern-pass/score-kill with its score and pattern name', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // The synthetic tape fires CandleOverCandle; an unreachable score minimum
+  // isolates the score gate as the killer.
+  const rules = { ...DEFAULT_WARRIOR_RULES, minScoreBull: 99, minScoreNeutral: 99, minScoreBear: 99 };
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: mappedDaily(),
+    rules, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'rejected');
+  assert.equal(r.stage, 'score');
+  const rows = f.service.bestEvaluations(1, TODAY);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.stage, 'score');
+  assert.equal(row.gate, 'score');
+  assert.equal(row.pattern, 'CandleOverCandle', 'the fired pattern is named');
+  assert.equal(row.score, r.score, 'the measured score is recorded');
+  assert.match(row.reason, /below BULLISH minimum 99/);
+});
+
+test('best-evaluation upsert keeps the furthest stage, one row per symbol/day', async () => {
+  const f = fixture();
+  const record = f.service._recordBestEvaluation;
+  record(1, { symbol: 'AAA', stage: 'momentum', reason: 'chase', dayChangePct: 18, tradeDate: TODAY });
+  record(1, { symbol: 'AAA', stage: 'pattern', reason: 'No enabled pattern detected a valid setup.', tradeDate: TODAY });
+  record(1, { symbol: 'AAA', stage: 'universe', reason: 'price band', tradeDate: TODAY });
+  let rows = f.db.prepare('SELECT * FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
+  assert.equal(rows.length, 1, 'one row per symbol/day — no per-tick history');
+  let best = JSON.parse(rows[0].data);
+  assert.equal(best.stage, 'pattern', 'a weaker later evaluation never replaces the best');
+  assert.equal(best.pattern, 'NO_PATTERN', 'a pattern-stage kill with no pattern reads NO_PATTERN');
+  record(1, { symbol: 'AAA', stage: 'score', reason: 'Score 7 below BULLISH minimum 9.', pattern: 'BullFlag', score: 7, tradeDate: TODAY });
+  record(1, { symbol: 'AAA', stage: 'pattern', reason: 'No enabled pattern detected a valid setup.', tradeDate: TODAY });
+  rows = f.db.prepare('SELECT * FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
+  assert.equal(rows.length, 1);
+  best = JSON.parse(rows[0].data);
+  assert.equal(best.stage, 'score', 'a strictly further evaluation replaces the best');
+  assert.equal(best.score, 7);
+  assert.equal(best.pattern, 'BullFlag');
+  // Ranking sanity: stages are strictly ordered along the gate stack.
+  const rank = f.service._bestStageRank;
+  assert.ok(rank({ stage: 'score', score: 7 }) > rank({ stage: 'pattern' }));
+  assert.ok(rank({ stage: 'pattern' }) > rank({ stage: 'momentum' }));
+  assert.ok(rank({ stage: 'momentum' }) > rank({ stage: 'universe' }));
+  assert.ok(rank({ stage: 'eligible', score: 1 }) > rank({ stage: 'score', score: 99 - 83 }),
+    'an eligible evaluation outranks every kill');
+});
+
+test('pruning the journal keeps today and the prior day only', async () => {
+  const f = fixture();
+  const record = f.service._recordBestEvaluation;
+  record(1, { symbol: 'NEW', stage: 'pattern', reason: 'x', tradeDate: '2026-09-29' }); // today (NOW)
+  record(1, { symbol: 'PRIOR', stage: 'pattern', reason: 'x', tradeDate: '2026-09-28' }); // prior day — kept
+  record(1, { symbol: 'OLD', stage: 'pattern', reason: 'x', tradeDate: '2026-09-27' }); // older — pruned
+  f.service.pruneDiagnostics(1);
+  const kept = f.db.prepare('SELECT symbol FROM warrior_best_evaluations ORDER BY symbol').all().map(r => r.symbol);
+  assert.deepEqual(kept, ['NEW', 'PRIOR'], 'today + prior day survive; anything older is pruned');
+});
+
+test('a journal failure does not break the scan cycle', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  // Simulate a broken journal: every record write will fail inside the
+  // recorder. The scan must still run, propose, and report its funnel.
+  f.db.exec('DROP TABLE warrior_best_evaluations');
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true, 'the scan cycle completes despite the journal failure');
+  assert.ok(result.scan, 'a scan ran');
+  assert.equal(result.scan.funnel.proposals, 1, 'the proposal path is unaffected');
+});
+
+test('day funnel totals and watched-set size are computed for a fixture day', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
+  const first = await f.service.run(1);
+  assert.equal(first.scan.funnel.fromScreen, 1);
+  f.world.gainers = []; // ZZZ slips off the screen — it stays watched
+  const second = await f.service.run(1);
+  assert.equal(second.scan.funnel.fromWatched, 1);
+  const totals = f.service.dayFunnelTotals(1, TODAY);
+  assert.equal(totals.fromScreen, 1, 'screen counts sum across the day\'s runs');
+  assert.equal(totals.fromWatched, 1, 'watched counts sum across the day\'s runs');
+  assert.equal(totals.fromRotation, 0);
+  assert.equal(totals.runs, 2);
+  assert.equal(totals.watchedCount, 1, 'one distinct name in the day\'s watched set');
+  const section = f.service.nearMissSection(1, TODAY);
+  assert.equal(section.tradeDate, TODAY);
+  assert.equal(section.funnel.fromScreen, 1);
+  assert.equal(section.funnel.fromWatched, 1);
+  assert.equal(section.watchedCount, 1);
+  assert.ok(Array.isArray(section.nearMisses), 'the section carries the near-miss records');
 });

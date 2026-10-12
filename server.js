@@ -1375,6 +1375,38 @@ app.get('/api/_verify20260927', async (req, res) => {
     try { mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n').filter(l => l.includes('/data')); } catch (e) { mounts = ['read-error: ' + e.message]; }
     try { dataLs = fs.readdirSync('/data'); } catch (e) { dataLs = ['read-error: ' + e.message]; }
     try { const s = fs.statSync('/data/jqf.db'); dbStat = { size: s.size, mtime: s.mtime.toISOString() }; } catch (e) { dbStat = 'missing: ' + e.message; }
+    // TEMP Warrior near-miss section (2026-10-12): the day's best-evaluation
+    // journal (furthest stage + killing gate per symbol), the day's scan
+    // funnel summed across scan runs, and the watched-set size — so a
+    // zero-trade day can name its gates and gainers-only sourcing can be
+    // verified from the bot's own records. Dates are Eastern (trade dates).
+    const etToday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const etDayStartIso = ds => {
+      const localHour = Number(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23',
+      }).format(new Date(`${ds}T12:00:00Z`)));
+      return new Date(`${ds}T00:00:00-${String(12 - localHour).padStart(2, '0')}:00`).toISOString();
+    };
+    const etNextDate = new Date(Date.parse(`${etToday}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
+    const warriorNearMisses = aq('SELECT user_id, symbol, trade_date, data, stage_rank FROM warrior_best_evaluations WHERE trade_date=? ORDER BY stage_rank DESC, symbol', etToday)
+      .map(r => {
+        let parsed = {};
+        try { parsed = JSON.parse(r.data || '{}'); } catch (_) { parsed = {}; }
+        return {
+          user_id: r.user_id, symbol: r.symbol, tradeDate: r.trade_date,
+          furthestStage: parsed.stage || null, gate: parsed.gate ?? null, reason: parsed.reason || null,
+          pattern: parsed.pattern ?? null, price: parsed.price ?? null,
+          dayChangePct: parsed.dayChangePct ?? null, paceRvol: parsed.paceRvol ?? null,
+          score: parsed.score ?? null, rr: parsed.rr ?? null,
+          evaluatedAt: parsed.evaluatedAt || null, stageRank: r.stage_rank,
+        };
+      });
+    const warriorFunnelRow = aq(`SELECT COALESCE(SUM(from_screen),0) AS fromScreen, COALESCE(SUM(from_watched),0) AS fromWatched,
+      COALESCE(SUM(from_rotation),0) AS fromRotation, COALESCE(SUM(symbols_scanned),0) AS symbolsScanned, COUNT(*) AS runs
+      FROM warrior_scan_runs WHERE started_at>=? AND started_at<?`, etDayStartIso(etToday), etDayStartIso(etNextDate))[0];
+    const warriorWatchedRow = aq('SELECT COUNT(*) AS n FROM warrior_universe WHERE watched_on=?', etToday)[0];
     const out = {
       env_sqlite_dir: process.env.SQLITE_DIR || null,
       cwd: process.cwd(),
@@ -1395,6 +1427,21 @@ app.get('/api/_verify20260927', async (req, res) => {
       warrior_proposals: aq("SELECT COUNT(*) AS n FROM warrior_proposals WHERE status='pending'")[0],
       warrior_positions: aq("SELECT COUNT(*) AS n FROM warrior_positions WHERE status='open'")[0],
       warrior_alerts: aq('SELECT created_at, kind, message FROM warrior_alerts ORDER BY created_at DESC LIMIT 5'),
+      // TEMP Warrior near-miss journal + day funnel (2026-10-12) — see
+      // computation above the payload. Empty nearMisses on a day with no
+      // post-deploy scan cycles is expected, not a fault.
+      warrior_near_miss: {
+        tradeDate: etToday,
+        nearMisses: warriorNearMisses,
+        funnel: {
+          fromScreen: Number(warriorFunnelRow?.fromScreen) || 0,
+          fromWatched: Number(warriorFunnelRow?.fromWatched) || 0,
+          fromRotation: Number(warriorFunnelRow?.fromRotation) || 0,
+          symbolsScanned: Number(warriorFunnelRow?.symbolsScanned) || 0,
+          runs: Number(warriorFunnelRow?.runs) || 0,
+        },
+        watchedCount: Number(warriorWatchedRow?.n) || 0,
+      },
       // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
       // TEMP Kiaan Bot visibility (2026-10-08) — stage-2 wiring verification
       kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),

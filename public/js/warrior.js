@@ -50,7 +50,8 @@
       ['holdRunners', 'Hold runners until volume fades (no fixed target after partial)', 'checkbox'],
       ['fadeVolumeFraction', 'Fade: recent volume below × baseline', 'number', 0.05],
       ['fadeStallBars', 'Fade: recent bars counted', 'number', 1], ['fadeBaselineBars', 'Fade: baseline bars', 'number', 1],
-      ['maxHoldCandles', 'Max hold (1m candles)', 'number', 1], ['eodFlatten', 'Flatten at 15:55 ET', 'checkbox'] ] },
+      ['maxHoldCandles', 'Max hold (1m candles)', 'number', 1], ['eodFlatten', 'Flatten at 15:55 ET', 'checkbox'],
+      ['takeProfitRsi', 'Take profit at RSI (0 = off)', 'number', 1] ] },
     { group: 'Sessions', fields: [
       ['premarketEnabled', 'Premarket scanning 04:00–09:30 ET', 'checkbox'],
       ['premarketScanOnly', 'Premarket scan-only (no entries before 09:30 ET)', 'checkbox'],

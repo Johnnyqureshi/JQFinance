@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  emaSeries, macdSeries, atrSeries, sessionVwap,
+  emaSeries, macdSeries, atrSeries, rsiSeries, sessionVwap,
   avgVolume, rvol, openingRange, premarketLevels, prevDayLevels,
   swingPoints, computeIntraday,
 } = require('../lib/warrior/indicators');
@@ -104,7 +104,7 @@ test('computeIntraday rows are no-look-ahead: prefix recompute matches', () => {
   const full = computeIntraday(candles);
   assert.equal(full.length, 60);
   assert.deepEqual(Object.keys(full[0]).sort(),
-    ['atr', 'avgVol20', 'ema20', 'ema9', 'macd', 'macdHist', 'macdSignal', 'rvol', 'vwap']);
+    ['atr', 'avgVol20', 'ema20', 'ema9', 'macd', 'macdHist', 'macdSignal', 'rsi', 'rvol', 'vwap']);
   for (const i of [9, 25, 33, 59]) {
     const prefix = computeIntraday(candles.slice(0, i + 1));
     assert.deepEqual(prefix[i], full[i]);
@@ -156,4 +156,38 @@ test('volumeFadeDetected: the fade fraction is configurable', () => {
   const tape = fadeTape({ recentVol: 9000, stall: true }); // 0.45x of baseline
   assert.equal(volumeFadeDetected(tape, { fadeVolumeFraction: 0.6 }), true);
   assert.equal(volumeFadeDetected(tape, { fadeVolumeFraction: 0.4 }), false);
+});
+
+// --- RSI (Johnny 2026-10-12: take profit at 75 RSI) -------------------------
+test('rsiSeries is Wilder RSI: null until 15 closes, then seeded at index 14', () => {
+  const short = rsiSeries([100, 101, 102], 14);
+  assert.deepEqual(short, [null, null, null], 'fewer than period+1 closes read null');
+  const closes = [100];
+  for (let i = 1; i < 40; i++) closes.push(+(closes[i - 1] + 0.15).toFixed(2));
+  const rsi = rsiSeries(closes, 14);
+  assert.equal(rsi[13], null);
+  assert.equal(rsi[14], 100, 'an all-gains seed reads 100');
+  assert.equal(rsi[39], 100, 'an all-gains series stays 100');
+});
+
+test('rsiSeries extremes: all losses read 0, perfectly flat reads 50', () => {
+  const down = [100];
+  for (let i = 1; i < 30; i++) down.push(+(down[i - 1] - 0.2).toFixed(2));
+  assert.equal(rsiSeries(down, 14)[29], 0);
+  const flat = new Array(30).fill(100);
+  assert.equal(rsiSeries(flat, 14)[29], 50);
+});
+
+test('rsiSeries matches the engineered borderline tape (74.80)', () => {
+  const closes = [100];
+  for (let i = 1; i < 40; i++) {
+    const step = i % 3 === 0 ? -0.195 : 0.31;
+    closes.push(Math.round((closes[i - 1] + step) * 100) / 100);
+  }
+  const rsi = rsiSeries(closes, 14);
+  assert.ok(Math.abs(rsi[39] - 74.8) < 0.05, `expected ~74.80, got ${rsi[39]}`);
+  // computeIntraday carries the same value on its rows.
+  const bars = closes.map((c, i) => bar(i, i ? closes[i - 1] : c, c + 0.02, c - 0.02, c, 20000));
+  const rows = computeIntraday(bars);
+  assert.equal(rows[39].rsi, rsi[39]);
 });

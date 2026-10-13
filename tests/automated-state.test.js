@@ -487,3 +487,26 @@ test('a hung PostgreSQL query times out instead of wedging the state machine', a
   await state.close();
   db.close();
 });
+
+test('warrior chase-cap migration patches stored 10 to 5 once, leaves custom values', async () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE warrior_settings(user_id INTEGER PRIMARY KEY, rules TEXT);
+    INSERT INTO warrior_settings VALUES (1, '{"maxChasePct":10,"minPctGain":2}');
+    INSERT INTO warrior_settings VALUES (2, '{"maxChasePct":7}');
+    INSERT INTO warrior_settings VALUES (3, '{}');`);
+  const state = createAutomatedState({ db, injectedPool: fakePool(), ownerId: 'test-owner' });
+  const first = state.applyWarriorChaseCap5();
+  assert.deepEqual(first, { patched: true });
+  const rulesOf = uid => JSON.parse(db.prepare('SELECT rules FROM warrior_settings WHERE user_id=?').get(uid).rules);
+  assert.equal(rulesOf(1).maxChasePct, 5, 'the old default 10 is patched to 5');
+  assert.equal(rulesOf(1).minPctGain, 2, 'other stored rules are untouched');
+  assert.equal(rulesOf(2).maxChasePct, 7, 'a deliberate custom cap is left alone');
+  assert.equal(rulesOf(3).maxChasePct, undefined, 'rows without the key stay without it (the new default applies)');
+  // One-shot: a later boot never re-patches, even if a stored 10 reappears.
+  db.prepare('UPDATE warrior_settings SET rules=? WHERE user_id=2').run('{"maxChasePct":10}');
+  const second = state.applyWarriorChaseCap5();
+  assert.deepEqual(second, { skipped: true });
+  assert.equal(rulesOf(2).maxChasePct, 10, 'the migration never runs twice');
+  await state.close();
+  db.close();
+});

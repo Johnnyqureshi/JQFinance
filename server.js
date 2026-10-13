@@ -528,6 +528,8 @@ const automatedStartup = automatedState.init()
   .then(() => automatedState.dropRetiredCryptoJournal())
   // Warrior $0.10–$20 price band (Johnny 2026-09-29) — before the checkpoint.
   .then(() => automatedState.applyWarriorPriceBand())
+  // Warrior chase cap 10 → 5 (Johnny 2026-10-12) — before the checkpoint.
+  .then(() => automatedState.applyWarriorChaseCap5())
   // Crypto bot DELETED 2026-10-07 on Johnny's order ("gut it, make it
   // disappear"): drop its tables and broker-account claim before the
   // startup checkpoint so the removal persists into the durable snapshot.
@@ -1442,6 +1444,22 @@ app.get('/api/_verify20260927', async (req, res) => {
         },
         watchedCount: Number(warriorWatchedRow?.n) || 0,
       },
+      // TEMP Warrior rules visibility (2026-10-12): the chase cap + RSI
+      // take-profit + exemption ceilings from stored Warrior rules, so
+      // the 2026-10-12 Warrior changes are server-verifiable. Numbers
+      // only, never secrets.
+      warrior_rules: aq('SELECT user_id, rules FROM warrior_settings').map(r => {
+        try {
+          const p = JSON.parse(r.rules || '{}');
+          return {
+            user_id: r.user_id,
+            maxChasePct: p.maxChasePct === undefined ? null : p.maxChasePct,
+            takeProfitRsi: p.takeProfitRsi === undefined ? null : p.takeProfitRsi,
+            secondLegMaxChasePct: p.secondLegMaxChasePct === undefined ? null : p.secondLegMaxChasePct,
+            premarketBreakMaxChasePct: p.premarketBreakMaxChasePct === undefined ? null : p.premarketBreakMaxChasePct,
+          };
+        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
+      }),
       // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
       // TEMP Kiaan Bot visibility (2026-10-08) — stage-2 wiring verification
       kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),

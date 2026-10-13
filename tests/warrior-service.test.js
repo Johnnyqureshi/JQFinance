@@ -21,7 +21,9 @@ const clone = value => JSON.parse(JSON.stringify(value));
 // --- synthetic market data --------------------------------------------------
 // Minute tape engineered to trigger CandleOverCandle on the last bar:
 // steady climb (MACD positive, close above VWAP), final bar B breaks A's high
-// with >= volume. Daily tape: +6.5% day, 3x relative volume.
+// with >= volume. Daily tape: +4.0% day, 3x relative volume (a qualifying
+// day under the 5% chase cap, Johnny 2026-10-12; it read +6.5% when the
+// cap was 10).
 function minuteBars() {
   const bars = [];
   const base = Date.parse('2026-09-29T13:30:00Z');
@@ -38,7 +40,7 @@ function dailyBars() {
   let date = Date.parse('2026-09-29T13:30:00Z');
   for (let i = 0; i < 45; i++) {
     const last = i === 0;
-    const c = last ? 10.55 : 9.90 - i * 0.01;
+    const c = last ? 10.55 : 10.15 - i * 0.01;
     bars.unshift({
       t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15,
       c, v: last ? 3000000 : 1000000,
@@ -1156,14 +1158,15 @@ test('phase 1 still rejects when average AND today are both illiquid', async () 
 });
 
 function wakingDailyBars(todayVolume) {
-  // Sleepy history (100k shares/day), prev close $10.00, today closes at
-  // the minute tape's $10.55 on today's volume.
+  // Sleepy history (100k shares/day), prev close $10.15, today closes at
+  // the minute tape's $10.55 on today's volume (+3.9% day — inside the
+  // 5% chase cap, so the liquidity gates are what decide this test).
   const bars = [];
   let date = Date.parse('2026-09-29T13:30:00Z');
   for (let i = 0; i < 45; i++) {
     const last = i === 0;
     const second = i === 1;
-    const c = last ? 10.55 : second ? 10.00 : 9.90;
+    const c = last ? 10.55 : second ? 10.15 : 9.90;
     bars.unshift({
       t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15,
       c, v: last ? todayVolume : 100000,
@@ -1349,6 +1352,10 @@ function seedRunner(f, overrides = {}) {
 test('holdRunners holds the remainder past the old fixed target while volume is strong', async () => {
   const f = fixture();
   await connectAndGet(f);
+  // Isolate the target-suppression behavior: the default tape's RSI is
+  // 100, so the RSI take-profit (Johnny 2026-10-12) is switched off here
+  // — it has its own tests below.
+  await f.service.setSettings(1, { rules: { takeProfitRsi: 0 } });
   seedRunner(f);
   f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '120' }];
   f.world.latestPrice = 120; // beyond the 115 target — the old engine dumped here
@@ -1599,4 +1606,238 @@ test('day funnel totals and watched-set size are computed for a fixture day', as
   assert.equal(section.funnel.fromWatched, 1);
   assert.equal(section.watchedCount, 1);
   assert.ok(Array.isArray(section.nearMisses), 'the section carries the near-miss records');
+});
+
+// --- Funnel persistence (step-0 diagnostic, Johnny 2026-10-12) -------------
+// Monday's production funnel summed fromScreen/fromWatched/fromRotation
+// 0/0/0 across 708 runs and 19,590 symbols scanned. These tests drive a
+// real scanCycle through run() with the broker stubbed and assert the
+// PERSISTED warrior_scan_runs row — not just the in-memory funnel the
+// cycle returns. (Git history: commit 49d6001 counted the sources only
+// in memory and its persisted UPDATE omitted the from_* columns; the
+// columns + persisted write landed in a6c323c, after Monday's close.)
+
+test('funnel persistence: a gainers-screen cycle persists from_screen > 0 on the scan-run row', async () => {
+  const f = fixture({
+    assets: ['AAA', 'BBB', 'CCC', 'ZZZ'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'ZZZ', percent_change: 42.5, price: 2.1, change: 0.63 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.fromScreen, 1, 'the in-memory funnel counts the screen name');
+  const row = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
+  assert.ok(row, 'a scan-run row was persisted');
+  assert.ok(row.from_screen > 0, `the persisted row carries from_screen > 0, got ${row.from_screen}`);
+  assert.equal(row.from_screen, 1);
+  assert.ok(row.symbols_scanned > 0, `the persisted row carries symbols_scanned > 0, got ${row.symbols_scanned}`);
+  assert.equal(row.symbols_scanned, 1);
+});
+
+test('funnel persistence: an empty screener persists from_watched or from_rotation > 0 on the scan-run row', async () => {
+  const f = fixture(); // gainers default [] — screen empty, watched set empty → rotation
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  const row = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
+  assert.ok(row, 'a scan-run row was persisted');
+  assert.ok(row.symbols_scanned > 0, `the persisted row carries symbols_scanned > 0, got ${row.symbols_scanned}`);
+  assert.ok((row.from_watched || 0) + (row.from_rotation || 0) > 0,
+    `the persisted row stamps a fallback source, got watched=${row.from_watched} rotation=${row.from_rotation}`);
+  assert.ok(row.from_rotation > 0, 'with an empty watched set the rotation fallback is the stamped source');
+});
+
+// --- Chase cap 5 + RSI take-profit (Johnny 2026-10-12) ---------------------
+// "Make that +5%. We need to catch these early." and "high volume, up 5%,
+// top gainers.. take profit at 75 RSI."
+
+test('chase cap defaults: 5% cap, RSI take-profit 75, exemption ceilings still 60, min gain still 2', () => {
+  assert.equal(DEFAULT_WARRIOR_RULES.maxChasePct, 5);
+  assert.equal(DEFAULT_WARRIOR_RULES.takeProfitRsi, 75);
+  assert.equal(DEFAULT_WARRIOR_RULES.secondLegMaxChasePct, 60);
+  assert.equal(DEFAULT_WARRIOR_RULES.premarketBreakMaxChasePct, 60);
+  assert.equal(DEFAULT_WARRIOR_RULES.minPctGain, 2);
+});
+
+test('chase cap 5: a +7% day is refused with the 5% reason', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  const daily = mappedDaily();
+  const prev = daily[daily.length - 2];
+  prev.c = 9.86; prev.o = 9.76; prev.h = 9.96; prev.l = 9.71; // day is +7.0%
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'rejected');
+  assert.equal(r.stage, 'momentum');
+  assert.match(r.reason, /above 5% chase limit/, `the refusal names the new cap, got: ${r.reason}`);
+  assert.match(r.reason, /7\.00%/, 'the refusal carries the measured day change');
+});
+
+test('chase cap 5: a +4% day proceeds past the chase gate', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // The standard fixture day is +4.0% (prev close 10.14 → 10.55).
+  const r = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: mappedDaily(),
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(r.outcome, 'eligible', `a +4% day with a valid pattern passes every gate, got ${JSON.stringify(r).slice(0, 300)}`);
+});
+
+test('chase cap 5: the second-leg exemption still bypasses at +7% (under its 60% ceiling)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => secondLegBars();
+  f.world.dailyBarsOverride = secondLegDaily(10.39); // +7.0% day — past the 5% cap, under the 60% ceiling
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_SECOND_LEG });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 1, 'the re-break still opens the chase door at +7%');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending[0].pattern_name, 'SecondLeg');
+});
+
+test('chase cap 5: the premarket-break exemption still bypasses at +7% (under its 60% ceiling)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => pmBreakBars();
+  f.world.dailyBarsOverride = pmBreakDaily(9.67); // +7.0% day — past the 5% cap, under the 60% ceiling
+  await f.service.setSettings(1, { rules: { autoApprove: false }, allowedPatterns: ONLY_PREMARKET_BREAK });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.equal(result.scan.funnel.proposals, 1, 'the early break still opens the chase door at +7%');
+  const pending = f.service.proposals(1, { status: 'pending' }).proposals;
+  assert.equal(pending[0].pattern_name, 'PremarketBreak');
+});
+
+// RSI tapes: closes engineered against indicators.rsiSeries (Wilder).
+// Tape A climbs +0.15/bar with no down bar → RSI(14) = 100, last 105.85.
+// Tape B repeats +0.31/+0.31/−0.195 → RSI(14) = 74.80, last 105.59.
+const { rsiSeries } = require('../lib/warrior/indicators');
+function rsiTape(closes) {
+  const start = Date.parse('2026-09-29T13:30:00Z');
+  return closes.map((c, i) => {
+    const o = i ? closes[i - 1] : c;
+    return { t: new Date(start + i * 60000).toISOString(), o, h: Math.max(o, c) + 0.02, l: Math.min(o, c) - 0.02, c, v: 20000 };
+  });
+}
+function climbCloses() {
+  const closes = [100];
+  for (let i = 1; i < 40; i++) closes.push(+(closes[i - 1] + 0.15).toFixed(2));
+  return closes;
+}
+function borderlineCloses() {
+  const closes = [100];
+  for (let i = 1; i < 40; i++) {
+    const step = i % 3 === 0 ? -0.195 : 0.31;
+    closes.push(Math.round((closes[i - 1] + step) * 100) / 100);
+  }
+  return closes;
+}
+function seedManagedPosition(f, overrides = {}) {
+  insertProposal(f.db);
+  const pos = seedOpenPosition(f.db, overrides);
+  f.db.prepare('UPDATE warrior_positions SET breakeven_set=1 WHERE position_id=?').run(pos.position_id);
+  return pos;
+}
+
+test('RSI take-profit fires at RSI >= 75 and closes the full position, journaled with the measured RSI', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const closes = climbCloses();
+  assert.equal(rsiSeries(closes, 14)[closes.length - 1], 100, 'tape A is a max-RSI tape');
+  seedManagedPosition(f); // 10 shares, entry 100, stop 95, target 110
+  f.world.minuteBarsOverride = () => rsiTape(closes);
+  f.world.positions = [{ symbol: 'AAA', qty: '10', avg_entry_price: '100', current_price: '105.85' }];
+  f.world.latestPrice = 105.85;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 105.85;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'closed', 'the RSI exit closed the position');
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the RSI exit is journaled');
+  assert.equal(trade.exitReason, 'RSI_TAKE_PROFIT');
+  assert.equal(Number(trade.shares), 10, 'the FULL position exited');
+  assert.equal(Number(trade.exitPrice), 105.85);
+  assert.equal(Number(trade.pnl), 58.5, 'realized P&L is journaled: (105.85-100) x 10');
+  const ind = JSON.parse(trade.indicators || '{}');
+  assert.equal(ind.rsi14, 100, 'the measured RSI is journaled with the exit');
+});
+
+test('RSI take-profit does not fire just below 75 (RSI 74.8 tape)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  const closes = borderlineCloses();
+  const rsi = rsiSeries(closes, 14)[closes.length - 1];
+  assert.ok(rsi < 75 && rsi > 74.5, `tape B sits just under the line, RSI=${rsi && rsi.toFixed(2)}`);
+  seedManagedPosition(f);
+  f.world.minuteBarsOverride = () => rsiTape(closes);
+  f.world.positions = [{ symbol: 'AAA', qty: '10', avg_entry_price: '100', current_price: '105.59' }];
+  f.world.latestPrice = 105.59;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 105.59;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'open', 'no RSI exit below 75 — the position is still managed');
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.equal(trade, undefined, 'nothing is journaled');
+});
+
+test('RSI take-profit after a partial target closes only the remainder', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedRunner(f); // 5 shares remain of 10, partial_taken=1, breakeven_set=1
+  f.db.prepare('UPDATE warrior_positions SET banked_pnl=50 WHERE position_id=?').run('pos-test-1');
+  f.world.minuteBarsOverride = () => rsiTape(climbCloses());
+  f.world.positions = [{ symbol: 'AAA', qty: '5', avg_entry_price: '100', current_price: '105.85' }];
+  f.world.latestPrice = 105.85;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 105.85;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'closed', 'the RSI exit closed the runner remainder');
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.ok(trade, 'the RSI exit is journaled');
+  assert.equal(trade.exitReason, 'RSI_TAKE_PROFIT');
+  assert.equal(Number(trade.shares), 5, 'only the remaining 5 shares exit — the banked partial is untouched');
+  assert.equal(Number(trade.pnl), 79.25, 'P&L is the remainder leg (105.85-100) x 5 plus the banked partial 50');
+});
+
+test('RSI take-profit never fires when the rule is disabled (0)', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { takeProfitRsi: 0 } });
+  seedManagedPosition(f);
+  f.world.minuteBarsOverride = () => rsiTape(climbCloses()); // RSI 100 tape
+  f.world.positions = [{ symbol: 'AAA', qty: '10', avg_entry_price: '100', current_price: '105.85' }];
+  f.world.latestPrice = 105.85;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 105.85;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'open', 'a disabled RSI rule never exits');
+  const trade = f.db.prepare('SELECT * FROM warrior_trades WHERE tradeId=?').get('pos-test-1');
+  assert.equal(trade, undefined, 'nothing is journaled');
+});
+
+test('RSI unavailable (insufficient bars) takes no action and leaves one throttled note', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  seedManagedPosition(f);
+  f.world.minuteBarsOverride = () => rsiTape(climbCloses().slice(0, 10)); // 10 bars < the 15 RSI needs
+  f.world.positions = [{ symbol: 'AAA', qty: '10', avg_entry_price: '100', current_price: '101.35' }];
+  f.world.latestPrice = 101.35;
+  f.world.autoFillExits = true;
+  f.world.marketFillPrice = 101.35;
+  await f.service.run(1);
+  const row = f.db.prepare('SELECT * FROM warrior_positions WHERE position_id=?').get('pos-test-1');
+  assert.equal(row.status, 'open', 'no RSI action on insufficient bars');
+  const notes = f.db.prepare("SELECT * FROM warrior_alerts WHERE message LIKE '%RSI unavailable%'").all();
+  assert.equal(notes.length, 1, 'exactly one throttled RSI-unavailable note is journaled');
 });

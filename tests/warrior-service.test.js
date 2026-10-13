@@ -142,7 +142,7 @@ function fixture(options = {}) {
       }
     }
     if (host === 'data.alpaca.markets') {
-      if (path === '/v1beta1/screener/stocks/gainers-losers') {
+      if (path === '/v1beta1/screener/stocks/movers') {
         if (world.moversError) return response({ message: 'screener unavailable' }, 500);
         return response({ gainers: world.gainers || [], losers: [], market_open: true });
       }
@@ -1042,7 +1042,7 @@ test('scan works the top gainers screen only — rotation contributes nothing', 
   await f.service.setSettings(1, { rules: { scanBudget: 2, autoApprove: false } });
   const result = await f.service.run(1);
   assert.equal(result.ok, true);
-  assert.ok(f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/gainers-losers'), 'screener was queried');
+  assert.ok(f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/movers'), 'screener was queried');
   assert.ok(!f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/most-actives'), 'most-actives is no longer a candidate source');
   assert.deepEqual(scannedSymbols(f), ['ZZZ'], 'only the gainer is scanned — the catalog is not rotated into the cycle');
   assert.equal(result.scan.funnel.fromScreen, 1);
@@ -1646,6 +1646,37 @@ test('funnel persistence: an empty screener persists from_watched or from_rotati
   assert.ok((row.from_watched || 0) + (row.from_rotation || 0) > 0,
     `the persisted row stamps a fallback source, got watched=${row.from_watched} rotation=${row.from_rotation}`);
   assert.ok(row.from_rotation > 0, 'with an empty watched set the rotation fallback is the stamped source');
+});
+
+// --- Gainers screen endpoint + off-catalog gainers (2026-10-13) ------------
+// Production root cause of Tuesday's 0/0/28,200 funnel: loadGainers called
+// /v1beta1/screener/stocks/gainers-losers, a path Alpaca does not expose —
+// it 404s, request() throws, and the loader returned null on EVERY cycle,
+// so the fail-soft rotation carried every scan while the tests stubbed the
+// wrong path and stayed green. The real screener endpoint is stocks/movers
+// (the call ORB's market universe uses), and a gainer must be able to enter
+// the scan even when the assets catalog never carried it.
+
+test('funnel persistence: a gainer missing from the assets catalog still scans from the screen and joins the watched set', async () => {
+  const f = fixture({
+    // NEWG is deliberately NOT in the catalog the universe is built from.
+    assets: ['AAA', 'BBB'].map(symbol => ({ symbol, class: 'us_equity', status: 'active', tradable: true })),
+    gainers: [{ symbol: 'NEWG', percent_change: 55.0, price: 3.1, change: 1.1 }],
+  });
+  await connectAndGet(f);
+  await f.service.setSettings(1, { rules: { autoApprove: false } });
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  assert.ok(f.world.calls.some(c => c.path === '/v1beta1/screener/stocks/movers'), 'the real movers endpoint was queried');
+  assert.equal(result.scan.funnel.fromScreen, 1, 'the off-catalog gainer counts as a screen candidate');
+  assert.equal(result.scan.funnel.fromRotation, 0, 'rotation contributes nothing when the screen answers');
+  assert.deepEqual(scannedSymbols(f), ['NEWG'], 'the off-catalog gainer is the scanned symbol');
+  const row = f.db.prepare('SELECT * FROM warrior_scan_runs ORDER BY started_at DESC LIMIT 1').get();
+  assert.ok(row.from_screen > 0, `the persisted row carries from_screen > 0, got ${row.from_screen}`);
+  assert.equal(row.from_screen, 1);
+  const watched = f.db.prepare("SELECT watched_on FROM warrior_universe WHERE symbol='NEWG'").get();
+  assert.ok(watched, 'the off-catalog gainer landed in warrior_universe');
+  assert.equal(watched.watched_on, TODAY, 'the off-catalog gainer is in the day\'s watched set');
 });
 
 // --- Chase cap 5 + RSI take-profit (Johnny 2026-10-12) ---------------------

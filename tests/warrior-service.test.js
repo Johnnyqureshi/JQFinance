@@ -1110,6 +1110,22 @@ test('a screener outage never breaks the scan (fail-soft to rotation)', async ()
   assert.ok(result.scan.funnel.fromRotation >= 1, 'the fallback is visible in the funnel');
 });
 
+test('a screener failure is diagnosed in the log, not swallowed silently', async () => {
+  const f = fixture({ moversError: true });
+  await connectAndGet(f);
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    const result = await f.service.run(1);
+    assert.equal(result.ok, true);
+  } finally {
+    console.error = originalError;
+  }
+  assert.ok(logged.some(line => line.includes('gainers screen') && line.includes('fetch failed')),
+    `the outage left a diagnostic line, got: ${JSON.stringify(logged)}`);
+});
+
 test('an in-band gainer through the screen path reaches a proposal with all gates intact', async () => {
   const f = fixture({
     gainers: [{ symbol: 'AAA', percent_change: 6.5, price: 10.55, change: 0.65 }],

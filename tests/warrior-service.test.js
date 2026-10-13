@@ -992,6 +992,68 @@ test('SIP 403 falls back to IEX for market data (regression)', async () => {
   assert.ok(runRow, 'scan run recorded despite the SIP 403');
 });
 
+// Builds a daily tape like dailyBars() but with a chosen per-session volume.
+function flatVolumeDailyBars(volume) {
+  const bars = [];
+  let date = Date.parse('2026-09-29T13:30:00Z');
+  for (let i = 0; i < 45; i++) {
+    const last = i === 0;
+    const c = last ? 10.55 : 10.15 - i * 0.01;
+    bars.unshift({
+      t: new Date(date).toISOString(), o: c - 0.1, h: c + 0.1, l: c - 0.15,
+      c, v: volume,
+    });
+    date -= 86400000;
+  }
+  return bars;
+}
+
+test('SIP 403 does not latch: after SIP recovers, later requests ask for SIP first (regression)', async () => {
+  const f = fixture({ sipForbidden: true });
+  await connectAndGet(f);
+  const first = await f.service.run(1);
+  assert.equal(first.ok, true, 'first scan succeeds via per-request IEX retries');
+  assert.ok(f.world.calls.some(c => c.url.includes('feed=iex')), 'first scan used the IEX retry');
+  const offset = f.world.calls.length;
+  f.world.sipForbidden = false; // the SIP entitlement appears
+  const second = await f.service.run(1);
+  assert.equal(second.ok, true, 'second scan succeeds');
+  const later = f.world.calls.slice(offset);
+  assert.ok(later.some(c => c.url.includes('feed=sip')), 'later requests ask for SIP first again — no latch');
+  assert.ok(!later.some(c => c.url.includes('feed=iex')), 'no later request is silently rewritten to IEX');
+});
+
+test('liquidity gate judges IEX bars against a feed-aware floor (TCRT-shaped, regression)', async () => {
+  // IEX ADV of 45,000 ≈ 560K consolidated at the ~8% IEX share — above the
+  // rules' 500,000 consolidated floor, so the name must clear the universe
+  // liquidity gate even though every bar arrived on the IEX feed. On the
+  // old latch the raw 45,000 was judged against 500,000 and died there
+  // (the TCRT kill: ADV read 8,928 against ~111-135K consolidated).
+  const f = fixture({ sipForbidden: true, dailyBarsOverride: flatVolumeDailyBars(45000) });
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  const rows = f.db.prepare('SELECT data FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
+  const liquidityKills = rows.filter(r => /daily volume|dollar volume/i.test(JSON.parse(r.data).reason || ''));
+  assert.equal(liquidityKills.length, 0,
+    `no liquidity-gate rejection for AAA on IEX bars: ${JSON.stringify(rows.map(r => JSON.parse(r.data).reason))}`);
+});
+
+test('liquidity gate still rejects a genuinely illiquid name on IEX bars (regression)', async () => {
+  // IEX ADV of 30,000 ≈ 375K consolidated — below the 500,000 floor even
+  // after feed-aware scaling (effective IEX floor 40,000), so the gate
+  // still bites, and the journal names the feed-aware floor it applied.
+  const f = fixture({ sipForbidden: true, dailyBarsOverride: flatVolumeDailyBars(30000) });
+  await connectAndGet(f);
+  const result = await f.service.run(1);
+  assert.equal(result.ok, true);
+  const rows = f.db.prepare('SELECT data FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
+  const kill = rows.map(r => JSON.parse(r.data)).find(e => /Average daily volume 30000/.test(e.reason || ''));
+  assert.ok(kill, `AAA rejected at the liquidity gate: ${JSON.stringify(rows.map(r => JSON.parse(r.data).reason))}`);
+  assert.match(kill.reason, /below 40000/, 'journal shows the feed-aware floor (500000 consolidated x 8% IEX share)');
+  assert.match(kill.reason, /IEX-feed floor/, 'journal names the feed the floor was scaled for');
+});
+
 test('mountWarrior serializes handler results with res.json (regression)', async () => {  const { mountWarrior } = require('../lib/warrior/service');
   const routes = {};
   const fakeApp = {

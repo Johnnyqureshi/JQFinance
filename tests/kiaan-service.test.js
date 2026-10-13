@@ -1060,3 +1060,26 @@ test('settings: longUniverse is a settable text rule and round-trips through get
   const view = await f.service.getSettings(1);
   assert.equal(view.rules.longUniverse, 'SOC,SMR');
 });
+
+test('SIP 403 downgrade is per-request, never latched (regression)', async () => {
+  const seen = [];
+  let sipForbidden = true;
+  const f = fixture('chop', {
+    wrapFetch: inner => async (url, init) => {
+      seen.push(String(url));
+      if (sipForbidden && String(url).includes('data.alpaca.markets') && String(url).includes('feed=sip')) {
+        return { ok: false, status: 403, json: async () => ({ code: 40310000, message: 'sip entitlement required' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  assert.ok(seen.some(u => u.includes('feed=iex')), 'first cycle was served via per-request IEX retries');
+  const offset = seen.length;
+  sipForbidden = false; // the SIP entitlement appears
+  await f.service._scanCycle(1);
+  const later = seen.slice(offset);
+  assert.ok(later.some(u => u.includes('feed=sip')), 'later requests ask for SIP first again — no latch');
+  assert.ok(!later.some(u => u.includes('feed=iex')), 'no later request is silently rewritten to IEX');
+});

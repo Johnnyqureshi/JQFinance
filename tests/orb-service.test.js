@@ -157,6 +157,7 @@ function fixture(options = {}) {
     }
     if (parsed.hostname === 'data.alpaca.markets') {
       if (path === '/v2/stocks/bars') {
+        if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         const symbols = (query.get('symbols') || '').split(',').filter(Boolean);
         const bySymbol = {
           AAA: dailyAAA(),
@@ -171,9 +172,11 @@ function fixture(options = {}) {
         return response({ bars, next_page_token: null });
       }
       if (path === '/v2/stocks/bars/latest') {
+        if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         return response({ bars: { AAA: { c: 10.07, t: iso(world.time) }, ...(world.latestBySymbol || {}) } });
       }
       if (path === '/v2/stocks/quotes/latest') {
+        if (world.sipForbidden && query.get('feed') === 'sip') return response({ message: 'sip entitlement required' }, 403);
         return response({ quotes: { AAA: { bp: 10.065, ap: 10.075, t: iso(world.time) }, ...(world.quoteBySymbol || {}) } });
       }
       if (path.startsWith('/v1beta1/screener/')) {
@@ -447,6 +450,22 @@ test('scan cycle takes the engineered long entry end to end', async () => {
 
   const sched = f.db.prepare('SELECT scheduler_status FROM orb_settings WHERE user_id=1').get();
   assert.equal(sched.scheduler_status, 'ok');
+});
+
+test('SIP 403 downgrade is per-request, never latched (regression)', async () => {
+  const f = fixture({ sipForbidden: true });
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: '' } });
+  await f.service._scanCycle(1);
+  assert.ok(f.world.calls.some(c => c.url.includes('feed=iex')), 'first cycle was served via per-request IEX retries');
+  const sched = f.db.prepare('SELECT scheduler_status FROM orb_settings WHERE user_id=1').get();
+  assert.equal(sched.scheduler_status, 'ok', 'cycle healthy on the IEX feed');
+  const offset = f.world.calls.length;
+  f.world.sipForbidden = false; // the SIP entitlement appears
+  await f.service._scanCycle(1);
+  const later = f.world.calls.slice(offset);
+  assert.ok(later.some(c => c.url.includes('feed=sip')), 'later requests ask for SIP first again — no latch');
+  assert.ok(!later.some(c => c.url.includes('feed=iex')), 'no later request is silently rewritten to IEX');
 });
 
 test('scan cycle withholds entries when nothing qualifies', async () => {

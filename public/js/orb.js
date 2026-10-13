@@ -63,6 +63,7 @@
     { group: 'Direction & Entry', fields: [
       ['allowLong', 'Allow longs', 'checkbox'],
       ['allowShort', 'Allow shorts', 'checkbox'],
+      ['allowShorts', 'Allow short side (off = long-only)', 'checkbox'],
       ['entryMode', 'Entry mode', 'select', ['breakout', 'retest', 'either']],
       ['maxAttemptsPerSymbol', 'Max attempts per symbol', 'number', 1],
       ['cooldownMinutes', 'Re-entry cooldown (min)', 'number', 1] ] },

@@ -166,6 +166,7 @@ test('DEFAULT_ORB_RULES carries every spec setting with spec defaults', () => {
   assert.equal(r.strongRvol, 3);
   assert.equal(r.allowLong, true);
   assert.equal(r.allowShort, true);
+  assert.equal(r.allowShorts, false); // long-only by default (2026-10-12)
   assert.equal(r.entryMode, 'either');
   assert.equal(r.maxAttemptsPerSymbol, 2);
   assert.equal(r.cooldownMinutes, 15);
@@ -425,7 +426,7 @@ test('evaluateEntry: happy-path long enters with full plan and WHY', () => {
 });
 
 test('evaluateEntry: happy-path short mirrors the long', () => {
-  const res = evaluateEntry(goodShortCtx());
+  const res = evaluateEntry(goodShortCtx({ rules: { allowShorts: true } }));
   assert.equal(res.decision, 'enter-short');
   assert.equal(res.score, 87);
   assert.equal(res.entry, 99.25);
@@ -476,11 +477,84 @@ test('two-break: closes beyond the line without conviction volume do not count',
 });
 
 test('two-break: short side mirrors — two conviction closes below the OR low', () => {
-  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break' } }));
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break', allowShorts: true } }));
   assert.equal(res.decision, 'enter-short');
   assert.equal(res.entry, 99.25);
   assert.equal(res.stop, 99.85);
   assert.ok(res.why.includes('2 closes beyond the OR low'), res.why);
+});
+
+// ---------------------------------------------------------------------------
+// Long-only (2026-10-12): allowShorts default false — the downside two-break
+// trigger is refused with the distinct SHORT_SIDE_DISABLED reason so refused
+// shorts stay countable; allowShorts=true restores the short side exactly;
+// the upside path is untouched either way.
+// ---------------------------------------------------------------------------
+test('long-only: downside two-break is refused with SHORT_SIDE_DISABLED by default', () => {
+  // No allowShorts anywhere — the factory default (false) governs.
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break' } }));
+  assert.equal(res.decision, 'wait');
+  assert.equal(res.entry, null);
+  assert.equal(res.size, null);
+  assert.ok(res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    `expected SHORT_SIDE_DISABLED, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('long-only: downside two-break is refused with SHORT_SIDE_DISABLED when allowShorts=false explicitly', () => {
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break', allowShorts: false } }));
+  assert.equal(res.decision, 'wait');
+  assert.equal(res.entry, null);
+  assert.ok(res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    `expected SHORT_SIDE_DISABLED, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('long-only: the same downside setup enters when allowShorts=true', () => {
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'two-break', allowShorts: true } }));
+  assert.equal(res.decision, 'enter-short');
+  assert.equal(res.entry, 99.25);
+  assert.ok(!res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')));
+});
+
+test('long-only: scored shorts are refused too — allowShorts is the master short switch', () => {
+  const res = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'scored' } }));
+  assert.equal(res.decision, 'wait');
+  assert.ok(res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    `expected SHORT_SIDE_DISABLED, got: ${JSON.stringify(res.rejectReasons)}`);
+  const on = evaluateEntry(goodShortCtx({ rules: { triggerMode: 'scored', allowShorts: true } }));
+  assert.equal(on.decision, 'enter-short');
+});
+
+test('long-only: upside path untouched — long two-break still enters with allowShorts=false', () => {
+  const ctx = goodLongCtx({ rules: { triggerMode: 'two-break', allowShorts: false } });
+  const res = evaluateEntry(ctx);
+  assert.equal(res.decision, 'enter-long');
+  assert.equal(res.entry, 100.75);
+  assert.ok(!res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')));
+});
+
+test('long-only: reversal-short is refused with SHORT_SIDE_DISABLED, longs still reverse', () => {
+  const res = evaluateEntry(failedBreakoutLongCtx({
+    regime: 'bearish',
+    relStrengthVsSpy: -0.8,
+    vwap: 100.30,
+    premarket: { trend: 'down', gapPct: -0.5 },
+  }));
+  assert.equal(res.decision, 'wait');
+  assert.ok(res.rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    `expected SHORT_SIDE_DISABLED, got: ${JSON.stringify(res.rejectReasons)}`);
+});
+
+test('long-only: allowShort=false still reports DIRECTION_DISABLED (legacy gate checked first)', () => {
+  expectReject(goodShortCtx({ rules: { allowShort: false, allowShorts: false } }), 'DIRECTION_DISABLED');
+  expectReject(goodShortCtx({ rules: { allowShort: false, allowShorts: true } }), 'DIRECTION_DISABLED');
+});
+
+test('long-only: validateConfig requires allowShorts to be boolean', () => {
+  assert.equal(validateConfig({ allowShorts: false }).ok, true);
+  assert.equal(validateConfig({ allowShorts: true }).ok, true);
+  const bad = validateConfig({ allowShorts: 'yes' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some(e => e.startsWith('allowShorts:')), JSON.stringify(bad.errors));
 });
 
 test('evaluateEntry: targets sorted nearest-first, OR-width included', () => {
@@ -558,7 +632,7 @@ test('evaluateEntry rejects: VWAP failure', () => {
 
 test('evaluateEntry rejects: opposing regime (SPY reversal)', () => {
   expectReject(goodLongCtx({ regime: 'bearish' }), 'REGIME_OPPOSED');
-  expectReject(goodShortCtx({ regime: 'bullish' }), 'REGIME_OPPOSED');
+  expectReject(goodShortCtx({ regime: 'bullish', rules: { allowShorts: true } }), 'REGIME_OPPOSED');
 });
 
 test('evaluateEntry rejects: widened spreads and thin liquidity', () => {
@@ -667,6 +741,7 @@ test('evaluateEntry: failed upside breakout becomes a reversal-short', () => {
     relStrengthVsSpy: -0.8,
     vwap: 100.30,
     premarket: { trend: 'down', gapPct: -0.5 },
+    rules: { allowShorts: true },
   }));
   assert.equal(res.decision, 'reversal-short');
   assert.ok(res.rejectReasons.some(r => r.startsWith('RETURN_INSIDE_OR')), JSON.stringify(res.rejectReasons));
@@ -684,6 +759,7 @@ test('evaluateEntry: failed breakout with weak reversal score stays out', () => 
     vwap: 100.30,
     premarket: { trend: 'flat', gapPct: 0 },
     trendAligned: false,
+    rules: { allowShorts: true },
   }));
   assert.equal(res.decision, 'wait');
   assert.ok(res.rejectReasons.some(r => r.startsWith('RETURN_INSIDE_OR')));
@@ -696,6 +772,7 @@ test('evaluateEntry: failed downside breakout becomes a reversal-long', () => {
     relStrengthVsSpy: 0.8,
     vwap: 99.00,
     premarket: { trend: 'up', gapPct: 0.5 },
+    rules: { allowShorts: true },
   });
   const rally = [
     bar('09:51', 99.25, 99.60, 99.20, 99.55, 30000),
@@ -977,7 +1054,7 @@ test('evaluateEntry: RSI filter honors the cap, the disable switch, and longs-on
   assert.equal(off.decision, 'enter-long', off.why);
   assert.ok(!off.rejectReasons.some(r => r.startsWith('rsi_overbought')));
   // Shorts are never touched by the rule, even with the cap at 1.
-  const short = evaluateEntry(goodShortCtx({ rules: { maxRsiLong: 1 } }));
+  const short = evaluateEntry(goodShortCtx({ rules: { maxRsiLong: 1, allowShorts: true } }));
   assert.equal(short.decision, 'enter-short', short.why);
 });
 

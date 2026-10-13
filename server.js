@@ -1491,6 +1491,23 @@ app.get('/api/_verify20260927', async (req, res) => {
           return { user_id: r.user_id, watchlist: p.watchlist === undefined ? null : list(p.watchlist) };
         } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
       }),
+      // TEMP ORB long-only visibility (2026-10-12): the stored ORB rules'
+      // allowShorts + universeMode + triggerMode, so the long-only flip
+      // (allowShorts=false) is server-verifiable. Booleans/strings only,
+      // never secrets.
+      orb_rules: aq('SELECT user_id, rules FROM orb_settings').map(r => {
+        try {
+          const p = JSON.parse(r.rules || '{}');
+          return {
+            user_id: r.user_id,
+            allowShorts: p.allowShorts === undefined ? null : p.allowShorts,
+            allowShort: p.allowShort === undefined ? null : p.allowShort,
+            allowLong: p.allowLong === undefined ? null : p.allowLong,
+            universeMode: p.universeMode === undefined ? null : p.universeMode,
+            triggerMode: p.triggerMode === undefined ? null : p.triggerMode,
+          };
+        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
+      }),
       // TEMP ORB visibility (2026-10-10) — ORB's enabled state was not
       // server-verifiable before this section (diagnosis orb-report §C.2).
       // Credential key LENGTH only, never key material.

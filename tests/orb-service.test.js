@@ -75,6 +75,35 @@ function minuteBarsAAA() {
   return bars;
 }
 
+// Short-side mirror of minuteBarsAAA, engineered for exactly ONE downside
+// two-break setup on BBB, 2026-10-01: same OR (10.00..10.05, 80k avg volume),
+// then 9:45 ET closes 9.97 below the OR low on 150k (conviction) and the tape
+// stays below the low on 120k bars (≥1.5× the OR average) to 10:29 ET.
+function minuteBarsBBB() {
+  const bars = [];
+  const base = Date.parse('2026-10-01T13:30:00Z'); // 9:30 ET
+  const m1 = (i, o, h, l, c, v) => bars.push({ t: iso(base + i * 60000), o, h, l, c, v });
+  m1(0, 10.00, 10.02, 10.00, 10.01, 80000);
+  m1(1, 10.01, 10.03, 10.005, 10.02, 80000);
+  m1(2, 10.02, 10.04, 10.01, 10.03, 80000);
+  m1(3, 10.03, 10.05, 10.02, 10.04, 80000);
+  for (let i = 4; i < 15; i++) {
+    const c = 10.04 - (i - 3) * 0.002;
+    m1(i, c + 0.005, Math.min(10.045, c + 0.01), Math.max(10.01, c - 0.01), c, 80000);
+  }
+  // Breakdown bar 9:45 ET: close 9.97 below OR low 10.00, conviction volume.
+  m1(15, 10.01, 10.02, 9.96, 9.97, 150000);
+  // Stay below the OR low on conviction volume through 10:29 ET.
+  let driftClose = 9.97;
+  for (let i = 16; i < 60; i++) {
+    const j = i - 15;
+    driftClose += (j % 3 === 0) ? 0.002 : -0.0012;
+    const c = i === 59 ? 9.97 : +driftClose.toFixed(4);
+    m1(i, c + 0.003, c + 0.008, c - 0.005, c, 120000);
+  }
+  return bars;
+}
+
 function fixture(options = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
@@ -870,6 +899,81 @@ test('pruneDiagnostics prunes past-date best rows and keeps today\'s', async () 
   await f.service.pruneDiagnostics(1);
   assert.equal(f.db.prepare("SELECT COUNT(*) n FROM orb_candidates_best WHERE symbol='OLD'").get().n, 0);
   assert.equal(f.db.prepare("SELECT COUNT(*) n FROM orb_candidates_best WHERE symbol='NEW'").get().n, 1);
+});
+
+// --- long-only (2026-10-12): allowShorts -----------------------------------
+test('allowShorts defaults to false (long-only) and round-trips as a boolean', async () => {
+  const { service } = fixture();
+  assert.equal(service.getSettings(1).rules.allowShorts, false);
+  assert.equal(DEFAULT_ORB_RULES.allowShorts, false);
+  await service.setSettings(1, { rules: { allowShorts: true } });
+  assert.equal(service.getSettings(1).rules.allowShorts, true);
+  await service.setSettings(1, { rules: { allowShorts: false } });
+  assert.equal(service.getSettings(1).rules.allowShorts, false);
+  await assert.rejects(
+    service.setSettings(1, { rules: { allowShorts: 'yes' } }),
+    /must be boolean/);
+});
+
+test('allowShorts migration persists false on stored rows, preserves an explicit true', async () => {
+  const a = fixtureWithStoredRules({ minScore: 80 });
+  const storedA = JSON.parse(a.db.prepare('SELECT rules FROM orb_settings WHERE user_id=1').get().rules);
+  assert.equal(storedA.allowShorts, false, 'the stored row itself flips to long-only');
+  assert.equal(storedA.minScore, 80, 'unrelated rules preserved');
+  assert.equal(a.service.getSettings(1).rules.allowShorts, false);
+  const b = fixtureWithStoredRules({ allowShorts: true });
+  const storedB = JSON.parse(b.db.prepare('SELECT rules FROM orb_settings WHERE user_id=1').get().rules);
+  assert.equal(storedB.allowShorts, true, 'an explicit stored true is not clobbered');
+  assert.equal(b.service.getSettings(1).rules.allowShorts, true);
+  const c = fixtureWithStoredRules({ allowShorts: false });
+  assert.equal(c.service.getSettings(1).rules.allowShorts, false, 'an explicit stored false survives');
+});
+
+function fixtureBBB() {
+  const quote = { bp: 9.965, ap: 9.975, t: iso(NOW) };
+  const latest = { c: 9.97, t: iso(NOW) };
+  return fixture({
+    dailyBySymbol: { BBB: dailyAAA() },
+    minuteBySymbol: { BBB: minuteBarsBBB() },
+    latestBySymbol: { BBB: latest },
+    quoteBySymbol: { BBB: quote },
+  });
+}
+
+test('long-only scan: downside two-break is refused, journaled SHORT_SIDE_DISABLED, no position opens', async () => {
+  const f = fixtureBBB();
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'BBB' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 0, 'no short order reaches the broker');
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM orb_positions').get().n, 0, 'no position opens');
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM orb_trades').get().n, 0, 'no trade records');
+  const cand = f.db.prepare('SELECT data FROM orb_candidates WHERE symbol=? AND trade_date=?').get('BBB', TRADE_DATE);
+  assert.ok(cand, 'a candidate record exists for the refused short');
+  const data = JSON.parse(cand.data);
+  assert.equal(data.decision, 'wait');
+  assert.ok((data.rejectReasons || []).some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    `candidate carries SHORT_SIDE_DISABLED: ${JSON.stringify(data.rejectReasons)}`);
+  const best = f.db.prepare('SELECT data FROM orb_candidates_best WHERE symbol=? AND trade_date=?').get('BBB', TRADE_DATE);
+  assert.ok(best && JSON.parse(best.data).rejectReasons.some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    'best-evaluation record carries SHORT_SIDE_DISABLED');
+  const rejected = f.db.prepare('SELECT reject_reasons FROM orb_rejected WHERE symbol=?').get('BBB');
+  assert.ok(rejected && JSON.parse(rejected.reject_reasons).some(r => r.startsWith('SHORT_SIDE_DISABLED:')),
+    'rejected-setups journal carries SHORT_SIDE_DISABLED');
+});
+
+test('long-only scan: the same downside setup enters as a short when allowShorts=true', async () => {
+  const f = fixtureBBB();
+  await connectPaper(f);
+  await f.service.setSettings(1, { enabled: true, rules: { watchlist: 'BBB', allowShorts: true } });
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 1, 'exactly one entry order');
+  assert.equal(f.world.orderPosts[0].symbol, 'BBB');
+  assert.equal(f.world.orderPosts[0].side, 'sell', 'short entry sells');
+  const positions = f.db.prepare('SELECT * FROM orb_positions').all();
+  assert.equal(positions.length, 1);
+  assert.equal(positions[0].direction, 'short');
+  assert.equal(positions[0].status, 'open');
 });
 
 test('a timed-out screener GET is retried exactly once and recovers', async () => {

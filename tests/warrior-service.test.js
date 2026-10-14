@@ -10,7 +10,7 @@ const { test } = require('node:test');
 const Database = require('better-sqlite3');
 const {
   createWarriorService, WarriorError, DEFAULT_WARRIOR_RULES,
-  PRE_TRADE_CHECKS, assessOrderFlow, preTradeInputs, paceRvol,
+  PRE_TRADE_CHECKS, assessOrderFlow, preTradeInputs, paceRvol, assessIndicators,
 } = require('../lib/warrior/service');
 const { createCredentialVault } = require('../lib/credential-vault');
 
@@ -294,6 +294,75 @@ test('approveProposal blocks on data_fresh when the latest bar is genuinely stal
   await assert.rejects(() => f.service.approveProposal(1, proposal.proposal_id), /data_fresh/);
   const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
   assert.equal(posts.length, 0, 'stale-data approval must not reach the broker');
+});
+
+// --- indicators_ok bar-count repair (2026-10-14, CORD) ---------------------
+// 14-bar PremarketBreak tape: 12 sparse premarket bars topping at $4.00,
+// the 09:30 ET bar, and a 09:31 break bar closing $4.18 above the
+// premarket high on rising volume. VWAP/EMA9 are finite; EMA20/MACD
+// cannot exist yet (<20 / <26 bars) and must not block approval.
+function shortPremarketBreakTape() {
+  const bars = [];
+  const pre = Date.parse('2026-09-29T12:00:00Z'); // 08:00 ET
+  for (let i = 0; i < 12; i++) {
+    bars.push({ t: new Date(pre + i * 60000).toISOString(), o: 3.95, h: 4.00, l: 3.90, c: 3.96, v: 20000 });
+  }
+  bars.push({ t: new Date(Date.parse('2026-09-29T13:30:00Z')).toISOString(), o: 3.98, h: 4.05, l: 3.95, c: 4.02, v: 200000 });
+  bars.push({ t: new Date(Date.parse('2026-09-29T13:31:00Z')).toISOString(), o: 4.05, h: 4.20, l: 4.03, c: 4.18, v: 400000 });
+  return bars;
+}
+function mappedBars(raw) {
+  return raw.map(b => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+}
+
+test('14-bar PremarketBreak tape passes the approval indicator check', async () => {
+  // Unit: EMA20/MACD are null on 14 bars but are not yet computable.
+  const gate = assessIndicators(mappedBars(shortPremarketBreakTape()));
+  assert.equal(gate.bars, 14);
+  assert.equal(gate.lastInd.ema20, null);
+  assert.equal(gate.lastInd.macd, null);
+  assert.equal(gate.ok, true, `short tape must pass, got ${gate.detail}`);
+  // Integration: approval of a PremarketBreak proposal on that tape submits.
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => shortPremarketBreakTape();
+  const proposal = insertProposal(f.db, { pattern_name: 'PremarketBreak' });
+  const result = await f.service.approveProposal(1, proposal.proposal_id);
+  assert.equal(result.submitted, true);
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 1, 'the short-tape approval reaches the broker exactly once');
+});
+
+test('>=26-bar tape with a NaN-producing input still blocks and the alert names indicator + bar count', async () => {
+  // Unit: a NaN close on the last of 31 bars poisons EMA9/EMA20/MACD —
+  // with >=26 bars MACD is computable, so its absence is a real failure.
+  const base = Date.parse('2026-09-29T13:30:00Z');
+  const long = [];
+  for (let i = 0; i < 31; i++) {
+    const c = 10 + i * 0.05;
+    long.push({ t: base + i * 60000, o: c, h: c + 0.02, l: c - 0.02, c, v: 100000 });
+  }
+  long[30].c = NaN; long[30].o = NaN; long[30].h = NaN; long[30].l = NaN;
+  const gate = assessIndicators(long);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.bars, 31);
+  assert.match(gate.detail, /indicators_ok \((ema9|ema20|macd) null, .*bars=31, last=2026-09-29T14:00:00\.000Z\)/);
+  // Integration: a 31-bar tape with zero cumulative volume (VWAP cannot
+  // compute) still blocks approval, submits nothing, and the block alert
+  // names the failed indicator, the bar count, and the last-bar time.
+  const f = fixture();
+  await connectAndGet(f);
+  f.world.minuteBarsOverride = () => long.map(b => ({
+    t: new Date(b.t).toISOString(), o: 10, h: 10.02, l: 9.98, c: 10 + (b.t - base) / 60000 * 0.05, v: 0,
+  }));
+  const proposal = insertProposal(f.db, { pattern_name: 'PremarketBreak' });
+  await assert.rejects(() => f.service.approveProposal(1, proposal.proposal_id), /indicators_ok \(vwap null, bars=31, last=/);
+  const posts = f.world.calls.filter(c => c.path === '/v2/orders' && c.method === 'POST');
+  assert.equal(posts.length, 0, 'a genuinely failed indicator gate must not reach the broker');
+  const alerts = f.service.alerts(1).alerts;
+  const block = alerts.find(a => /approval blocked by pre-trade gates/.test(a.message));
+  assert.ok(block, `a block alert is recorded: ${JSON.stringify(alerts)}`);
+  assert.match(block.message, /indicators_ok \(vwap null, bars=31, last=2026-09-29T14:00:00\.000Z\)/);
 });
 
 test('approveProposal is idempotent — a second approval reconciles, never resubmits', async () => {

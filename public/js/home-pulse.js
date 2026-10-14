@@ -232,7 +232,6 @@
   function refreshBots() {
     var jobs = [
       { prefix: 'hpWarrior', statusUrl: '/api/warrior/status', tradesUrl: '/api/warrior/trades' },
-      { prefix: 'hpOrb', statusUrl: '/api/orb/status', tradesUrl: '/api/orb/trades' },
     ];
     return Promise.all(jobs.map(function (job) {
       return Promise.allSettled([fetchJson(job.statusUrl), fetchJson(job.tradesUrl)]).then(function (rs) {
@@ -261,8 +260,6 @@
     if (kiaanview) kiaanview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('kiaan'); });
     var warriorview = $('hpWarriorView');
     if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
-    var orbview = $('hpOrbView');
-    if (orbview) orbview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('orb'); });
     refresh();
     setInterval(function () { if (homeVisible()) refresh(); }, 60000);
   }

@@ -21,7 +21,6 @@ const {
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
-const { createOrbService, mountOrb } = require('./lib/orb/service');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
@@ -539,6 +538,11 @@ const automatedStartup = automatedState.init()
   // tables and broker-account claim before the startup checkpoint so the
   // removal persists into the durable snapshot.
   .then(() => automatedState.dropFlipperBot())
+  // ORB bot DELETED 2026-10-14 on Johnny's order ("get rid of ORB and all
+  // of its files and history"): drop its tables and broker-account claim
+  // before the startup checkpoint so the removal persists into the durable
+  // snapshot.
+  .then(() => automatedState.dropOrbBot())
   // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
   // One-shot: runs before the startup checkpoint so the pause propagates
   // into the durable snapshot, and never re-runs after Johnny re-enables.
@@ -1467,9 +1471,9 @@ app.get('/api/_verify20260927', async (req, res) => {
       kiaan_positions: aq("SELECT COUNT(*) AS n FROM kiaan_positions WHERE status IN ('open','pending_entry')")[0],
       kiaan_alerts: aq('SELECT created_at, kind, message FROM kiaan_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Kiaan longUniverse visibility (2026-10-12): the stored Kiaan
-      // rules' longUniverse + hedge list, and ORB's stored watchlist, so
-      // the Kiaan expansion (Johnny: "the same ones as ORB") is
-      // server-verifiable list-for-list. Symbol lists only, never secrets.
+      // rules' longUniverse + hedge list, so the Kiaan expansion (Johnny:
+      // "the same ones as ORB") is server-verifiable. Symbol lists only,
+      // never secrets.
       kiaan_rules: aq('SELECT user_id, rules FROM kiaan_settings').map(r => {
         try {
           const p = JSON.parse(r.rules || '{}');
@@ -1483,38 +1487,6 @@ app.get('/api/_verify20260927', async (req, res) => {
           };
         } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
       }),
-      orb_watchlist: aq('SELECT user_id, rules FROM orb_settings').map(r => {
-        try {
-          const p = JSON.parse(r.rules || '{}');
-          const list = v => Array.isArray(v) ? v.map(s => String(s).trim().toUpperCase()).filter(Boolean)
-            : String(v || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-          return { user_id: r.user_id, watchlist: p.watchlist === undefined ? null : list(p.watchlist) };
-        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
-      }),
-      // TEMP ORB long-only visibility (2026-10-12): the stored ORB rules'
-      // allowShorts + universeMode + triggerMode, so the long-only flip
-      // (allowShorts=false) is server-verifiable. Booleans/strings only,
-      // never secrets.
-      orb_rules: aq('SELECT user_id, rules FROM orb_settings').map(r => {
-        try {
-          const p = JSON.parse(r.rules || '{}');
-          return {
-            user_id: r.user_id,
-            allowShorts: p.allowShorts === undefined ? null : p.allowShorts,
-            allowShort: p.allowShort === undefined ? null : p.allowShort,
-            allowLong: p.allowLong === undefined ? null : p.allowLong,
-            universeMode: p.universeMode === undefined ? null : p.universeMode,
-            triggerMode: p.triggerMode === undefined ? null : p.triggerMode,
-          };
-        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
-      }),
-      // TEMP ORB visibility (2026-10-10) — ORB's enabled state was not
-      // server-verifiable before this section (diagnosis orb-report §C.2).
-      // Credential key LENGTH only, never key material.
-      orb_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM orb_settings'),
-      orb_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM orb_credentials'),
-      orb_positions: aq("SELECT COUNT(*) AS n FROM orb_positions WHERE status IN ('open','pending_entry')")[0],
-      orb_alerts: aq('SELECT created_at, kind, message FROM orb_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP pre-teardown export (2026-10-01): full row dumps of B2 + options
       // trade history before the bots are deleted. Remove with the teardown.
       b2_export: {
@@ -6352,18 +6324,7 @@ const warriorService = createWarriorService({
 mountWarrior({ app, service: warriorService, requireAuth, ensureSessionUserInTradingStore });
 let warriorSchedulerStarted = false;
 
-// ORB "Opening Range Breakout" bot is wired next to Warrior: own tables,
-// own scheduler, own lease. Ships DISABLED and paper-first — never enable it
-// for Johnny; he connects and enables bots himself.
-const orbService = createOrbService({
-  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-});
-mountOrb({ app, service: orbService, requireAuth, ensureSessionUserInTradingStore });
-let orbSchedulerStarted = false;
-
-// Kiaan Bot (regime-first, Johnny 2026-10-08) is wired next to ORB: own
+// Kiaan Bot (regime-first, Johnny 2026-10-08) is wired next to Warrior: own
 // kiaan_* tables, own scheduler, own lease. Paper-only by design and ships
 // DISABLED — never enable it for Johnny; he connects and enables bots
 // himself, on a dedicated new paper account.
@@ -6380,10 +6341,6 @@ let kiaanSchedulerStarted = false;
 for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
   try { warriorService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
-}
-for (const row of automatedDb.prepare("SELECT user_id FROM orb_settings").all()) {
-  try { orbService.pruneDiagnostics(row.user_id); }
-  catch (error) { console.warn('[ORB] boot prune failed:', error.message); }
 }
 for (const row of automatedDb.prepare("SELECT user_id FROM kiaan_settings").all()) {
   try { kiaanService.pruneDiagnostics(row.user_id); }
@@ -6417,7 +6374,6 @@ app.get('/readyz', async (_req, res) => {
     && automatedTradingPersistenceReady
     && databaseReady
     && warriorSchedulerStarted
-    && orbSchedulerStarted
     && kiaanSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
@@ -6425,7 +6381,6 @@ app.get('/readyz', async (_req, res) => {
     fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
     schedulers: {
       warrior: warriorSchedulerStarted ? 'started' : 'stopped',
-      orb: orbSchedulerStarted ? 'started' : 'stopped',
       kiaan: kiaanSchedulerStarted ? 'started' : 'stopped',
     },
   });
@@ -6467,15 +6422,13 @@ async function stopAutomatedState(signal) {
   let failed = false;
   try {
     warriorSchedulerStarted = false;
-    orbSchedulerStarted = false;
     kiaanSchedulerStarted = false;
     const warriorDrain = warriorService.drain();
-    const orbDrain = orbService.drain();
     const kiaanDrain = kiaanService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([warriorDrain, orbDrain, kiaanDrain]);
+    await Promise.all([warriorDrain, kiaanDrain]);
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6495,12 +6448,8 @@ function startServer() {
   console.log(`Qureshi Finance on :${PORT}`);
   warriorService.start(); // first run delayed ~30s
   warriorSchedulerStarted = true;
-  // ORB first run is delayed by the service itself (~120s), staggered
-  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
-  orbService.start();
-  orbSchedulerStarted = true;
   // Kiaan Bot first run is delayed by the service itself (~150s), staggered
-  // after ORB. Ships disabled: the loop idles until Johnny enables it.
+  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
   kiaanService.start();
   kiaanSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open

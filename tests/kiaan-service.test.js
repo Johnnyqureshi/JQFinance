@@ -5,7 +5,7 @@
 // (risk-on entry with Warrior-style OCO protection, risk-off hedge-only,
 // chop stand-aside journaled, unknown regime on VIX failure, sub-penny
 // price safety, daily locks, EOD flatten).
-// Fixture mirrors orb-service.test.js: in-memory better-sqlite3, real
+// Fixture mirrors the other bot-service tests: in-memory better-sqlite3, real
 // credential vault, fake broker/Yahoo fetch. No network.
 
 const assert = require('node:assert/strict');

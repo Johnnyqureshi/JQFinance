@@ -695,9 +695,12 @@ test('intradayExitGeometry: stop/targets equal entry ∓ 1.5×ATR15 / +2R / +3R'
 // SOC is on ORB's 87-name watchlist and is NOT a hedge-list symbol.
 const GOOD_UNIVERSE = { ...GOOD_LONG, symbol: 'SOC' };
 
-test('longUniverse default is exactly ORB\'s 87-name watchlist, verbatim', () => {
-  const { DEFAULT_ORB_RULES, parseWatchlist } = require('../lib/orb/engine');
-  const orbList = parseWatchlist(DEFAULT_ORB_RULES);
+test('longUniverse default is exactly the frozen 87-name list, verbatim', () => {
+  // The list was copied verbatim from ORB's stored watchlist on 2026-10-12
+  // (Johnny: "the same ones as ORB"). ORB was deleted 2026-10-14, so the
+  // ground truth is frozen here: Kiaan's default must still match it
+  // name-for-name, in order.
+  const orbList = 'SOUN,UUUU,SMR,ONDS,BBAI,BDC,RCAT,UMAC,RR,SERV,BTG,DNN,CRML,TMQ,ASM,PLG,IAUX,UEC,USAR,LASE,CDTG,USAS,EXK,MTA,SOC,BORR,PBR,NAT,GLND,RIG,EGY,BTE,ANNA,NEXT,QID,SQQQ,AAPD,PLTD,SBIT,TSLL,SATL,RDWU,BABO,KMLI,INTW,MULL,NVDG,NVDL,SMCX,SMCL,PLTG,ADBG,NOWL,VYX,UECG,NUVB,NVDY,SNXX,SKHX,SPCH,ORCU,SOFX,KEEL,CIFG,AFRU,IRE,AMAU,GPRO,NOK,CRMG,NVTX,HODU,SKHL,SNDC,TSLG,PATX,MUU,MSTZ,CORD,AVS,QQQD,ORCZ,NVD,ERY,TSXD,TSLZ,TSDD'.split(',');
   assert.equal(orbList.length, 87);
   const kiaanList = mergedKiaanRules({}).longUniverse.split(',').filter(Boolean);
   assert.deepEqual(kiaanList, orbList);

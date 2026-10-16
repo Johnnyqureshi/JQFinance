@@ -766,3 +766,91 @@ test('a symbol on BOTH lists (SQQQ) is a hedge first: risk-on still refuses it',
   assert.ok(hasReason(d, 'REGIME_RISK_ON_HEDGE'));
   assert.ok(!hasReason(d, 'LONG_UNIVERSE_OK'));
 });
+
+// --- single-stock inverse sleeve (2026-10-16, strategy-lab Test 10) --------
+// The sleeve is rules + a separate service-side book, NOT an engine mode:
+// these tests pin the shipped defaults (the lab's 31 names verbatim, the
+// toggle, the dedicated cap) and the exact evaluation construction the
+// service uses — sleeve rules (hedge list extended with the sleeve list,
+// maxPositions = sleeveMaxPositions) against sleeve-local day state.
+const { isSleeveSymbol, parseSymbolList } = require('../lib/kiaan/engine');
+
+const SLEEVE_31 = [
+  'AAPD', 'AMDD', 'AMZD', 'AVS', 'CSCS', 'GGLS', 'METD', 'MSFD', 'MUD',
+  'NFXS', 'NVDD', 'ORCS', 'PALD', 'PLTD', 'QCMD', 'TSLS', 'TSMZ',
+  'NVDQ', 'TSLZ', 'MSTZ', 'CORD', 'CRCD',
+  'NVD', 'CONI',
+  'NVDS', 'TSLQ', 'ORCZ',
+  'SMST', 'ASTN',
+  'QQQD', 'TSXD',
+];
+// A confirming sleeve candidate on a risk-off day (RS vs SPY = +4.1 pts).
+const GOOD_SLEEVE = {
+  symbol: 'NVD', price: 3.85, dayChangePct: 3.0,
+  vwap: 3.75, orHigh: 3.80, orLow: 3.70,
+  brokeOrHigh: true, reclaimedVwap: false,
+  rvol: 2.4, atr: 0.09, avgVolume: 78000000, spreadPct: 0.25,
+  isInverseHedge: true,
+};
+const sleeveRulesFor = () => mergedKiaanRules({
+  hedgeSymbols: [...parseSymbolList(DEFAULT_KIAAN_RULES.hedgeSymbols), ...SLEEVE_31].join(','),
+  maxPositions: DEFAULT_KIAAN_RULES.sleeveMaxPositions,
+});
+
+test('sleeve defaults ship the lab list verbatim; incumbents untouched', () => {
+  assert.deepEqual(parseSymbolList(DEFAULT_KIAAN_RULES.sleeveSymbols), SLEEVE_31);
+  assert.equal(SLEEVE_31.length, 31);
+  assert.equal(DEFAULT_KIAAN_RULES.sleeveEnabled, true);
+  assert.equal(DEFAULT_KIAAN_RULES.sleeveMaxPositions, 1);
+  // The incumbents' rails are exactly what they were before the sleeve.
+  assert.equal(DEFAULT_KIAAN_RULES.hedgeSymbols, 'SQQQ,SPXS,TSDD,SOXS,TECS,LABD');
+  assert.equal(DEFAULT_KIAAN_RULES.maxPositions, 3);
+  assert.equal(isSleeveSymbol('cord'), true);
+  assert.equal(isSleeveSymbol('SQQQ'), false);
+  const merged = mergedKiaanRules({});
+  assert.deepEqual(parseSymbolList(merged.sleeveSymbols), SLEEVE_31);
+  assert.equal(merged.sleeveEnabled, true);
+  // The toggle is a strict boolean like hedgeOnly: only explicit false off.
+  assert.equal(mergedKiaanRules({ sleeveEnabled: false }).sleeveEnabled, false);
+  assert.equal(mergedKiaanRules({ sleeveEnabled: 'false' }).sleeveEnabled, false);
+  assert.equal(mergedKiaanRules({ sleeveEnabled: 'yes' }).sleeveEnabled, true);
+  assert.equal(validateConfig({}).ok, true);
+  const bad = validateConfig({ sleeveMaxPositions: 0 });
+  assert.ok(bad.errors.some(e => e.startsWith('sleeveMaxPositions:')), JSON.stringify(bad.errors));
+});
+
+test('sleeve construction: confirming sleeve name enters under its own cap', () => {
+  const d = evaluateCandidate(ctxFor(RISK_OFF), GOOD_SLEEVE, sleeveRulesFor());
+  assert.equal(d.decision, 'enter-long', JSON.stringify(d.reasons));
+  assert.equal(d.symbol, 'NVD');
+  assert.ok(hasReason(d, 'HEDGE_CONFIRM_PATH'));
+});
+
+test('sleeve cap binds on sleeve-local state only; incumbent hedge unaffected', () => {
+  // The sleeve slot is full (its own local count at its own cap of 1):
+  // the sleeve candidate is refused by MAX_POSITIONS...
+  const full = { ...CLEAN_DAY, openPositions: 1 };
+  const blocked = evaluateCandidate(
+    { market: RISK_OFF, nowMs: NOW, dayState: full, accountEquity: 100000 },
+    GOOD_SLEEVE, sleeveRulesFor(),
+  );
+  assert.equal(blocked.decision, 'no-trade');
+  assert.ok(hasReason(blocked, 'MAX_POSITIONS'), JSON.stringify(blocked.reasons));
+  // ...while an incumbent hedge judged against the incumbent book (cap 3,
+  // one incumbent open) still enters — the sleeve's cap never leaks into
+  // the incumbent evaluation, and vice versa.
+  const incumbent = evaluateCandidate(
+    { market: RISK_OFF, nowMs: NOW, dayState: full, accountEquity: 100000 },
+    GOOD_HEDGE, mergedKiaanRules({}),
+  );
+  assert.equal(incumbent.decision, 'enter-long', JSON.stringify(incumbent.reasons));
+});
+
+test('sleeve name under incumbent rules is NOT a hedge: risk-off refuses it as an ordinary name', () => {
+  // Zero-displacement guard at the engine level: without the sleeve
+  // rules, NVD is just a long-universe name and the incumbent book can
+  // never enter it on a hedge day — the sleeve path is the only door.
+  const d = evaluateCandidate(ctxFor(RISK_OFF), { ...GOOD_SLEEVE, isInverseHedge: false }, mergedKiaanRules({}));
+  assert.equal(d.decision, 'no-trade');
+  assert.ok(hasReason(d, 'REGIME_RISK_OFF'), JSON.stringify(d.reasons));
+});

@@ -1083,3 +1083,181 @@ test('SIP 403 downgrade is per-request, never latched (regression)', async () =>
   assert.ok(later.some(u => u.includes('feed=sip')), 'later requests ask for SIP first again — no latch');
   assert.ok(!later.some(u => u.includes('feed=iex')), 'no later request is silently rewritten to IEX');
 });
+
+// --- single-stock inverse sleeve (2026-10-16, strategy-lab Test 10) --------
+// Risk-off tape. NVD (a sleeve name) confirms exactly like SQQQ does:
+// prev close 3.70 -> 3.85 (+4.05%, RS +5.6 pts vs SPY -1.53%), OR high
+// 3.80 broken, pace RVOL ~4.5x, ATR 0.20, spread 0.26%.
+function dailySleeveLike(prev, last, vol = 2000000) {
+  const bars = dailyFlat(prev, vol, prev + 0.1, prev - 0.1);
+  bars.push({ t: iso(Date.parse('2026-10-01T13:30:00Z')), o: prev + 0.05, h: last + 0.02, l: prev - 0.05, c: last, v: Math.round(vol / 2) });
+  return bars;
+}
+function minutesSleeveLike(open, last, orHigh, orLow) {
+  return driftMinutes({ open, last, orHigh, orLow, vol: 20000, orVol: 30000, breakVol: 40000 });
+}
+// SPY after a hard morning drop that BOUNCES into the decision time:
+// last close 758.2 is far above the running low (~750), so SPY is below
+// VWAP but NOT breaking down — the sleeve gate's proximity leg fails.
+function minutesSPYBounce() {
+  const bars = [];
+  const base = Date.parse('2026-10-01T13:30:00Z');
+  for (let i = 0; i < 60; i++) {
+    let c;
+    if (i < 45) c = 769 + (750 - 769) * (i / 44);
+    else c = 750 + (758.2 - 750) * ((i - 44) / 15);
+    c = +c.toFixed(4);
+    bars.push({ t: iso(base + i * 60000), o: i === 0 ? 769 : bars[i - 1].c, h: +(c + 0.01).toFixed(4), l: +(c - 0.01).toFixed(4), c, v: 100000 });
+  }
+  return bars;
+}
+const SLEEVE_YAHOO = { '^VIX': [24, 28], '^TNX': [5.3, 5.36], 'CL=F': [92, 93] };
+SCENARIOS.sleeveBD = {
+  assets: ['SQQQ', 'NVD'],
+  daily: { SQQQ: dailySQQQ(), NVD: dailySleeveLike(3.7, 3.85), SPY: dailyIndex(770, 758), QQQ: dailyIndex(690, 679) },
+  minutes: {
+    SQQQ: minutesSQQQ(),
+    NVD: minutesSleeveLike(3.75, 3.85, 3.80, 3.72),
+    SPY: driftMinutes({ open: 769, last: 758.2, vol: 100000 }),
+    QQQ: driftMinutes({ open: 689, last: 679.3, vol: 100000 }),
+  },
+  latest: { SQQQ: 10.3, NVD: 3.85 },
+  quotes: { SQQQ: [10.29, 10.31], NVD: [3.845, 3.855] },
+  yahoo: SLEEVE_YAHOO,
+};
+SCENARIOS.sleeveNoBD = {
+  ...SCENARIOS.sleeveBD,
+  minutes: { ...SCENARIOS.sleeveBD.minutes, SPY: minutesSPYBounce() },
+};
+SCENARIOS.sleeveCap = {
+  assets: ['SQQQ', 'NVD', 'TSLQ'],
+  daily: {
+    SQQQ: dailySQQQ(), NVD: dailySleeveLike(3.7, 3.85), TSLQ: dailySleeveLike(16.5, 16.9, 4000000),
+    SPY: dailyIndex(770, 758), QQQ: dailyIndex(690, 679),
+  },
+  minutes: {
+    SQQQ: minutesSQQQ(),
+    NVD: minutesSleeveLike(3.75, 3.85, 3.80, 3.72),
+    TSLQ: minutesSleeveLike(16.55, 16.9, 16.75, 16.5),
+    SPY: driftMinutes({ open: 769, last: 758.2, vol: 100000 }),
+    QQQ: driftMinutes({ open: 689, last: 679.3, vol: 100000 }),
+  },
+  latest: { SQQQ: 10.3, NVD: 3.85, TSLQ: 16.9 },
+  quotes: { SQQQ: [10.29, 10.31], NVD: [3.845, 3.855], TSLQ: [16.89, 16.91] },
+  yahoo: SLEEVE_YAHOO,
+};
+SCENARIOS.sleeveFull = {
+  assets: ['SQQQ', 'SPXS', 'SOXS', 'TECS', 'NVD'],
+  daily: {
+    SQQQ: dailySQQQ(),
+    SPXS: dailySleeveLike(8.8, 9.05), SOXS: dailySleeveLike(37.0, 37.9), TECS: dailySleeveLike(5.2, 5.35),
+    NVD: dailySleeveLike(3.7, 3.85),
+    SPY: dailyIndex(770, 758), QQQ: dailyIndex(690, 679),
+  },
+  minutes: {
+    SQQQ: minutesSQQQ(),
+    SPXS: minutesSleeveLike(8.85, 9.05, 8.95, 8.82),
+    SOXS: minutesSleeveLike(37.2, 37.9, 37.35, 37.1),
+    TECS: minutesSleeveLike(5.24, 5.35, 5.30, 5.22),
+    NVD: minutesSleeveLike(3.75, 3.85, 3.80, 3.72),
+    SPY: driftMinutes({ open: 769, last: 758.2, vol: 100000 }),
+    QQQ: driftMinutes({ open: 689, last: 679.3, vol: 100000 }),
+  },
+  latest: { SQQQ: 10.3, SPXS: 9.05, SOXS: 37.9, TECS: 5.35, NVD: 3.85 },
+  quotes: { SQQQ: [10.29, 10.31], SPXS: [9.04, 9.06], SOXS: [37.85, 37.95], TECS: [5.345, 5.355], NVD: [3.845, 3.855] },
+  yahoo: SLEEVE_YAHOO,
+};
+
+test('sleeve: SPY breaking down + confirming sleeve name enters in its own slot, tagged', async () => {
+  const f = fixture('sleeveBD');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy').map(o => o.symbol).sort();
+  assert.deepEqual(buys, ['NVD', 'SQQQ'], 'incumbent hedge and sleeve name both enter');
+  const nvd = f.db.prepare("SELECT * FROM kiaan_positions WHERE symbol='NVD'").get();
+  assert.equal(nvd.status, 'open');
+  assert.equal(nvd.sleeve, 1, 'sleeve position carries the sleeve flag');
+  const sqqq = f.db.prepare("SELECT * FROM kiaan_positions WHERE symbol='SQQQ'").get();
+  assert.equal(sqqq.sleeve, 0, 'incumbent position is not a sleeve position');
+  const trade = f.db.prepare("SELECT * FROM kiaan_trades WHERE symbol='NVD'").get();
+  assert.ok(trade.entryReason.startsWith('SLEEVE: '), `sleeve trade tagged: ${trade.entryReason}`);
+  const sleeveDecision = f.db.prepare("SELECT * FROM kiaan_decisions WHERE dkey='CAND:SLEEVE:NVD'").get();
+  assert.equal(sleeveDecision.decision, 'enter-long');
+  assert.equal(JSON.parse(sleeveDecision.data).sleeve, true);
+  assert.ok(JSON.parse(sleeveDecision.reasons).some(r => r.startsWith('SLEEVE_SPY_GATE_OK:')));
+  // The incumbent pass judged NVD as what it is there — a universe name
+  // on a risk-off day — and refused it; the two books' journals coexist.
+  const incumbentDecision = f.db.prepare("SELECT * FROM kiaan_decisions WHERE dkey='CAND:NVD'").get();
+  assert.equal(incumbentDecision.decision, 'no-trade');
+  assert.ok(JSON.parse(incumbentDecision.reasons).some(r => r.startsWith('REGIME_RISK_OFF:')));
+  const ds = JSON.parse(f.db.prepare('SELECT state FROM kiaan_day_state').get().state);
+  assert.equal(ds.sleeveTrades, 1);
+  assert.equal(ds.trades, 2);
+});
+
+test('sleeve: no entry when SPY is not breaking down, even with a full confirmation', async () => {
+  const f = fixture('sleeveNoBD');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy').map(o => o.symbol);
+  assert.deepEqual(buys, ['SQQQ'], 'incumbent hedge trades; the sleeve stays out');
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM kiaan_positions WHERE symbol='NVD'").get().n, 0);
+  const sleeveDecision = f.db.prepare("SELECT * FROM kiaan_decisions WHERE dkey='CAND:SLEEVE:NVD'").get();
+  assert.equal(sleeveDecision.decision, 'no-trade');
+  assert.ok(JSON.parse(sleeveDecision.reasons).some(r => r.startsWith('SLEEVE_SPY_GATE:')),
+    JSON.stringify(JSON.parse(sleeveDecision.reasons)));
+});
+
+test('sleeve: its own 1-position cap binds — a second confirming sleeve name is refused', async () => {
+  const f = fixture('sleeveCap');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy').map(o => o.symbol).sort();
+  assert.deepEqual(buys, ['NVD', 'SQQQ'], 'one sleeve entry (NVD, first in list order) plus the incumbent');
+  const tslq = f.db.prepare("SELECT * FROM kiaan_decisions WHERE dkey='CAND:SLEEVE:TSLQ'").get();
+  assert.equal(tslq.decision, 'no-trade');
+  assert.ok(JSON.parse(tslq.reasons).some(r => r.startsWith('MAX_POSITIONS:')),
+    JSON.stringify(JSON.parse(tslq.reasons)));
+});
+
+test('sleeve: a full incumbent book (3/3) neither blocks nor is consumed by the sleeve', async () => {
+  const f = fixture('sleeveFull');
+  await connectAndEnable(f);
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy').map(o => o.symbol);
+  assert.equal(buys.length, 4, `3 incumbent hedges + 1 sleeve entry, got ${JSON.stringify(buys)}`);
+  assert.ok(buys.includes('NVD'), 'sleeve enters despite the full incumbent book');
+  const hedgeBuys = buys.filter(s => ['SQQQ', 'SPXS', 'SOXS', 'TECS'].includes(s));
+  assert.equal(hedgeBuys.length, 3, 'incumbent cap held at 3');
+  const blockedHedge = ['SQQQ', 'SPXS', 'SOXS', 'TECS'].find(s => !hedgeBuys.includes(s));
+  const blockedDecision = f.db.prepare('SELECT * FROM kiaan_decisions WHERE dkey=?').get(`CAND:${blockedHedge}`);
+  assert.equal(blockedDecision.decision, 'no-trade');
+  assert.ok(JSON.parse(blockedDecision.reasons).some(r => r.startsWith('MAX_POSITIONS:')),
+    `${blockedHedge}: ${blockedDecision.reasons}`);
+  const sleevePositions = f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions WHERE sleeve=1').get().n;
+  const incumbentPositions = f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions WHERE sleeve=0').get().n;
+  assert.equal(sleevePositions, 1);
+  assert.equal(incumbentPositions, 3);
+});
+
+test('sleeve: sleeveEnabled=false turns the sleeve off; incumbents trade on', async () => {
+  const f = fixture('sleeveBD');
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { sleeveEnabled: false } });
+  await f.service._scanCycle(1);
+  const buys = f.world.orderPosts.filter(o => o.side === 'buy').map(o => o.symbol);
+  assert.deepEqual(buys, ['SQQQ']);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM kiaan_decisions WHERE dkey LIKE 'CAND:SLEEVE:%'").get().n, 0);
+});
+
+test('sleeve: settings carry the sleeve rules (31 names, cap 1, toggleable)', async () => {
+  const f = fixture();
+  await connectPaper(f);
+  const view = await f.service.getSettings(1);
+  assert.equal(view.rules.sleeveEnabled, true);
+  assert.equal(view.rules.sleeveSymbols.split(',').length, 31);
+  assert.equal(view.rules.sleeveMaxPositions, 1);
+  const updated = await f.service.setSettings(1, { rules: { sleeveMaxPositions: 2 } });
+  assert.ok(updated);
+  assert.equal((await f.service.getSettings(1)).rules.sleeveMaxPositions, 2);
+});

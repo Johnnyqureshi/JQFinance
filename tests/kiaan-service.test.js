@@ -2,7 +2,7 @@
 
 // Kiaan Bot service tests — schema, connect/ownership/paper-only guards,
 // settings validation, regime-first scan cycles through the real engine
-// (risk-on entry with Warrior-style OCO protection, risk-off hedge-only,
+// (risk-on entry with OCO protection, risk-off hedge-only,
 // chop stand-aside journaled, unknown regime on VIX failure, sub-penny
 // price safety, daily locks, EOD flatten).
 // Fixture mirrors the other bot-service tests: in-memory better-sqlite3, real

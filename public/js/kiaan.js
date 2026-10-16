@@ -4,7 +4,9 @@
  * trades only what the regime allows. Every decision — including standing
  * aside — is journaled server-side with its reasons and shown here.
  * PAPER ONLY BY DESIGN: there is no live mode anywhere in this bot.
- * Reuses the shared warrior skin classes (war-*) — warrior.css is global;
+ * Reuses the shared bot skin classes (war-*) from kiaan.css (the skin was
+ * Warrior's until its deletion on 2026-10-16; the classes stayed because
+ * Kiaan's page is built on them);
  * Kiaan-specific bits live in the kb-* style block below. Everything
  * renders real API data; empty states say "no data yet".
  */

@@ -40,7 +40,7 @@
     })();
   </script>
   <link rel="stylesheet" href="/public/css/style.css?v=20260929d"/>
-  <link rel="stylesheet" href="/public/css/warrior.css?v=20260929d"/>
+  <link rel="stylesheet" href="/public/css/kiaan.css?v=20261016a"/>
   <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
   <link rel="stylesheet" href="/public/css/home-pulse.css?v=20261001a"/>
 </head>
@@ -127,9 +127,6 @@
     </button><button class="nav-link" data-page="kiaan">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/></svg>
       <span class="nav-label">Kiaan</span>
-    </button><button class="nav-link" data-page="warrior">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
-      <span class="nav-label">Warrior</span>
     </button>
   </div>
 
@@ -256,18 +253,6 @@
               <div><span>Status</span><strong class="hp-bot-num" id="hpKiaanOpen">Wiring next</strong></div>
             </div>
             <button class="hp-view" id="hpKiaanView" type="button">View →</button>
-          </article>
-          <article class="hp-bot" aria-label="Warrior bot status">
-            <div class="hp-bot-head">
-              <h3>Warrior<span class="hp-bot-sub">Manual-approval intraday</span></h3>
-              <span class="hp-pill hp-pill-paused" id="hpWarriorPill">…</span>
-            </div>
-            <p class="hp-bot-blocker" id="hpWarriorBlocker" style="display:none"></p>
-            <div class="hp-bot-stats">
-              <div><span>Today&rsquo;s P&amp;L</span><strong class="hp-bot-num" id="hpWarriorPnl">—</strong></div>
-              <div><span>Open positions</span><strong class="hp-bot-num" id="hpWarriorOpen">—</strong></div>
-            </div>
-            <button class="hp-view" id="hpWarriorView" type="button">View →</button>
           </article>
         </div>
       </div>
@@ -828,7 +813,6 @@
 </div>
 
 <div class="page" id="page-kiaan"></div>
-<div class="page" id="page-warrior"></div>
 
 
 <!-- ALPACA CONNECT MODAL -->
@@ -871,8 +855,8 @@
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
-<script src="/js/app.js?v=20261014a"></script>
-<script src="/js/home-pulse.js?v=20261014a"></script>
+<script src="/js/app.js?v=20261016a"></script>
+<script src="/js/home-pulse.js?v=20261016a"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
 <script src="/js/gameplan.js?v=20260929d"></script>
@@ -881,8 +865,7 @@
 
 <script src="/js/alpacatrader.js?v=20261001a"></script>
 <script src="/js/agent.js?v=20260929d"></script>
-<script src="/js/kiaan.js?v=20261014a"></script>
-<script src="/js/warrior.js?v=20261012a"></script>
+<script src="/js/kiaan.js?v=20261016a"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">
@@ -904,9 +887,6 @@
   </button><button class="mobile-nav-btn nav-link" data-page="kiaan" aria-label="Kiaan Bot">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/></svg>
     <span>Kiaan</span>
-  </button><button class="mobile-nav-btn nav-link" data-page="warrior" aria-label="Warrior Bot">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M12 8v4m0 3v.5"/></svg>
-    <span>Warrior</span>
   </button>
 </nav>
 

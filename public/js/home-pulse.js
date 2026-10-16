@@ -230,9 +230,9 @@
   }
 
   function refreshBots() {
-    var jobs = [
-      { prefix: 'hpWarrior', statusUrl: '/api/warrior/status', tradesUrl: '/api/warrior/trades' },
-    ];
+    // Warrior was deleted 2026-10-16; the Kiaan card is static summary
+    // text, so no bot status polling remains on the home page.
+    var jobs = [];
     return Promise.all(jobs.map(function (job) {
       return Promise.allSettled([fetchJson(job.statusUrl), fetchJson(job.tradesUrl)]).then(function (rs) {
         var status = rs[0].status === 'fulfilled' ? rs[0].value : null;
@@ -258,8 +258,6 @@
     if (!$('homeEmpty') || !$('hpTiles')) return;
     var kiaanview = $('hpKiaanView');
     if (kiaanview) kiaanview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('kiaan'); });
-    var warriorview = $('hpWarriorView');
-    if (warriorview) warriorview.addEventListener('click', function () { if (typeof goPage === 'function') goPage('warrior'); });
     refresh();
     setInterval(function () { if (homeVisible()) refresh(); }, 60000);
   }

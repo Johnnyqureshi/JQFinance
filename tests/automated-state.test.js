@@ -101,7 +101,7 @@ test('restore writes the validated highest image before service startup', async 
 });
 test('checkpoint refuses to overwrite a durable snapshot with an empty local image', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  source.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   // Local DB is fresh/empty (restore never ran); a durable snapshot exists.
@@ -116,11 +116,11 @@ test('checkpoint refuses to overwrite a durable snapshot with an empty local ima
 
 test('checkpoint commits once the local image carries bot identity', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  source.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: fakePool({ image }), ownerId: 'test-owner' });
   await state.init();
   await state.acquireFence();
@@ -132,7 +132,7 @@ test('checkpoint commits once the local image carries bot identity', async () =>
 
 test('checkpoint allows an empty image when this boot restored the snapshot', async () => {
   const source = new Database(':memory:');
-  source.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  source.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const image = source.serialize();
   source.close();
   // Restore ran (scripts/boot.js sets this); the local image IS the snapshot.
@@ -233,7 +233,7 @@ test('one-shot truncate runs after restore + fence, before the startup checkpoin
   const pool = instrumentedPool({ snapshot: seededSnapshot(5) });
   const db = new Database(':memory:');
   db.exec("CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('restored')");
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
   await state.init();
   assert.equal(state.generation(), 5);
@@ -264,7 +264,7 @@ test('one-shot truncate runs after restore + fence, before the startup checkpoin
 test('boot survives a throwing TRUNCATE and the one-shot retries on the next boot', async () => {
   const pool = instrumentedPool({ snapshot: seededSnapshot(3), failTruncate: true });
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
   await state.init();
   await state.acquireFence();
@@ -293,26 +293,26 @@ test('throttle coalesces rapid mutation checkpoints and lands the latest state',
   const pool = instrumentedPool();
   const db = new Database(':memory:');
   db.exec("CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('v1')");
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner', checkpointMinIntervalMs: 60 });
   await state.init();
   await state.acquireFence();
 
-  const first = await state.flush('warrior-operation');
+  const first = await state.flush('kiaan-operation');
   assert.equal(first.generation, 1);
   assert.equal(pool.control.insertCount, 1);
 
   db.exec("UPDATE marker SET value='v2'");
   const pending = [
-    state.flush('warrior-operation'),
-    state.flush('warrior-tick'),
+    state.flush('kiaan-operation'),
+    state.flush('kiaan-tick'),
     state.flush('kiaan-operation'),
   ];
   // Coalesced: nothing new has been written yet.
   assert.equal(pool.control.insertCount, 1);
   const results = await Promise.all(pending);
   assert.equal(pool.control.insertCount, 2);
-  assert.deepEqual(pool.control.reasons, ['warrior-operation', 'kiaan-operation']);
+  assert.deepEqual(pool.control.reasons, ['kiaan-operation', 'kiaan-operation']);
   for (const result of results) assert.equal(result.generation, 2);
 
   // The landed image is the latest state (v2), restorable end to end.
@@ -333,7 +333,7 @@ test('startup bypasses the throttle and the shutdown checkpoint settles a pendin
   const pool = instrumentedPool();
   const db = new Database(':memory:');
   db.exec("CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('v1')");
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner', checkpointMinIntervalMs: 60_000 });
   await state.init();
   await state.acquireFence();
@@ -413,7 +413,7 @@ function leasePool() {
 test('lost fence latches fail-closed, then recoverFence re-acquires via the lease and resumes', async () => {
   const { pool, control } = leasePool();
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
   await state.init();
   const firstEpoch = await state.acquireFence();
@@ -448,7 +448,7 @@ test('lost fence latches fail-closed, then recoverFence re-acquires via the leas
 test('recoverFence never displaces another live fence holder', async () => {
   const { pool, control } = leasePool();
   const db = new Database(':memory:');
-  db.exec("CREATE TABLE warrior_settings(user_id TEXT); INSERT INTO warrior_settings VALUES ('u1')");
+  db.exec("CREATE TABLE kiaan_settings(user_id TEXT); INSERT INTO kiaan_settings VALUES ('u1')");
   const state = createAutomatedState({ db, injectedPool: pool, ownerId: 'test-owner' });
   await state.init();
   await state.acquireFence();
@@ -484,29 +484,6 @@ test('a hung PostgreSQL query times out instead of wedging the state machine', a
   const startedAt = Date.now();
   await assert.rejects(state.acquireFence(), /timed out/);
   assert.ok(Date.now() - startedAt < 5_000, 'timeout must fire promptly');
-  await state.close();
-  db.close();
-});
-
-test('warrior chase-cap migration patches stored 10 to 5 once, leaves custom values', async () => {
-  const db = new Database(':memory:');
-  db.exec(`CREATE TABLE warrior_settings(user_id INTEGER PRIMARY KEY, rules TEXT);
-    INSERT INTO warrior_settings VALUES (1, '{"maxChasePct":10,"minPctGain":2}');
-    INSERT INTO warrior_settings VALUES (2, '{"maxChasePct":7}');
-    INSERT INTO warrior_settings VALUES (3, '{}');`);
-  const state = createAutomatedState({ db, injectedPool: fakePool(), ownerId: 'test-owner' });
-  const first = state.applyWarriorChaseCap5();
-  assert.deepEqual(first, { patched: true });
-  const rulesOf = uid => JSON.parse(db.prepare('SELECT rules FROM warrior_settings WHERE user_id=?').get(uid).rules);
-  assert.equal(rulesOf(1).maxChasePct, 5, 'the old default 10 is patched to 5');
-  assert.equal(rulesOf(1).minPctGain, 2, 'other stored rules are untouched');
-  assert.equal(rulesOf(2).maxChasePct, 7, 'a deliberate custom cap is left alone');
-  assert.equal(rulesOf(3).maxChasePct, undefined, 'rows without the key stay without it (the new default applies)');
-  // One-shot: a later boot never re-patches, even if a stored 10 reappears.
-  db.prepare('UPDATE warrior_settings SET rules=? WHERE user_id=2').run('{"maxChasePct":10}');
-  const second = state.applyWarriorChaseCap5();
-  assert.deepEqual(second, { skipped: true });
-  assert.equal(rulesOf(2).maxChasePct, 10, 'the migration never runs twice');
   await state.close();
   db.close();
 });

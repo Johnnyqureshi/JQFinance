@@ -44,8 +44,8 @@ test('server.js wires the Kiaan service: create, mount, scheduler, readyz, drain
 test('index.html has the Kiaan page first and the bumped asset tag', () => {
   assert.ok(html.includes('data-page="kiaan"'), 'desktop/mobile nav has Kiaan');
   assert.ok(html.includes('id="page-kiaan"'), 'page-kiaan container exists');
-  assert.ok(html.includes('/js/kiaan.js?v=20261014a'), 'kiaan.js included with the current cache-busting tag');
-  assert.ok(html.indexOf('data-page="kiaan"') < html.indexOf('data-page="warrior"'), 'Kiaan tab stays first');
+  assert.ok(html.includes('/js/kiaan.js?v=20261016a'), 'kiaan.js included with the current cache-busting tag');
+  assert.ok(!html.includes('data-page="warrior"'), 'no Warrior tab remains (bot deleted 2026-10-16)');
 });
 
 test('app.js routes the kiaan page through window.kiaanBot', () => {

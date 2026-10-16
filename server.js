@@ -20,7 +20,6 @@ const {
   deriveOvernightPrice,
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
-const { createWarriorService, mountWarrior } = require('./lib/warrior/service');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
@@ -518,17 +517,10 @@ const automatedStartup = automatedState.init()
   // Singles & Doubles was deleted: drop its tables before the startup
   // checkpoint so the drop propagates into the durable snapshot.
   .then(() => automatedState.dropRetiredSdTables())
-  // Warrior rejection log retired 2026-09-29: drop before the startup
-  // checkpoint so the drop propagates into the durable snapshot.
-  .then(() => automatedState.dropRetiredWarriorRejectionTable())
   // b2_close_attempts + crypto_journal retired 2026-09-29 (Johnny: no zombie
   // data) — drop before the startup checkpoint so the drops persist.
   .then(() => automatedState.dropRetiredB2CloseAttempts())
   .then(() => automatedState.dropRetiredCryptoJournal())
-  // Warrior $0.10–$20 price band (Johnny 2026-09-29) — before the checkpoint.
-  .then(() => automatedState.applyWarriorPriceBand())
-  // Warrior chase cap 10 → 5 (Johnny 2026-10-12) — before the checkpoint.
-  .then(() => automatedState.applyWarriorChaseCap5())
   // Crypto bot DELETED 2026-10-07 on Johnny's order ("gut it, make it
   // disappear"): drop its tables and broker-account claim before the
   // startup checkpoint so the removal persists into the durable snapshot.
@@ -543,10 +535,11 @@ const automatedStartup = automatedState.init()
   // before the startup checkpoint so the removal persists into the durable
   // snapshot.
   .then(() => automatedState.dropOrbBot())
-  // All bots paused 2026-09-29 on Johnny's order ("pause all bots").
-  // One-shot: runs before the startup checkpoint so the pause propagates
-  // into the durable snapshot, and never re-runs after Johnny re-enables.
-  .then(() => automatedState.pauseAllBotsOnce())
+  // Warrior bot DELETED 2026-10-16 on Johnny's order ("we can do without
+  // Warrior.. let's stick to a slim system"): drop its tables and
+  // broker-account claim before the startup checkpoint so the removal
+  // persists into the durable snapshot. The fleet is Kiaan only.
+  .then(() => automatedState.dropWarriorBot())
   .then(() => automatedState.flush('startup').catch(error => {
     // A refused startup checkpoint (empty local image while a snapshot
     // exists) must not take the whole site down: the bots simply stay
@@ -1381,38 +1374,6 @@ app.get('/api/_verify20260927', async (req, res) => {
     try { mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n').filter(l => l.includes('/data')); } catch (e) { mounts = ['read-error: ' + e.message]; }
     try { dataLs = fs.readdirSync('/data'); } catch (e) { dataLs = ['read-error: ' + e.message]; }
     try { const s = fs.statSync('/data/jqf.db'); dbStat = { size: s.size, mtime: s.mtime.toISOString() }; } catch (e) { dbStat = 'missing: ' + e.message; }
-    // TEMP Warrior near-miss section (2026-10-12): the day's best-evaluation
-    // journal (furthest stage + killing gate per symbol), the day's scan
-    // funnel summed across scan runs, and the watched-set size — so a
-    // zero-trade day can name its gates and gainers-only sourcing can be
-    // verified from the bot's own records. Dates are Eastern (trade dates).
-    const etToday = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date());
-    const etDayStartIso = ds => {
-      const localHour = Number(new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23',
-      }).format(new Date(`${ds}T12:00:00Z`)));
-      return new Date(`${ds}T00:00:00-${String(12 - localHour).padStart(2, '0')}:00`).toISOString();
-    };
-    const etNextDate = new Date(Date.parse(`${etToday}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
-    const warriorNearMisses = aq('SELECT user_id, symbol, trade_date, data, stage_rank FROM warrior_best_evaluations WHERE trade_date=? ORDER BY stage_rank DESC, symbol', etToday)
-      .map(r => {
-        let parsed = {};
-        try { parsed = JSON.parse(r.data || '{}'); } catch (_) { parsed = {}; }
-        return {
-          user_id: r.user_id, symbol: r.symbol, tradeDate: r.trade_date,
-          furthestStage: parsed.stage || null, gate: parsed.gate ?? null, reason: parsed.reason || null,
-          pattern: parsed.pattern ?? null, price: parsed.price ?? null,
-          dayChangePct: parsed.dayChangePct ?? null, paceRvol: parsed.paceRvol ?? null,
-          score: parsed.score ?? null, rr: parsed.rr ?? null,
-          evaluatedAt: parsed.evaluatedAt || null, stageRank: r.stage_rank,
-        };
-      });
-    const warriorFunnelRow = aq(`SELECT COALESCE(SUM(from_screen),0) AS fromScreen, COALESCE(SUM(from_watched),0) AS fromWatched,
-      COALESCE(SUM(from_rotation),0) AS fromRotation, COALESCE(SUM(symbols_scanned),0) AS symbolsScanned, COUNT(*) AS runs
-      FROM warrior_scan_runs WHERE started_at>=? AND started_at<?`, etDayStartIso(etToday), etDayStartIso(etNextDate))[0];
-    const warriorWatchedRow = aq('SELECT COUNT(*) AS n FROM warrior_universe WHERE watched_on=?', etToday)[0];
     const out = {
       env_sqlite_dir: process.env.SQLITE_DIR || null,
       cwd: process.cwd(),
@@ -1427,44 +1388,7 @@ app.get('/api/_verify20260927', async (req, res) => {
       b2_trades: aq('SELECT COUNT(*) AS n FROM b2_trades')[0],
       b2_open: aq(`SELECT COUNT(*) AS n FROM b2_trades WHERE status NOT IN ('closed','rejected','canceled','expired')`)[0],
       b2_alerts: aq('SELECT created_at, type AS kind, message FROM b2_alerts ORDER BY created_at DESC LIMIT 5'),
-      // TEMP Warrior visibility (2026-09-29) — keep B2 fields untouched above
-      warrior_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM warrior_settings'),
-      warrior_creds: aq('SELECT user_id, mode, length(key_enc) AS key_bytes FROM warrior_credentials'),
-      warrior_proposals: aq("SELECT COUNT(*) AS n FROM warrior_proposals WHERE status='pending'")[0],
-      warrior_positions: aq("SELECT COUNT(*) AS n FROM warrior_positions WHERE status='open'")[0],
-      warrior_alerts: aq('SELECT created_at, kind, message FROM warrior_alerts ORDER BY created_at DESC LIMIT 5'),
-      // TEMP Warrior near-miss journal + day funnel (2026-10-12) — see
-      // computation above the payload. Empty nearMisses on a day with no
-      // post-deploy scan cycles is expected, not a fault.
-      warrior_near_miss: {
-        tradeDate: etToday,
-        nearMisses: warriorNearMisses,
-        funnel: {
-          fromScreen: Number(warriorFunnelRow?.fromScreen) || 0,
-          fromWatched: Number(warriorFunnelRow?.fromWatched) || 0,
-          fromRotation: Number(warriorFunnelRow?.fromRotation) || 0,
-          symbolsScanned: Number(warriorFunnelRow?.symbolsScanned) || 0,
-          runs: Number(warriorFunnelRow?.runs) || 0,
-        },
-        watchedCount: Number(warriorWatchedRow?.n) || 0,
-      },
-      // TEMP Warrior rules visibility (2026-10-12): the chase cap + RSI
-      // take-profit + exemption ceilings from stored Warrior rules, so
-      // the 2026-10-12 Warrior changes are server-verifiable. Numbers
-      // only, never secrets.
-      warrior_rules: aq('SELECT user_id, rules FROM warrior_settings').map(r => {
-        try {
-          const p = JSON.parse(r.rules || '{}');
-          return {
-            user_id: r.user_id,
-            maxChasePct: p.maxChasePct === undefined ? null : p.maxChasePct,
-            takeProfitRsi: p.takeProfitRsi === undefined ? null : p.takeProfitRsi,
-            secondLegMaxChasePct: p.secondLegMaxChasePct === undefined ? null : p.secondLegMaxChasePct,
-            premarketBreakMaxChasePct: p.premarketBreakMaxChasePct === undefined ? null : p.premarketBreakMaxChasePct,
-          };
-        } catch (_) { return { user_id: r.user_id, _error: 'rules unparseable' }; }
-      }),
-      // TEMP Crypto breakout visibility (2026-09-29) — keep B2/Warrior fields untouched above
+      // TEMP Crypto breakout visibility (2026-09-29) — keep B2 fields untouched above
       // TEMP Kiaan Bot visibility (2026-10-08) — stage-2 wiring verification
       kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),
       kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
@@ -6314,20 +6238,11 @@ app.put('/api/trade-settings', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Warrior: own tables, own scheduler, own lease. The deleted S&D bot is not
-// restored. Proposals never auto-submit.
-const warriorService = createWarriorService({
-  db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
-  persistenceReady: () => automatedTradingPersistenceReady,
-  durability: automatedState,
-});
-mountWarrior({ app, service: warriorService, requireAuth, ensureSessionUserInTradingStore });
-let warriorSchedulerStarted = false;
-
-// Kiaan Bot (regime-first, Johnny 2026-10-08) is wired next to Warrior: own
-// kiaan_* tables, own scheduler, own lease. Paper-only by design and ships
-// DISABLED — never enable it for Johnny; he connects and enables bots
-// himself, on a dedicated new paper account.
+// Kiaan Bot (regime-first, Johnny 2026-10-08): own kiaan_* tables, own
+// scheduler, own lease. Paper-only by design and ships DISABLED — never
+// enable it for Johnny; he connects and enables bots himself, on a
+// dedicated new paper account. Since Warrior's deletion on 2026-10-16
+// Kiaan is the only bot in the fleet.
 const kiaanService = createKiaanService({
   db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
@@ -6338,10 +6253,6 @@ let kiaanSchedulerStarted = false;
 
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it
 // runs even while the bots are paused.
-for (const row of automatedDb.prepare('SELECT user_id FROM warrior_settings').all()) {
-  try { warriorService.pruneDiagnostics(row.user_id); }
-  catch (error) { console.warn('[Warrior] boot prune failed:', error.message); }
-}
 for (const row of automatedDb.prepare("SELECT user_id FROM kiaan_settings").all()) {
   try { kiaanService.pruneDiagnostics(row.user_id); }
   catch (error) { console.warn('[Kiaan] boot prune failed:', error.message); }
@@ -6373,14 +6284,12 @@ app.get('/readyz', async (_req, res) => {
   const ready = !serviceShuttingDown
     && automatedTradingPersistenceReady
     && databaseReady
-    && warriorSchedulerStarted
     && kiaanSchedulerStarted;
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'unavailable',
     database: databaseReady ? 'ready' : 'unavailable',
     fence: automatedTradingPersistenceReady ? 'active' : 'inactive',
     schedulers: {
-      warrior: warriorSchedulerStarted ? 'started' : 'stopped',
       kiaan: kiaanSchedulerStarted ? 'started' : 'stopped',
     },
   });
@@ -6421,14 +6330,12 @@ async function stopAutomatedState(signal) {
   serviceShuttingDown = true;
   let failed = false;
   try {
-    warriorSchedulerStarted = false;
     kiaanSchedulerStarted = false;
-    const warriorDrain = warriorService.drain();
     const kiaanDrain = kiaanService.drain();
     // A timeout is unsafe: active HTTP handlers may still mutate automated
     // state, so do not checkpoint or release the fence on this path.
     await closeServer(httpServer);
-    await Promise.all([warriorDrain, kiaanDrain]);
+    await kiaanDrain;
     clearInterval(authAttemptCleanupTimer);
     clearInterval(automatedHeartbeatTimer);
     await automatedState.releaseFence();
@@ -6446,10 +6353,8 @@ process.once('SIGINT', () => { void stopAutomatedState('SIGINT'); });
 function startServer() {
   httpServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Qureshi Finance on :${PORT}`);
-  warriorService.start(); // first run delayed ~30s
-  warriorSchedulerStarted = true;
-  // Kiaan Bot first run is delayed by the service itself (~150s), staggered
-  // after Warrior. Ships disabled: the loop idles until Johnny enables it.
+  // Kiaan Bot first run is delayed by the service itself (~150s). Ships
+  // disabled: the loop idles until Johnny enables it.
   kiaanService.start();
   kiaanSchedulerStarted = true;
   // Pre-load SPY levels immediately at startup so data is ready before market open

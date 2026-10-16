@@ -382,6 +382,7 @@ function fixture(scenario = 'riskon', options = {}) {
     db, vault, fetch: fetchImpl, now: () => world.time,
     persistenceReady: () => true, durability: options.durability || null,
     timeoutMs: options.timeoutMs,
+    retryBaseMs: options.retryBaseMs,
     exitPoll: { tries: 3, intervalMs: 0 },
   });
   return { db, service, world };
@@ -726,23 +727,23 @@ test('second scan cycle on the same trade date reuses the cached assets catalog 
   assert.ok(minuteCalls.length >= 1, 'minute bars stay fresh each cycle');
 });
 
-test('a timed-out GET is retried once and can succeed (connect account read)', async () => {
+test('a timed-out GET retries with backoff and can succeed on the third attempt (connect account read)', async () => {
   let accountGets = 0;
   const f = fixture('riskon', {
-    timeoutMs: 50,
+    timeoutMs: 50, retryBaseMs: 1,
     wrapFetch: inner => async (url, init = {}) => {
       const parsed = new URL(url);
       if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/account'
         && (init.method || 'GET') === 'GET') {
         accountGets++;
-        if (accountGets === 1) return new Promise(() => {}); // hang → 50ms timeout
+        if (accountGets <= 2) return new Promise(() => {}); // hang → 50ms timeout, twice
       }
       return inner(url, init);
     },
   });
   const out = await connectPaper(f);
   assert.equal(out.ok, true);
-  assert.equal(accountGets, 2, 'first GET timed out, the single retry succeeded');
+  assert.equal(accountGets, 3, 'two timed-out GETs, the third attempt succeeded');
 });
 
 test('a timed-out POST (order) is NEVER retried — reconciliation semantics preserved', async () => {
@@ -1260,4 +1261,176 @@ test('sleeve: settings carry the sleeve rules (31 names, cap 1, toggleable)', as
   const updated = await f.service.setSettings(1, { rules: { sleeveMaxPositions: 2 } });
   assert.ok(updated);
   assert.equal((await f.service.getSettings(1)).rules.sleeveMaxPositions, 2);
+});
+
+// --- broker-timeout hardening (2026-10-16: retries, 5xx, latch auto-clear) ---
+test('broker hardening: a GET answered 500 is retried and can succeed', async () => {
+  let accountGets = 0;
+  const f = fixture('riskon', {
+    retryBaseMs: 1,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/account'
+        && (init.method || 'GET') === 'GET') {
+        accountGets++;
+        if (accountGets === 1) return { ok: false, status: 500, json: async () => ({ code: 50010000, message: 'broker busy' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  const out = await connectPaper(f);
+  assert.equal(out.ok, true);
+  assert.equal(accountGets, 2, 'first GET drew a 500, the retry succeeded');
+});
+
+test('broker hardening: a GET answered 500 on every attempt fails after 3 tries', async () => {
+  let accountGets = 0;
+  const f = fixture('riskon', {
+    retryBaseMs: 1,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/account'
+        && (init.method || 'GET') === 'GET') {
+        accountGets++;
+        return { ok: false, status: 500, json: async () => ({ code: 50010000, message: 'broker busy' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  await assert.rejects(() => connectPaper(f), /HTTP 500/);
+  assert.equal(accountGets, 3, 'all 3 attempts were made before failing');
+});
+
+test('broker hardening: a GET answered 4xx is definitive — never retried', async () => {
+  let accountGets = 0;
+  const f = fixture('riskon', {
+    retryBaseMs: 1,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/account'
+        && (init.method || 'GET') === 'GET') {
+        accountGets++;
+        return { ok: false, status: 403, json: async () => ({ code: 40310000, message: 'forbidden' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  await assert.rejects(() => connectPaper(f), /HTTP 403/);
+  assert.equal(accountGets, 1, 'a 4xx answer is not retried');
+});
+
+test('broker hardening: retry-exhausted GET still fails closed — error latch set, zero orders', async () => {
+  const f = fixture('riskon', {
+    timeoutMs: 50, retryBaseMs: 1,
+    wrapFetch: (inner, world) => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (world.failAccountGets && parsed.hostname === 'paper-api.alpaca.markets'
+        && parsed.pathname === '/v2/account' && (init.method || 'GET') === 'GET') {
+        world.accountGetAttempts = (world.accountGetAttempts || 0) + 1;
+        return new Promise(() => {}); // hang → timeout on every attempt
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  f.world.failAccountGets = true;
+  await f.service._scanCycle(1);
+  assert.equal(f.world.accountGetAttempts, 3, 'account GET exhausted all 3 attempts');
+  const settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'error');
+  assert.match(settings.scheduler_reason, /timed out; reconciliation required/);
+  assert.equal(f.world.orderPosts.length, 0, 'no orders while the broker is unreachable');
+});
+
+test('broker hardening: an order POST answered 500 is NEVER retried (writes stay single-attempt)', async () => {
+  let orderAttempts = 0;
+  const f = fixture('riskon', {
+    retryBaseMs: 1,
+    wrapFetch: inner => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'paper-api.alpaca.markets' && parsed.pathname === '/v2/orders' && init.method === 'POST') {
+        orderAttempts++;
+        return { ok: false, status: 500, json: async () => ({ code: 50010000, message: 'broker busy' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false } });
+  await f.service._scanCycle(1);
+  assert.equal(orderAttempts, 1, 'a failed entry POST must not be re-sent');
+  assert.equal(f.world.orderPosts.length, 0, 'the broker never recorded the order');
+});
+
+test('broker hardening: reconciliation latch auto-clears on the next cycle whose full broker fetch succeeds', async () => {
+  const f = fixture('riskon', {
+    timeoutMs: 50, retryBaseMs: 1,
+    wrapFetch: (inner, world) => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (world.failAccountGets && parsed.hostname === 'paper-api.alpaca.markets'
+        && parsed.pathname === '/v2/account' && (init.method || 'GET') === 'GET') {
+        return new Promise(() => {}); // hang → timeout
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false } });
+  f.world.failAccountGets = true;
+  await f.service._scanCycle(1);
+  let settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'error');
+  assert.match(settings.scheduler_reason, /reconciliation required/);
+  assert.equal(f.world.orderPosts.length, 0, 'latched cycle placed no orders');
+  f.world.failAccountGets = false;
+  await f.service._scanCycle(1);
+  settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'ok', 'latch cleared without a restart');
+  assert.equal(settings.scheduler_reason, null);
+  assert.ok(f.world.orderPosts.length >= 1, 'the recovered cycle trades again');
+});
+
+test('broker hardening: latch clears mid-cycle — a later scan-stage failure records its own reason, not the stale latch', async () => {
+  const f = fixture('riskon', {
+    timeoutMs: 50, retryBaseMs: 1,
+    wrapFetch: (inner, world) => async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (world.failAccountGets && parsed.hostname === 'paper-api.alpaca.markets'
+        && parsed.pathname === '/v2/account' && (init.method || 'GET') === 'GET') {
+        return new Promise(() => {}); // hang → timeout
+      }
+      if (world.failBars && parsed.hostname === 'data.alpaca.markets' && parsed.pathname === '/v2/stocks/bars') {
+        return { ok: false, status: 500, json: async () => ({ code: 50010000, message: 'bars down' }) };
+      }
+      return inner(url, init);
+    },
+  });
+  await connectAndEnable(f);
+  f.world.failAccountGets = true;
+  await f.service._scanCycle(1);
+  let settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'error');
+  assert.match(settings.scheduler_reason, /reconciliation required/);
+  // Broker account/session reads recover; only the scan-stage bars read
+  // still fails. The stale reconciliation latch must be gone — the
+  // stored reason is the fresh bars failure, proving the clear happened
+  // mid-cycle (after reconciliation, before the scan completed).
+  f.world.failAccountGets = false;
+  f.world.failBars = true;
+  await f.service._scanCycle(1);
+  settings = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'error');
+  assert.match(settings.scheduler_reason, /HTTP 500/);
+  assert.doesNotMatch(settings.scheduler_reason, /reconciliation required/);
+});
+
+test('broker hardening: a successful status() account read clears a stored reconciliation latch', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  f.db.prepare("UPDATE kiaan_settings SET scheduler_status='error', scheduler_reason='Broker request timed out; reconciliation required.' WHERE user_id=1").run();
+  const st = await f.service.status(1);
+  assert.equal(st.schedulerStatus, 'ok');
+  assert.equal(st.schedulerReason, null);
+  const settings = f.db.prepare('SELECT scheduler_status FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.scheduler_status, 'ok', 'the stored latch is cleared, not just the response');
 });

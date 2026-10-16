@@ -1109,17 +1109,23 @@ test('liquidity gate judges IEX bars against a feed-aware floor (TCRT-shaped, re
 });
 
 test('liquidity gate still rejects a genuinely illiquid name on IEX bars (regression)', async () => {
-  // IEX ADV of 30,000 ≈ 375K consolidated — below the 500,000 floor even
-  // after feed-aware scaling (effective IEX floor 40,000), so the gate
-  // still bites, and the journal names the feed-aware floor it applied.
-  const f = fixture({ sipForbidden: true, dailyBarsOverride: flatVolumeDailyBars(30000) });
+  // IEX ADV of 2,000 fails the 40,000 feed-aware floor on EVERY leg: the
+  // average, today's actual volume, and today's pace projection (a flat
+  // 2,000-share tape at 10:00 ET runs at 13.0x its own sleepy pace, which
+  // still projects only a 26,000-share day). The gate still bites, and
+  // the journal names all three legs and the feed-aware floor applied.
+  // (At a flat 30,000 this fixture now pace-passes the share leg and is
+  // decided by the untouched dollar floor instead — the pace leg working
+  // as designed, Johnny 2026-10-16.)
+  const f = fixture({ sipForbidden: true, dailyBarsOverride: flatVolumeDailyBars(2000) });
   await connectAndGet(f);
   const result = await f.service.run(1);
   assert.equal(result.ok, true);
   const rows = f.db.prepare('SELECT data FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
-  const kill = rows.map(r => JSON.parse(r.data)).find(e => /Average daily volume 30000/.test(e.reason || ''));
+  const kill = rows.map(r => JSON.parse(r.data)).find(e => /Average daily volume 2000/.test(e.reason || ''));
   assert.ok(kill, `AAA rejected at the liquidity gate: ${JSON.stringify(rows.map(r => JSON.parse(r.data).reason))}`);
   assert.match(kill.reason, /below 40000/, 'journal shows the feed-aware floor (500000 consolidated x 8% IEX share)');
+  assert.match(kill.reason, /pace-projected volume 26000 also below 40000/, 'journal shows the pace leg was judged and failed');
   assert.match(kill.reason, /IEX-feed floor/, 'journal names the feed the floor was scaled for');
 });
 
@@ -1379,6 +1385,69 @@ test("scoreSymbol admits a waking name on today's volume alone", async () => {
   });
   assert.equal(stillSleepy.outcome, 'rejected');
   assert.equal(stillSleepy.stage, 'universe', 'average and today both illiquid — still rejected');
+});
+
+// --- Pace leg on the share-volume gate (Johnny 2026-10-16, XLAB) -----------
+// The average judges a name by its sleepy days; a name exploding TODAY is
+// liquid today. Third pass: today's volume projected at its current pace
+// (paceRvol x the average day) against the same floor. Dollar floor
+// untouched.
+test('scoreSymbol pace leg: a sleepy name exploding today passes the share gate on pace projection', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // XLAB-shaped: 10k-share average day, only 300k shares traded by the
+  // last bar (10:29 ET) — average AND today both under the 500k floor, so
+  // the pre-pace gate rejected this shape outright. The pace is
+  // (300k/59min)/(10k/390min) ~ 198x, projecting a ~1.98M-share day.
+  // Prices are the standard tape scaled ~1.85x so today's dollar volume
+  // also clears the (unchanged) $5M dollar floor at 300k shares.
+  const K = 1.85;
+  const m1 = mappedMinute().map(b => ({ ...b, o: b.o * K, h: b.h * K, l: b.l * K, c: b.c * K }));
+  const daily = mappedDaily().map(b => ({ ...b, o: b.o * K, h: b.h * K, l: b.l * K, c: b.c * K, v: 10000 }));
+  daily[daily.length - 1].v = 300000;
+  const paced = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1, daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(paced.outcome, 'eligible', `pace leg must carry the share gate, got ${JSON.stringify(paced).slice(0, 300)}`);
+  assert.match(paced.liquidityNote || '', /Liquidity passed on pace: pace-projected volume \d+ ≥ floor 500000/,
+    'the evaluation names the pace leg as the one that passed');
+  const rows = f.db.prepare('SELECT data FROM warrior_best_evaluations WHERE symbol=?').all('AAA');
+  const journaled = rows.map(r => JSON.parse(r.data)).find(e => /Liquidity passed on pace/.test(e.liquidityNote || ''));
+  assert.ok(journaled, 'near-miss journal record carries the pace-pass note');
+});
+
+test('scoreSymbol pace leg: a sleepy name quiet today still fails every leg', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // ADV 100k, today 50k by 10:29 ET: pace ~3.3x projects a ~331k-share
+  // day — under the 500k floor too, so all three legs fail and the
+  // journal reason names each one.
+  const daily = mappedDaily().map(b => ({ ...b, v: 100000 }));
+  daily[daily.length - 1].v = 50000;
+  const quiet = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily,
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(quiet.outcome, 'rejected');
+  assert.equal(quiet.stage, 'universe');
+  assert.match(quiet.reason, /Average volume 100000 and today's volume 50000 both below 500000, pace-projected volume \d+ also below 500000/);
+});
+
+test('scoreSymbol pace leg: a normally liquid name is unaffected', async () => {
+  const f = fixture();
+  await connectAndGet(f);
+  f.db.prepare('INSERT INTO warrior_leases(user_id,token,expires_at) VALUES (1,?,?)').run('t', NOW + 3600000);
+  // Standard tape: 1M-share average day clears the floor on the average
+  // leg alone — eligible exactly as before, with no pace note attached.
+  const normal = f.service.scoreSymbol({
+    uid: 1, symbol: 'AAA', m1: mappedMinute(), daily: mappedDaily(),
+    rules: DEFAULT_WARRIOR_RULES, account: { equity: '100000' },
+  });
+  assert.equal(normal.outcome, 'eligible', `normal name unaffected, got ${JSON.stringify(normal).slice(0, 300)}`);
+  assert.equal(normal.liquidityNote, null, 'no pace note when the average leg carried the gate');
 });
 
 // --- Premarket scanning + hold-the-runner (Johnny 2026-10-01) ---------------

@@ -24,6 +24,7 @@ const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { mountSubscription } = require('./lib/subscription');
 const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
+const { mountAdminUsers } = require('./lib/admin-users');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -1377,7 +1378,13 @@ app.get('/api/auth/me', async (req, res) => {
     req.session.destroy(() => {});
     return res.status(401).json({ error: 'Not authenticated', code: 'ACCOUNT_RETIRED' });
   }
-  res.json({ id: req.session.userId, username: req.session.username, email, emailVerified });
+  res.json({
+    id: req.session.userId, username: req.session.username, email, emailVerified,
+    // Owner identity (Johnny's login) — used only to render owner-only
+    // chrome such as the USERS nav entry; every owner surface is gated
+    // server-side regardless of what the client shows.
+    isOwner: uid === 1000000005,
+  });
 });
 
 // Friendly verification landing page (linked from the verification email).
@@ -6306,6 +6313,18 @@ mountReferrals({
   db,
   requireAuth,
   getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
+});
+
+// USERS admin page (Johnny 2026-10-17): owner-only (Johnny's login,
+// user 1000000005 — the same identity pinned for the Kiaan owner view).
+// Page + API 404 for every other account, logged in or not; see
+// lib/admin-users.js.
+mountAdminUsers({
+  app,
+  db,
+  kiaanService,
+  getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
+  ownerUserId: 1000000005,
 });
 let kiaanSchedulerStarted = false;
 

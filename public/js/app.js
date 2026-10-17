@@ -706,6 +706,8 @@ function goPage(page) {
   else if (window.kiaanBot) kiaanBot.pause();
   if (page==='brokers') { if (window.brokersPage) brokersPage.open(); }
   else if (window.brokersPage) brokersPage.pause();
+  if (page==='users') { if (window.usersPage) usersPage.open(); }
+  else if (window.usersPage) usersPage.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 
@@ -2353,6 +2355,40 @@ function setupWatchlistPage() {
   inp?.addEventListener('keydown',e=>{if(e.key==='Enter')ok?.click();});
 }
 
+// ── USERS admin nav (owner only, Johnny 2026-10-17) ──────────────────────────
+// The USERS buttons exist ONLY when the signed-in account is the owner:
+// they are created here, never present in the static markup, and removed
+// again on logout or a non-owner sign-in. This is chrome only — the page
+// route and its data API are gated server-side regardless
+// (lib/admin-users.js: 404 for every non-owner, logged in or not).
+const USERS_NAV_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s3.9 1.5 4.5 4.5"/><circle cx="17" cy="9" r="2.5"/><path d="M15.6 14.7c2.2.2 4.2 1.6 4.8 4.3"/></svg>';
+const USERS_NAV_ICON_MOBILE = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s3.9 1.5 4.5 4.5"/><circle cx="17" cy="9" r="2.5"/><path d="M15.6 14.7c2.2.2 4.2 1.6 4.8 4.3"/></svg>';
+function injectUsersNav() {
+  if (document.querySelector('[data-page="users"]')) return;
+  const desktopAnchor = document.querySelector('.nav-links [data-page="brokers"]');
+  if (desktopAnchor) {
+    const btn = document.createElement('button');
+    btn.className = 'nav-link';
+    btn.dataset.page = 'users';
+    btn.innerHTML = USERS_NAV_ICON + '<span class="nav-label">Users</span>';
+    btn.addEventListener('click', () => goPage('users'));
+    desktopAnchor.after(btn);
+  }
+  const mobileAnchor = document.querySelector('#mobileNav [data-page="brokers"]');
+  if (mobileAnchor) {
+    const btn = document.createElement('button');
+    btn.className = 'mobile-nav-btn nav-link';
+    btn.dataset.page = 'users';
+    btn.setAttribute('aria-label', 'Users');
+    btn.innerHTML = USERS_NAV_ICON_MOBILE + '<span>Users</span>';
+    btn.addEventListener('click', () => goPage('users'));
+    mobileAnchor.after(btn);
+  }
+}
+function removeUsersNav() {
+  document.querySelectorAll('[data-page="users"]').forEach(b => b.remove());
+}
+
 // ── Auth overlay helpers ────────────────────────────────────────────────────────
 function showApp(user) {
   state.currentUser = user;
@@ -2361,6 +2397,12 @@ function showApp(user) {
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
+  if (user && user.isOwner) {
+    injectUsersNav();
+    if (window.location.hash === '#users') goPage('users');
+  } else {
+    removeUsersNav();
+  }
   window.jqfAgent?.show();
   futuresTracker.init();
   marketAlerts.start();
@@ -2371,6 +2413,7 @@ function showApp(user) {
 
 function showAuthOverlay() {
   window.subscriptionPopup?.onLogout();
+  removeUsersNav();
   $('authOverlay').classList.remove('auth-hidden');
   $('navUser').style.display = 'none';
   window.jqfAgent?.hide();

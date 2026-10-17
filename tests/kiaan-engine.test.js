@@ -302,12 +302,17 @@ test('every decision carries journal-ready explanation fields', () => {
   }
 });
 
-// --- paper-only & config -----------------------------------------------------------------
+// --- modes & config -----------------------------------------------------------------
 
-test('paper-only is forced: no override can move the bot toward live', () => {
-  const r = mergedKiaanRules({ tradingMode: 'LIVE', liveEnabled: true, liveConfirmed: true });
-  assert.equal(r.tradingMode, 'PAPER');
+test('modes (2026-10-17): PAPER is the default, LIVE is accepted and normalized, anything else fails validation', () => {
   assert.equal(DEFAULT_KIAAN_RULES.tradingMode, 'PAPER');
+  assert.equal(mergedKiaanRules({}).tradingMode, 'PAPER');
+  assert.equal(mergedKiaanRules({ tradingMode: 'LIVE', liveEnabled: true, liveConfirmed: true }).tradingMode, 'LIVE');
+  assert.equal(mergedKiaanRules({ tradingMode: 'live' }).tradingMode, 'LIVE');
+  assert.equal(validateConfig({ tradingMode: 'LIVE' }).ok, true);
+  const bad = validateConfig({ tradingMode: 'DEMO' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some(e => e.startsWith('tradingMode:')));
 });
 
 test('validateConfig accepts the defaults and rejects nonsense', () => {

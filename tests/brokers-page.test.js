@@ -7,7 +7,7 @@
 // Paper account / Live account choice. IBKR and Tradier are
 // "In development" placeholders with no credential capture. Connect
 // endpoint behavior itself is unchanged and covered by
-// kiaan-service.test.js (paper connects; live refused loudly).
+// kiaan-service.test.js (paper and live connects, stored per mode).
 
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
@@ -23,7 +23,7 @@ const service = read('../lib/kiaan/service.js');
 test('index.html has the Brokers nav entry (desktop + mobile), page container, and bumped assets', () => {
   assert.ok((html.match(/data-page="brokers"/g) || []).length >= 2, 'desktop and mobile nav both carry Brokers');
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
-  assert.ok(html.includes('/js/brokers.js?v=20261016a'), 'brokers.js included with a cache-busting tag');
+  assert.ok(html.includes('/js/brokers.js?v=20261017a'), 'brokers.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/brokers.css?v=20261016a'), 'brokers.css included with a cache-busting tag');
   assert.ok(html.includes('/js/app.js?v=20261016c'), 'app.js tag bumped for the routing change');
 });
@@ -67,9 +67,12 @@ test('broker cards: Alpaca available, IBKR + Tradier in development with no capt
   }
 });
 
-test('connect endpoint behavior is unchanged: paper-only, live refused loudly (no parallel store)', () => {
-  assert.ok(service.includes("String(input.mode).toLowerCase() !== 'paper'"), 'connect still rejects non-paper modes');
-  assert.ok(service.includes('LIVE trading does not exist for Kiaan Bot'), 'live refusal is loud, not a quiet downgrade');
+test('connect endpoint behavior: paper + live accepted and stored per mode, bogus modes refused loudly (no parallel store)', () => {
+  assert.ok(service.includes("mode !== 'paper' && mode !== 'live'"), 'connect accepts exactly paper or live');
+  assert.ok(service.includes("Connect mode must be 'paper' or 'live'"), 'bogus mode refusal is loud, not a quiet downgrade');
+  assert.ok(service.includes('mode mismatch'), 'order-path mode guard present in the service');
   assert.ok(service.includes("app.post('/api/kiaan/connect'"), 'connect route unchanged');
   assert.ok(service.includes("app.post('/api/kiaan/disconnect'"), 'disconnect route unchanged');
+  assert.ok(brokersJs.includes('Live account — real money'), 'live option carries the plain real-money warning');
+  assert.ok(!brokersJs.includes('not accepted yet'), 'stale paper-only note is gone');
 });

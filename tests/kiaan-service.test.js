@@ -1,6 +1,6 @@
 'use strict';
 
-// Kiaan Bot service tests — schema, connect/ownership/paper-only guards,
+// Kiaan Bot service tests — schema, connect/ownership/mode guards,
 // settings validation, regime-first scan cycles through the real engine
 // (risk-on entry with OCO protection, risk-off hedge-only,
 // chop stand-aside journaled, unknown regime on VIX failure, sub-penny
@@ -289,7 +289,7 @@ function fixture(scenario = 'riskon', options = {}) {
       if (!closes) return response({ message: 'unknown symbol' }, 404);
       return response({ chart: { result: [{ indicators: { quote: [{ close: closes }] } }] } });
     }
-    if (parsed.hostname === 'paper-api.alpaca.markets') {
+    if (parsed.hostname === 'paper-api.alpaca.markets' || parsed.hostname === 'api.alpaca.markets') {
       if (path === '/v2/account' && method === 'GET') return response({
         id: world.accountId, status: 'ACTIVE', trading_blocked: false,
         account_blocked: false, trade_suspended_by_user: false,
@@ -430,7 +430,7 @@ test('tickPrice rounds to cents at $1+ and 4dp below $1', async () => {
   assert.equal(service._tickPrice(0.56521725), 0.5652);
 });
 
-// --- connect / ownership / paper-only ---------------------------------------
+// --- connect / ownership / modes ---------------------------------------
 test('connect claims the account for scope kiaan and ships DISABLED', async () => {
   const f = fixture();
   const out = await connectPaper(f);
@@ -453,14 +453,51 @@ test('connect is refused when another bot already owns the account', async () =>
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_credentials').get().n, 0);
 });
 
-test('live connect is refused loudly; settings can never select LIVE', async () => {
+test('live connect is accepted, validated on the LIVE endpoint, and stored live everywhere (2026-10-17)', async () => {
   const f = fixture();
-  await assert.rejects(() => f.service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8), mode: 'live' }), /LIVE trading does not exist/);
-  await connectPaper(f);
-  await assert.rejects(() => f.service.setSettings(1, { rules: { tradingMode: 'LIVE' } }), /tradingMode must be one of PAPER/);
+  const out = await f.service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8), mode: 'live' });
+  assert.equal(out.ok, true);
+  // Validation went to the LIVE Alpaca endpoint, not paper.
+  const accountCall = f.world.calls.find(c => c.path === '/v2/account');
+  assert.ok(accountCall.url.startsWith('https://api.alpaca.markets'), `live validation hit ${accountCall.url}`);
+  // The chosen mode is stored in all three places the guard checks.
+  const cred = f.db.prepare('SELECT * FROM kiaan_credentials WHERE user_id=1').get();
+  assert.equal(cred.mode, 'live');
+  const owner = f.db.prepare('SELECT * FROM broker_account_owners WHERE account_id=?').get('acct-kiaan-test');
+  assert.equal(owner.mode, 'live');
+  assert.equal(owner.scope, 'kiaan');
+  const settings = f.db.prepare('SELECT * FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(settings.mode, 'live');
+  // Still ships DISABLED — connecting stores credentials only.
+  const st = await f.service.status(1);
+  assert.equal(st.enabled, false);
+  assert.equal(st.connected, true);
+  // Views report the STORED mode, not a hard-coded PAPER string.
+  assert.equal(st.tradingMode, 'LIVE');
+  const dash = await f.service.dashboard(1);
+  assert.equal(dash.status.tradingMode, 'LIVE');
+  // Settings may now select LIVE (and still reject unknown keys/values).
+  const ok = await f.service.setSettings(1, { rules: { tradingMode: 'LIVE' } });
+  assert.equal(ok.tradingMode, 'LIVE');
+  assert.equal((await f.service.getSettings(1)).rules.tradingMode, 'LIVE');
+  await assert.rejects(() => f.service.setSettings(1, { rules: { tradingMode: 'DEMO' } }), /tradingMode must be one of PAPER, LIVE/);
   await assert.rejects(() => f.service.setSettings(1, { rules: { nope: 1 } }), /Unknown setting: nope/);
-  const view = await f.service.getSettings(1);
-  assert.equal(view.rules.tradingMode, 'PAPER');
+  // A bogus connect mode is still refused loudly — no quiet downgrade.
+  await assert.rejects(() => f.service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8), mode: 'demo' }), /must be 'paper' or 'live'/);
+});
+
+test('order-path mode guard: settings mode diverging from the credential fails closed with zero orders', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false } });
+  // Tamper: settings claim 'live' while the credential + claim are paper.
+  f.db.prepare("UPDATE kiaan_settings SET mode='live' WHERE user_id=1").run();
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.length, 0, 'mode mismatch placed no orders');
+  // The order write was attempted and withheld BY THE GUARD: the scan
+  // journals the exact mismatch instead of reaching the broker.
+  const alerts = f.db.prepare('SELECT message FROM kiaan_alerts WHERE user_id=1').all().map(r => r.message).join('\n');
+  assert.match(alerts, /mode mismatch: credential, account claim and settings modes do not agree/);
 });
 
 test('settings validation runs the engine validateConfig', async () => {
@@ -705,7 +742,7 @@ test('mountKiaan exposes the full route list and maps service 502 → 422', asyn
   assert.match(payload.error, /50010000/);
 });
 
-test('DEFAULT_KIAAN_RULES is paper-only and the error keeps broker code+message', async () => {
+test('DEFAULT_KIAAN_RULES defaults to PAPER and the error keeps broker code+message', async () => {
   assert.equal(DEFAULT_KIAAN_RULES.tradingMode, 'PAPER');
   const err = new KiaanError('Broker request failed (HTTP 422) [42210000]: sub-penny', 502);
   assert.match(err.message, /42210000/);

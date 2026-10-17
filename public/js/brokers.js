@@ -5,12 +5,12 @@
  * credential store exists, and no other broker captures credentials:
  * Interactive Brokers and Tradier are "In development" placeholders only.
  *
- * PAPER / LIVE: the form offers an explicit account-type choice. The
- * Kiaan backend today accepts PAPER only — a live connect is refused
- * loudly by the server (no quiet downgrade, no parallel store) and the
- * live option says so in plain words. Entering keys only stores them
- * through the existing flow: connecting never arms, enables, or switches
- * anything to live trading.
+ * PAPER / LIVE: the form offers an explicit account-type choice and
+ * the server accepts both (live capability shipped 2026-10-17): keys
+ * are validated against the endpoint for the chosen account type and
+ * stored under that mode — no quiet downgrade, no parallel store.
+ * Entering keys only stores them through the existing flow: connecting
+ * never arms or enables the bot; it trades only after Resume.
  */
 (function () {
   'use strict';
@@ -46,7 +46,7 @@
               <label class="brk-mode-opt"><input type="radio" name="brkMode" value="paper" checked><span><b>Paper account</b><small>Practice account with fake money — what the bot runs on today.</small></span></label>
               <label class="brk-mode-opt"><input type="radio" name="brkMode" value="live"><span><b>Live account</b><small>Your real-money Alpaca account.</small></span></label>
             </fieldset>
-            <p class="brk-live-note" id="brkLiveNote" style="display:none">Live accounts are not accepted yet: the Kiaan Bot currently runs paper only, and the server will refuse live keys rather than store them somewhere else. Paper keys connect normally.</p>
+            <p class="brk-live-note" id="brkLiveNote" style="display:none">Live account — real money. These keys are validated against your LIVE Alpaca account and stored as the bot's live account. Connecting only stores your keys: the bot stays paused until you resume it on the Kiaan Bot page, and it then trades this account for real.</p>
             <label class="brk-field"><span>API Key ID</span><input id="brkKey" type="text" placeholder="PKXXXXXXXXXXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false"/></label>
             <label class="brk-field"><span>API Secret Key</span><input id="brkSecret" type="password" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="off"/></label>
             <div class="brk-error" id="brkError" role="alert"></div>

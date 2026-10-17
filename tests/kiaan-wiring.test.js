@@ -1,8 +1,9 @@
 'use strict';
 
 // Kiaan Bot wiring integration: routes, nav, page, assets, scheduler,
-// verify endpoint, settings registry — and the bot ships disabled and
-// paper-only BY DESIGN (there is no live mode to flip on).
+// verify endpoint, settings registry — and the bot ships disabled;
+// live-account capability exists in code (2026-10-17) but nothing is
+// ever enabled or switched by wiring alone.
 
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
@@ -44,7 +45,7 @@ test('server.js wires the Kiaan service: create, mount, scheduler, readyz, drain
 test('index.html has the Kiaan page first and the bumped asset tag', () => {
   assert.ok(html.includes('data-page="kiaan"'), 'desktop/mobile nav has Kiaan');
   assert.ok(html.includes('id="page-kiaan"'), 'page-kiaan container exists');
-  assert.ok(html.includes('/js/kiaan.js?v=20261016c'), 'kiaan.js included with the current cache-busting tag');
+  assert.ok(html.includes('/js/kiaan.js?v=20261017a'), 'kiaan.js included with the current cache-busting tag');
   assert.ok(!html.includes('data-page="warrior"'), 'no Warrior tab remains (bot deleted 2026-10-16)');
 });
 
@@ -96,9 +97,10 @@ test('Kiaan is registered in automatic-bot-settings as a paper-only strategy', (
   assert.equal(settings.status(1, 'kiaan', { mode: 'paper', enabled: true, liveArmed: false }).posture, 'active');
 });
 
-test('Kiaan ships paper-only: merged rules force PAPER against any override', () => {
+test('Kiaan modes (2026-10-17): PAPER default, LIVE a real validated mode', () => {
   const { DEFAULT_KIAAN_RULES, mergedKiaanRules, validateConfig } = require('../lib/kiaan/engine');
   assert.equal(DEFAULT_KIAAN_RULES.tradingMode, 'PAPER');
-  assert.equal(mergedKiaanRules({ tradingMode: 'LIVE' }).tradingMode, 'PAPER');
+  assert.equal(mergedKiaanRules({ tradingMode: 'LIVE' }).tradingMode, 'LIVE');
   assert.equal(validateConfig({}).ok, true);
+  assert.equal(validateConfig({ tradingMode: 'LIVE' }).ok, true);
 });

@@ -65,7 +65,7 @@
     page.appendChild(style);
     const root = document.createElement('div');
     root.innerHTML = `<section class="war-shell" id="kiaanRoot" aria-labelledby="kiaanTitle">
-      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · KIAAN BOT</span><h1 id="kiaanTitle">Kiaan Bot <em>regime first, trades second</em></h1><p>Reads the market first, then decides whether trading is allowed today and in what. Every decision is journaled in plain language.</p></div><span class="war-auto-label">PAPER ONLY</span></header>
+      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · KIAAN BOT</span><h1 id="kiaanTitle">Kiaan Bot <em>regime first, trades second</em></h1><p>Reads the market first, then decides whether trading is allowed today and in what. Every decision is journaled in plain language.</p></div><span class="war-auto-label" id="kiaanModeBadge">PAPER</span></header>
       <div class="war-notice" id="kiaanNotice" role="status" aria-live="polite"></div>
       <section class="war-status" aria-label="Kiaan Bot system status">
         <div><span>Status</span><strong id="kiaanPill">CHECKING</strong><small id="kiaanTradeDate">Trade date —</small></div>
@@ -81,7 +81,7 @@
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">TRADE JOURNAL</span><h2>Trades</h2></div></div><div class="war-table-wrap" id="kiaanJournal"><p class="war-empty" style="padding:13px 18px">No data yet.</p></div></article>
       </main>
       <aside class="war-rail">
-        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">BROKER</span><h2>Alpaca</h2></div></div><div class="war-account-row"><div><b>Paper</b><small id="kiaanPaperState">Checking</small></div><span class="war-tag">ALPACA</span></div><p class="war-account-note">Connection status only. Broker accounts are managed on the Brokers page — there is no key entry on this page.</p></article>
+        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">BROKER</span><h2>Alpaca</h2></div></div><div class="war-account-row"><div><b id="kiaanBrokerMode">Paper</b><small id="kiaanPaperState">Checking</small></div><span class="war-tag">ALPACA</span></div><p class="war-account-note">Connection status only. Broker accounts are managed on the Brokers page — there is no key entry on this page.</p></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">DAY STATE &amp; LOCKS</span><h2>Daily risk</h2></div></div><div class="war-list" id="kiaanLocks"><p class="war-empty">No data yet.</p></div></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">SETTINGS</span><h2>Settings</h2></div></div><div id="kiaanSettings"><p class="war-empty">Loading settings…</p></div><button class="war-button war-save" id="kiaanSave">Save settings</button></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">RISK DESK</span><h2>Alerts</h2></div></div><div class="war-list" id="kiaanAlerts"><p class="war-empty">No data yet.</p></div></article>
@@ -99,9 +99,12 @@
     $('kiaanPill').textContent = pillText;
     $('kiaanPill').className = pillClass;
     $('kiaanTradeDate').textContent = tradeDate ? `Trade date ${esc(tradeDate)}` : 'Trade date —';
-    $('kiaanConnection').textContent = connected ? 'PAPER CONNECTED' : 'DISCONNECTED';
+    const modeLabel = String(status.tradingMode || 'PAPER').toUpperCase() === 'LIVE' ? 'Live' : 'Paper';
+    if ($('kiaanModeBadge')) $('kiaanModeBadge').textContent = modeLabel.toUpperCase();
+    if ($('kiaanBrokerMode')) $('kiaanBrokerMode').textContent = modeLabel;
+    $('kiaanConnection').textContent = connected ? `${modeLabel.toUpperCase()} CONNECTED` : 'DISCONNECTED';
     $('kiaanConnection').className = connected ? 'war-good' : 'war-bad';
-    $('kiaanAccount').textContent = userView() ? 'Alpaca · Paper' : (status.accountId ? `Account ${status.accountId}` : 'Dedicated Kiaan account required');
+    $('kiaanAccount').textContent = userView() ? `Alpaca · ${modeLabel}` : (status.accountId ? `Account ${status.accountId}` : 'Dedicated Kiaan account required');
     $('kiaanScheduler').textContent = String(status.schedulerStatus || 'IDLE').toUpperCase();
     $('kiaanSchedulerNote').textContent = userView()
       ? (status.lastCycleAt ? `Last cycle ${time(status.lastCycleAt)}` : 'No completed cycle yet')

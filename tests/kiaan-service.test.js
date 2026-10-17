@@ -1443,6 +1443,7 @@ test('broker hardening: a successful status() account read clears a stored recon
 function seedNonOwner(f) {
   const rules = {
     fixedDollars: 250, spyStrongPct: 0.98765, minRvol: 7.77,
+    maxRiskPerTradeDollars: 42.5, maxDailyLossPct: 3.25,
     hedgeSymbols: 'SECRETQ,SECRETR', sleeveSymbols: 'SLEEVESYM',
     guardYieldMin: 9.99, flattenTime: '15:57',
   };
@@ -1464,8 +1465,8 @@ const FORBIDDEN_IN_USER_PAYLOAD = [
   'spyStrongPct', 'spyWeakPct', 'qqqStrongPct', 'vixCalm', 'vixPanic', 'guardYieldMin', 'guardBrentMin',
   'riskOnScore', 'riskOffScore', 'hedgeSymbols', 'longUniverse', 'sleeveSymbols', 'sleeveEnabled',
   'exitAtrTimeframe', 'entryWindowStart', 'entryWindowEnd', 'flattenTime', 'minRvol', 'maxSpreadPct',
-  'minAvgVolume', 'atrStopMult', 'breakevenR', 'maxDailyLossPct', 'maxConsecutiveLosses', 'maxTradesPerDay',
-  'maxPositions', 'minRelStrengthPct', 'maxExtensionAtrs', 'sizingMode', 'maxRiskPerTradeDollars',
+  'minAvgVolume', 'atrStopMult', 'breakevenR', 'maxConsecutiveLosses', 'maxTradesPerDay',
+  'maxPositions', 'minRelStrengthPct', 'maxExtensionAtrs', 'sizingMode',
   'regimeScore', 'relStrength', 'stop_price', 'stopPrice', 'targets_json', 'targets', 'riskDollars',
   'SECRETQ', 'SLEEVESYM', '0.98765', 'SPY_WEAK', 'VIX_HIGH', 'uiSchema',
 ];
@@ -1487,9 +1488,14 @@ test('hide-internals (a): non-owner GET payloads contain no internal rule fields
       assert.ok(!text.includes(bad), `${name} payload leaked "${bad}": ${text.slice(0, 400)}`);
     }
   }
-  // The user view still carries what Johnny allows: position size only,
-  // one plain regime, positions, trades, P&L, plain journal.
-  assert.deepEqual(payloads.settings.rules, { fixedDollars: 250 });
+  // The user view still carries what Johnny allows (tightened 2026-10-16
+  // ~23:25 CT): sizing + risk ONLY — position size (editable) plus the
+  // per-trade risk cap and daily-loss lock (read-only) — one plain
+  // regime, positions, trades, P&L, plain journal. The two risk keys are
+  // deliberately NOT in FORBIDDEN_IN_USER_PAYLOAD: they are the
+  // sanctioned-visible risk values now; every OTHER internal is.
+  assert.deepEqual(payloads.settings.rules, { fixedDollars: 250, maxRiskPerTradeDollars: 42.5, maxDailyLossPct: 3.25 });
+  assert.deepEqual(Object.keys(payloads.settings.rules).sort(), ['fixedDollars', 'maxDailyLossPct', 'maxRiskPerTradeDollars']);
   assert.equal(payloads.settings.viewer, 'user');
   assert.equal(payloads.dashboard.session.regime, 'risk-off');
   assert.deepEqual(Object.keys(payloads.dashboard.session).sort(), ['regime', 'stance', 'updatedAt']);
@@ -1508,7 +1514,7 @@ test('hide-internals (b): non-owner settings update applies ONLY position size',
   seedNonOwner(f);
   await f.service.setSettings(2, {
     enabled: false,
-    rules: { fixedDollars: 300, spyStrongPct: 1.23, hedgeSymbols: 'HACK,XXX', minRvol: 9, flattenTime: '10:00' },
+    rules: { fixedDollars: 300, spyStrongPct: 1.23, hedgeSymbols: 'HACK,XXX', minRvol: 9, flattenTime: '10:00', maxRiskPerTradeDollars: 1, maxDailyLossPct: 99 },
   });
   const stored = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=2').get().rules);
   assert.equal(stored.fixedDollars, 300, 'position size is the one writable field');
@@ -1516,8 +1522,12 @@ test('hide-internals (b): non-owner settings update applies ONLY position size',
   assert.equal(stored.hedgeSymbols, 'SECRETQ,SECRETR', 'symbol list unchanged');
   assert.equal(stored.minRvol, 7.77, 'RVOL gate unchanged');
   assert.equal(stored.flattenTime, '15:57', 'flatten time unchanged');
+  // The risk values are VISIBLE to non-owners but never writable:
+  // visible must not widen edit rights beyond fixedDollars.
+  assert.equal(stored.maxRiskPerTradeDollars, 42.5, 'risk cap is read-only for non-owners');
+  assert.equal(stored.maxDailyLossPct, 3.25, 'daily-loss lock is read-only for non-owners');
   const view = await f.service.getSettings(2);
-  assert.deepEqual(view.rules, { fixedDollars: 300 });
+  assert.deepEqual(view.rules, { fixedDollars: 300, maxRiskPerTradeDollars: 42.5, maxDailyLossPct: 3.25 });
   assert.equal(view.enabled, false, 'pause/resume (enabled) still works for non-owners');
   await assert.rejects(() => f.service.setSettings(2, { rules: { fixedDollars: 'lots' } }), /fixedDollars must be a finite number/);
 });
@@ -1537,4 +1547,41 @@ test('hide-internals (c): owner payload keeps full rules and regime detail', asy
   seedNonOwner(f);
   const ownerJournal = await f.service.journal(1);
   assert.ok(Array.isArray(ownerJournal.decisions), 'owner journal shape unchanged');
+});
+
+test('hide-internals (e): non-owner settings payload is exactly sizing + risk, every other rule key absent', async () => {
+  // Johnny 2026-10-16 ~23:25 CT: "users see sizing and risk only."
+  // Exhaustive sweep: EVERY key of the full merged rule set must be
+  // absent from the non-owner settings payload except the three
+  // sanctioned keys — position size + the two read-only risk values.
+  const f = fixture('riskon', { ownerUserId: 1 });
+  seedNonOwner(f);
+  const { mergedKiaanRules } = require('../lib/kiaan/engine');
+  const view = await f.service.getSettings(2);
+  const allowed = ['fixedDollars', 'maxRiskPerTradeDollars', 'maxDailyLossPct'];
+  assert.deepEqual(Object.keys(view.rules).sort(), [...allowed].sort(),
+    'non-owner settings rules carry exactly the sizing + risk keys');
+  for (const key of Object.keys(mergedKiaanRules({}))) {
+    if (allowed.includes(key)) continue;
+    assert.ok(!(key in view.rules), `internal rule key "${key}" must be absent from the non-owner settings payload`);
+  }
+  // Named absence checks for the categories Johnny circled: regime
+  // thresholds, vote thresholds, guard levels, confirmation legs,
+  // windows, ATR/exit geometry, sleeve params, symbol lists.
+  for (const key of ['riskOnScore', 'riskOffScore', 'spyStrongPct', 'spyWeakPct', 'qqqStrongPct', 'qqqWeakPct',
+    'vixCalm', 'vixElevated', 'vixHigh', 'vixPanic', 'vixSpikePct', 'breadthStrongPct', 'breadthWeakPct',
+    'oilSpikePct', 'yieldSpikeBps', 'hardDownPct', 'guardYieldMin', 'guardBrentMin',
+    'minRelStrengthPct', 'minRvol', 'maxSpreadPct', 'maxExtensionAtrs', 'maxDayGainPct',
+    'orMinutes', 'entryWindowStart', 'entryWindowEnd', 'flattenTime', 'exitAtrTimeframe',
+    'atrStopMult', 'targets', 'breakevenR', 'sleeveEnabled', 'sleeveSymbols', 'sleeveMaxPositions',
+    'hedgeSymbols', 'longUniverse', 'hedgeOnly', 'sizingMode', 'maxPositions',
+    'maxConsecutiveLosses', 'maxTradesPerDay', 'minPrice', 'maxPrice', 'minAvgVolume', 'tradingMode']) {
+    assert.ok(!(key in view.rules), `non-owner settings payload must not contain "${key}"`);
+  }
+  // Presence: sizing (editable) + both risk values at their configured
+  // (seeded) values.
+  assert.equal(view.rules.fixedDollars, 250, 'position size present');
+  assert.equal(view.rules.maxRiskPerTradeDollars, 42.5, 'per-trade risk cap present, read-only');
+  assert.equal(view.rules.maxDailyLossPct, 3.25, 'daily-loss lock present, read-only');
+  assert.ok(!('uiSchema' in view) && !('liveNote' in view), 'no owner-only extras in the user settings payload');
 });

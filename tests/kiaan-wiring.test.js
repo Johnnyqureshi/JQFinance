@@ -44,7 +44,7 @@ test('server.js wires the Kiaan service: create, mount, scheduler, readyz, drain
 test('index.html has the Kiaan page first and the bumped asset tag', () => {
   assert.ok(html.includes('data-page="kiaan"'), 'desktop/mobile nav has Kiaan');
   assert.ok(html.includes('id="page-kiaan"'), 'page-kiaan container exists');
-  assert.ok(html.includes('/js/kiaan.js?v=20261016b'), 'kiaan.js included with the current cache-busting tag');
+  assert.ok(html.includes('/js/kiaan.js?v=20261016c'), 'kiaan.js included with the current cache-busting tag');
   assert.ok(!html.includes('data-page="warrior"'), 'no Warrior tab remains (bot deleted 2026-10-16)');
 });
 
@@ -78,6 +78,10 @@ test('hide-internals (d): the bot page has NO API-key form for any role, and no 
   }
   assert.ok(kiaanJs.includes('uiSchema'), 'kiaan.js renders the owner schema from the settings payload');
   assert.ok(kiaanJs.includes('fixedDollars'), 'kiaan.js keeps the one user-editable field: position size');
+  // Sizing + risk only (Johnny 2026-10-16 ~23:25 CT): the user settings
+  // render also shows the two read-only risk values from the payload.
+  assert.ok(kiaanJs.includes('maxRiskPerTradeDollars') && kiaanJs.includes('maxDailyLossPct'),
+    'kiaan.js renders the two user-visible risk values (per-trade cap, daily-loss lock)');
   assert.ok(server.includes('ownerUserId: 1000000005'), 'server.js pins Johnny (…005) as the owner view');
 });
 

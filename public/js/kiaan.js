@@ -261,12 +261,19 @@
       return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="number" step="${stepOrOptions}" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
     };
     if (settingsView?.viewer === 'user') {
-      // User view: position size is the ONLY editable field on this page.
+      // User view (Johnny 2026-10-16, tightened): sizing + risk ONLY.
+      // Position size is the one editable field; the risk values are
+      // read-only text — never inputs, never data-rule fields, so a
+      // save can never carry them back as edits.
       el.innerHTML = `
       <fieldset class="war-fieldset"><legend>Position size</legend>
       ${field('fixedDollars', 'Position size — dollars per trade ($)', 'number', 50)}
       </fieldset>
-      <p class="war-note">This is the only setting you can change. Everything else about how the bot trades is managed for you. Mode is <b>PAPER</b>.</p>`;
+      <fieldset class="war-fieldset"><legend>Risk</legend>
+      <div class="war-field"><span>Hard risk cap per trade</span><strong>${money(rules.maxRiskPerTradeDollars)}</strong></div>
+      <div class="war-field"><span>Daily loss lock</span><strong>${pct(rules.maxDailyLossPct)} of equity</strong></div>
+      </fieldset>
+      <p class="war-note">Position size is the only setting you can change. Your risk limits above are set for you, and everything else about how the bot trades is managed for you. Mode is <b>PAPER</b>.</p>`;
       return;
     }
     el.innerHTML = `

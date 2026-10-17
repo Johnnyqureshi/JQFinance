@@ -384,6 +384,7 @@ function fixture(scenario = 'riskon', options = {}) {
     timeoutMs: options.timeoutMs,
     retryBaseMs: options.retryBaseMs,
     exitPoll: { tries: 3, intervalMs: 0 },
+    ownerUserId: options.ownerUserId ?? null,
   });
   return { db, service, world };
 }
@@ -1433,4 +1434,107 @@ test('broker hardening: a successful status() account read clears a stored recon
   assert.equal(st.schedulerReason, null);
   const settings = f.db.prepare('SELECT scheduler_status FROM kiaan_settings WHERE user_id=1').get();
   assert.equal(settings.scheduler_status, 'ok', 'the stored latch is cleared, not just the response');
+});
+
+// --- hide-internals: owner vs user view (Johnny 2026-10-16) -----------------
+// Seed a non-owner (uid 2) with distinctive internal rule values, a
+// position, a closed trade and journal rows, so any leak of a rule
+// field name OR value into a non-owner payload is detectable.
+function seedNonOwner(f) {
+  const rules = {
+    fixedDollars: 250, spyStrongPct: 0.98765, minRvol: 7.77,
+    hedgeSymbols: 'SECRETQ,SECRETR', sleeveSymbols: 'SLEEVESYM',
+    guardYieldMin: 9.99, flattenTime: '15:57',
+  };
+  f.db.prepare('INSERT INTO kiaan_settings(user_id,enabled,mode,rules) VALUES (2,1,?,?)')
+    .run('paper', JSON.stringify(rules));
+  f.db.prepare(`INSERT INTO kiaan_positions(position_id,user_id,symbol,direction,entry_price,shares,entry_shares,stop_price,initial_stop_price,targets_json,status,opened_at,updated_at)
+    VALUES ('pos-u2',2,'SQQQ','long',30,10,10,28.5,28.5,'[{"r":2,"pct":50,"price":33}]','open',?,?)`).run(iso(NOW), iso(NOW));
+  f.db.prepare(`INSERT INTO kiaan_trades(trade_id,user_id,symbol,direction,entryTime,regime,regimeScore,relStrength,rvol,atr,stopPrice,targets,riskDollars,entryPrice,exitPrice,pnl,entryReason,closedAt,created_at)
+    VALUES ('tr-u2',2,'SQQQ','long',?,'risk-off',-4,3.3,5.5,0.4,28.5,'[]',15,30,31,10,'ENTER-LONG secret why',?,?)`).run(iso(NOW), iso(NOW), iso(NOW));
+  const data = JSON.stringify({ score: -4, locked: false, guardActive: false, inputs: { spyDayChangePct: -1.2, vixLevel: 28 } });
+  f.db.prepare(`INSERT INTO kiaan_decisions(user_id,dkey,trade_date,kind,symbol,decision,regime,reasons,why,data,created_at,updated_at)
+    VALUES (2,'SESSION:risk-off:seek-hedges',?,'session','SESSION','seek-hedges','risk-off',?,'KIAAN SESSION secret score why',?,?,?)`)
+    .run(TRADE_DATE, JSON.stringify(['SPY_WEAK: secret vote', 'VIX_HIGH: secret vote']), data, iso(NOW), iso(NOW));
+  f.db.prepare(`INSERT INTO kiaan_decisions(user_id,dkey,trade_date,kind,symbol,decision,regime,reasons,why,data,created_at,updated_at)
+    VALUES (2,'CAND:SQQQ',?,'candidate','SQQQ','enter-long','risk-off',?,'ENTER-LONG SQQQ stop $28.50 targets secret',?,?,?)`)
+    .run(TRADE_DATE, JSON.stringify(['VOLUME_OK: rvol 5.5 secret']), JSON.stringify({ features: { rvol: 5.5, atr: 0.4 }, stop: 28.5 }), iso(NOW), iso(NOW));
+}
+const FORBIDDEN_IN_USER_PAYLOAD = [
+  'spyStrongPct', 'spyWeakPct', 'qqqStrongPct', 'vixCalm', 'vixPanic', 'guardYieldMin', 'guardBrentMin',
+  'riskOnScore', 'riskOffScore', 'hedgeSymbols', 'longUniverse', 'sleeveSymbols', 'sleeveEnabled',
+  'exitAtrTimeframe', 'entryWindowStart', 'entryWindowEnd', 'flattenTime', 'minRvol', 'maxSpreadPct',
+  'minAvgVolume', 'atrStopMult', 'breakevenR', 'maxDailyLossPct', 'maxConsecutiveLosses', 'maxTradesPerDay',
+  'maxPositions', 'minRelStrengthPct', 'maxExtensionAtrs', 'sizingMode', 'maxRiskPerTradeDollars',
+  'regimeScore', 'relStrength', 'stop_price', 'stopPrice', 'targets_json', 'targets', 'riskDollars',
+  'SECRETQ', 'SLEEVESYM', '0.98765', 'SPY_WEAK', 'VIX_HIGH', 'uiSchema',
+];
+
+test('hide-internals (a): non-owner GET payloads contain no internal rule fields or values', async () => {
+  const f = fixture('riskon', { ownerUserId: 1 });
+  seedNonOwner(f);
+  const payloads = {
+    settings: await f.service.getSettings(2),
+    status: await f.service.status(2),
+    dashboard: await f.service.dashboard(2),
+    positions: await f.service.positions(2),
+    trades: await f.service.trades(2),
+    journal: await f.service.journal(2),
+  };
+  for (const [name, payload] of Object.entries(payloads)) {
+    const text = JSON.stringify(payload);
+    for (const bad of FORBIDDEN_IN_USER_PAYLOAD) {
+      assert.ok(!text.includes(bad), `${name} payload leaked "${bad}": ${text.slice(0, 400)}`);
+    }
+  }
+  // The user view still carries what Johnny allows: position size only,
+  // one plain regime, positions, trades, P&L, plain journal.
+  assert.deepEqual(payloads.settings.rules, { fixedDollars: 250 });
+  assert.equal(payloads.settings.viewer, 'user');
+  assert.equal(payloads.dashboard.session.regime, 'risk-off');
+  assert.deepEqual(Object.keys(payloads.dashboard.session).sort(), ['regime', 'stance', 'updatedAt']);
+  assert.equal(payloads.dashboard.positions[0].symbol, 'SQQQ');
+  assert.equal(Number(payloads.trades.trades.find(t => t.status === 'closed')?.pnl), 10);
+  const sessionRow = payloads.journal.decisions.find(d => d.kind === 'session');
+  assert.equal(sessionRow.why, "Today's regime is Risk-off.");
+  assert.ok(!('reasons' in sessionRow) && !('data' in sessionRow), 'journal rows carry no reasons/data for non-owners');
+  assert.equal(payloads.status.broker, 'Alpaca');
+  assert.equal(payloads.status.connected, false);
+  assert.ok(!('accountId' in payloads.status), 'no account id for non-owners');
+});
+
+test('hide-internals (b): non-owner settings update applies ONLY position size', async () => {
+  const f = fixture('riskon', { ownerUserId: 1 });
+  seedNonOwner(f);
+  await f.service.setSettings(2, {
+    enabled: false,
+    rules: { fixedDollars: 300, spyStrongPct: 1.23, hedgeSymbols: 'HACK,XXX', minRvol: 9, flattenTime: '10:00' },
+  });
+  const stored = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=2').get().rules);
+  assert.equal(stored.fixedDollars, 300, 'position size is the one writable field');
+  assert.equal(stored.spyStrongPct, 0.98765, 'regime threshold unchanged');
+  assert.equal(stored.hedgeSymbols, 'SECRETQ,SECRETR', 'symbol list unchanged');
+  assert.equal(stored.minRvol, 7.77, 'RVOL gate unchanged');
+  assert.equal(stored.flattenTime, '15:57', 'flatten time unchanged');
+  const view = await f.service.getSettings(2);
+  assert.deepEqual(view.rules, { fixedDollars: 300 });
+  assert.equal(view.enabled, false, 'pause/resume (enabled) still works for non-owners');
+  await assert.rejects(() => f.service.setSettings(2, { rules: { fixedDollars: 'lots' } }), /fixedDollars must be a finite number/);
+});
+
+test('hide-internals (c): owner payload keeps full rules and regime detail', async () => {
+  const f = fixture('riskon', { ownerUserId: 1 });
+  await connectPaper(f);
+  const { mergedKiaanRules } = require('../lib/kiaan/engine');
+  const view = await f.service.getSettings(1);
+  assert.equal(view.viewer, 'owner');
+  assert.deepEqual(view.rules, mergedKiaanRules({}), 'owner rules payload is the full merged rules, unchanged');
+  assert.ok(Array.isArray(view.uiSchema) && JSON.stringify(view.uiSchema).includes('spyStrongPct'), 'owner receives the settings-form schema');
+  const st = await f.service.status(1);
+  assert.equal(st.accountId, 'acct-kiaan-test', 'owner status keeps the account id');
+  // Owner journal/dashboard keep score + reasons (seeded via a scan is
+  // covered elsewhere; here the settings surface is the pinned check).
+  seedNonOwner(f);
+  const ownerJournal = await f.service.journal(1);
+  assert.ok(Array.isArray(ownerJournal.decisions), 'owner journal shape unchanged');
 });

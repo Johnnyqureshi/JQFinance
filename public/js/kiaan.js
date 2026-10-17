@@ -47,61 +47,6 @@
   }
   function notice(message, error) { const el = $('kiaanNotice'); if (el) { el.textContent = message || ''; el.classList.toggle('is-error', !!error); } }
 
-  /* Every DEFAULT_KIAAN_RULES key the settings form exposes, grouped. */
-  const RULE_SCHEMA = [
-    { group: 'Strategy mode — hedge-only rebuild (2026-10-11), long-universe expansion (2026-10-12)', fields: [
-      ['hedgeOnly', 'Hedge-only mode — ordinary longs entered ONLY for the long-universe list, on risk-on days; hedge list only, on risk-off / guard days', 'boolselect'],
-      ['exitAtrTimeframe', 'Exit geometry — ATR timeframe for the managed stop/targets (sizing unchanged)', 'select', ['15m', 'daily']] ] },
-    { group: 'Session', fields: [
-      ['orMinutes', 'Opening range duration (min)', 'select', [5, 15, 30]],
-      ['entryWindowStart', 'Entry window start (ET)', 'time'],
-      ['entryWindowEnd', 'Entry window end (ET)', 'time'],
-      ['flattenTime', 'Flatten everything at (ET)', 'time'] ] },
-    { group: 'Regime thresholds', fields: [
-      ['riskOnScore', 'Score at/above → risk-on', 'number', 1],
-      ['riskOffScore', 'Score at/below → risk-off', 'number', 1],
-      ['spyStrongPct', 'SPY strong day (%)', 'number', 0.05],
-      ['spyWeakPct', 'SPY weak day (%)', 'number', 0.05],
-      ['qqqStrongPct', 'QQQ strong day (%)', 'number', 0.05],
-      ['qqqWeakPct', 'QQQ weak day (%)', 'number', 0.05],
-      ['hardDownPct', 'Hard-down override — SPY & QQQ at/below (%)', 'number', 0.05],
-      ['vixCalm', 'VIX at/below → calm vote', 'number', 0.5],
-      ['vixElevated', 'VIX at/above → elevated', 'number', 0.5],
-      ['vixHigh', 'VIX at/above → high', 'number', 0.5],
-      ['vixPanic', 'VIX at/above → panic (forces risk-off)', 'number', 0.5],
-      ['vixSpikePct', 'VIX day move that votes spike/drop (%)', 'number', 0.5],
-      ['breadthStrongPct', 'Breadth strong (% advancing)', 'number', 1],
-      ['breadthWeakPct', 'Breadth weak (% advancing)', 'number', 1],
-      ['oilSpikePct', 'Oil spike = macro stress (%)', 'number', 0.1],
-      ['yieldSpikeBps', '10Y spike = macro stress (bps)', 'number', 1],
-      ['guardYieldMin', 'Relief-bounce guard — 10Y at/above (%) (with Brent, blocks longs; hedges only)', 'number', 0.05],
-      ['guardBrentMin', 'Relief-bounce guard — Brent at/above ($) (with 10Y, blocks longs; hedges only)', 'number', 1] ] },
-    { group: 'Confirmation — all three legs', fields: [
-      ['minRelStrengthPct', 'Min relative strength vs SPY (pts)', 'number', 0.1],
-      ['minRvol', 'Min relative volume (pace, ×)', 'number', 0.1],
-      ['maxExtensionAtrs', 'Anti-chase: max extension past trigger (ATR)', 'number', 0.1],
-      ['maxDayGainPct', 'Anti-chase: max day gain already made (%)', 'number', 0.5] ] },
-    { group: 'Universe & rails', fields: [
-      ['minPrice', 'Min price ($)', 'number', 0.1],
-      ['maxPrice', 'Max price ($)', 'number', 1],
-      ['minAvgVolume', 'Min avg daily volume (shares)', 'number', 10000],
-      ['maxSpreadPct', 'Max bid/ask spread (%)', 'number', 0.05],
-      ['hedgeSymbols', 'Hedge list — the only longs allowed on risk-off days', 'text'],
-      ['longUniverse', 'Long universe — the 87 names allowed as ordinary longs on risk-on days only (guard off), $20-cap exempt; empty = pure hedge-only', 'text'] ] },
-    { group: 'Sizing & risk', fields: [
-      ['sizingMode', 'Sizing mode', 'select', ['dollars', 'risk']],
-      ['fixedDollars', 'Fixed dollars per trade ($)', 'number', 50],
-      ['maxRiskPerTradeDollars', 'Hard risk cap per trade ($)', 'number', 5],
-      ['atrStopMult', 'ATR stop multiplier', 'number', 0.1],
-      ['targets', 'Targets — R:pct% per partial, comma-separated (e.g. 2R:50%, 3R:50%)', 'targets'],
-      ['breakevenR', 'Move stop to breakeven at (R)', 'number', 0.25],
-      ['maxPositions', 'Max open positions', 'number', 1] ] },
-    { group: 'Daily locks', fields: [
-      ['maxDailyLossPct', 'Max daily loss (% of equity)', 'number', 0.1],
-      ['maxConsecutiveLosses', 'Max consecutive losses', 'number', 1],
-      ['maxTradesPerDay', 'Max trades per day', 'number', 1] ] },
-  ];
-
   function pillState() {
     if (!status) return ['CHECKING', ''];
     const sched = String(status.schedulerStatus || '').toLowerCase();
@@ -120,7 +65,7 @@
     page.appendChild(style);
     const root = document.createElement('div');
     root.innerHTML = `<section class="war-shell" id="kiaanRoot" aria-labelledby="kiaanTitle">
-      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · KIAAN BOT</span><h1 id="kiaanTitle">Kiaan Bot <em>regime first, trades second</em></h1><p>Reads the whole board first — SPY/QQQ trend, VIX, yields, oil — and only then decides whether trading is even allowed, and in what. Risk-on: the strongest breakouts. Risk-off: no fresh longs, hedge ETFs only on confirmation. Chop: stand aside. Every decision is journaled with its reasons.</p></div><span class="war-auto-label">PAPER ONLY</span></header>
+      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · KIAAN BOT</span><h1 id="kiaanTitle">Kiaan Bot <em>regime first, trades second</em></h1><p>Reads the market first, then decides whether trading is allowed today and in what. Every decision is journaled in plain language.</p></div><span class="war-auto-label">PAPER ONLY</span></header>
       <div class="war-notice" id="kiaanNotice" role="status" aria-live="polite"></div>
       <section class="war-status" aria-label="Kiaan Bot system status">
         <div><span>Status</span><strong id="kiaanPill">CHECKING</strong><small id="kiaanTradeDate">Trade date —</small></div>
@@ -128,7 +73,7 @@
         <div><span>Open positions</span><strong id="kiaanOpen">—</strong><small id="kiaanDayPnl">Day P&amp;L —</small></div>
         <div><span>Scheduler</span><strong id="kiaanScheduler">—</strong><small id="kiaanSchedulerNote">Server-owned cycle</small></div>
       </section>
-      <section class="war-command"><div><span class="war-eyebrow">BOT CONTROL</span><h2 id="kiaanMandate">Connect an account to begin</h2><p id="kiaanMandateCopy">Connect a dedicated Alpaca paper account — a NEW one, separate from Warrior. Trading starts disabled — you enable it.</p><p id="kiaanBlockers" class="war-blockers"></p></div><button class="war-button war-quiet" id="kiaanEnabledToggle" disabled>Checking account</button></section>
+      <section class="war-command"><div><span class="war-eyebrow">BOT CONTROL</span><h2 id="kiaanMandate">Checking account</h2><p id="kiaanMandateCopy">Broker connection is managed on the Brokers page. Trading can be paused or resumed here.</p><p id="kiaanBlockers" class="war-blockers"></p></div><button class="war-button war-quiet" id="kiaanEnabledToggle" disabled>Checking account</button></section>
       <section class="war-layout"><main class="war-main">
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">TODAY'S REGIME</span><h2>Market read</h2></div><span id="kiaanRegimeMeta">Loading</span></div><div id="kiaanRegime"></div></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">DECISIONS JOURNAL</span><h2>Why every trade — and every no-trade</h2></div><span id="kiaanDecisionMeta">Loading</span></div><div class="war-list" id="kiaanDecisions"><p class="war-empty">Loading decisions…</p></div></article>
@@ -136,14 +81,16 @@
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">TRADE JOURNAL</span><h2>Trades</h2></div></div><div class="war-table-wrap" id="kiaanJournal"><p class="war-empty" style="padding:13px 18px">No data yet.</p></div></article>
       </main>
       <aside class="war-rail">
-        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">DEDICATED BROKER</span><h2>Alpaca paper</h2></div></div><div class="war-account-row"><div><b>Paper</b><small id="kiaanPaperState">Checking</small></div><button class="war-button war-quiet" id="kiaanPaperConnect">Connect</button></div><p class="war-account-note">Kiaan Bot runs on its own dedicated Alpaca paper account — never shared with other bots or manual trading. Use a brand-new paper account: Alpaca generates keys for whichever account its dashboard is displaying. Key and secret are stored encrypted and never displayed back. This bot has no live mode at all.</p></article>
+        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">BROKER</span><h2>Alpaca</h2></div></div><div class="war-account-row"><div><b>Paper</b><small id="kiaanPaperState">Checking</small></div><span class="war-tag">ALPACA</span></div><p class="war-account-note">Connection status only. Broker accounts are managed on the Brokers page — there is no key entry on this page.</p></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">DAY STATE &amp; LOCKS</span><h2>Daily risk</h2></div></div><div class="war-list" id="kiaanLocks"><p class="war-empty">No data yet.</p></div></article>
-        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">FULL CONFIG</span><h2>Settings</h2></div></div><div id="kiaanSettings"><p class="war-empty">Loading settings…</p></div><button class="war-button war-save" id="kiaanSave">Save settings</button></article>
+        <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">SETTINGS</span><h2>Settings</h2></div></div><div id="kiaanSettings"><p class="war-empty">Loading settings…</p></div><button class="war-button war-save" id="kiaanSave">Save settings</button></article>
         <article class="war-panel"><div class="war-head"><div><span class="war-eyebrow">RISK DESK</span><h2>Alerts</h2></div></div><div class="war-list" id="kiaanAlerts"><p class="war-empty">No data yet.</p></div></article>
       </aside></section>
     </section>`;
     page.appendChild(root);
   }
+
+  const userView = () => settingsView?.viewer === 'user' || status?.viewer === 'user' || lastDashboard?.viewer === 'user';
 
   function renderStatus(tradeDate) {
     if (!status) return;
@@ -154,29 +101,40 @@
     $('kiaanTradeDate').textContent = tradeDate ? `Trade date ${esc(tradeDate)}` : 'Trade date —';
     $('kiaanConnection').textContent = connected ? 'PAPER CONNECTED' : 'DISCONNECTED';
     $('kiaanConnection').className = connected ? 'war-good' : 'war-bad';
-    $('kiaanAccount').textContent = status.accountId ? `Account ${status.accountId}` : 'Dedicated Kiaan account required';
+    $('kiaanAccount').textContent = userView() ? 'Alpaca · Paper' : (status.accountId ? `Account ${status.accountId}` : 'Dedicated Kiaan account required');
     $('kiaanScheduler').textContent = String(status.schedulerStatus || 'IDLE').toUpperCase();
-    $('kiaanSchedulerNote').textContent = status.schedulerReason || (status.lastCycleAt ? `Last cycle ${time(status.lastCycleAt)}` : 'No completed cycle yet');
-    $('kiaanMandate').textContent = !connected ? 'Connect an account to begin' : !status.enabled ? 'Trading is paused' : 'Reading the regime';
+    $('kiaanSchedulerNote').textContent = userView()
+      ? (status.lastCycleAt ? `Last cycle ${time(status.lastCycleAt)}` : 'No completed cycle yet')
+      : (status.schedulerReason || (status.lastCycleAt ? `Last cycle ${time(status.lastCycleAt)}` : 'No completed cycle yet'));
+    $('kiaanMandate').textContent = !connected ? 'No broker account connected' : !status.enabled ? 'Trading is paused' : 'Reading the regime';
     $('kiaanMandateCopy').textContent = !connected
-      ? 'Connect a dedicated Alpaca paper account — a NEW one, separate from the other bots. Kiaan Bot ships disabled — enable trading when you are ready.'
+      ? 'Broker connection is managed on the Brokers page. Once an account is connected, trading can be paused or resumed here.'
       : status.enabled
         ? 'The server classifies the regime every minute of the session and trades only what the regime allows. Fully automatic — no approval step.'
         : 'Trading is paused. Existing positions remain under automatic management. New entries stay withheld until you resume.';
     $('kiaanBlockers').textContent = (status.blockers || []).join(' · ');
     const toggle = $('kiaanEnabledToggle');
     toggle.disabled = !connected || changing;
-    toggle.textContent = !connected ? 'Connect Alpaca' : status.enabled ? 'Pause trading' : 'Resume trading';
+    toggle.textContent = !connected ? 'Not connected' : status.enabled ? 'Pause trading' : 'Resume trading';
     $('kiaanPaperState').textContent = connected ? 'Connected' : 'Not connected';
-    $('kiaanPaperConnect').textContent = connected ? 'Manage' : 'Connect';
   }
 
   function renderRegime(data) {
     const el = $('kiaanRegime');
     const session = data?.session || null;
     if (!session) {
-      el.innerHTML = '<p class="war-empty">No regime read yet — no data yet. The first read lands on the first scheduler cycle after the bot is enabled, and is journaled here with every vote.</p>';
+      el.innerHTML = userView()
+        ? '<p class="war-empty">No regime read yet — no data yet.</p>'
+        : '<p class="war-empty">No regime read yet — no data yet. The first read lands on the first scheduler cycle after the bot is enabled, and is journaled here with every vote.</p>';
       $('kiaanRegimeMeta').textContent = 'No data yet';
+      return;
+    }
+    if (userView()) {
+      // User view: today's regime in ONE plain line — no score, no vote
+      // breakdown, no market tape.
+      const label = { 'risk-on': 'Risk-on', 'risk-off': 'Risk-off', chop: 'Chop', unknown: 'Unknown' }[session.regime] || 'Unknown';
+      $('kiaanRegimeMeta').textContent = session.updatedAt ? `Updated ${time(session.updatedAt)}` : 'Live read';
+      el.innerHTML = `<div class="kb-regime ${esc(session.regime || '')}"><strong>${esc(label)}</strong></div>`;
       return;
     }
     $('kiaanRegimeMeta').textContent = session.updatedAt ? `Updated ${time(session.updatedAt)}` : 'Live read';
@@ -206,6 +164,10 @@
     if (!items.length) { el.innerHTML = '<p class="war-empty">No candidate decisions — no data yet. On a stand-aside day the session read above is the journal entry: sitting out is a decision, and it is recorded.</p>'; return; }
     el.innerHTML = items.slice(0, 60).map(d => {
       const entered = d.decision === 'enter-long';
+      if (userView()) {
+        return `<div class="war-row"><div><b>${esc(d.symbol || '—')}</b> <span class="war-tag ${entered ? 'war-good' : ''}">${esc(entered ? 'ENTER LONG' : 'NO TRADE')}</span> <span class="war-tag">${esc(String(d.regime || '—').toUpperCase())}</span>
+        <small>${esc(d.why || '')}</small></div></div>`;
+      }
       const f = d.data?.features || {};
       const firstReason = Array.isArray(d.reasons) && d.reasons.length ? d.reasons[d.reasons.length - 1] : '';
       return `<div class="war-row"><div><b>${esc(d.symbol || '—')}</b> <span class="war-tag ${entered ? 'war-good' : ''}">${esc(entered ? 'ENTER LONG' : 'NO TRADE')}</span> <span class="war-tag">${esc(String(d.regime || '—').toUpperCase())}</span>
@@ -220,6 +182,10 @@
     $('kiaanOpen').textContent = String(items?.length ?? '—');
     if (!items?.length) { el.innerHTML = '<p class="war-empty">No open positions — no data yet.</p>'; return; }
     el.innerHTML = items.map(p => {
+      if (userView()) {
+        return `<div class="war-row"><div><b>${esc(p.symbol || '—')}</b> <span class="war-tag war-good">LONG</span> <span class="war-tag">${esc(String(p.status || '').replace(/_/g, ' '))}</span>
+        <small>${esc(p.shares ?? '—')} sh · entry ${money(p.entry_price)} · realized so far ${money(p.realized_pnl)}</small></div></div>`;
+      }
       const targets = (() => { try { const t = JSON.parse(p.targets_json || '[]'); return Array.isArray(t) ? t.map(x => `${money(x.price)} (${x.r}R)`).join(' → ') : '—'; } catch (_) { return '—'; } })();
       const prot = [p.t1_status === 'protected' ? 'OCO live' : null, p.t2_status === 'protected' ? 'stop live' : null].filter(Boolean).join(' · ') || 'server-managed';
       return `<div class="war-row"><div><b>${esc(p.symbol || '—')}</b> <span class="war-tag war-good">LONG</span> <span class="war-tag">${esc(String(p.status || '').replace(/_/g, ' '))}</span>
@@ -231,6 +197,16 @@
   function renderJournal(items) {
     const el = $('kiaanJournal');
     if (!items?.length) { el.innerHTML = '<p class="war-empty" style="padding:13px 18px">No trades recorded — no data yet.</p>'; return; }
+    if (userView()) {
+      el.innerHTML = `<table class="war-table"><thead><tr><th>Trade</th><th>Position</th><th>Result</th></tr></thead><tbody>${items.slice(0, 100).map(t => {
+        const pnl = pick(t, 'pnl');
+        const entryAt = pick(t, 'entryTime', 'entry_time', 'createdAt', 'created_at');
+        return `<tr><td><b>${esc(pick(t, 'symbol') || '—')}</b> <span class="war-tag war-good">LONG</span><small>${day(entryAt)} ${time(entryAt)}${t.closedAt ? ` → ${time(t.closedAt)}` : ' · open'}</small></td>
+        <td><small>${isNumber(pick(t, 'size')) ? `${number(pick(t, 'size'), 0)} sh` : '—'} · entry ${money(pick(t, 'entryPrice'))} → exit ${money(pick(t, 'exitPrice'))}</small></td>
+        <td class="${isNumber(pnl) ? (Number(pnl) >= 0 ? 'war-good' : 'war-bad') : ''}">${isNumber(pnl) ? money(pnl) : '—'}</td></tr>`;
+      }).join('')}</tbody></table>`;
+      return;
+    }
     el.innerHTML = `<table class="war-table"><thead><tr><th>Trade</th><th>Context</th><th>Position</th><th>Result</th><th>Reasons</th></tr></thead><tbody>${items.slice(0, 100).map(t => {
       const pnl = pick(t, 'pnl');
       const r = pick(t, 'rMultiple', 'r_multiple');
@@ -252,9 +228,11 @@
     const locks = data?.locks || null;
     if (!dayState) { el.innerHTML = '<p class="war-empty">No data yet.</p>'; return; }
     const lockLines = locks?.locked
-      ? `<div class="war-row"><div><b>LOCKED</b><small>${esc((locks.reasons || []).join(' · '))}</small></div><span class="war-tag war-bad">HALTED</span></div>`
+      ? `<div class="war-row"><div><b>LOCKED</b><small>${esc(userView() ? 'The bot has stopped taking new trades for today.' : (locks.reasons || []).join(' · '))}</small></div><span class="war-tag war-bad">HALTED</span></div>`
       : '<div class="war-row"><div><b>Daily locks</b><small>No lock engaged. Loss %, loss streak, trade count and position caps are enforced by the engine before every entry.</small></div><span class="war-tag war-good">OK</span></div>';
-    el.innerHTML = `<div class="war-row"><div><b>Day summary</b><small>P&amp;L ${isNumber(pnl) ? money(pnl) : '—'} · trades ${esc(pick(dayState, 'trades') ?? '—')} · wins ${esc(pick(dayState, 'wins') ?? '—')} · losses ${esc(pick(dayState, 'losses') ?? '—')} · consec. losses ${esc(pick(dayState, 'consecLosses') ?? '—')} · exposure ${money(pick(dayState, 'exposureDollars'))}</small></div></div>` + lockLines;
+    el.innerHTML = (userView()
+      ? `<div class="war-row"><div><b>Day summary</b><small>P&amp;L ${isNumber(pnl) ? money(pnl) : '—'} · trades ${esc(pick(dayState, 'trades') ?? '—')} · wins ${esc(pick(dayState, 'wins') ?? '—')} · losses ${esc(pick(dayState, 'losses') ?? '—')}</small></div></div>`
+      : `<div class="war-row"><div><b>Day summary</b><small>P&amp;L ${isNumber(pnl) ? money(pnl) : '—'} · trades ${esc(pick(dayState, 'trades') ?? '—')} · wins ${esc(pick(dayState, 'wins') ?? '—')} · losses ${esc(pick(dayState, 'losses') ?? '—')} · consec. losses ${esc(pick(dayState, 'consecLosses') ?? '—')} · exposure ${money(pick(dayState, 'exposureDollars'))}</small></div></div>`) + lockLines;
   }
 
   function renderAlerts(items) {
@@ -282,11 +260,20 @@
       }
       return `<label class="war-field" for="${id}"><span>${esc(label)}</span><input id="${id}" type="number" step="${stepOrOptions}" data-rule="${key}" value="${esc(value ?? '')}"></label>`;
     };
+    if (settingsView?.viewer === 'user') {
+      // User view: position size is the ONLY editable field on this page.
+      el.innerHTML = `
+      <fieldset class="war-fieldset"><legend>Position size</legend>
+      ${field('fixedDollars', 'Position size — dollars per trade ($)', 'number', 50)}
+      </fieldset>
+      <p class="war-note">This is the only setting you can change. Everything else about how the bot trades is managed for you. Mode is <b>PAPER</b>.</p>`;
+      return;
+    }
     el.innerHTML = `
       <fieldset class="war-fieldset"><legend>Master switch</legend>
       <label class="war-field war-check" for="kiaanEnabled"><input id="kiaanEnabled" type="checkbox" data-enabled ${settingsView?.enabled ? 'checked' : ''}><span>Trading enabled</span></label>
       </fieldset>` +
-      RULE_SCHEMA.map(group => `
+      (settingsView?.uiSchema || []).map(group => `
       <fieldset class="war-fieldset"><legend>${esc(group.group)}</legend>
       ${group.fields.map(([key, label, type, extra]) => field(key, label, type, extra)).join('')}
       </fieldset>`).join('') +
@@ -324,10 +311,10 @@
   /* ---- Actions ---- */
 
   async function toggleEnabled() {
-    if (changing || !status?.connected) { if (!status?.connected) connectionModal(); return; }
+    if (changing || !status?.connected) return;
     changing = true; revision++;
     try {
-      await api('/api/kiaan/settings', { method: 'PUT', body: JSON.stringify({ enabled: !status.enabled, rules: settingsView?.rules || {} }) });
+      await api('/api/kiaan/settings', { method: 'PUT', body: JSON.stringify({ enabled: !status.enabled }) });
       settingsView = await api('/api/kiaan/settings');
       status = await api('/api/kiaan/status');
       renderStatus(); renderSettings();
@@ -349,39 +336,6 @@
     } catch (error) { notice(`Settings not saved: ${error.message}`, true); }
     finally { changing = false; renderStatus(); }
   }
-  function connectionModal() {
-    if (changing) return;
-    const old = $('kiaanModal'); if (old) old.remove();
-    const previousFocus = document.activeElement;
-    document.body.insertAdjacentHTML('beforeend', `<div class="war-modal" id="kiaanModal" role="dialog" aria-modal="true" aria-labelledby="kiaanModalTitle"><form class="war-modal-card" id="kiaanForm"><button type="button" class="war-close" id="kiaanClose" aria-label="Close">×</button><div class="war-modal-scroll"><span class="war-eyebrow">KIAAN BOT DEDICATED CONNECTION</span><h2 id="kiaanModalTitle">Connect Alpaca Paper</h2><p>Use a <b>brand-new dedicated paper account</b>, separate from Warrior and manual trading — an account another bot owns will be refused. In Alpaca, switch the dashboard TO the new account first (keys are generated for whichever account is displayed), then generate its key pair and paste both values here. Keys are stored encrypted and never displayed back. Paper is the only mode this bot has.</p><label>API key<input id="kiaanKey" required autocomplete="off"></label><label>API secret<input id="kiaanSecret" type="password" required autocomplete="off"></label><p id="kiaanFormError" class="war-form-error" role="alert"></p></div><div class="war-modal-actions"><button type="submit" class="war-button" id="kiaanSubmit">Connect</button><button type="button" class="war-button war-quiet" id="kiaanDisconnect">Disconnect</button></div></form></div>`);
-    const close = () => { if (changing) return; $('kiaanModal')?.remove(); previousFocus?.focus(); };
-    $('kiaanClose').onclick = close;
-    $('kiaanModal').onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); close(); } };
-    $('kiaanForm').onsubmit = async event => {
-      event.preventDefault();
-      if (changing) return;
-      changing = true; revision++;
-      $('kiaanModal').querySelectorAll('button,input,select').forEach(control => { control.disabled = true; });
-      try {
-        status = await api('/api/kiaan/connect', { method: 'POST', body: JSON.stringify({ key: $('kiaanKey').value, secret: $('kiaanSecret').value }) });
-        settingsView = await api('/api/kiaan/settings');
-        close(); renderStatus(); renderSettings();
-        notice('Paper connected. Trading is still disabled — resume it when ready.');
-        refresh();
-      } catch (error) { $('kiaanFormError').textContent = `Connection blocked: ${error.message}`; }
-      finally { changing = false; $('kiaanModal')?.querySelectorAll('button,input,select').forEach(control => { control.disabled = false; }); renderStatus(); }
-    };
-    $('kiaanDisconnect').onclick = async () => {
-      if (!window.confirm('Disconnect the Kiaan Bot paper account? Blocked while positions remain open.')) return;
-      if (changing) return;
-      changing = true; revision++;
-      try { status = await api('/api/kiaan/disconnect', { method: 'POST' }); close(); renderStatus(); notice('Kiaan Bot disconnected.'); refresh(); }
-      catch (error) { $('kiaanFormError').textContent = `Disconnect blocked: ${error.message}`; }
-      finally { changing = false; renderStatus(); }
-    };
-    $('kiaanClose').focus();
-  }
-
   async function refresh() {
     if (!mounted || refreshing || changing) return;
     refreshing = true;
@@ -416,7 +370,6 @@
 
   async function open() {
     shell(); mounted = true;
-    $('kiaanPaperConnect').onclick = connectionModal;
     $('kiaanEnabledToggle').onclick = toggleEnabled;
     $('kiaanSave').onclick = saveSettings;
     try { settingsView = await api('/api/kiaan/settings'); renderSettings(); } catch (_) {}

@@ -6247,6 +6247,10 @@ const kiaanService = createKiaanService({
   db: automatedDb, vault: credentialVault, fetch, getAutomaticBotContext, automaticBotSettings,
   persistenceReady: () => automatedTradingPersistenceReady,
   durability: automatedState,
+  // Hide-internals (Johnny 2026-10-16): Johnny's account (…005) is the
+  // owner view — full Kiaan settings/regime detail. Every other account
+  // gets the stripped user view and may change only position size.
+  ownerUserId: 1000000005,
 });
 mountKiaan({ app, service: kiaanService, requireAuth, ensureSessionUserInTradingStore });
 let kiaanSchedulerStarted = false;

@@ -21,6 +21,7 @@ const {
 } = require('./lib/extended-hours');
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
+const { mountSubscription } = require('./lib/subscription');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -1393,6 +1394,9 @@ app.get('/api/_verify20260927', async (req, res) => {
       kiaan_settings: aq('SELECT user_id, enabled, mode, scheduler_status, scheduler_reason FROM kiaan_settings'),
       kiaan_creds: aq('SELECT user_id, mode, length(api_key_enc) AS key_bytes FROM kiaan_credentials'),
       kiaan_positions: aq("SELECT COUNT(*) AS n FROM kiaan_positions WHERE status IN ('open','pending_entry')")[0],
+      // Subscription visibility (2026-10-16): counts + mode only, never keys.
+      subscriptions: q('SELECT status, COUNT(*) AS n FROM agentic_subscriptions GROUP BY status'),
+      subscription_checkout_mode: process.env.STRIPE_SECRET_KEY ? 'stripe' : 'founding',
       kiaan_alerts: aq('SELECT created_at, kind, message FROM kiaan_alerts ORDER BY created_at DESC LIMIT 5'),
       // TEMP Kiaan longUniverse visibility (2026-10-12): the stored Kiaan
       // rules' longUniverse + hedge list, so the Kiaan expansion (Johnny:
@@ -6253,6 +6257,20 @@ const kiaanService = createKiaanService({
   ownerUserId: 1000000005,
 });
 mountKiaan({ app, service: kiaanService, requireAuth, ensureSessionUserInTradingStore });
+
+// Agentic Trading subscription (Johnny 2026-10-16): ONE flat $49.99/mo
+// plan, "Unlock Agentic Trading" popup after login, Stripe Checkout when
+// STRIPE_SECRET_KEY is present in the app environment. Until the LLC +
+// Stripe account are ready the key is absent BY DESIGN and checkout runs
+// in founding-list mode (signup recorded, nothing charged). The key is
+// only ever read here at runtime — never stored, logged, or returned.
+mountSubscription({
+  app,
+  db,
+  requireAuth,
+  getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
+  fetchImpl: fetch,
+});
 let kiaanSchedulerStarted = false;
 
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it

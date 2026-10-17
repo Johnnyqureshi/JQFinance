@@ -2334,6 +2334,7 @@ function setupWatchlistPage() {
 // ── Auth overlay helpers ────────────────────────────────────────────────────────
 function showApp(user) {
   state.currentUser = user;
+  window.subscriptionPopup?.onAuthenticated(user);
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
@@ -2346,6 +2347,7 @@ function showApp(user) {
 }
 
 function showAuthOverlay() {
+  window.subscriptionPopup?.onLogout();
   $('authOverlay').classList.remove('auth-hidden');
   $('navUser').style.display = 'none';
   window.jqfAgent?.hide();

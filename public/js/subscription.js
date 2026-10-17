@@ -43,9 +43,11 @@
     }
     const bannerCopy = $('subscriptionBannerCopy');
     if (bannerCopy && state) {
-      bannerCopy.textContent = state.status === 'active'
-        ? 'Agentic Trading is active on your account at the locked early-signup price.'
-        : state.status === 'founding'
+      bannerCopy.textContent = state.status === 'active' && state.exempt
+        ? 'Agentic Trading is active on your account — subscription fees are waived for this account.'
+        : state.status === 'active'
+          ? 'Agentic Trading is active on your account at the locked early-signup price.'
+          : state.status === 'founding'
           ? "You're on the founding list — billing opens the moment payments go live."
           : 'The agentic bot on your own broker account, live journal and signals, paper mode included.';
     }
@@ -65,7 +67,9 @@
     if (done) done.style.display = 'none';
     if (state && state.status === 'active') {
       if (confirm) {
-        confirm.textContent = 'Agentic Trading is active on your account — $49.99/mo at your locked early-signup price.';
+        confirm.textContent = state.exempt
+          ? 'Agentic Trading is active on your account — subscription fees are waived for this account.'
+          : 'Agentic Trading is active on your account — $49.99/mo at your locked early-signup price.';
         confirm.classList.add('show');
       }
       if (cta) cta.style.display = 'none';

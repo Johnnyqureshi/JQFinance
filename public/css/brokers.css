@@ -1,0 +1,41 @@
+/* Brokers page — dedicated broker cards + the Alpaca API-key interface.
+   Aligned to the Qureshi Finance theme vars used by kiaan.css/style.css. */
+.brk-shell{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--panel:var(--card);--panel2:var(--card2);--mint:var(--teal);--amber:var(--gold);--danger:var(--red);max-width:1180px;margin:auto;padding:36px clamp(16px,4vw,56px) 84px;font-family:Inter,sans-serif;color:var(--ink)}
+.brk-hero{padding:10px 0 24px;border-bottom:1px solid var(--line)}
+.brk-eyebrow{font:800 10px 'DM Mono',monospace;letter-spacing:.13em;color:var(--dim)}
+.brk-hero h1{font-size:clamp(30px,4.5vw,48px);letter-spacing:-.05em;margin:8px 0}
+.brk-hero p{color:var(--muted);font-size:13px;line-height:1.65;margin:0;max-width:640px}
+.brk-notice{min-height:28px;padding:9px 0;color:var(--amber);font:11px 'DM Mono',monospace}
+.brk-notice.is-error{color:var(--danger)}
+.brk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;align-items:start}
+.brk-card{border:1px solid var(--line);background:var(--panel);padding:18px;box-shadow:0 12px 28px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.025)}
+.brk-card p{color:var(--muted);font-size:12.5px;line-height:1.65}
+.brk-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
+.brk-card-head h2{font-size:19px;letter-spacing:-.02em;margin:0;color:var(--ink)}
+.brk-chip{border:1px solid var(--line);padding:5px 9px;color:var(--muted);font:600 10px 'DM Mono',monospace;white-space:nowrap}
+.brk-chip-ok{color:var(--mint);border-color:var(--mint)}
+.brk-state{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0}
+.brk-state span{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.09em}
+.brk-state strong{font:600 12px 'DM Mono',monospace;color:var(--ink)}
+.brk-good{color:var(--mint)!important}
+.brk-bad{color:var(--danger)!important}
+.brk-mode{border:1px solid var(--line);margin:0 0 12px;padding:10px 12px}
+.brk-mode legend{font:800 9px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding:0 6px}
+.brk-mode-opt{display:flex;gap:9px;align-items:flex-start;cursor:pointer;padding:7px 0;color:var(--muted);font-size:12px}
+.brk-mode-opt input{margin-top:2px;accent-color:var(--teal)}
+.brk-mode-opt b{display:block;color:var(--ink);font-size:13px}
+.brk-mode-opt small{display:block;margin-top:2px;line-height:1.45}
+.brk-live-note{border:1px solid var(--amber);color:var(--amber)!important;padding:10px 12px;font-size:12px}
+.brk-field{display:block;margin:0 0 12px;color:var(--muted);font-size:11px}
+.brk-field>span{display:block;margin-bottom:6px}
+.brk-field input{box-sizing:border-box;width:100%;padding:11px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);font:600 13px 'DM Mono',monospace}
+.brk-error{color:var(--danger);font-size:12px;min-height:16px;line-height:1.5}
+.brk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.brk-button{cursor:pointer;border:1px solid var(--teal);background:linear-gradient(100deg,#14cdbd,#168ee9);color:#03101a;padding:10px 16px;font:800 11px Inter,sans-serif;letter-spacing:.03em}
+.brk-button:hover:not(:disabled){transform:translateY(-1px)}
+.brk-button:disabled{opacity:.55;cursor:not-allowed}
+.brk-quiet{color:var(--muted);background:transparent;border-color:var(--line)}
+.brk-note{font-size:11px!important;line-height:1.6}
+.brk-note a{color:var(--teal)}
+.brk-button:focus-visible,.brk-field input:focus-visible,.brk-mode-opt input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+@media(max-width:620px){.brk-shell{padding:20px 14px 70px}.brk-actions .brk-button{flex:1}}

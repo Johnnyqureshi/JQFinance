@@ -682,6 +682,8 @@ function goPage(page) {
   if (page==='trading')   { alpacaTrader.open(); }
   if (page==='kiaan') { if (window.kiaanBot) kiaanBot.open(); }
   else if (window.kiaanBot) kiaanBot.pause();
+  if (page==='brokers') { if (window.brokersPage) brokersPage.open(); }
+  else if (window.brokersPage) brokersPage.pause();
   document.dispatchEvent(new CustomEvent('pageChanged', { detail: { page } }));
 }
 

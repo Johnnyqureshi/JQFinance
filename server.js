@@ -25,6 +25,7 @@ const { mountSubscription } = require('./lib/subscription');
 const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
 const { mountAdminUsers } = require('./lib/admin-users');
+const adminControls = require('./lib/admin-controls');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -744,6 +745,15 @@ function requireAuth(req, res, next) {
     req.session.destroy(() => {});
     return res.status(401).json({ error: 'Not authenticated', code: 'ACCOUNT_RETIRED' });
   }
+  // Admin suspension (Johnny 2026-10-17, USERS page): a suspended
+  // account's live sessions stop working on their next authenticated
+  // request — same destroy-and-401 pattern as retirement. The flag is
+  // read fresh from admin_user_controls on every call, so suspension
+  // and reactivation take effect immediately.
+  if (adminControls.isSuspended(db, uid)) {
+    req.session.destroy(() => {});
+    return res.status(401).json({ error: 'Not authenticated', code: 'ACCOUNT_SUSPENDED' });
+  }
   next();
 }
 
@@ -1306,6 +1316,16 @@ app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
         code: 'EMAIL_UNVERIFIED',
         error: 'Please verify your email address before signing in. Check your inbox for the verification link.',
         email: user.email || null,
+      });
+    }
+
+    // Admin suspension (Johnny 2026-10-17, USERS page): a suspended
+    // account cannot sign in at all. requireAuth above independently
+    // kills any session that predates the suspension.
+    if (adminControls.isSuspended(db, user.id)) {
+      return res.status(403).json({
+        code: 'ACCOUNT_SUSPENDED',
+        error: 'This account has been suspended and cannot sign in.',
       });
     }
 

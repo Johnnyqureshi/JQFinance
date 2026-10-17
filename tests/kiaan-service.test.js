@@ -1622,3 +1622,46 @@ test('hide-internals (e): non-owner settings payload is exactly sizing + risk, e
   assert.equal(view.rules.maxDailyLossPct, 3.25, 'daily-loss lock present, read-only');
   assert.ok(!('uiSchema' in view) && !('liveNote' in view), 'no owner-only extras in the user settings payload');
 });
+
+test('admin hold: entries withheld while held, user Pause/Resume cannot lift it, entry resumes on lift', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
+  assert.equal(f.service.isAdminHold(1), false);
+  assert.equal(f.service.setAdminHold(1, true), false, 'setAdminHold returns the previous flag');
+  assert.equal(f.service.isAdminHold(1), true);
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.filter(o => o.side === 'buy').length, 0, 'no entries under an admin hold');
+  const held = f.db.prepare('SELECT scheduler_status, scheduler_reason FROM kiaan_settings WHERE user_id=1').get();
+  assert.equal(held.scheduler_status, 'idle');
+  assert.match(held.scheduler_reason, /Admin hold/);
+  const rosterRow = f.service.adminBotRoster().find(r => r.userId === 1);
+  assert.equal(rosterRow.adminHold, true, 'roster reports the hold for the USERS page');
+  const st = await f.service.status(1);
+  assert.ok(st.blockers.some(b => /Admin hold/.test(b)), 'status surfaces the hold as a blocker');
+  // The user's own Pause/Resume writes enabled only — the hold survives.
+  await f.service.setSettings(1, { enabled: false });
+  await f.service.setSettings(1, { enabled: true });
+  assert.equal(f.service.isAdminHold(1), true, 'user Pause/Resume cannot lift an admin hold');
+  // Lift the hold: the same confirming entry now goes through.
+  assert.equal(f.service.setAdminHold(1, false), true);
+  await f.service._scanCycle(1);
+  assert.equal(f.world.orderPosts.filter(o => o.side === 'buy').length, 1, 'entry resumes once the hold lifts');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1);
+});
+
+test('admin hold: an open position is still flattened at EOD (never trapped)', async () => {
+  const f = fixture('riskon');
+  await connectAndEnable(f);
+  await f.service.setSettings(1, { rules: { hedgeOnly: false, exitAtrTimeframe: 'daily' } });
+  await f.service._scanCycle(1);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 1);
+  f.service.setAdminHold(1, true);
+  f.world.brokerPositions = [{ symbol: 'AAA', qty: '49' }];
+  f.world.exitPrice = 10.2;
+  f.world.time = Date.parse('2026-10-01T19:56:00Z'); // 15:56 ET — past flattenTime
+  await f.service._scanCycle(1);
+  const marketSells = f.world.orderPosts.filter(o => o.side === 'sell' && o.type === 'market');
+  assert.equal(marketSells.length, 1, 'EOD flatten still runs under an admin hold');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_positions').get().n, 0);
+});

@@ -238,13 +238,18 @@ test('GET /api/referrals/me returns the account summary (code, counts, discount,
   assert.equal(res.body.rule, '20% off for each friend who subscribes, up to 60% off, while they stay subscribed.');
 });
 
-test('billing hook: checkout params carry the deterministic coupon only for a real discount tier', () => {
+test('billing hook: checkout params carry the deterministic coupon for the effective discount', () => {
   const base = { successUrl: 'https://x.test/ok', cancelUrl: 'https://x.test/no', userId: 7 };
   assert.equal(sub.buildCheckoutSessionParams(base).discounts, undefined, 'no discount, no coupon');
-  assert.equal(sub.buildCheckoutSessionParams({ ...base, discountPct: 15 }).discounts, undefined, 'off-tier pct ignored');
+  assert.equal(sub.buildCheckoutSessionParams({ ...base, discountPct: 0 }).discounts, undefined, 'zero discount, no coupon');
   assert.deepEqual(
     sub.buildCheckoutSessionParams({ ...base, discountPct: 40 }).discounts,
-    [{ coupon: 'qf-referral-40' }]);
+    [{ coupon: 'qf-referral-40' }], 'referral tiers keep their durable coupon ids');
+  // Admin fee discounts (USERS page, 2026-10-17) made ANY percentage a
+  // real discount: off-tier pcts get their own deterministic coupon.
+  assert.deepEqual(
+    sub.buildCheckoutSessionParams({ ...base, discountPct: 15 }).discounts,
+    [{ coupon: 'qf-discount-15' }], 'off-tier pct now maps to the generic discount coupon');
 });
 
 test('billing hook: session creation ensures the coupon, then posts the discount to Stripe', async () => {

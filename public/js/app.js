@@ -66,10 +66,32 @@ function setupThemeToggle() {
 }
 
 // ── Auth API ────────────────────────────────────────────────────────────────────
+// Refer & Save (Johnny 2026-10-17): a visitor arriving via a referral
+// link (/?ref=CODE) has the code stored (first touch wins) and posted
+// back at signup, so attribution survives the email-verification flow —
+// the account is created once, attributed server-side at registration.
+const REFERRAL_STORAGE_KEY = 'qf-referral-code';
+function storedReferralCode() {
+  try { return localStorage.getItem(REFERRAL_STORAGE_KEY) || ''; } catch { return ''; }
+}
+(function captureReferralCode() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const ref = (params.get('ref') || '').trim();
+    if (!ref) return;
+    if (!storedReferralCode()) {
+      try { localStorage.setItem(REFERRAL_STORAGE_KEY, ref); } catch {}
+    }
+    params.delete('ref');
+    const qs = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+  } catch {}
+})();
+
 const authAPI = {
   async me()          { try { const r=await fetch('/api/auth/me'); return r.ok ? r.json() : null; } catch { return null; } },
   async login(u,p)    { try { const r=await fetch('/api/auth/login',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
-  async register(u,p,email) { try { const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p,email})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
+  async register(u,p,email,referralCode) { try { const payload={username:u,password:p,email}; if (referralCode) payload.referralCode=referralCode; const r=await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false,data:{error:'Network error — please try again.'}}; } },
   async resendVerification(email) { try { const r=await fetch('/api/auth/resend-verification', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(email?{email}:{})}); return {ok:r.ok,data:await r.json()}; } catch { return {ok:false}; } },
   async logout()      { try { await fetch('/api/auth/logout', {method:'POST'}); } catch {} },
 };
@@ -2335,6 +2357,7 @@ function setupWatchlistPage() {
 function showApp(user) {
   state.currentUser = user;
   window.subscriptionPopup?.onAuthenticated(user);
+  window.referralsCard?.refresh();
   $('authOverlay').classList.add('auth-hidden');
   $('navUser').style.display = 'flex';
   $('navUsername').textContent = user.username;
@@ -2424,10 +2447,13 @@ function setupAuthUI() {
     $('authSubmit').disabled    = true;
     $('authSubmit').textContent = mode === 'login' ? 'Signing in…' : 'Creating account…';
 
-    const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p, em);
+    const res = mode === 'login' ? await authAPI.login(u, p) : await authAPI.register(u, p, em, storedReferralCode());
 
     if (res.ok) {
       if (mode === 'register') {
+        // Attribution is recorded server-side at registration; the stored
+        // code has done its job and must not attribute a later signup.
+        try { localStorage.removeItem(REFERRAL_STORAGE_KEY); } catch {}
         // Account exists but has no session yet: the emailed verification
         // link gates the site, so show the "check your inbox" state.
         showVerifyPending(em);

@@ -25,7 +25,7 @@ test('index.html has the Brokers nav entry (desktop + mobile), page container, a
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
   assert.ok(html.includes('/js/brokers.js?v=20261017a'), 'brokers.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/brokers.css?v=20261016a'), 'brokers.css included with a cache-busting tag');
-  assert.ok(html.includes('/js/app.js?v=20261016c'), 'app.js tag bumped for the routing change');
+  assert.ok(html.includes('/js/app.js?v=20261017a'), 'app.js tag bumped for the routing change');
 });
 
 test('app.js routes the brokers page through window.brokersPage', () => {

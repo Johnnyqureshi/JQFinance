@@ -57,3 +57,18 @@
 .sub-notice{max-width:1180px;margin:14px auto 0;padding:12px 16px;border-radius:12px;font-size:13px;
   border:1px solid #f59e0b;background:rgba(245,158,11,.12);color:#fcd34d}
 @media(max-width:620px){.sub-modal{padding:24px 18px}.sub-actions .sub-cta,.sub-actions .sub-later{flex:1}}
+/* Refer & Save card (Johnny 2026-10-17) — same sober theme as the
+   subscription surfaces: deep navy/slate, #1dd6a3 the only accent. */
+.ref-card{margin:18px 0;padding:18px 20px;border-radius:16px;color:#dce8fa;
+  background:#111827;border:1px solid #1c2a42}
+.ref-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.ref-card h3{margin:0;font-size:20px;letter-spacing:-.02em}
+.ref-discount{font:800 12px Inter,sans-serif;color:#1dd6a3;letter-spacing:.02em;text-align:right}
+.ref-rule{margin:6px 0 12px;font-size:13px;line-height:1.55;color:#93a5c8}
+.ref-link-row{display:flex;gap:10px;flex-wrap:wrap}
+.ref-link-row input{flex:1;min-width:220px;background:#0f1424;color:#dce8fa;
+  border:1px solid #243556;border-radius:999px;padding:10px 14px;font:600 12px Inter,sans-serif}
+.ref-copy{cursor:pointer;border:1px solid #1dd6a3;border-radius:999px;background:#1dd6a3;color:#0a1628;
+  padding:10px 18px;font:800 12px Inter,sans-serif;white-space:nowrap}
+.ref-copy:hover{opacity:.88}
+.ref-stats{margin:10px 0 0;font-size:12.5px;color:#c3cbe0}

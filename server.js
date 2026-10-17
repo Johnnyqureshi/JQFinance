@@ -22,6 +22,8 @@ const {
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { mountSubscription } = require('./lib/subscription');
+const referrals = require('./lib/referrals');
+const { mountReferrals } = referrals;
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
 const { normalizeYahooFloatSummary, scannerFloatFields } = require('./lib/scanner-float');
@@ -1166,6 +1168,29 @@ app.post('/api/auth/register', rateLimitAuth, async (req, res) => {
     if (!user) return res.status(409).json({ error: 'Username already taken.' });
     const uid = Number(user.id);
     authStore.syncSqliteUser(db, user);
+    // Refer & Save attribution (Johnny 2026-10-17): a signup that arrived
+    // via a referral link posts the code back; attribute the new account
+    // to the code's owner exactly once (set-once and self-referral rules
+    // live in lib/referrals.js). Fail-open: attribution problems never
+    // break signup.
+    try {
+      const refCode = typeof (req.body || {}).referralCode === 'string' ? req.body.referralCode : '';
+      if (refCode) {
+        const referrerId = referrals.resolveReferralCode(db, refCode);
+        if (referrerId) {
+          const referrer = await authStore.findUserById(referrerId).catch(() => null);
+          referrals.recordAttribution(db, {
+            referredUserId: uid,
+            referrerUserId: referrerId,
+            code: refCode,
+            referredEmail: em,
+            referrerEmail: referrer ? referrer.email : null,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[Auth] Referral attribution failed:', e.message);
+    }
     // Issue a verification token and send the email. Fail-open: mail problems
     // never break signup — the token flow still works and can be re-sent.
     let verificationSent = false;
@@ -6270,6 +6295,17 @@ mountSubscription({
   requireAuth,
   getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
   fetchImpl: fetch,
+});
+
+// Refer & Save (Johnny 2026-10-17): personal referral codes/links and the
+// 20%-per-active-referral discount (60% cap). Founding-phase tracking
+// while the Stripe key is absent; the discount entitlement is computed
+// live from current active referrals — see lib/referrals.js.
+mountReferrals({
+  app,
+  db,
+  requireAuth,
+  getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
 });
 let kiaanSchedulerStarted = false;
 

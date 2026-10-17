@@ -235,8 +235,8 @@ test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped
   assert.ok(html.includes('id="subscriptionBannerBtn"'), 'dashboard entry point present');
   assert.ok(html.includes('id="subscriptionKiaanBtn"'), 'Kiaan page entry point present');
   assert.ok(html.includes('/js/subscription.js?v=20261016b'), 'subscription.js tag bumped');
-  assert.ok(html.includes('/public/css/subscription.css?v=20261016b'), 'subscription.css tag bumped');
-  assert.ok(html.includes('/js/app.js?v=20261016c'), 'app.js tag bumped for the login hook');
+  assert.ok(html.includes('/public/css/subscription.css?v=20261017a'), 'subscription.css tag bumped');
+  assert.ok(html.includes('/js/app.js?v=20261017a'), 'app.js tag bumped for the login hook');
   assert.ok(!/paypal/i.test(html), 'no PayPal in this build (phase 2)');
 });
 

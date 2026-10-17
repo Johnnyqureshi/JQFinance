@@ -42,7 +42,7 @@
   <link rel="stylesheet" href="/public/css/style.css?v=20260929d"/>
   <link rel="stylesheet" href="/public/css/kiaan.css?v=20261016a"/>
   <link rel="stylesheet" href="/public/css/brokers.css?v=20261016a"/>
-  <link rel="stylesheet" href="/public/css/subscription.css?v=20261016b"/>
+  <link rel="stylesheet" href="/public/css/subscription.css?v=20261017a"/>
   <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
   <link rel="stylesheet" href="/public/css/home-pulse.css?v=20261001a"/>
 </head>
@@ -270,6 +270,23 @@
           <p id="subscriptionBannerCopy">The agentic bot on your own broker account, live journal and signals, paper mode included.</p>
         </div>
         <button class="sub-entry-btn" id="subscriptionBannerBtn" type="button">Unlock Agentic Trading</button>
+      </div>
+
+      <!-- 5 · Refer & Save (Johnny 2026-10-17): personal referral link,
+           20% off per subscribed friend, 60% cap. Rendered by
+           public/js/referrals.js from /api/referrals/me; stays hidden
+           until the account's data loads. -->
+      <div class="ref-card" id="referralCard" style="display:none">
+        <div class="ref-head">
+          <h3>Refer &amp; Save</h3>
+          <span class="ref-discount" id="referralDiscount"></span>
+        </div>
+        <p class="ref-rule">20% off for each friend who subscribes, up to 60% off, while they stay subscribed.</p>
+        <div class="ref-link-row">
+          <input type="text" id="referralLink" readonly value="" aria-label="Your referral link"/>
+          <button class="ref-copy" id="referralCopyBtn" type="button">Copy link</button>
+        </div>
+        <p class="ref-stats" id="referralStats"></p>
       </div>
 
     </section>
@@ -906,7 +923,7 @@
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
-<script src="/js/app.js?v=20261016c"></script>
+<script src="/js/app.js?v=20261017a"></script>
 <script src="/js/home-pulse.js?v=20261016a"></script>
 <script src="/js/search-intelligence.js?v=20260929d"></script>
 <script src="/js/realtimetrader.js?v=20260929d"></script>
@@ -919,6 +936,7 @@
 <script src="/js/kiaan.js?v=20261017a"></script>
 <script src="/js/brokers.js?v=20261017a"></script>
 <script src="/js/subscription.js?v=20261016b"></script>
+<script src="/js/referrals.js?v=20261017a"></script>
 
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation">

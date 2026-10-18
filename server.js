@@ -22,6 +22,7 @@ const {
 const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { mountSubscription } = require('./lib/subscription');
+const { mountStripeWebhook } = require('./lib/stripe-webhook');
 const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
 const { mountAdminUsers } = require('./lib/admin-users');
@@ -668,6 +669,17 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // CORS: allow credentials from any origin — security is enforced by
 // session auth (requireAuth), bcrypt, rate limiting, and input validation.
 app.use(cors({ credentials: true, origin: true }));
+
+// Stripe webhook (Johnny 2026-10-18): mounted BEFORE the JSON body
+// parser because signature verification needs the exact raw bytes of
+// the delivery. Fails closed (400, no state change) until
+// STRIPE_WEBHOOK_SECRET is set in the app environment; the secret is
+// only ever read here at runtime — never stored, logged, or returned.
+mountStripeWebhook({
+  app,
+  db,
+  getWebhookSecret: () => process.env.STRIPE_WEBHOOK_SECRET || null,
+});
 
 app.use(express.json({ limit: '50kb' }));
 

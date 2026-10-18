@@ -486,6 +486,158 @@ test('live connect is accepted, validated on the LIVE endpoint, and stored live 
   await assert.rejects(() => f.service.connect(1, { key: 'k'.repeat(8), secret: 's'.repeat(8), mode: 'demo' }), /must be 'paper' or 'live'/);
 });
 
+// --- per-user connect hardening (Johnny 2026-10-18) ---------------------
+// A wrapFetch gate that behaves like Alpaca itself: a key pair is valid
+// ONLY on the environment host it was issued for, presenting it anywhere
+// else (or with a wrong secret) earns a 401 {"message":"unauthorized"}.
+// Registry: keyId -> { secret, accountId, host }.
+function alpacaKeyGate(registry) {
+  return (fakeFetch, world) => async (url, init = {}) => {
+    const parsed = new URL(url);
+    const isBroker = parsed.hostname === 'paper-api.alpaca.markets' || parsed.hostname === 'api.alpaca.markets';
+    if (isBroker && parsed.pathname === '/v2/account') {
+      const host = parsed.hostname === 'api.alpaca.markets' ? 'live' : 'paper';
+      const entry = registry[init.headers?.['APCA-API-KEY-ID']];
+      if (!entry || entry.host !== host || entry.secret !== init.headers?.['APCA-API-SECRET-KEY']) {
+        return { ok: false, status: 401, json: async () => ({ code: 40110000, message: 'unauthorized' }) };
+      }
+      world.accountId = entry.accountId;
+    }
+    return fakeFetch(url, init);
+  };
+}
+const GATE_PAIRS = {
+  paperKeyA: { secret: 'paperSecretA', accountId: 'acct-paper-a', host: 'paper' },
+  liveKeyB: { secret: 'liveSecretB', accountId: 'acct-live-b', host: 'live' },
+  paperKeyC: { secret: 'paperSecretC', accountId: 'acct-paper-c', host: 'paper' },
+};
+const vaultProbe = () => createCredentialVault('test-only-secret-never-a-real-credential-987654321');
+
+test('non-owner connects PAPER: validated on the paper endpoint, stored encrypted, nothing echoed back', async () => {
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: alpacaKeyGate(GATE_PAIRS), retryBaseMs: 1 });
+  const out = await f.service.connect(2, { key: 'paperKeyA', secret: 'paperSecretA' });
+  assert.equal(out.ok, true);
+  assert.equal(out.accountId, 'acct-paper-a');
+  const accountCall = f.world.calls.find(c => c.path === '/v2/account');
+  assert.ok(accountCall.url.startsWith('https://paper-api.alpaca.markets'), `paper validation hit ${accountCall.url}`);
+  // Mode stored consistently in all three stores the order-path guard reads.
+  const cred = f.db.prepare('SELECT * FROM kiaan_credentials WHERE user_id=2').get();
+  assert.equal(cred.mode, 'paper');
+  assert.equal(cred.account_id, 'acct-paper-a');
+  const owner = f.db.prepare('SELECT * FROM broker_account_owners WHERE account_id=?').get('acct-paper-a');
+  assert.equal(owner.user_id, 2);
+  assert.equal(owner.scope, 'kiaan');
+  assert.equal(owner.mode, 'paper');
+  assert.equal(f.db.prepare('SELECT mode FROM kiaan_settings WHERE user_id=2').get().mode, 'paper');
+  // Encrypted at rest: stored values decrypt back to the pair under the
+  // vault, and are not the plaintext.
+  const probe = vaultProbe();
+  assert.ok(probe.isEncrypted(cred.api_key_enc) && probe.isEncrypted(cred.api_secret_enc));
+  assert.equal(probe.decrypt(cred.api_key_enc), 'paperKeyA');
+  assert.equal(probe.decrypt(cred.api_secret_enc), 'paperSecretA');
+  // No surface echoes key material.
+  const st = await f.service.status(2);
+  assert.equal(st.connected, true);
+  assert.ok(!JSON.stringify(st).includes('paperSecretA') && !JSON.stringify(out).includes('paperSecretA'));
+  // Ships disabled for a non-owner too.
+  assert.equal(st.enabled, false);
+});
+
+test('non-owner connects LIVE: validated on the live endpoint and stored live everywhere', async () => {
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: alpacaKeyGate(GATE_PAIRS), retryBaseMs: 1 });
+  const out = await f.service.connect(2, { key: 'liveKeyB', secret: 'liveSecretB', mode: 'live' });
+  assert.equal(out.ok, true);
+  assert.equal(out.accountId, 'acct-live-b');
+  const accountCall = f.world.calls.find(c => c.path === '/v2/account');
+  assert.ok(accountCall.url.startsWith('https://api.alpaca.markets'), `live validation hit ${accountCall.url}`);
+  assert.equal(f.db.prepare('SELECT mode FROM kiaan_credentials WHERE user_id=2').get().mode, 'live');
+  assert.equal(f.db.prepare('SELECT mode FROM broker_account_owners WHERE account_id=?').get('acct-live-b').mode, 'live');
+  assert.equal(f.db.prepare('SELECT mode FROM kiaan_settings WHERE user_id=2').get().mode, 'live');
+  const st = await f.service.status(2);
+  assert.equal(st.connected, true);
+  assert.equal(st.tradingMode, 'LIVE');
+  assert.equal(st.enabled, false);
+});
+
+test('paper keys submitted in LIVE mode are rejected with plain-language copy and ZERO stored state', async () => {
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: alpacaKeyGate(GATE_PAIRS), retryBaseMs: 1 });
+  await assert.rejects(
+    () => f.service.connect(2, { key: 'paperKeyA', secret: 'paperSecretA', mode: 'live' }),
+    err => {
+      assert.match(err.message, /Alpaca rejected these keys/);
+      assert.match(err.message, /Paper\/Live choice matches/);
+      assert.ok(!err.message.includes('paperSecretA'), 'message must never contain the secret');
+      assert.ok(!/Broker request failed \(HTTP 401\)/.test(err.message), 'raw broker copy is translated');
+      assert.equal(err.httpStatus, 401, 'internal broker status is preserved on the error');
+      return true;
+    },
+  );
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_credentials WHERE user_id=2').get().n, 0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM broker_account_owners').get().n, 0);
+  assert.equal((await f.service.status(2)).connected, false);
+  assert.equal(f.db.prepare('SELECT enabled FROM kiaan_settings WHERE user_id=2').get().enabled, 0);
+});
+
+test('a wrong-secret pair is rejected with plain-language copy and ZERO stored state', async () => {
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: alpacaKeyGate(GATE_PAIRS), retryBaseMs: 1 });
+  await assert.rejects(
+    () => f.service.connect(2, { key: 'paperKeyA', secret: 'notTheSecret' }),
+    err => {
+      assert.match(err.message, /Alpaca rejected these keys/);
+      assert.ok(!err.message.includes('notTheSecret'), 'message must never contain the secret');
+      assert.equal(err.httpStatus, 401);
+      return true;
+    },
+  );
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_credentials').get().n, 0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM broker_account_owners').get().n, 0);
+  assert.equal((await f.service.status(2)).connected, false);
+});
+
+test('an unreachable broker during connect returns try-again copy and stores nothing', async () => {
+  const down = (fakeFetch, world) => async (url, init = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/v2/account' && parsed.hostname.includes('alpaca.markets')) {
+      return { ok: false, status: 503, json: async () => ({ code: 50310000, message: 'service unavailable' }) };
+    }
+    return fakeFetch(url, init);
+  };
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: down, retryBaseMs: 1 });
+  await assert.rejects(
+    () => f.service.connect(2, { key: 'paperKeyA', secret: 'paperSecretA' }),
+    err => {
+      assert.match(err.message, /Could not reach Alpaca just now/);
+      assert.ok(!err.message.includes('paperSecretA'));
+      return true;
+    },
+  );
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_credentials').get().n, 0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM broker_account_owners').get().n, 0);
+});
+
+test('two users connect independently; disconnect clears ONLY the disconnecting user', async () => {
+  const f = fixture('riskon', { ownerUserId: 999, wrapFetch: alpacaKeyGate(GATE_PAIRS), retryBaseMs: 1 });
+  await f.service.connect(2, { key: 'paperKeyA', secret: 'paperSecretA' });
+  await f.service.connect(3, { key: 'paperKeyC', secret: 'paperSecretC' });
+  // The second user's connect left the first user fully intact.
+  const cred2 = f.db.prepare('SELECT * FROM kiaan_credentials WHERE user_id=2').get();
+  assert.equal(cred2.account_id, 'acct-paper-a');
+  assert.equal(cred2.mode, 'paper');
+  assert.ok(f.db.prepare('SELECT 1 FROM broker_account_owners WHERE account_id=? AND user_id=2').get('acct-paper-a'));
+  assert.equal((await f.service.status(2)).connected, true);
+  assert.equal((await f.service.status(3)).connected, true);
+  // Disconnecting user 2 clears user 2 only.
+  await f.service.disconnect(2);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM kiaan_credentials WHERE user_id=2').get().n, 0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM broker_account_owners WHERE account_id=?').get('acct-paper-a').n, 0);
+  assert.equal((await f.service.status(2)).connected, false);
+  const cred3 = f.db.prepare('SELECT * FROM kiaan_credentials WHERE user_id=3').get();
+  assert.equal(cred3.account_id, 'acct-paper-c');
+  assert.ok(f.db.prepare('SELECT 1 FROM broker_account_owners WHERE account_id=? AND user_id=3').get('acct-paper-c'));
+  assert.equal((await f.service.status(3)).connected, true);
+  assert.equal(f.db.prepare('SELECT mode FROM kiaan_settings WHERE user_id=3').get().mode, 'paper');
+});
+
 test('order-path mode guard: settings mode diverging from the credential fails closed with zero orders', async () => {
   const f = fixture('riskon');
   await connectAndEnable(f);
@@ -1335,7 +1487,9 @@ test('broker hardening: a GET answered 500 on every attempt fails after 3 tries'
       return inner(url, init);
     },
   });
-  await assert.rejects(() => connectPaper(f), /HTTP 500/);
+  // Retry count is the invariant; the surfaced copy is the connect
+  // surface's plain-language try-again message (Johnny 2026-10-18).
+  await assert.rejects(() => connectPaper(f), /Could not reach Alpaca just now/);
   assert.equal(accountGets, 3, 'all 3 attempts were made before failing');
 });
 

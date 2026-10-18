@@ -19,6 +19,13 @@
 .brk-state strong{font:600 12px 'DM Mono',monospace;color:var(--ink)}
 .brk-good{color:var(--mint)!important}
 .brk-bad{color:var(--danger)!important}
+.brk-help{border:1px solid var(--line);background:var(--panel2);padding:10px 12px;margin:0 0 12px}
+.brk-help summary{cursor:pointer;color:var(--ink);font:700 12px Inter,sans-serif;letter-spacing:.01em}
+.brk-help summary::marker{color:var(--teal)}
+.brk-help ol{margin:10px 0 2px;padding-left:18px;color:var(--muted);font-size:12px;line-height:1.6}
+.brk-help li{margin:5px 0}
+.brk-help b{color:var(--ink)}
+.brk-help a{color:var(--teal)}
 .brk-mode{border:1px solid var(--line);margin:0 0 12px;padding:10px 12px}
 .brk-mode legend{font:800 9px 'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding:0 6px}
 .brk-mode-opt{display:flex;gap:9px;align-items:flex-start;cursor:pointer;padding:7px 0;color:var(--muted);font-size:12px}
@@ -37,5 +44,5 @@
 .brk-quiet{color:var(--muted);background:transparent;border-color:var(--line)}
 .brk-note{font-size:11px!important;line-height:1.6}
 .brk-note a{color:var(--teal)}
-.brk-button:focus-visible,.brk-field input:focus-visible,.brk-mode-opt input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.brk-button:focus-visible,.brk-field input:focus-visible,.brk-mode-opt input:focus-visible,.brk-help summary:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 @media(max-width:620px){.brk-shell{padding:20px 14px 70px}.brk-actions .brk-button{flex:1}}

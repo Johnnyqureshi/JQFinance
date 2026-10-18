@@ -17,14 +17,15 @@ const read = p => readFileSync(require.resolve(p), 'utf8');
 const html = read('../index.html');
 const appJs = read('../public/js/app.js');
 const brokersJs = read('../public/js/brokers.js');
+const brokersCss = read('../public/css/brokers.css');
 const kiaanJs = read('../public/js/kiaan.js');
 const service = read('../lib/kiaan/service.js');
 
 test('index.html has the Brokers nav entry (desktop + mobile), page container, and bumped assets', () => {
   assert.ok((html.match(/data-page="brokers"/g) || []).length >= 2, 'desktop and mobile nav both carry Brokers');
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
-  assert.ok(html.includes('/js/brokers.js?v=20261018a'), 'brokers.js included with a cache-busting tag');
-  assert.ok(html.includes('/public/css/brokers.css?v=20261016a'), 'brokers.css included with a cache-busting tag');
+  assert.ok(html.includes('/js/brokers.js?v=20261018b'), 'brokers.js included with a cache-busting tag');
+  assert.ok(html.includes('/public/css/brokers.css?v=20261018b'), 'brokers.css included with a cache-busting tag');
   assert.ok(html.includes('/js/app.js?v=20261017b'), 'app.js tag bumped for the routing change');
 });
 
@@ -64,6 +65,32 @@ test('broker cards: Alpaca available, IBKR + Tradier in development with no capt
   // No credential capture or connect path for the in-development brokers.
   for (const bad of ['/api/ibkr', '/api/interactive', '/api/tradier', 'ibkrKey', 'tradierKey']) {
     assert.ok(!brokersJs.includes(bad), `brokers.js must not contain ${bad}`);
+  }
+});
+
+test('how-to-connect instructions module sits in the Alpaca card for every user (Johnny 2026-10-18)', () => {
+  assert.ok(brokersJs.includes('<details class="brk-help">'), 'collapsible instructions module present');
+  assert.ok(brokersJs.includes('How to connect your API keys'), 'module title present');
+  // Placed inside the Alpaca card, between the status row and the form.
+  const stateIdx = brokersJs.indexOf('id="brkAlpacaState"');
+  const helpIdx = brokersJs.indexOf('brk-help');
+  const formIdx = brokersJs.indexOf('id="brkForm"');
+  assert.ok(stateIdx > -1 && helpIdx > stateIdx && helpIdx < formIdx, 'module sits between status and the connect form');
+  // The five steps, accurate to the real flow.
+  assert.ok(brokersJs.includes('pick <b>Paper</b> or <b>Live</b> trading inside Alpaca first'), 'step 1: choose the environment inside Alpaca first');
+  assert.ok(brokersJs.includes('API Keys → Generate New Key'), 'step 2: generate the pair in Alpaca');
+  assert.ok(brokersJs.includes('the secret is shown only once, and generating a new pair replaces the old one'), 'step 2: secret shown once, new pair replaces the old');
+  assert.ok(brokersJs.includes('to match where the keys came from, paste both, and tap <b>Connect</b>'), 'step 3: match Paper/Live here and connect');
+  assert.ok(brokersJs.includes('We verify the keys with Alpaca before saving anything'), 'step 4: verified before anything is saved');
+  assert.ok(brokersJs.includes("the pair doesn't match or the Paper/Live choice is wrong"), 'step 4: rejection means mismatched pair or wrong choice');
+  assert.ok(brokersJs.includes('Keys are stored encrypted and never shown again'), 'step 5: encrypted, never shown again');
+  assert.ok(brokersJs.includes("Connecting doesn't turn trading on — enable the bot on the K1 Agentic page"), 'step 5: connecting does not enable trading');
+  // Muted design language: styled from brokers.css theme vars, no gradient.
+  assert.ok(/\.brk-help\{[^}]*var\(--line\)/.test(brokersCss), 'module styled with the page theme vars');
+  assert.ok(!/\.brk-help[^{]*\{[^}]*gradient/.test(brokersCss), 'module uses no gradient');
+  // No bot internals in the module copy.
+  for (const bad of ['fixedDollars', 'longUniverse', 'hedgeSymbols', 'ATR', 'regime score']) {
+    assert.ok(!brokersJs.includes(bad), `instructions must not contain internals: ${bad}`);
   }
 });
 

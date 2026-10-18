@@ -1,4 +1,44 @@
+# QureshiFinance — robots.txt
+#
+# Content-Signal policy for this site's content:
+#   ai-train=no
+#   ai-input=no
+#   search=yes
+# (Content Signals — https://contentsignals.org/: search indexing and
+#  ordinary browsing are welcome; AI training and AI input are not
+#  granted. AI crawlers are also refused at the server edge.)
+
+# Everyone else — people, search engines, link previews: full access.
 User-agent: *
 Allow: /
+
+# AI training / scraper crawlers — not permitted anywhere on this site.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: anthropic-ai
+User-agent: Claude-Web
+User-agent: CCBot
+User-agent: Google-Extended
+User-agent: Meta-ExternalAgent
+User-agent: Bytespider
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: cohere-ai
+User-agent: AI2Bot
+User-agent: Diffbot
+User-agent: ImagesiftBot
+User-agent: Omigili
+User-agent: YouBot
+User-agent: MistralAI-User
+User-agent: Amazonbot
+User-agent: Applebot-Extended
+User-agent: DuckAssistBot
+User-agent: Timpibot
+User-agent: Webzio-Extended
+User-agent: ICC-Crawler
+User-agent: PetalBot
+Disallow: /
 
 Sitemap: https://qureshifinance.com/sitemap.xml

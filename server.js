@@ -23,6 +23,7 @@ const { buildDayTradingComparison } = require('./lib/day-trading-comparison');
 const { createKiaanService, mountKiaan } = require('./lib/kiaan/service');
 const { mountSubscription } = require('./lib/subscription');
 const { mountStripeWebhook } = require('./lib/stripe-webhook');
+const { createAiBotBlockMiddleware } = require('./lib/ai-bot-block');
 const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
 const { mountAdminUsers } = require('./lib/admin-users');
@@ -669,6 +670,14 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // CORS: allow credentials from any origin — security is enforced by
 // session auth (requireAuth), bcrypt, rate limiting, and input validation.
 app.use(cors({ credentials: true, origin: true }));
+
+// Anti-AI-copy block (Johnny 2026-10-18): known AI-training/scraper
+// crawler User-Agents get a 403; everyone else — real browsers, search
+// engines, link-preview bots — passes untouched. Mounted early, but
+// /readyz, /healthz, /robots.txt and /api/stripe/webhook are exempt by
+// path inside the middleware, so platform health checks and Stripe's
+// deliveries can never be blocked. See lib/ai-bot-block.js.
+app.use(createAiBotBlockMiddleware());
 
 // Stripe webhook (Johnny 2026-10-18): mounted BEFORE the JSON body
 // parser because signature verification needs the exact raw bytes of

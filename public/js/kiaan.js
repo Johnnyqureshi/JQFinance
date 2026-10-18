@@ -65,9 +65,9 @@
     page.appendChild(style);
     const root = document.createElement('div');
     root.innerHTML = `<section class="war-shell" id="kiaanRoot" aria-labelledby="kiaanTitle">
-      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · KIAAN BOT</span><h1 id="kiaanTitle">Kiaan Bot <em>regime first, trades second</em></h1><p>Reads the market first, then decides whether trading is allowed today and in what. Every decision is journaled in plain language.</p></div><span class="war-auto-label" id="kiaanModeBadge">PAPER</span></header>
+      <header class="war-hero"><div><span class="war-eyebrow">REGIME-FIRST · K1 AGENTIC</span><h1 id="kiaanTitle">K1 Agentic <em>regime first, trades second</em></h1><p>Reads the market first, then decides whether trading is allowed today and in what. Every decision is journaled in plain language.</p></div><span class="war-auto-label" id="kiaanModeBadge">PAPER</span></header>
       <div class="war-notice" id="kiaanNotice" role="status" aria-live="polite"></div>
-      <section class="war-status" aria-label="Kiaan Bot system status">
+      <section class="war-status" aria-label="K1 Agentic system status">
         <div><span>Status</span><strong id="kiaanPill">CHECKING</strong><small id="kiaanTradeDate">Trade date —</small></div>
         <div><span>Connection</span><strong id="kiaanConnection">CHECKING</strong><small id="kiaanAccount">Dedicated account required</small></div>
         <div><span>Open positions</span><strong id="kiaanOpen">—</strong><small id="kiaanDayPnl">Day P&amp;L —</small></div>
@@ -104,7 +104,7 @@
     if ($('kiaanBrokerMode')) $('kiaanBrokerMode').textContent = modeLabel;
     $('kiaanConnection').textContent = connected ? `${modeLabel.toUpperCase()} CONNECTED` : 'DISCONNECTED';
     $('kiaanConnection').className = connected ? 'war-good' : 'war-bad';
-    $('kiaanAccount').textContent = userView() ? `Alpaca · ${modeLabel}` : (status.accountId ? `Account ${status.accountId}` : 'Dedicated Kiaan account required');
+    $('kiaanAccount').textContent = userView() ? `Alpaca · ${modeLabel}` : (status.accountId ? `Account ${status.accountId}` : 'Dedicated K1 Agentic account required');
     $('kiaanScheduler').textContent = String(status.schedulerStatus || 'IDLE').toUpperCase();
     $('kiaanSchedulerNote').textContent = userView()
       ? (status.lastCycleAt ? `Last cycle ${time(status.lastCycleAt)}` : 'No completed cycle yet')
@@ -328,7 +328,7 @@
       settingsView = await api('/api/kiaan/settings');
       status = await api('/api/kiaan/status');
       renderStatus(); renderSettings();
-      notice(status.enabled ? 'Kiaan Bot resumed — the regime is read every minute of the session.' : 'Kiaan Bot paused. Existing positions remain under automatic management.');
+      notice(status.enabled ? 'K1 Agentic resumed — the regime is read every minute of the session.' : 'K1 Agentic paused. Existing positions remain under automatic management.');
     } catch (error) { notice(`Toggle failed: ${error.message}`, true); }
     finally { changing = false; renderStatus(); }
   }

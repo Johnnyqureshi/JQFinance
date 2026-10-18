@@ -23,7 +23,7 @@ const service = read('../lib/kiaan/service.js');
 test('index.html has the Brokers nav entry (desktop + mobile), page container, and bumped assets', () => {
   assert.ok((html.match(/data-page="brokers"/g) || []).length >= 2, 'desktop and mobile nav both carry Brokers');
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
-  assert.ok(html.includes('/js/brokers.js?v=20261017a'), 'brokers.js included with a cache-busting tag');
+  assert.ok(html.includes('/js/brokers.js?v=20261018a'), 'brokers.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/brokers.css?v=20261016a'), 'brokers.css included with a cache-busting tag');
   assert.ok(html.includes('/js/app.js?v=20261017b'), 'app.js tag bumped for the routing change');
 });
@@ -60,7 +60,7 @@ test('broker cards: Alpaca available, IBKR + Tradier in development with no capt
   assert.ok((brokersJs.match(/In development/g) || []).length >= 2, 'IBKR and Tradier both marked In development');
   assert.ok(brokersJs.includes('Robinhood and Fidelity do not offer an official trading API'), 'honest no-API note present');
   assert.ok(brokersJs.includes('Alpaca Broker API'), 'in-app account-opening (Broker API) noted as planned');
-  assert.ok(brokersJs.includes('Connect a brokerage once; the Kiaan Bot trades only the account you connect; you can disconnect anytime.'), 'plain-language intro line present');
+  assert.ok(brokersJs.includes('Connect a brokerage once; K1 Agentic trades only the account you connect; you can disconnect anytime.'), 'plain-language intro line present');
   // No credential capture or connect path for the in-development brokers.
   for (const bad of ['/api/ibkr', '/api/interactive', '/api/tradier', 'ibkrKey', 'tradierKey']) {
     assert.ok(!brokersJs.includes(bad), `brokers.js must not contain ${bad}`);

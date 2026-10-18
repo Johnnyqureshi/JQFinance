@@ -505,7 +505,7 @@ test('settings validation runs the engine validateConfig', async () => {
   await connectPaper(f);
   await assert.rejects(
     () => f.service.setSettings(1, { rules: { entryWindowStart: '15:00', entryWindowEnd: '09:45' } }),
-    /Invalid Kiaan configuration/,
+    /Invalid K1 Agentic configuration/,
   );
   const ok = await f.service.setSettings(1, { rules: { minRvol: 2 } });
   assert.equal(ok.enabled, false);

@@ -107,6 +107,100 @@ test('checkout params: subscription mode with inline price_data (4999 USD, month
   assert.equal(p.client_reference_id, '7');
 });
 
+// ── Free trial: first trading week free = 5 BUSINESS days (Johnny
+// 2026-10-18, corrected from 7 calendar days). Stripe gets an explicit
+// subscription_data.trial_end = 23:59:59 America/Chicago on the 5th
+// business day, today counting as day 1 when it is a business day.
+function chicagoParts(epochSeconds) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', weekday: 'short', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(epochSeconds * 1000));
+  const get = t => parts.find(p => p.type === t).value;
+  return {
+    weekday: get('weekday'), year: get('year'), month: get('month'), day: get('day'),
+    time: `${get('hour')}:${get('minute')}:${get('second')}`,
+  };
+}
+
+test('trial end: Monday signup (CDT) ends Friday 23:59:59 CT of the same week', () => {
+  const now = new Date('2026-10-19T15:00:00Z'); // Mon Oct 19, 10:00 CDT
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Fri');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-23');
+  assert.equal(p.time, '23:59:59');
+  assert.equal(end, Math.floor(Date.UTC(2026, 9, 24, 4, 59, 59) / 1000), 'CDT is UTC-5');
+  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
+});
+
+test('trial end: Friday signup counts Fri as day 1 and ends the following Thursday', () => {
+  const now = new Date('2026-10-23T15:00:00Z'); // Fri Oct 23, 10:00 CDT
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Thu');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-29');
+  assert.equal(p.time, '23:59:59');
+  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
+});
+
+test('trial end: Saturday signup — the five business days are Mon–Fri, ends Friday', () => {
+  const now = new Date('2026-10-24T15:00:00Z'); // Sat Oct 24, 10:00 CDT
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Fri');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-30');
+  assert.equal(p.time, '23:59:59');
+  const sun = sub.computeTrialEndEpoch(new Date('2026-10-25T15:00:00Z'));
+  assert.equal(sun, end, 'Sunday signup lands on the same Friday');
+});
+
+test('trial end: the CT offset follows the target date across the DST boundary (CST)', () => {
+  const now = new Date('2026-11-02T16:00:00Z'); // Mon Nov 2, 10:00 CST
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Fri');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-11-06');
+  assert.equal(p.time, '23:59:59');
+  assert.equal(end, Math.floor(Date.UTC(2026, 10, 7, 5, 59, 59) / 1000), 'CST is UTC-6');
+});
+
+test('checkout params: subscription_data carries the computed trial_end, no trial_period_days', () => {
+  const now = new Date('2026-10-19T15:00:00Z'); // Monday
+  const p = sub.buildCheckoutSessionParams({
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no', userId: 7, now,
+  });
+  assert.equal(p.subscription_data.trial_end, sub.computeTrialEndEpoch(now));
+  assert.equal(p.subscription_data.trial_period_days, undefined, 'business-day trial is an explicit end, not a day count');
+  assert.equal(p.subscription_data.metadata.user_id, '7', 'subscription metadata unchanged');
+  assert.equal(p.payment_method_collection, undefined, 'card collection stays Stripe default');
+});
+
+test('checkout-session creation posts subscription_data[trial_end] to Stripe', async () => {
+  const calls = [];
+  const fetchStub = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true, status: 200,
+      json: async () => ({ id: 'cs_test_trial', url: 'https://checkout.stripe.com/c/cs_test_trial' }),
+    };
+  };
+  const now = new Date('2026-10-19T15:00:00Z'); // Monday
+  await sub.createCheckoutSession({
+    secretKey: 'sk_test_stubbed',
+    fetchImpl: fetchStub,
+    successUrl: 'https://example.test/ok',
+    cancelUrl: 'https://example.test/no',
+    userId: 7,
+    now,
+  });
+  assert.equal(calls.length, 1);
+  const body = decodeURIComponent(calls[0].options.body);
+  assert.ok(body.includes(`[trial_end]=${sub.computeTrialEndEpoch(now)}`), 'trial_end sent in subscription_data');
+  assert.ok(!body.includes('trial_period_days'), 'no calendar-day trial sent');
+});
+
 test('checkout-session creation with a stubbed key posts the inline price to Stripe', async () => {
   const calls = [];
   const fetchStub = async (url, options) => {
@@ -223,6 +317,75 @@ test('success-return marking: only a verified paid session for THIS user subscri
   assert.equal(sub.getSubscriptionRow(db3, 7), null, 'another user\'s session changes nothing');
 });
 
+// ── Trial promo popup (Johnny 2026-10-18): audience is exactly the
+// accounts that could convert; dismissal is a server-side flag.
+test('trial popup audience: free users only — not active, founding, exempt, or the owner', () => {
+  const free = sub.computePopupState(null, {});
+  assert.equal(free.showTrialPopup, true, 'fresh free account sees the trial promo');
+  const active = sub.computePopupState({ status: 'active', founding: 1 }, {});
+  assert.equal(active.showTrialPopup, false, 'subscribers never see it');
+  const founding = sub.computePopupState({ status: 'founding', founding: 1 }, {});
+  assert.equal(founding.showTrialPopup, false, 'founding-list accounts never see it');
+  const exempt = sub.computePopupState(null, { exempt: true });
+  assert.equal(exempt.showTrialPopup, false, 'exempt accounts never see it');
+  const owner = sub.computePopupState(null, { isOwner: true });
+  assert.equal(owner.showTrialPopup, false, 'the owner is not nagged');
+  const dismissed = sub.computePopupState(
+    { status: 'none', trial_popup_dismissed_at: '2026-10-18T00:00:00.000Z' }, {});
+  assert.equal(dismissed.showTrialPopup, false, 'dismissed accounts never see it again');
+  assert.equal(dismissed.trialDismissed, true);
+});
+
+test('trial popup: owner pin applies through getPopupState without an explicit flag', () => {
+  const db = freshDb();
+  assert.equal(sub.getPopupState(db, 7, {}).showTrialPopup, true, 'regular free user is in the audience');
+  assert.equal(sub.getPopupState(db, sub.OWNER_USER_ID, {}).showTrialPopup, false, 'owner id is excluded by default');
+});
+
+test('trial popup dismissal persists server-side per account', () => {
+  const db = freshDb();
+  assert.equal(sub.getPopupState(db, 7, {}).showTrialPopup, true);
+  const row = sub.recordTrialPopupDismissal(db, 7);
+  assert.ok(row.trial_popup_dismissed_at, 'dismissal timestamp recorded');
+  const after = sub.getPopupState(db, 7, {});
+  assert.equal(after.showTrialPopup, false, 'never shows again after dismissal');
+  assert.equal(after.status, 'none', 'dismissal alone does not change subscription status');
+  assert.equal(after.shouldShowPopup, true, 'unlock popup state is independent of the trial flag');
+});
+
+test('trial-dismiss route records the dismissal and echoes the closed state', async () => {
+  const db = freshDb();
+  const app = fakeApp();
+  const out = sub.mountSubscription({
+    app, db, requireAuth: requireAuthStub,
+    getStripeSecretKey: () => null,
+    fetchImpl: async () => { throw new Error('Stripe must not be called'); },
+  });
+  assert.ok(out.routes.includes('POST /api/subscription/trial-dismiss'), 'trial-dismiss route mounted');
+  const res = fakeRes();
+  await app.handlers.get('POST /api/subscription/trial-dismiss')({ session: { userId: 7 } }, res);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.showTrialPopup, false);
+  assert.ok(sub.getSubscriptionRow(db, 7).trial_popup_dismissed_at);
+});
+
+test('index.html carries the trial popup markup and the trial copy (muted theme classes)', () => {
+  assert.ok(html.includes('id="trialOverlay"'), 'trial overlay present');
+  assert.ok(html.includes('id="trialCta"'), 'trial CTA present');
+  assert.ok(html.includes('Your first trading week is free'), 'headline present');
+  assert.ok(html.includes('Five business days of K1 Agentic trading — then $49.99/mo. Cancel anytime.'), 'body copy present');
+  assert.ok(html.includes('Start my free week'), 'primary button label present');
+  assert.ok(html.includes('First trading week free — 5 business days, then'), 'plan block trial line present');
+  assert.ok(!/guarantee|guaranteed|profit/i.test(html.slice(html.indexOf('id="trialOverlay"'), html.indexOf('id="trialOverlay"') + 1200)), 'no profit promises in the trial popup');
+});
+
+test('client wiring: trial popup is server-gated, dismisses via its endpoint, never stacks', () => {
+  assert.ok(subJs.includes('/api/subscription/trial-dismiss'), 'client posts trial dismissal to the server');
+  assert.ok(subJs.includes('state.showTrialPopup'), 'client renders only when the server says so');
+  assert.ok(subJs.includes("showTrialModal"), 'trial modal renderer present');
+  assert.ok(subJs.includes("$('subscriptionOverlay')?.classList.contains('open')"), 'no-stack guard checks the unlock overlay');
+});
+
 test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped assets', () => {
   assert.ok(html.includes('Unlock Agentic Trading'), 'headline present');
   assert.ok(html.includes('id="subscriptionOverlay"'), 'popup overlay present');
@@ -234,8 +397,8 @@ test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped
   assert.ok(html.includes('id="subscriptionNavBtn"'), 'nav entry point present');
   assert.ok(html.includes('id="subscriptionBannerBtn"'), 'dashboard entry point present');
   assert.ok(html.includes('id="subscriptionKiaanBtn"'), 'Kiaan page entry point present');
-  assert.ok(html.includes('/js/subscription.js?v=20261017b'), 'subscription.js tag bumped');
-  assert.ok(html.includes('/public/css/subscription.css?v=20261017a'), 'subscription.css tag bumped');
+  assert.ok(html.includes('/js/subscription.js?v=20261018a'), 'subscription.js tag bumped');
+  assert.ok(html.includes('/public/css/subscription.css?v=20261018a'), 'subscription.css tag bumped');
   assert.ok(html.includes('/js/app.js?v=20261017b'), 'app.js tag bumped for the login hook');
   assert.ok(!/paypal/i.test(html), 'no PayPal in this build (phase 2)');
 });

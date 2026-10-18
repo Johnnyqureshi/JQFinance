@@ -1,6 +1,7 @@
 /* Unlock Agentic Trading (Johnny 2026-10-16): ONE flat subscription —
  * $49.99/mo, everything included, early-signup reward locked while you
- * stay subscribed. No tiers.
+ * stay subscribed. No tiers. First trading week free — 5 business
+ * days, then $49.99/mo (Johnny 2026-10-18).
  *
  * The popup shows once per browser session on the first authenticated
  * dashboard load, and only while the server says the account has neither
@@ -89,8 +90,8 @@
       if (cta) cta.style.display = '';
       if (note) {
         note.textContent = mode === 'stripe'
-          ? 'Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
-          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price — no charge today.';
+          ? 'First trading week free — 5 business days, then $49.99/mo. Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
+          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price — no charge today, and your first trading week is free when billing opens.';
       }
     }
     overlay.classList.add('open');
@@ -98,6 +99,31 @@
 
   function hideModal() {
     $('subscriptionOverlay')?.classList.remove('open');
+  }
+
+  // Trial promo popup (Johnny 2026-10-18): audience and dismissal are
+  // server-side state (state.showTrialPopup); this layer only renders.
+  // Guard: the two modals never stack — if the unlock popup is open
+  // (or opens first), the trial popup stays down.
+  function showTrialModal() {
+    const overlay = $('trialOverlay');
+    if (!overlay) return;
+    if ($('subscriptionOverlay')?.classList.contains('open')) return;
+    const err = $('trialError');
+    if (err) err.textContent = '';
+    const cta = $('trialCta');
+    if (cta) { cta.disabled = false; cta.textContent = 'Start my free week'; }
+    overlay.classList.add('open');
+  }
+
+  function hideTrialModal() {
+    $('trialOverlay')?.classList.remove('open');
+  }
+
+  async function dismissTrial() {
+    hideTrialModal();
+    try { state = await api('/api/subscription/trial-dismiss', { method: 'POST', body: '{}' }); } catch (_) {}
+    renderEntryPoints();
   }
 
   async function refresh() {
@@ -115,14 +141,23 @@
   async function onAuthenticated(user) {
     const uid = user && user.id != null ? String(user.id) : 'me';
     await refresh();
+    let returning = false;
+    try { returning = new URLSearchParams(window.location.search).has('subscription'); } catch (_) {}
     handleReturnParams();
-    if (!state || !state.shouldShowPopup) return;
-    let shown = null;
-    try { shown = sessionStorage.getItem('qf-sub-popup-session'); } catch (_) {}
-    if (shown === uid || sessionShownFor === uid) return; // first load of the session only
-    sessionShownFor = uid;
-    try { sessionStorage.setItem('qf-sub-popup-session', uid); } catch (_) {}
-    showModal(state.checkoutMode);
+    if (state && state.shouldShowPopup) {
+      // The unlock popup wins: when it is due, the trial promo never
+      // stacks on top of it.
+      let shown = null;
+      try { shown = sessionStorage.getItem('qf-sub-popup-session'); } catch (_) {}
+      if (shown === uid || sessionShownFor === uid) return; // first load of the session only
+      sessionShownFor = uid;
+      try { sessionStorage.setItem('qf-sub-popup-session', uid); } catch (_) {}
+      showModal(state.checkoutMode);
+      return;
+    }
+    // Trial promo: dashboard load, free accounts only (server-gated),
+    // skipped on a checkout-return load so it never crowds the result.
+    if (!returning && state && state.showTrialPopup) showTrialModal();
   }
 
   function handleReturnParams() {
@@ -157,9 +192,12 @@
     renderEntryPoints();
   }
 
-  async function unlock() {
-    const cta = $('subscriptionCta');
-    const err = $('subscriptionError');
+  // One checkout flow for both CTAs: the unlock popup's "Unlock Now"
+  // and the trial popup's "Start my free week" (fromTrial) post to the
+  // same endpoint — the session it creates carries the trial.
+  async function unlock(fromTrial = false) {
+    const cta = $(fromTrial ? 'trialCta' : 'subscriptionCta');
+    const err = $(fromTrial ? 'trialError' : 'subscriptionError');
     if (err) err.textContent = '';
     if (cta) { cta.disabled = true; cta.textContent = 'Working…'; }
     try {
@@ -171,6 +209,13 @@
       // Founding-list mode: no charge, signup recorded server-side.
       state = result;
       renderEntryPoints();
+      if (fromTrial) {
+        // Hand off to the unlock modal, which renders the resulting
+        // state (founding confirmation / active) with state fresh.
+        hideTrialModal();
+        showModal(state && state.checkoutMode);
+        return;
+      }
       const confirm = $('subscriptionConfirm');
       if (confirm) {
         confirm.textContent = result.confirmation
@@ -186,7 +231,7 @@
       if (note) note.textContent = '';
     } catch (e) {
       if (err) err.textContent = e.message || 'Something went wrong. Your account was not charged.';
-      if (cta) { cta.disabled = false; cta.textContent = 'Unlock Now'; }
+      if (cta) { cta.disabled = false; cta.textContent = fromTrial ? 'Start my free week' : 'Unlock Now'; }
     }
   }
 
@@ -199,19 +244,28 @@
     state = null;
     sessionShownFor = null;
     hideModal();
+    hideTrialModal();
     renderEntryPoints();
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    $('subscriptionCta')?.addEventListener('click', unlock);
+    $('subscriptionCta')?.addEventListener('click', () => unlock(false));
     $('subscriptionLater')?.addEventListener('click', dismiss);
     $('subscriptionClose')?.addEventListener('click', dismiss);
     $('subscriptionDone')?.addEventListener('click', hideModal);
     $('subscriptionOverlay')?.addEventListener('click', e => {
       if (e.target === $('subscriptionOverlay')) dismiss();
     });
+    $('trialCta')?.addEventListener('click', () => unlock(true));
+    $('trialLater')?.addEventListener('click', dismissTrial);
+    $('trialClose')?.addEventListener('click', dismissTrial);
+    $('trialOverlay')?.addEventListener('click', e => {
+      if (e.target === $('trialOverlay')) dismissTrial();
+    });
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && $('subscriptionOverlay')?.classList.contains('open')) dismiss();
+      if (e.key !== 'Escape') return;
+      if ($('subscriptionOverlay')?.classList.contains('open')) dismiss();
+      else if ($('trialOverlay')?.classList.contains('open')) dismissTrial();
     });
     for (const btn of entryButtons()) btn.addEventListener('click', openFromEntry);
     // Already-authenticated page load (session cookie): app.js showApp
@@ -219,5 +273,8 @@
     refresh().then(() => { if (state) onAuthenticated({ id: sessionShownFor || undefined }); });
   });
 
-  window.subscriptionPopup = { open: openFromEntry, refresh, onAuthenticated, onLogout, showModal, hideModal };
+  window.subscriptionPopup = {
+    open: openFromEntry, refresh, onAuthenticated, onLogout, showModal, hideModal,
+    showTrialModal, hideTrialModal, dismissTrial,
+  };
 })();

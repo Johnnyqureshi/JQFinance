@@ -131,6 +131,21 @@ test('checkout.session.completed resolves the user from metadata when client_ref
   assert.equal(sub.getSubscriptionRow(db, 7).status, 'active');
 });
 
+test('checkout.session.completed for a TRIALING session (no_payment_required) activates', () => {
+  // First trading week free: the completed trial session owes $0, so
+  // Stripe reports payment_status 'no_payment_required', not 'paid'.
+  // The subscriber must still be activated — the trial IS the access.
+  const db = freshDb();
+  const handler = makeHandler(db);
+  const evt = paidSessionEvent({ payment_status: 'no_payment_required' });
+  const res = deliver(handler, evt);
+  assert.equal(res.statusCode, 200);
+  const row = sub.getSubscriptionRow(db, 7);
+  assert.equal(row.status, 'active');
+  assert.equal(row.stripe_subscription_id, 'sub_1');
+  assert.ok(row.subscribed_at);
+});
+
 test('checkout.session.completed for an UNPAID session does not activate', () => {
   const db = freshDb();
   const handler = makeHandler(db);

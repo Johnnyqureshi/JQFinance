@@ -1,5 +1,7 @@
 /* Unlock Agentic Trading — subscription popup + entry points (Johnny
    2026-10-16). One flat plan, $49.99/mo, everything included.
+   First trading week free — 5 business days, then $49.99/mo (Johnny
+   2026-10-18).
    Restyled 2026-10-16 (Johnny: "too kiddy, get rid of the colors"):
    sober site theme — deep navy surfaces, slate cards, solid site
    green (#1dd6a3) as the only accent. No gradients, no emoji. */
@@ -38,6 +40,7 @@
 .sub-card span{font-size:12px;line-height:1.5;color:#93a5c8}
 .sub-plan{border:1px solid rgba(29,214,163,.45);border-radius:18px;padding:20px;text-align:center;
   background:#111827}
+.sub-plan .sub-trial{margin:0 0 2px;color:#1dd6a3;font-size:15px;font-weight:700}
 .sub-plan .sub-price{font-size:44px;font-weight:800;letter-spacing:-.03em;color:#f5f8ff}
 .sub-plan .sub-price small{font-size:16px;font-weight:600;color:#c3cbe0}
 .sub-plan p{margin:6px 0;color:#c3cbe0;font-size:13px;line-height:1.55}

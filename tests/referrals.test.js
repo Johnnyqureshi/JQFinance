@@ -321,7 +321,7 @@ test('wiring: register carries the code, the card is on the dashboard, assets bu
   assert.ok(html.includes('20% off for each friend who subscribes, up to 60% off, while they stay subscribed.'),
     'plain-language rule on the card');
   assert.ok(html.includes('id="referralLink"') && html.includes('id="referralCopyBtn"'), 'link + copy button present');
-  assert.ok(html.includes('/js/referrals.js?v=20261017a'), 'referrals.js tag present and bumped');
+  assert.ok(html.includes('/js/referrals.js?v=20261018a'), 'referrals.js tag present and bumped');
   assert.ok(refsJs.includes('/api/referrals/me'), 'client reads the server summary');
   assert.ok(refsJs.includes('navigator.clipboard'), 'copy button uses the clipboard');
 });

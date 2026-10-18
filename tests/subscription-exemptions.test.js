@@ -249,7 +249,8 @@ test('privacy: no exempt address is baked into any tracked source or public surf
   const s = sub.getPopupState(db, 21, {});
   assert.deepEqual(Object.keys(s).sort(), [
     'checkoutMode', 'dismissed', 'entryLabel', 'exempt', 'founding',
-    'priceCents', 'priceDisplay', 'shouldShowPopup', 'status', 'subscribed',
+    'priceCents', 'priceDisplay', 'shouldShowPopup', 'showTrialPopup',
+    'status', 'subscribed', 'trialDismissed',
   ], 'state shape is the standard one — nothing extra leaks');
 });
 

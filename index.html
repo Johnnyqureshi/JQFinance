@@ -44,6 +44,7 @@
   <link rel="stylesheet" href="/public/css/brokers.css?v=20261018b"/>
   <link rel="stylesheet" href="/public/css/users.css?v=20261019a"/>
   <link rel="stylesheet" href="/public/css/subscription.css?v=20261018a"/>
+  <link rel="stylesheet" href="/public/css/agreement.css?v=20261019a"/>
   <link rel="stylesheet" href="/public/css/contact.css?v=20261019a"/>
   <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
   <link rel="stylesheet" href="/public/css/home-pulse.css?v=20261001a"/>
@@ -957,6 +958,31 @@
   </div>
 </div>
 
+<!-- AUTOMATED TRADING AGREEMENT (Johnny 2026-10-19): mandatory
+     consent gate before agentic trading can be ACTIVATED. The terms
+     render client-side from GET /api/agreement/state (the server's
+     canonical text — the same text an acceptance row stores);
+     acceptance is recorded server-side only, and the K1 enable
+     transition refuses without it (403 agreement_required). Styling
+     is public/css/agreement.css — theme variables only, so the modal
+     follows the active light/dark theme. -->
+<div class="agr-overlay" id="agreementOverlay" role="dialog" aria-modal="true" aria-labelledby="agreementTitle">
+  <div class="agr-modal">
+    <h2 id="agreementTitle">Automated Trading Agreement &amp; Risk Disclosure</h2>
+    <p class="agr-version" id="agreementVersion"></p>
+    <div class="agr-terms" id="agreementTerms" tabindex="0" aria-label="Agreement terms"></div>
+    <label class="agr-check" for="agreementCheckbox">
+      <input type="checkbox" id="agreementCheckbox">
+      <span id="agreementCheckboxLabel">I have read and agree to the Automated Trading Agreement and understand the risks of AI-executed trades.</span>
+    </label>
+    <div class="agr-error" id="agreementError" role="alert"></div>
+    <div class="agr-actions">
+      <button class="agr-agree" id="agreementAgree" type="button" disabled>Agree &amp; Continue</button>
+      <button class="agr-cancel" id="agreementCancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script src="/js/rrg-style.js?v=20260929d"></script>
@@ -970,7 +996,8 @@
 
 <script src="/js/alpacatrader.js?v=20261001a"></script>
 <script src="/js/agent.js?v=20260929d"></script>
-<script src="/js/kiaan.js?v=20261018a"></script>
+<script src="/js/kiaan.js?v=20261019a"></script>
+<script src="/js/agreement.js?v=20261019a"></script>
 <script src="/js/brokers.js?v=20261019a"></script>
 <script src="/js/users.js?v=20261019a"></script>
 <script src="/js/subscription.js?v=20261018a"></script>

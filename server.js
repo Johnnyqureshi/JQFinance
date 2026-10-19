@@ -28,6 +28,8 @@ const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
 const { mountAdminUsers } = require('./lib/admin-users');
 const { mountSupport } = require('./lib/support');
+const agreement = require('./lib/agreement');
+const { mountAgreement } = agreement;
 const adminControls = require('./lib/admin-controls');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
@@ -6372,6 +6374,12 @@ const kiaanService = createKiaanService({
   // owner view — full Kiaan settings/regime detail. Every other account
   // gets the stripped user view and may change only position size.
   ownerUserId: 1000000005,
+  // Automated Trading Agreement gate (Johnny 2026-10-19): the
+  // disabled→enabled transition requires a current-version consent
+  // row in lib/agreement.js (jqf.db, same account id space). Already
+  // enabled bots — including the owner's live bot — are never gated.
+  hasAgreementConsent: uid => agreement.hasCurrentConsent(db, uid),
+  agreementVersion: agreement.AGREEMENT_VERSION,
 });
 mountKiaan({ app, service: kiaanService, requireAuth, ensureSessionUserInTradingStore });
 
@@ -6418,6 +6426,12 @@ mountAdminUsers({
 // the owner USERS page payload; SUPPORT_NOTIFY_EMAIL (read at runtime
 // by lib/support.js) optionally forwards each one by email.
 mountSupport({ app, db });
+
+// Automated Trading Agreement (Johnny 2026-10-19): consent state +
+// acceptance endpoints. Acceptance is recorded server-side from the
+// canonical terms in lib/agreement.js; the K1 enable transition is
+// gated on it (see the createKiaanService wiring above).
+mountAgreement({ app, db, requireAuth });
 let kiaanSchedulerStarted = false;
 
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it

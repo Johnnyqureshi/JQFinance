@@ -1,0 +1,88 @@
+/* Automated Trading Agreement modal (Johnny 2026-10-19).
+   Colors come ONLY from the site's theme variables (style.css
+   :root, redefined under html[data-theme="light"]), so the modal
+   follows the visitor's active light/dark theme exactly — no
+   palette of its own. The green accent on the primary action is the
+   site's --teal, per site convention. */
+
+.agr-overlay {
+  position: fixed; inset: 0; z-index: 1300;
+  display: none; align-items: center; justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+}
+.agr-overlay.open { display: flex; }
+
+.agr-modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  width: min(680px, 100%);
+  max-height: calc(100dvh - 32px);
+  display: flex; flex-direction: column;
+  padding: 22px 22px 18px;
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.agr-modal h2 {
+  margin: 0 0 4px; font-size: 20px; line-height: 1.25; color: var(--text);
+}
+.agr-version {
+  margin: 0 0 12px; font-size: 12px; color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.agr-terms {
+  overflow-y: auto; flex: 1 1 auto; min-height: 0;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 13.5px; line-height: 1.6; color: var(--text-secondary);
+}
+.agr-terms h3 {
+  margin: 14px 0 4px; font-size: 13px; letter-spacing: .04em;
+  color: var(--text);
+}
+.agr-terms h3:first-child { margin-top: 0; }
+.agr-terms p { margin: 0 0 10px; }
+.agr-terms p:last-child { margin-bottom: 0; }
+
+.agr-check {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 14px 0 0; cursor: pointer;
+  font-size: 13.5px; line-height: 1.5; color: var(--text);
+}
+.agr-check input {
+  margin-top: 2px; width: 18px; height: 18px; flex: 0 0 auto;
+  accent-color: var(--teal); cursor: pointer;
+}
+
+.agr-error {
+  color: var(--red); font-size: 13px; min-height: 18px; margin: 8px 0 0;
+}
+
+.agr-actions {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;
+}
+.agr-agree {
+  cursor: pointer; border: none; border-radius: 999px;
+  padding: 12px 26px; background: var(--teal); color: var(--bg);
+  font: 800 14px Inter, sans-serif;
+}
+.agr-agree:hover:not(:disabled) { opacity: .88; }
+.agr-agree:disabled { opacity: .45; cursor: not-allowed; }
+.agr-cancel {
+  cursor: pointer; border-radius: 999px; padding: 12px 22px;
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border2);
+  font: 600 14px Inter, sans-serif;
+}
+.agr-cancel:hover { color: var(--text); }
+
+@media (max-width: 560px) {
+  .agr-modal { padding: 16px 14px 14px; }
+  .agr-modal h2 { font-size: 17px; }
+  .agr-actions { flex-direction: column; }
+  .agr-agree, .agr-cancel { width: 100%; }
+}

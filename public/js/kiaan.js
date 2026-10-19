@@ -41,9 +41,27 @@
   async function api(url, options = {}) {
     const response = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(45000), headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
     const data = await response.json().catch(() => { throw new Error('Server returned an unreadable response. Refresh to verify the current state.'); });
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    if (!response.ok) {
+      // The parsed body rides along (err.payload) so callers can act
+      // on machine-readable refusals — notably the Automated Trading
+      // Agreement gate's 403 { error: 'agreement_required' }.
+      const err = new Error(data.error || `Request failed (${response.status})`);
+      err.status = response.status;
+      err.payload = data;
+      throw err;
+    }
     if (!data || typeof data !== 'object') throw new Error('Server response is incomplete.');
     return data;
+  }
+  // Agreement gate (Johnny 2026-10-19): an enable attempt refused
+  // with agreement_required opens the consent modal (public/js/
+  // agreement.js); the SAME action re-runs after acceptance is
+  // recorded server-side. Deferred a tick so the caller's own
+  // finally-block (changing flag, status render) settles first.
+  const isAgreementRefusal = error => error?.payload?.error === 'agreement_required' && !!window.agreementGate;
+  function deferToAgreement(retry) {
+    notice('Please review and accept the Automated Trading Agreement to activate trading.');
+    setTimeout(() => { window.agreementGate.requireFor(retry); }, 0);
   }
   function notice(message, error) { const el = $('kiaanNotice'); if (el) { el.textContent = message || ''; el.classList.toggle('is-error', !!error); } }
 
@@ -329,7 +347,10 @@
       status = await api('/api/kiaan/status');
       renderStatus(); renderSettings();
       notice(status.enabled ? 'K1 Agentic resumed — the regime is read every minute of the session.' : 'K1 Agentic paused. Existing positions remain under automatic management.');
-    } catch (error) { notice(`Toggle failed: ${error.message}`, true); }
+    } catch (error) {
+      if (isAgreementRefusal(error) && !status.enabled) deferToAgreement(() => toggleEnabled());
+      else notice(`Toggle failed: ${error.message}`, true);
+    }
     finally { changing = false; renderStatus(); }
   }
   async function saveSettings() {
@@ -343,7 +364,10 @@
       status = await api('/api/kiaan/status');
       renderStatus(); renderSettings();
       notice('Settings saved.');
-    } catch (error) { notice(`Settings not saved: ${error.message}`, true); }
+    } catch (error) {
+      if (isAgreementRefusal(error)) deferToAgreement(() => saveSettings());
+      else notice(`Settings not saved: ${error.message}`, true);
+    }
     finally { changing = false; renderStatus(); }
   }
   async function refresh() {
@@ -383,6 +407,10 @@
     $('kiaanEnabledToggle').onclick = toggleEnabled;
     $('kiaanSave').onclick = saveSettings;
     try { settingsView = await api('/api/kiaan/settings'); renderSettings(); } catch (_) {}
+    // Agreement gate: entitled users who have not accepted the
+    // current version meet the consent modal here (server state
+    // decides; free/founding users are never nagged — unlock first).
+    try { await window.agreementGate?.checkOnLoad(); } catch (_) {}
     await refresh(); if (!mounted) return; clearInterval(polling); polling = setInterval(refresh, 30000);
   }
   function pause() { mounted = false; clearInterval(polling); polling = null; }

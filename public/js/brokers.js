@@ -50,6 +50,7 @@
               <li>Keys are stored encrypted and never shown again. Connecting doesn't turn trading on — enable the bot on the K1 Agentic page when you're ready, and disconnect anytime from this page.</li>
             </ol>
           </details>
+          <p class="brk-note">Still stuck connecting? <a href="/contact">Contact support</a> — tell us where it stopped and we'll help.</p>
           <form id="brkForm" autocomplete="off">
             <fieldset class="brk-mode">
               <legend>Account type</legend>

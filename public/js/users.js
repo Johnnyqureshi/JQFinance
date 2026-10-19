@@ -74,6 +74,11 @@
         <h2 id="usrAuditTitle">Recent admin actions</h2>
         <div id="usrAudit"><p class="usr-dim">No admin actions yet.</p></div>
       </section>
+      <section class="usr-audit" id="usrSupportWrap" aria-labelledby="usrSupportTitle">
+        <h2 id="usrSupportTitle">Support messages</h2>
+        <p class="usr-support-note">From the /contact form — newest first. Reply from your own inbox; this list is read-only.</p>
+        <div id="usrSupport"><p class="usr-dim">No support messages yet.</p></div>
+      </section>
     </section>`;
     page.appendChild(root);
     $('usrRefresh').addEventListener('click', refresh);
@@ -217,6 +222,23 @@
     }
   }
 
+  function renderSupport(messages) {
+    const el = $('usrSupport');
+    if (!el) return;
+    if (!messages || !messages.length) {
+      el.innerHTML = '<p class="usr-dim">No support messages yet.</p>';
+      return;
+    }
+    el.innerHTML = `<ul class="usr-support-list">${messages.map(m => {
+      const when = fmtDateTime(m.at) || esc(m.at || '');
+      return `<li>
+        <div class="usr-support-head"><span class="usr-audit-when">${esc(when)}</span>`
+        + `<strong>${esc(m.name)}</strong> <span class="usr-dim">&lt;${esc(m.email)}&gt;</span>`
+        + `<span class="usr-chip usr-support-topic">${esc(m.topic)}</span></div>`
+        + `<p class="usr-support-msg">${esc(m.message)}</p></li>`;
+    }).join('')}</ul>`;
+  }
+
   async function refresh() {
     if (!mounted) return;
     notice('Loading…');
@@ -230,6 +252,7 @@
           : '<tr><td colspan="9" class="usr-empty">No registered users yet.</td></tr>';
       }
       renderAudit(data.audit || []);
+      renderSupport(data.supportMessages || []);
       notice('');
     } catch (error) {
       notice(error.message || 'Could not load users.', true);

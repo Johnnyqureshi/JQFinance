@@ -24,7 +24,7 @@ const service = read('../lib/kiaan/service.js');
 test('index.html has the Brokers nav entry (desktop + mobile), page container, and bumped assets', () => {
   assert.ok((html.match(/data-page="brokers"/g) || []).length >= 2, 'desktop and mobile nav both carry Brokers');
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
-  assert.ok(html.includes('/js/brokers.js?v=20261018b'), 'brokers.js included with a cache-busting tag');
+  assert.ok(html.includes('/js/brokers.js?v=20261019a'), 'brokers.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/brokers.css?v=20261018b'), 'brokers.css included with a cache-busting tag');
   assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the routing change');
 });

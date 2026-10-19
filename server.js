@@ -27,6 +27,7 @@ const { createAiBotBlockMiddleware } = require('./lib/ai-bot-block');
 const referrals = require('./lib/referrals');
 const { mountReferrals } = referrals;
 const { mountAdminUsers } = require('./lib/admin-users');
+const { mountSupport } = require('./lib/support');
 const adminControls = require('./lib/admin-controls');
 const { createAutomaticBotSettings } = require('./lib/automatic-bot-settings');
 const { buildAutomaticBotContext, consumeAutomaticBotContext } = require('./lib/automatic-bot-context');
@@ -6410,6 +6411,13 @@ mountAdminUsers({
   getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY || null,
   ownerUserId: 1000000005,
 });
+
+// Contact / Support (Johnny 2026-10-19): public /contact page + form
+// (POST /api/support, no login required — locked-out customers still
+// reach us). Submissions are stored in support_messages and surface in
+// the owner USERS page payload; SUPPORT_NOTIFY_EMAIL (read at runtime
+// by lib/support.js) optionally forwards each one by email.
+mountSupport({ app, db });
 let kiaanSchedulerStarted = false;
 
 // Johnny 2026-09-29: lean database — prune diagnostic history at boot so it

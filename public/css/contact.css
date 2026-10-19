@@ -1,0 +1,42 @@
+/* Contact / Support (Johnny 2026-10-19) — the standalone /contact page
+   plus the site-wide footer rendered by the SPA shell. Aligned to the
+   Qureshi Finance theme vars: deep navy surfaces, dark slate cards,
+   site green the only accent, no gradients. */
+.ctc-shell{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--panel:var(--card);--panel2:var(--card2);--mint:var(--teal);--danger:var(--red);max-width:760px;margin:0 auto;padding:40px clamp(16px,4vw,40px) 84px;font-family:Inter,sans-serif;color:var(--ink)}
+.ctc-back{display:inline-block;color:var(--muted);font:600 12px Inter,sans-serif;text-decoration:none;margin-bottom:22px}
+.ctc-back:hover{color:var(--mint)}
+.ctc-eyebrow{font:800 10px 'DM Mono',monospace;letter-spacing:.13em;color:var(--dim)}
+.ctc-shell h1{font-size:clamp(30px,4.5vw,44px);letter-spacing:-.04em;margin:8px 0 6px}
+.ctc-lede{color:var(--muted);font-size:14px;line-height:1.65;margin:0 0 22px}
+.ctc-card{border:1px solid var(--line);background:var(--panel);padding:18px;margin-bottom:18px}
+.ctc-card h2{font-size:15px;letter-spacing:-.02em;margin:0 0 8px;color:var(--ink)}
+.ctc-card p{color:var(--muted);font-size:13px;line-height:1.65;margin:0 0 8px}
+.ctc-card p:last-child{margin-bottom:0}
+.ctc-mail{display:inline-block;color:var(--mint);font:700 17px 'DM Mono',monospace;text-decoration:none;margin:2px 0 6px}
+.ctc-mail:hover{text-decoration:underline}
+.ctc-include{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.7}
+.ctc-field{display:block;margin:0 0 14px;color:var(--muted);font-size:11.5px}
+.ctc-field>span{display:block;margin-bottom:6px}
+.ctc-field input,.ctc-field select,.ctc-field textarea{box-sizing:border-box;width:100%;padding:11px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);font:500 13.5px Inter,sans-serif;border-radius:0}
+.ctc-field textarea{min-height:150px;resize:vertical;line-height:1.55}
+.ctc-field input:focus,.ctc-field select:focus,.ctc-field textarea:focus{outline:none;border-color:var(--mint)}
+.ctc-hp{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;opacity:0}
+.ctc-error{color:var(--danger);font-size:12.5px;min-height:18px;line-height:1.5;margin:2px 0 8px}
+.ctc-submit{cursor:pointer;border:1px solid var(--mint);background:var(--mint);color:#0a1628;padding:12px 26px;font:800 13px Inter,sans-serif;letter-spacing:.02em}
+.ctc-submit:hover{opacity:.88}
+.ctc-submit:disabled{opacity:.55;cursor:wait}
+.ctc-done{border:1px solid var(--mint);background:var(--panel);padding:22px 18px;text-align:center}
+.ctc-done strong{display:block;font-size:17px;color:var(--ink);margin-bottom:6px}
+.ctc-done p{color:var(--muted);font-size:13px;line-height:1.6;margin:0}
+
+/* Site footer (SPA shell, every page) */
+.site-footer{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--mint:var(--teal);border-top:1px solid var(--line);margin-top:12px;padding:22px clamp(16px,4vw,56px) 96px;font-family:Inter,sans-serif;color:var(--muted)}
+.site-footer-inner{max-width:1180px;margin:0 auto;display:flex;flex-wrap:wrap;gap:8px 22px;align-items:baseline}
+.site-footer-brand{color:var(--ink);font-weight:700;font-size:13px}
+.site-footer-links{display:flex;gap:18px}
+.site-footer-links a{color:var(--muted);font-size:12.5px;text-decoration:none}
+.site-footer-links a:hover{color:var(--mint)}
+.site-footer-note{flex-basis:100%;font-size:12px;line-height:1.6;margin:2px 0 0;color:var(--dim)}
+.site-footer-note a{color:var(--muted)}
+.site-footer-note a:hover{color:var(--mint)}
+@media(max-width:768px){.site-footer{padding-bottom:110px}}

@@ -46,4 +46,12 @@
 .usr-audit-list li:last-child{border-bottom:none}
 .usr-audit-list strong{color:var(--ink)}
 .usr-audit-when{color:var(--dim);font:11px 'DM Mono',monospace;margin-right:8px;white-space:nowrap}
+.usr-support-note{color:var(--dim);font-size:12px;margin:0 0 8px}
+.usr-support-list{list-style:none;margin:0;padding:0}
+.usr-support-list li{padding:10px 0;border-bottom:1px solid var(--line)}
+.usr-support-list li:last-child{border-bottom:none}
+.usr-support-head{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.usr-support-head strong{color:var(--ink)}
+.usr-support-topic{margin-left:2px}
+.usr-support-msg{white-space:pre-wrap;color:var(--muted);font-size:12.5px;line-height:1.6;margin:6px 0 0}
 @media(max-width:620px){.usr-shell{padding:20px 14px 70px}.usr-hero{flex-direction:column}}

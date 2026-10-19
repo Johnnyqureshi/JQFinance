@@ -28,8 +28,8 @@
     const discount = $('referralDiscount');
     if (discount) {
       discount.textContent = data.discountPct > 0
-        ? `${data.discountPct}% off — first trading week free, then you pay ${data.discountedPriceDisplay}/mo`
-        : `First trading week free, then ${data.priceDisplay}/mo — your price drops with each signup`;
+        ? `${data.discountPct}% off — first 14 days free, then you pay ${data.discountedPriceDisplay}/mo`
+        : `First 14 days free, then ${data.priceDisplay}/mo — your price drops with each signup`;
     }
     const stats = $('referralStats');
     if (stats) {

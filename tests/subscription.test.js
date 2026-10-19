@@ -107,10 +107,11 @@ test('checkout params: subscription mode with inline price_data (4999 USD, month
   assert.equal(p.client_reference_id, '7');
 });
 
-// ── Free trial: first trading week free = 5 BUSINESS days (Johnny
-// 2026-10-18, corrected from 7 calendar days). Stripe gets an explicit
-// subscription_data.trial_end = 23:59:59 America/Chicago on the 5th
-// business day, today counting as day 1 when it is a business day.
+// ── Free trial: marketed as "14 days free" = 10 BUSINESS days (Johnny
+// 2026-10-18 at 5 business days; extended 2026-10-19). Stripe gets an
+// explicit subscription_data.trial_end = 23:59:59 America/Chicago on
+// the 10th business day, today counting as day 1 when it is a
+// business day.
 function chicagoParts(epochSeconds) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Chicago', weekday: 'short', hourCycle: 'h23',
@@ -124,36 +125,39 @@ function chicagoParts(epochSeconds) {
   };
 }
 
-test('trial end: Monday signup (CDT) ends Friday 23:59:59 CT of the same week', () => {
+test('trial end: Monday signup (CDT) ends Friday 23:59:59 CT of the following week', () => {
   const now = new Date('2026-10-19T15:00:00Z'); // Mon Oct 19, 10:00 CDT
-  const end = sub.computeTrialEndEpoch(now);
-  const p = chicagoParts(end);
-  assert.equal(p.weekday, 'Fri');
-  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-23');
-  assert.equal(p.time, '23:59:59');
-  assert.equal(end, Math.floor(Date.UTC(2026, 9, 24, 4, 59, 59) / 1000), 'CDT is UTC-5');
-  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
-});
-
-test('trial end: Friday signup counts Fri as day 1 and ends the following Thursday', () => {
-  const now = new Date('2026-10-23T15:00:00Z'); // Fri Oct 23, 10:00 CDT
-  const end = sub.computeTrialEndEpoch(now);
-  const p = chicagoParts(end);
-  assert.equal(p.weekday, 'Thu');
-  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-29');
-  assert.equal(p.time, '23:59:59');
-  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
-});
-
-test('trial end: Saturday signup — the five business days are Mon–Fri, ends Friday', () => {
-  const now = new Date('2026-10-24T15:00:00Z'); // Sat Oct 24, 10:00 CDT
   const end = sub.computeTrialEndEpoch(now);
   const p = chicagoParts(end);
   assert.equal(p.weekday, 'Fri');
   assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-10-30');
   assert.equal(p.time, '23:59:59');
+  assert.equal(end, Math.floor(Date.UTC(2026, 9, 31, 4, 59, 59) / 1000), 'CDT is UTC-5');
+  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
+});
+
+test('trial end: Friday signup counts Fri as day 1 and ends the Thursday two weeks out', () => {
+  const now = new Date('2026-10-23T15:00:00Z'); // Fri Oct 23, 10:00 CDT
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Thu');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-11-05');
+  assert.equal(p.time, '23:59:59');
+  assert.ok(end > Math.floor(now.getTime() / 1000), 'trial_end is in the future');
+});
+
+test('trial end: Saturday signup — the ten business days are the next two Mon–Fri weeks, ends the second Friday', () => {
+  const now = new Date('2026-10-24T15:00:00Z'); // Sat Oct 24, 10:00 CDT
+  const end = sub.computeTrialEndEpoch(now);
+  const p = chicagoParts(end);
+  assert.equal(p.weekday, 'Fri');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-11-06');
+  assert.equal(p.time, '23:59:59');
   const sun = sub.computeTrialEndEpoch(new Date('2026-10-25T15:00:00Z'));
   assert.equal(sun, end, 'Sunday signup lands on the same Friday');
+  // Independently computed: Fri Nov 6 2026, 23:59:59 CST (UTC-6) =
+  // 2026-11-07T05:59:59Z.
+  assert.equal(end, 1794031199, 'Sunday/Saturday signup trial_end epoch');
 });
 
 test('trial end: the CT offset follows the target date across the DST boundary (CST)', () => {
@@ -161,9 +165,9 @@ test('trial end: the CT offset follows the target date across the DST boundary (
   const end = sub.computeTrialEndEpoch(now);
   const p = chicagoParts(end);
   assert.equal(p.weekday, 'Fri');
-  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-11-06');
+  assert.equal(`${p.year}-${p.month}-${p.day}`, '2026-11-13');
   assert.equal(p.time, '23:59:59');
-  assert.equal(end, Math.floor(Date.UTC(2026, 10, 7, 5, 59, 59) / 1000), 'CST is UTC-6');
+  assert.equal(end, Math.floor(Date.UTC(2026, 10, 14, 5, 59, 59) / 1000), 'CST is UTC-6');
 });
 
 test('checkout params: subscription_data carries the computed trial_end, no trial_period_days', () => {
@@ -372,10 +376,10 @@ test('trial-dismiss route records the dismissal and echoes the closed state', as
 test('index.html carries the trial popup markup and the trial copy (muted theme classes)', () => {
   assert.ok(html.includes('id="trialOverlay"'), 'trial overlay present');
   assert.ok(html.includes('id="trialCta"'), 'trial CTA present');
-  assert.ok(html.includes('Your first trading week is free'), 'headline present');
-  assert.ok(html.includes('Five business days of K1 Agentic trading — then $49.99/mo. Cancel anytime.'), 'body copy present');
-  assert.ok(html.includes('Start my free week'), 'primary button label present');
-  assert.ok(html.includes('First trading week free — 5 business days, then'), 'plan block trial line present');
+  assert.ok(html.includes('Your first 14 days are free'), 'headline present');
+  assert.ok(html.includes('14 days of K1 Agentic trading — then $49.99/mo. Cancel anytime.'), 'body copy present');
+  assert.ok(html.includes('Start my free trial'), 'primary button label present');
+  assert.ok(html.includes('First 14 days free, then'), 'plan block trial line present');
   assert.ok(!/guarantee|guaranteed|profit/i.test(html.slice(html.indexOf('id="trialOverlay"'), html.indexOf('id="trialOverlay"') + 1200)), 'no profit promises in the trial popup');
 });
 
@@ -397,8 +401,8 @@ test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped
   assert.ok(html.includes('id="subscriptionNavBtn"'), 'nav entry point present');
   assert.ok(html.includes('id="subscriptionBannerBtn"'), 'dashboard entry point present');
   assert.ok(html.includes('id="subscriptionKiaanBtn"'), 'Kiaan page entry point present');
-  assert.ok(html.includes('/js/subscription.js?v=20261018a'), 'subscription.js tag bumped');
-  assert.ok(html.includes('/public/css/subscription.css?v=20261018a'), 'subscription.css tag bumped');
+  assert.ok(html.includes('/js/subscription.js?v=20261019b'), 'subscription.js tag bumped');
+  assert.ok(html.includes('/public/css/subscription.css?v=20261019b'), 'subscription.css tag bumped');
   assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the login hook');
   assert.ok(!/paypal/i.test(html), 'no PayPal in this build (phase 2)');
 });

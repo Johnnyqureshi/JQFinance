@@ -1,7 +1,7 @@
 /* Unlock Agentic Trading (Johnny 2026-10-16): ONE flat subscription —
  * $49.99/mo, everything included, early-signup reward locked while you
- * stay subscribed. No tiers. First trading week free — 5 business
- * days, then $49.99/mo (Johnny 2026-10-18).
+ * stay subscribed. No tiers. First 14 days free, then $49.99/mo
+ * (Johnny 2026-10-18; extended 2026-10-19 — actually 10 business days).
  *
  * The popup shows once per browser session on the first authenticated
  * dashboard load, and only while the server says the account has neither
@@ -90,8 +90,8 @@
       if (cta) cta.style.display = '';
       if (note) {
         note.textContent = mode === 'stripe'
-          ? 'First trading week free — 5 business days, then $49.99/mo. Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
-          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price — no charge today, and your first trading week is free when billing opens.';
+          ? 'First 14 days free, then $49.99/mo. Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
+          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price — no charge today, and your first 14 days are free when billing opens.';
       }
     }
     overlay.classList.add('open');
@@ -112,7 +112,7 @@
     const err = $('trialError');
     if (err) err.textContent = '';
     const cta = $('trialCta');
-    if (cta) { cta.disabled = false; cta.textContent = 'Start my free week'; }
+    if (cta) { cta.disabled = false; cta.textContent = 'Start my free trial'; }
     overlay.classList.add('open');
   }
 
@@ -193,7 +193,7 @@
   }
 
   // One checkout flow for both CTAs: the unlock popup's "Unlock Now"
-  // and the trial popup's "Start my free week" (fromTrial) post to the
+  // and the trial popup's "Start my free trial" (fromTrial) post to the
   // same endpoint — the session it creates carries the trial.
   async function unlock(fromTrial = false) {
     const cta = $(fromTrial ? 'trialCta' : 'subscriptionCta');
@@ -231,7 +231,7 @@
       if (note) note.textContent = '';
     } catch (e) {
       if (err) err.textContent = e.message || 'Something went wrong. Your account was not charged.';
-      if (cta) { cta.disabled = false; cta.textContent = fromTrial ? 'Start my free week' : 'Unlock Now'; }
+      if (cta) { cta.disabled = false; cta.textContent = fromTrial ? 'Start my free trial' : 'Unlock Now'; }
     }
   }
 

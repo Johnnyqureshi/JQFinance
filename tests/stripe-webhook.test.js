@@ -132,7 +132,7 @@ test('checkout.session.completed resolves the user from metadata when client_ref
 });
 
 test('checkout.session.completed for a TRIALING session (no_payment_required) activates', () => {
-  // First trading week free: the completed trial session owes $0, so
+  // First 14 days free: the completed trial session owes $0, so
   // Stripe reports payment_status 'no_payment_required', not 'paid'.
   // The subscriber must still be activated — the trial IS the access.
   const db = freshDb();

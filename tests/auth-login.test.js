@@ -18,6 +18,7 @@ const { test } = require('node:test');
 const bcrypt = require('bcryptjs');
 
 const {
+  createPostgresAuthStore,
   classifyLoginIdentifier,
   resolveLoginUser,
   summarizeAuthUserRow,
@@ -129,6 +130,22 @@ test('summarizeAuthUserRow: hash format class only — the hash itself never lea
 test('summarizeAuthUserRow: a non-bcrypt stored credential is flagged as other', () => {
   const summary = summarizeAuthUserRow({ ...userRow, password_hash: 'sha256:deadbeef' });
   assert.equal(summary.hash_format, 'other');
+});
+
+test('store.findUserByLoginIdentifier is bound to the real finders (no undefined references)', async () => {
+  // Regression for the first ship of this fix: the dispatcher was wired to
+  // shorthand names that do not exist in the store scope, so every login
+  // threw ReferenceError and returned 503. With an unreachable database the
+  // call must fail with a CONNECTION error — never a "not defined" error.
+  const store = createPostgresAuthStore({
+    databaseUrl: 'postgresql://unused:unused@127.0.0.1:1/unused',
+    sessionTtlMs: 60_000,
+  });
+  await assert.rejects(
+    () => store.findUserByLoginIdentifier('demo.user@example.com'),
+    err => !/is not defined/.test(err.message),
+  );
+  await store.close().catch(() => {});
 });
 
 // --- wiring pins (route + store + client) -------------------------------------

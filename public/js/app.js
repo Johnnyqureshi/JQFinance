@@ -2461,7 +2461,12 @@ function setupAuthUI() {
     $('tabReg').classList.toggle('active',    isReg);
     $('tabLogin').setAttribute('aria-selected', String(!isReg));
     $('tabReg').setAttribute('aria-selected', String(isReg));
-    $('authUser').placeholder = isReg ? 'Choose a username' : 'Enter your username';
+    $('authUser').placeholder = isReg ? 'Choose a username' : 'Enter your username or email';
+    // Sign-in accepts the account email too (it can exceed the 20-char
+    // username cap — the old maxlength silently truncated typed emails).
+    $('authUser').maxLength = isReg ? 20 : 254;
+    const userLabel = $('authUserLabel');
+    if (userLabel) userLabel.textContent = isReg ? 'Username' : 'Username or email';
     $('authPass').placeholder = isReg ? 'Choose a password' : 'Enter your password';
     $('authPass').setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
     const emailField = $('authEmailField');
@@ -2481,7 +2486,7 @@ function setupAuthUI() {
     $('authError').textContent = '';
 
     // Client-side validation
-    if (!u) { $('authError').textContent = 'Please enter a username.'; $('authUser').focus(); return; }
+    if (!u) { $('authError').textContent = mode === 'login' ? 'Please enter your username or email.' : 'Please enter a username.'; $('authUser').focus(); return; }
     if (!p) { $('authError').textContent = 'Please enter a password.';  $('authPass').focus(); return; }
     if (mode === 'register' && p.length < 6) { $('authError').textContent = 'Password must be at least 6 characters.'; return; }
     if (mode === 'register' && !/^[a-zA-Z0-9_]{3,20}$/.test(u)) { $('authError').textContent = 'Username must be 3–20 characters (letters, numbers, _).'; return; }

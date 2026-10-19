@@ -638,6 +638,7 @@ function ensureAuthStoreReady() {
       bcrypt.hashSync(crypto.randomBytes(48).toString('base64url'), 12)
     ))
     .then(() => enforceRetiredSessions())
+    .then(() => enforceRequestedForceLogout())
     .then(() => {
       authStoreInitialized = true;
       authStoreInitError = null;
@@ -790,6 +791,45 @@ async function enforceRetiredSessions() {
     }
   } catch (error) {
     console.error('[Auth] Retired-session enforcement failed:', error.message);
+  }
+}
+
+// Owner-requested force-logout (Johnny 2026-10-18): purge every web session
+// for the account registered under this email, once, so the account is
+// signed out on every device. NOT a suspension — the account keeps its
+// password, subscription and bot state and can sign back in immediately.
+// The store call is sentinel-guarded (runs exactly once ever); the summary
+// it returns is logged here with product-side state attached (subscription
+// status + bot connection presence/mode only — never credential material).
+async function enforceRequestedForceLogout() {
+  try {
+    const result = await authStore.forceLogoutByEmailOnce(
+      'Qureshiomeir@gmail.com',
+      'force_logout_20261018_qureshiomeir'
+    );
+    if (!result || result.alreadyDone) return;
+    for (const acct of result.accounts || []) {
+      try {
+        const sub = db.prepare('SELECT status FROM agentic_subscriptions WHERE user_id=?').get(acct.id);
+        acct.subscription_status = sub ? sub.status : 'none';
+      } catch (_) { acct.subscription_status = 'unknown'; }
+      try {
+        const cred = automatedDb.prepare('SELECT user_id FROM kiaan_credentials WHERE user_id=?').get(acct.id);
+        const settings = automatedDb.prepare('SELECT enabled, mode FROM kiaan_settings WHERE user_id=?').get(acct.id);
+        acct.bot_connected = !!cred;
+        acct.bot_enabled = settings ? Number(settings.enabled) : null;
+        acct.bot_mode = settings ? settings.mode : null;
+      } catch (_) { acct.bot_connected = 'unknown'; }
+      // Belt-and-braces: production sessions live in Postgres (purged by the
+      // store call above); clear any legacy SQLite session rows too.
+      try {
+        sessionDb.prepare('DELETE FROM sessions WHERE sess LIKE ? OR sess LIKE ?')
+          .run(`%"userId":${acct.id}%`, `%"userId": ${acct.id}%`);
+      } catch (_) {}
+    }
+    console.log('[Auth] Force-logout (Johnny 2026-10-18): ' + JSON.stringify(result));
+  } catch (error) {
+    console.error('[Auth] Requested force-logout failed:', error.message);
   }
 }
 
@@ -1305,14 +1345,17 @@ app.post('/api/auth/resend-verification', rateLimitAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Login
+// Login — the identifier may be the username OR the account email
+// (Johnny 2026-10-18: a demo login typed the account's email and got
+// "invalid username or password" because only the username column was
+// ever searched). Lookup stays case-insensitive on both paths.
 app.post('/api/auth/login', rateLimitAuth, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password)
-    return res.status(400).json({ error: 'Username and password are required.' });
+    return res.status(400).json({ error: 'Username/email and password are required.' });
 
   try {
-    const user = await authStore.findUserByUsername(username.trim());
+    const user = await authStore.findUserByLoginIdentifier(username);
     if (!user) {
     // This source-disclosed bootstrap identity was retired one-way. Keep the
     // normal generic response for other usernames, but give its owner an

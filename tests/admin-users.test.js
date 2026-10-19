@@ -218,7 +218,7 @@ test('index.html: page container + bumped assets, and NO static USERS nav entry'
   assert.ok(html.includes('id="page-users"'), 'page-users container exists');
   assert.ok(html.includes('/js/users.js?v=20261017b'), 'users.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/users.css?v=20261017b'), 'users.css included with a cache-busting tag');
-  assert.ok(html.includes('/js/app.js?v=20261017b'), 'app.js tag bumped for the nav injection');
+  assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the nav injection');
   assert.ok(!html.includes('data-page="users"'), 'USERS nav entry is never in the static markup');
 });
 

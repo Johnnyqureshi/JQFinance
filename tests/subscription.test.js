@@ -11,6 +11,7 @@ const { test } = require('node:test');
 const Database = require('better-sqlite3');
 
 const sub = require('../lib/subscription');
+const exemptions = require('../lib/subscription-exemptions');
 const read = p => readFileSync(require.resolve(p), 'utf8');
 const html = read('../index.html');
 const server = read('../server.js');
@@ -401,10 +402,183 @@ test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped
   assert.ok(html.includes('id="subscriptionNavBtn"'), 'nav entry point present');
   assert.ok(html.includes('id="subscriptionBannerBtn"'), 'dashboard entry point present');
   assert.ok(html.includes('id="subscriptionKiaanBtn"'), 'Kiaan page entry point present');
-  assert.ok(html.includes('/js/subscription.js?v=20261019b'), 'subscription.js tag bumped');
-  assert.ok(html.includes('/public/css/subscription.css?v=20261019b'), 'subscription.css tag bumped');
+  assert.ok(html.includes('/js/subscription.js?v=20261020a'), 'subscription.js tag bumped');
+  assert.ok(html.includes('/public/css/subscription.css?v=20261020a'), 'subscription.css tag bumped');
   assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the login hook');
   assert.ok(!/paypal/i.test(html), 'no PayPal in this build (phase 2)');
+});
+
+// ── Annual plan (Johnny 2026-10-20): $539.89/year = exactly 10% off
+// 12 × $49.99 ($599.88). Monthly stays the default and the fallback;
+// the trial computation and the percent coupons are interval-blind.
+test('annual plan constants: 53989 is exactly 10% off a year of monthly; plan normalization', () => {
+  assert.equal(sub.ANNUAL_PRICE_CENTS, 53989);
+  assert.equal(sub.ANNUAL_PRICE_CENTS, Math.round(sub.PRICE_CENTS * 12 * 0.9));
+  assert.equal(sub.ANNUAL_PRICE_DISPLAY, '$539.89');
+  assert.equal(sub.normalizePlan('annual'), 'annual');
+  assert.equal(sub.normalizePlan('monthly'), 'monthly');
+  assert.equal(sub.normalizePlan('bogus'), 'monthly', 'unknown plan falls back to monthly');
+  assert.equal(sub.normalizePlan(undefined), 'monthly', 'missing plan falls back to monthly');
+});
+
+test('annual checkout params: 53989 USD, yearly interval, same product, identical trial_end', () => {
+  const now = new Date('2026-10-19T15:00:00Z'); // Monday
+  const base = { successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no', userId: 7, now };
+  const annual = sub.buildCheckoutSessionParams({ ...base, plan: 'annual' });
+  const monthly = sub.buildCheckoutSessionParams({ ...base, plan: 'monthly' });
+  const item = annual.line_items[0];
+  assert.equal(annual.mode, 'subscription');
+  assert.equal(item.price_data.unit_amount, 53989);
+  assert.equal(item.price_data.currency, 'usd');
+  assert.equal(item.price_data.recurring.interval, 'year');
+  assert.equal(item.price_data.product_data.name, 'QureshiFinance Agentic Trading');
+  assert.equal(annual.subscription_data.trial_end, monthly.subscription_data.trial_end,
+    'trial_end computation is identical for the annual plan');
+  assert.equal(annual.metadata.billing_plan, 'annual');
+  assert.equal(annual.subscription_data.metadata.billing_plan, 'annual');
+});
+
+test('plan fallback: unknown or missing plan bills the monthly amount and interval', () => {
+  const base = { successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no', userId: 7 };
+  for (const plan of [undefined, 'monthly', 'yearly', 'ANNUAL', 42]) {
+    const p = sub.buildCheckoutSessionParams({ ...base, plan });
+    assert.equal(p.line_items[0].price_data.unit_amount, 4999, `plan ${String(plan)} bills monthly`);
+    assert.equal(p.line_items[0].price_data.recurring.interval, 'month');
+    assert.equal(p.metadata.billing_plan, 'monthly');
+  }
+});
+
+test('annual checkout-session creation posts 53989 + interval year + trial_end to Stripe', async () => {
+  const calls = [];
+  const fetchStub = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true, status: 200,
+      json: async () => ({ id: 'cs_test_annual', url: 'https://checkout.stripe.com/c/cs_test_annual' }),
+    };
+  };
+  const now = new Date('2026-10-19T15:00:00Z'); // Monday
+  const session = await sub.createCheckoutSession({
+    secretKey: 'sk_test_stubbed', fetchImpl: fetchStub,
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no',
+    userId: 7, plan: 'annual', now,
+  });
+  assert.equal(session.id, 'cs_test_annual');
+  assert.equal(calls.length, 1);
+  const body = decodeURIComponent(calls[0].options.body);
+  assert.ok(body.includes('[unit_amount]=53989'), 'annual amount sent');
+  assert.ok(body.includes('[recurring][interval]=year'), 'yearly interval sent');
+  assert.ok(body.includes(`[trial_end]=${sub.computeTrialEndEpoch(now)}`), 'trial_end sent for annual');
+  assert.ok(body.includes('[billing_plan]=annual'), 'billing plan metadata sent');
+});
+
+test('annual checkout applies the referral coupon identically', async () => {
+  const calls = [];
+  const fetchStub = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/coupons/qf-referral-20')) {
+      return { ok: false, status: 404, json: async () => ({ error: { message: 'No such coupon' } }) };
+    }
+    if (url.endsWith('/coupons')) {
+      return { ok: true, status: 200, json: async () => ({ id: 'qf-referral-20', percent_off: 20 }) };
+    }
+    return {
+      ok: true, status: 200,
+      json: async () => ({ id: 'cs_test_ann_disc', url: 'https://checkout.stripe.com/c/cs_test_ann_disc' }),
+    };
+  };
+  await sub.createCheckoutSession({
+    secretKey: 'sk_test_stubbed', fetchImpl: fetchStub,
+    successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no',
+    userId: 7, plan: 'annual', discountPct: 20,
+  });
+  assert.ok(calls.some(c => c.url.endsWith('/coupons')), 'coupon ensured before checkout');
+  const sessionCall = calls.find(c => c.url.endsWith('/checkout/sessions'));
+  const body = decodeURIComponent(sessionCall.options.body);
+  assert.ok(body.includes('[unit_amount]=53989'), 'annual amount with coupon');
+  assert.ok(body.includes('[recurring][interval]=year'), 'annual interval with coupon');
+  assert.ok(body.includes('qf-referral-20'), 'referral coupon applied to the annual session');
+});
+
+test('checkout route: plan annual in the request body creates an annual Stripe session', async () => {
+  const db = freshDb();
+  const app = fakeApp();
+  const bodies = [];
+  sub.mountSubscription({
+    app, db, requireAuth: requireAuthStub,
+    getStripeSecretKey: () => 'sk_test_stubbed',
+    fetchImpl: async (url, options) => {
+      bodies.push(decodeURIComponent(options.body || ''));
+      return {
+        ok: true, status: 200,
+        json: async () => ({ id: 'cs_test_route_ann', url: 'https://checkout.stripe.com/c/cs_test_route_ann' }),
+      };
+    },
+  });
+  const res = fakeRes();
+  await app.handlers.get('POST /api/subscription/checkout')(
+    { session: { userId: 7 }, protocol: 'https', get: () => 'example.test', body: { plan: 'annual' } }, res);
+  assert.equal(res.body.mode, 'stripe');
+  assert.equal(res.body.url, 'https://checkout.stripe.com/c/cs_test_route_ann');
+  assert.ok(bodies.join(' ').includes('[unit_amount]=53989'), 'route passed the annual plan through');
+  assert.ok(bodies.join(' ').includes('[recurring][interval]=year'), 'annual interval reached Stripe');
+});
+
+test('checkout route: exempt account creates zero Stripe sessions on either plan', async () => {
+  for (const plan of ['monthly', 'annual']) {
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE users(id INTEGER PRIMARY KEY, email TEXT)');
+    db.prepare('INSERT INTO users(id, email) VALUES (7, ?)').run('kin@example.test');
+    sub.ensureSubscriptionSchema(db);
+    exemptions.addExemption(db, 'kin@example.test');
+    let stripeCalls = 0;
+    const app = fakeApp();
+    sub.mountSubscription({
+      app, db, requireAuth: requireAuthStub,
+      getStripeSecretKey: () => 'sk_test_stubbed',
+      fetchImpl: async () => { stripeCalls += 1; throw new Error('Stripe must not be called for exempt accounts'); },
+    });
+    const res = fakeRes();
+    await app.handlers.get('POST /api/subscription/checkout')(
+      { session: { userId: 7 }, protocol: 'https', get: () => 'example.test', body: { plan } }, res);
+    assert.equal(res.body.mode, 'exempt', `${plan}: exempt short-circuit answers without Stripe`);
+    assert.equal(stripeCalls, 0, `${plan}: zero Stripe calls for an exempt account`);
+    db.close();
+  }
+});
+
+test('annual activation: success marking records plan_amount_cents 53989; monthly default unchanged', async () => {
+  const db = freshDb();
+  const ok = await sub.verifyAndMarkSubscribed({
+    db, secretKey: 'sk_test_stubbed',
+    fetchImpl: async () => ({
+      ok: true, status: 200,
+      json: async () => ({
+        id: 'cs_ann', status: 'complete', payment_status: 'paid',
+        client_reference_id: '7', customer: 'cus_9', subscription: 'sub_9',
+        metadata: { user_id: '7', billing_plan: 'annual' },
+      }),
+    }),
+    sessionId: 'cs_ann', userId: 7,
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(Number(sub.getSubscriptionRow(db, 7).plan_amount_cents), 53989, 'annual amount recorded');
+  const monthlyRow = sub.markSubscribed(freshDb(), 7, {});
+  assert.equal(Number(monthlyRow.plan_amount_cents), 4999, 'monthly stays the default recorded amount');
+});
+
+test('annual option markup + wiring: chooser in the unlock popup, monthly preselected, plan submitted', () => {
+  assert.ok(html.includes('data-plan-option="monthly"'), 'monthly option present');
+  assert.ok(html.includes('data-plan-option="annual"'), 'annual option present');
+  assert.ok(html.includes('name="subPlan"'), 'plan radio group present');
+  assert.ok(html.includes('value="monthly" checked'), 'monthly preselected');
+  assert.ok(html.includes('$539.89'), 'annual price shown');
+  assert.ok(html.includes('SAVE 10%'), 'save tag shown');
+  assert.ok(html.includes('First 14 days free, then $49.99/mo — or $539.89/year, 10% off'),
+    'plan line and K1 strip carry the annual alternative');
+  assert.ok(subJs.includes('selectedPlan()'), 'client reads the chooser');
+  assert.ok(subJs.includes('JSON.stringify({ plan: selectedPlan() })'), 'checkout posts the chosen plan');
+  assert.ok(subJs.includes('input[name="subPlan"]'), 'chooser change wiring present');
 });
 
 test('client + server wiring: popup after login, per-account dismiss, env-only Stripe key', () => {

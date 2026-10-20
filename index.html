@@ -43,7 +43,7 @@
   <link rel="stylesheet" href="/public/css/kiaan.css?v=20261016a"/>
   <link rel="stylesheet" href="/public/css/brokers.css?v=20261018b"/>
   <link rel="stylesheet" href="/public/css/users.css?v=20261019a"/>
-  <link rel="stylesheet" href="/public/css/subscription.css?v=20261019b"/>
+  <link rel="stylesheet" href="/public/css/subscription.css?v=20261020a"/>
   <link rel="stylesheet" href="/public/css/agreement.css?v=20261019a"/>
   <link rel="stylesheet" href="/public/css/contact.css?v=20261019a"/>
   <link rel="stylesheet" href="/public/css/crypto.css?v=20261001a"/>
@@ -849,7 +849,7 @@
 
 <div class="page" id="page-kiaan">
   <div class="sub-kiaan-entry" id="subscriptionKiaanEntry">
-    <div><strong>Unlock Agentic Trading</strong><span>First 14 days free, then $49.99/mo. Everything included.</span></div>
+    <div><strong>Unlock Agentic Trading</strong><span>First 14 days free, then $49.99/mo — or $539.89/year, 10% off. Everything included.</span></div>
     <button class="sub-entry-btn" id="subscriptionKiaanBtn" type="button">Unlock Agentic Trading</button>
   </div>
 </div>
@@ -922,8 +922,19 @@
       <div class="sub-card"><b>Always improving</b><span>New improvements land on your account while you stay subscribed.</span></div>
     </div>
     <div class="sub-plan">
-      <p class="sub-trial">First 14 days free, then</p>
-      <div class="sub-price">$49.99<small>/mo</small></div>
+      <p class="sub-trial">First 14 days free, then $49.99/mo — or $539.89/year, 10% off</p>
+      <div class="sub-plan-options" role="radiogroup" aria-label="Billing period">
+        <label class="sub-plan-option is-selected" data-plan-option="monthly">
+          <input type="radio" name="subPlan" value="monthly" checked>
+          <span class="sub-plan-option-top"><span class="sub-plan-option-name">Monthly</span></span>
+          <span class="sub-plan-option-price">$49.99<small>/mo</small></span>
+        </label>
+        <label class="sub-plan-option" data-plan-option="annual">
+          <input type="radio" name="subPlan" value="annual">
+          <span class="sub-plan-option-top"><span class="sub-plan-option-name">Annual</span><span class="sub-plan-save">SAVE 10%</span></span>
+          <span class="sub-plan-option-price">$539.89<small>/yr</small></span>
+        </label>
+      </div>
       <p class="sub-lock">Early signup reward — locked while you stay subscribed</p>
       <p>Everything included. One flat plan, no tiers. Cancel anytime.</p>
     </div>
@@ -1000,7 +1011,7 @@
 <script src="/js/agreement.js?v=20261019a"></script>
 <script src="/js/brokers.js?v=20261019a"></script>
 <script src="/js/users.js?v=20261019a"></script>
-<script src="/js/subscription.js?v=20261019b"></script>
+<script src="/js/subscription.js?v=20261020a"></script>
 <script src="/js/referrals.js?v=20261019b"></script>
 
 <!-- MOBILE BOTTOM NAV -->

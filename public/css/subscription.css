@@ -1,7 +1,9 @@
 /* Unlock Agentic Trading — subscription popup + entry points (Johnny
    2026-10-16). One flat plan, $49.99/mo, everything included.
    First 14 days free, then $49.99/mo (Johnny 2026-10-18; extended
-   2026-10-19 — actually 10 business days).
+   2026-10-19 — actually 10 business days). Annual option added
+   2026-10-20: $539.89/year, 10% off, via the .sub-plan-options
+   chooser (monthly preselected).
    Restyled 2026-10-16 (Johnny: "too kiddy, get rid of the colors"):
    sober site theme — deep navy surfaces, slate cards, solid site
    green (#1dd6a3) as the only accent. No gradients, no emoji. */
@@ -45,6 +47,22 @@
 .sub-plan .sub-price small{font-size:16px;font-weight:600;color:#c3cbe0}
 .sub-plan p{margin:6px 0;color:#c3cbe0;font-size:13px;line-height:1.55}
 .sub-plan .sub-lock{color:#9dafcc;font-weight:600}
+/* Plan chooser (Johnny 2026-10-20): two selectable options inside the
+   plan block — slate cards on the navy popup, site green the only
+   accent (selected border, radio, SAVE tag). No gradients, no emoji. */
+.sub-plan-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 4px}
+.sub-plan-option{cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;
+  border-radius:14px;padding:14px 12px;background:#0f1424;border:1px solid #1c2a42;color:#dce8fa}
+.sub-plan-option:hover{border-color:rgba(29,214,163,.55)}
+.sub-plan-option.is-selected{border-color:#1dd6a3}
+.sub-plan-option input{accent-color:#1dd6a3;margin:0;cursor:pointer}
+.sub-plan-option-top{display:flex;align-items:center;gap:8px}
+.sub-plan-option-name{font:800 13px Inter,sans-serif;letter-spacing:.02em;color:#eef3fc}
+.sub-plan-option-price{font-size:26px;font-weight:800;letter-spacing:-.02em;color:#f5f8ff}
+.sub-plan-option-price small{font-size:13px;font-weight:600;color:#c3cbe0}
+.sub-plan-save{font:800 10px Inter,sans-serif;letter-spacing:.04em;background:#1dd6a3;color:#0a1628;
+  border-radius:999px;padding:3px 8px}
+@media(max-width:620px){.sub-plan-options{grid-template-columns:1fr}}
 .sub-confirm{display:none;border:1px solid rgba(29,214,163,.4);background:rgba(29,214,163,.08);color:#c9f7ea;
   border-radius:12px;padding:14px 16px;font-size:14px;line-height:1.6;margin-bottom:14px}
 .sub-confirm.show{display:block}

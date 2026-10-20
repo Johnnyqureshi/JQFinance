@@ -2,6 +2,9 @@
  * $49.99/mo, everything included, early-signup reward locked while you
  * stay subscribed. No tiers. First 14 days free, then $49.99/mo
  * (Johnny 2026-10-18; extended 2026-10-19 — actually 10 business days).
+ * Annual option (Johnny 2026-10-20): $539.89/year, 10% off, chosen in
+ * the unlock popup's plan chooser; monthly is preselected and is what
+ * every chooser-less surface (trial popup included) submits.
  *
  * The popup shows once per browser session on the first authenticated
  * dashboard load, and only while the server says the account has neither
@@ -90,8 +93,8 @@
       if (cta) cta.style.display = '';
       if (note) {
         note.textContent = mode === 'stripe'
-          ? 'First 14 days free, then $49.99/mo. Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
-          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price — no charge today, and your first 14 days are free when billing opens.';
+          ? 'First 14 days free, then $49.99/mo — or $539.89/year, 10% off. Secure checkout by Stripe — credit/debit cards, Apple Pay and Google Pay accepted.'
+          : 'Billing is not live yet: Unlock Now joins the founding list at the locked $49.99/mo early-signup price (or $539.89/year, 10% off) — no charge today, and your first 14 days are free when billing opens.';
       }
     }
     overlay.classList.add('open');
@@ -192,6 +195,23 @@
     renderEntryPoints();
   }
 
+  // Billing-plan choice (Johnny 2026-10-20): the unlock popup's
+  // chooser is the single source — monthly is preselected in the
+  // markup, and both CTAs submit whatever it currently says, so the
+  // trial popup's "Start my free trial" rides the same choice
+  // (monthly unless the visitor picked Annual in the unlock popup).
+  function selectedPlan() {
+    const checked = document.querySelector('input[name="subPlan"]:checked');
+    return checked && checked.value === 'annual' ? 'annual' : 'monthly';
+  }
+
+  function syncPlanOptions() {
+    const plan = selectedPlan();
+    for (const opt of document.querySelectorAll('[data-plan-option]')) {
+      opt.classList.toggle('is-selected', opt.getAttribute('data-plan-option') === plan);
+    }
+  }
+
   // One checkout flow for both CTAs: the unlock popup's "Unlock Now"
   // and the trial popup's "Start my free trial" (fromTrial) post to the
   // same endpoint — the session it creates carries the trial.
@@ -201,7 +221,9 @@
     if (err) err.textContent = '';
     if (cta) { cta.disabled = true; cta.textContent = 'Working…'; }
     try {
-      const result = await api('/api/subscription/checkout', { method: 'POST', body: '{}' });
+      const result = await api('/api/subscription/checkout', {
+        method: 'POST', body: JSON.stringify({ plan: selectedPlan() }),
+      });
       if (result.mode === 'stripe' && result.url) {
         window.location.href = result.url;
         return;
@@ -249,6 +271,10 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    for (const input of document.querySelectorAll('input[name="subPlan"]')) {
+      input.addEventListener('change', syncPlanOptions);
+    }
+    syncPlanOptions();
     $('subscriptionCta')?.addEventListener('click', () => unlock(false));
     $('subscriptionLater')?.addEventListener('click', dismiss);
     $('subscriptionClose')?.addEventListener('click', dismiss);

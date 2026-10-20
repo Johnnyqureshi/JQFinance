@@ -248,6 +248,7 @@ test('privacy: no exempt address is baked into any tracked source or public surf
   addUser(db, 21, EXEMPT_A);
   const s = sub.getPopupState(db, 21, {});
   assert.deepEqual(Object.keys(s).sort(), [
+    'annualPriceCents', 'annualPriceDisplay',
     'checkoutMode', 'dismissed', 'entryLabel', 'exempt', 'founding',
     'priceCents', 'priceDisplay', 'shouldShowPopup', 'showTrialPopup',
     'status', 'subscribed', 'trialDismissed',

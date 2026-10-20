@@ -963,12 +963,13 @@ test('hedge-only + long universe is the shipped default: a risk-on day refuses a
   const f = fixture('riskon');
   await connectAndEnable(f);
   // No rule overrides — DEFAULT_KIAAN_RULES as shipped (hedgeOnly ON,
-  // longUniverse = ORB's 87 names since 2026-10-12). AAA is NOT on the
+  // longUniverse = ORB's 87 names since 2026-10-12, plus AVL appended
+  // 2026-10-20 = 88 names). AAA is NOT on the
   // list, so it is refused distinctly and no order is placed.
   const view = await f.service.getSettings(1);
   assert.equal(view.rules.hedgeOnly, true);
   assert.equal(view.rules.exitAtrTimeframe, '15m');
-  assert.equal(view.rules.longUniverse.split(',').length, 87);
+  assert.equal(view.rules.longUniverse.split(',').length, 88);
   await f.service._scanCycle(1);
   assert.equal(f.world.orderPosts.length, 0, 'no orders for a non-universe name');
   const session = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='session'").get();
@@ -978,7 +979,7 @@ test('hedge-only + long universe is the shipped default: a risk-on day refuses a
   assert.match(session.reasons, /LONG_UNIVERSE_MODE/);
   const sdata = JSON.parse(session.data);
   assert.equal(sdata.hedgeOnly, true);
-  assert.equal(sdata.longUniverseSize, 87);
+  assert.equal(sdata.longUniverseSize, 88);
   const aaa = f.db.prepare("SELECT * FROM kiaan_decisions WHERE kind='candidate' AND symbol='AAA'").get();
   assert.equal(aaa.decision, 'no-trade');
   assert.match(aaa.reasons, /LONG_NOT_IN_UNIVERSE/);
@@ -1228,7 +1229,7 @@ test('migration seeds longUniverse into stored rules that predate it, and never 
     persistenceReady: () => true, exitPoll: { tries: 1, intervalMs: 0 },
   });
   const seeded = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=7').get().rules);
-  assert.equal(seeded.longUniverse.split(',').length, 87);
+  assert.equal(seeded.longUniverse.split(',').length, 88);
   assert.equal(seeded.longUniverse, DEFAULT_KIAAN_RULES.longUniverse);
   assert.equal(seeded.minRvol, 2, 'existing stored rules are preserved');
   const emptied = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=8').get().rules);
@@ -1241,6 +1242,44 @@ test('migration seeds longUniverse into stored rules that predate it, and never 
   });
   const again = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=7').get().rules);
   assert.equal(again.longUniverse, seeded.longUniverse);
+});
+
+test('migration appends AVL to stored longUniverse rows that predate it (Johnny 2026-10-20)', async () => {
+  const f = fixture();
+  // The pre-AVL list: the current default minus the appended AVL.
+  const oldList = DEFAULT_KIAAN_RULES.longUniverse.replace(/,AVL$/, '');
+  assert.equal(oldList.split(',').length, 87);
+  assert.ok(!oldList.split(',').includes('AVL'));
+  // A row carrying the old 87-name list.
+  f.db.prepare('INSERT INTO kiaan_settings(user_id, rules) VALUES (9, ?)')
+    .run(JSON.stringify({ longUniverse: oldList, minRvol: 2 }));
+  // A row already carrying AVL.
+  f.db.prepare('INSERT INTO kiaan_settings(user_id, rules) VALUES (10, ?)')
+    .run(JSON.stringify({ longUniverse: DEFAULT_KIAAN_RULES.longUniverse }));
+  // A deliberately emptied universe stays emptied.
+  f.db.prepare('INSERT INTO kiaan_settings(user_id, rules) VALUES (11, ?)')
+    .run(JSON.stringify({ longUniverse: '' }));
+  // Re-constructing the service on the same db runs the one-shot append.
+  const { createCredentialVault: mkVault } = require('../lib/credential-vault');
+  const construct = () => createKiaanService({
+    db: f.db, vault: mkVault('test-only-secret-never-a-real-credential-987654321'),
+    fetch: async () => { throw new Error('no network in migration test'); },
+    persistenceReady: () => true, exitPoll: { tries: 1, intervalMs: 0 },
+  });
+  construct();
+  const appended = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=9').get().rules);
+  assert.equal(appended.longUniverse, DEFAULT_KIAAN_RULES.longUniverse);
+  assert.equal(appended.longUniverse.split(',').length, 88);
+  assert.equal(appended.longUniverse.split(',').at(-1), 'AVL');
+  assert.equal(appended.minRvol, 2, 'existing stored rules are preserved');
+  const already = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=10').get().rules);
+  assert.equal(already.longUniverse, DEFAULT_KIAAN_RULES.longUniverse, 'a row already carrying AVL is untouched');
+  const emptied = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=11').get().rules);
+  assert.equal(emptied.longUniverse, '', 'a deliberately emptied universe stays emptied');
+  // Idempotent: a second construction changes nothing.
+  construct();
+  const again = JSON.parse(f.db.prepare('SELECT rules FROM kiaan_settings WHERE user_id=9').get().rules);
+  assert.equal(again.longUniverse, appended.longUniverse);
 });
 
 test('settings: longUniverse is a settable text rule and round-trips through getSettings', async () => {

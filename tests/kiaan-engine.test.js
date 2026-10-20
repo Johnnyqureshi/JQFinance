@@ -583,7 +583,7 @@ test('hedge-only rebuild: the shipped defaults are hedgeOnly ON and exitAtrTimef
 });
 
 test('hedge-only ON: a passing ordinary long NOT on the long universe is refused on a risk-on day (LONG_NOT_IN_UNIVERSE)', () => {
-  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }); // ACME is not on the 87-name list
+  const d = evaluateCandidate(ctxFor(RISK_ON), { ...GOOD_LONG }); // ACME is not on the 88-name list
   assert.equal(d.decision, 'no-trade');
   assert.equal(d.hedgeOnly, true);
   assert.equal(d.inLongUniverse, false);
@@ -597,7 +597,7 @@ test('hedge-only ON: a passing ordinary long NOT on the long universe is refused
   assert.equal(s.regime, 'risk-on');
   assert.equal(s.stance, 'seek-longs');
   assert.equal(s.hedgeOnly, true);
-  assert.equal(s.longUniverseSize, 87);
+  assert.equal(s.longUniverseSize, 88);
   assert.ok(hasReason(s, 'HEDGE_ONLY_MODE'));
   assert.ok(hasReason(s, 'LONG_UNIVERSE_MODE'));
   assert.match(s.why, /long universe/);
@@ -700,15 +700,19 @@ test('intradayExitGeometry: stop/targets equal entry ∓ 1.5×ATR15 / +2R / +3R'
 // SOC is on ORB's 87-name watchlist and is NOT a hedge-list symbol.
 const GOOD_UNIVERSE = { ...GOOD_LONG, symbol: 'SOC' };
 
-test('longUniverse default is exactly the frozen 87-name list, verbatim', () => {
-  // The list was copied verbatim from ORB's stored watchlist on 2026-10-12
-  // (Johnny: "the same ones as ORB"). ORB was deleted 2026-10-14, so the
-  // ground truth is frozen here: Kiaan's default must still match it
-  // name-for-name, in order.
+test('longUniverse default is the frozen 87-name ORB list verbatim, plus AVL appended (Johnny 2026-10-20)', () => {
+  // The first 87 names were copied verbatim from ORB's stored watchlist
+  // on 2026-10-12 (Johnny: "the same ones as ORB"). ORB was deleted
+  // 2026-10-14, so the ground truth is frozen here: Kiaan's default must
+  // still match it name-for-name, in order. AVL (Direxion Daily AVGO
+  // Bull 2X Shares) was appended at the end on 2026-10-20 on Johnny's
+  // direct order, making the list 88 names.
   const orbList = 'SOUN,UUUU,SMR,ONDS,BBAI,BDC,RCAT,UMAC,RR,SERV,BTG,DNN,CRML,TMQ,ASM,PLG,IAUX,UEC,USAR,LASE,CDTG,USAS,EXK,MTA,SOC,BORR,PBR,NAT,GLND,RIG,EGY,BTE,ANNA,NEXT,QID,SQQQ,AAPD,PLTD,SBIT,TSLL,SATL,RDWU,BABO,KMLI,INTW,MULL,NVDG,NVDL,SMCX,SMCL,PLTG,ADBG,NOWL,VYX,UECG,NUVB,NVDY,SNXX,SKHX,SPCH,ORCU,SOFX,KEEL,CIFG,AFRU,IRE,AMAU,GPRO,NOK,CRMG,NVTX,HODU,SKHL,SNDC,TSLG,PATX,MUU,MSTZ,CORD,AVS,QQQD,ORCZ,NVD,ERY,TSXD,TSLZ,TSDD'.split(',');
   assert.equal(orbList.length, 87);
   const kiaanList = mergedKiaanRules({}).longUniverse.split(',').filter(Boolean);
-  assert.deepEqual(kiaanList, orbList);
+  assert.equal(kiaanList.length, 88);
+  assert.deepEqual(kiaanList.slice(0, 87), orbList);
+  assert.equal(kiaanList[87], 'AVL');
   assert.equal(mergedKiaanRules({}).longUniverse, DEFAULT_KIAAN_RULES.longUniverse);
   // The hedge list is unchanged by the expansion.
   assert.equal(mergedKiaanRules({}).hedgeSymbols, 'SQQQ,SPXS,TSDD,SOXS,TECS,LABD');

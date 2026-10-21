@@ -22,7 +22,9 @@
       card.style.display = 'none';
       return;
     }
-    const link = `${window.location.origin}${data.linkPath}`;
+    // Share link always uses the canonical domain (Johnny 2026-10-20),
+    // no matter which domain the account is viewing the card on.
+    const link = `https://vixionbot.com${data.linkPath}`;
     const input = $('referralLink');
     if (input) input.value = link;
     const discount = $('referralDiscount');

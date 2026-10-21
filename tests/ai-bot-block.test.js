@@ -137,7 +137,7 @@ test('robots.txt: default allow-all, AI group disallowed, signals stated', () =>
     assert.match(robotsTxt, new RegExp(`User-agent: ${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`), token);
   }
   assert.match(robotsTxt, /Disallow: \/\n/);
-  assert.match(robotsTxt, /Sitemap: https:\/\/qureshifinance\.com\/sitemap\.xml/);
+  assert.match(robotsTxt, /Sitemap: https:\/\/vixionbot.com\/sitemap\.xml/);
 });
 
 test('robots.txt: good bots are never in the disallow group', () => {

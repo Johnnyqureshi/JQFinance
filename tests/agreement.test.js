@@ -44,7 +44,7 @@ const OWNER = 1000000005;
 
 test('canonical terms: title, version, exactly the 9 specified sections, exact checkbox label', () => {
   assert.equal(agreement.AGREEMENT_TITLE, 'Automated Trading Agreement & Risk Disclosure');
-  assert.equal(agreement.AGREEMENT_VERSION, '2026-10-19-v1');
+  assert.equal(agreement.AGREEMENT_VERSION, '2026-10-20-v2');
   assert.equal(
     agreement.AGREEMENT_CHECKBOX_LABEL,
     'I have read and agree to the Automated Trading Agreement and understand the risks of AI-executed trades.',
@@ -340,8 +340,8 @@ test('modal markup: dialog, scrollable terms region, unchecked checkbox, disable
   assert.ok(html.includes('id="agreementCancel"'), 'Cancel button present');
   assert.ok(html.includes(agreement.AGREEMENT_CHECKBOX_LABEL), 'exact checkbox label in the page');
   assert.ok(html.includes('/public/css/agreement.css?v=20261019a'), 'agreement css tag');
-  assert.ok(html.includes('/js/agreement.js?v=20261019a'), 'agreement js tag');
-  assert.ok(html.includes('/js/kiaan.js?v=20261019a'), 'kiaan.js tag bumped for the gate wiring');
+  assert.ok(html.includes('/js/agreement.js?v=20261020b'), 'agreement js tag');
+  assert.ok(html.includes('/js/kiaan.js?v=20261020b'), 'kiaan.js tag bumped for the gate wiring');
 });
 
 test('modal CSS: scrollable terms + theme variables ONLY (no hardcoded palette, follows light/dark)', () => {

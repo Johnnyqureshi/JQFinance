@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Trading Desk ────────────────────────────────────
+// ── VixionBot — Trading Desk ────────────────────────────────────
 
 const alpacaTrader = (() => {
 

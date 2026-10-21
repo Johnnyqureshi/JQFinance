@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Realtime Trader ────────────────────────────────────
+// ── VixionBot — Realtime Trader ────────────────────────────────────
 
 const trader = (() => {
   const REFRESH_SECS = 60;

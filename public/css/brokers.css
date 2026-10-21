@@ -1,5 +1,5 @@
 /* Brokers page — dedicated broker cards + the Alpaca API-key interface.
-   Aligned to the Qureshi Finance theme vars used by kiaan.css/style.css. */
+   Aligned to the VixionBot theme vars used by kiaan.css/style.css. */
 .brk-shell{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--panel:var(--card);--panel2:var(--card2);--mint:var(--teal);--amber:var(--gold);--danger:var(--red);max-width:1180px;margin:auto;padding:36px clamp(16px,4vw,56px) 84px;font-family:Inter,sans-serif;color:var(--ink)}
 .brk-hero{padding:10px 0 24px;border-bottom:1px solid var(--line)}
 .brk-eyebrow{font:800 10px 'DM Mono',monospace;letter-spacing:.13em;color:var(--dim)}

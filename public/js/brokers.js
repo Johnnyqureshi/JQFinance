@@ -33,12 +33,12 @@
     if (!page || $('brokersRoot')) return;
     const root = document.createElement('div');
     root.innerHTML = `<section class="brk-shell" id="brokersRoot" aria-labelledby="brokersTitle">
-      <header class="brk-hero"><div><span class="brk-eyebrow">BROKERS</span><h1 id="brokersTitle">Brokers</h1><p>Connect a brokerage once; K1 Agentic trades only the account you connect; you can disconnect anytime.</p></div></header>
+      <header class="brk-hero"><div><span class="brk-eyebrow">BROKERS</span><h1 id="brokersTitle">Brokers</h1><p>Connect a brokerage once; VixionBot Agentic trades only the account you connect; you can disconnect anytime.</p></div></header>
       <div class="brk-notice" id="brkNotice" role="status" aria-live="polite"></div>
       <div class="brk-grid">
         <article class="brk-card" aria-label="Alpaca">
           <div class="brk-card-head"><h2>Alpaca</h2><span class="brk-chip brk-chip-ok">Available now</span></div>
-          <p>Free API, paper and live — the broker K1 Agentic runs on today.</p>
+          <p>Free API, paper and live — the broker VixionBot Agentic runs on today.</p>
           <div class="brk-state"><span>Status</span><strong id="brkAlpacaState">Checking…</strong></div>
           <details class="brk-help">
             <summary>How to connect your API keys</summary>
@@ -47,7 +47,7 @@
               <li>In Alpaca, go to <b>API Keys → Generate New Key</b> and copy the Key ID and Secret <b>together</b> — the secret is shown only once, and generating a new pair replaces the old one.</li>
               <li>Back here, choose <b>Paper account</b> or <b>Live account</b> to match where the keys came from, paste both, and tap <b>Connect</b>.</li>
               <li>We verify the keys with Alpaca before saving anything. If they're rejected, the pair doesn't match or the Paper/Live choice is wrong.</li>
-              <li>Keys are stored encrypted and never shown again. Connecting doesn't turn trading on — enable the bot on the K1 Agentic page when you're ready, and disconnect anytime from this page.</li>
+              <li>Keys are stored encrypted and never shown again. Connecting doesn't turn trading on — enable the bot on the VixionBot Agentic page when you're ready, and disconnect anytime from this page.</li>
             </ol>
           </details>
           <p class="brk-note">Still stuck connecting? <a href="/contact">Contact support</a> — tell us where it stopped and we'll help.</p>
@@ -57,7 +57,7 @@
               <label class="brk-mode-opt"><input type="radio" name="brkMode" value="paper" checked><span><b>Paper account</b><small>Practice account with fake money — what the bot runs on today.</small></span></label>
               <label class="brk-mode-opt"><input type="radio" name="brkMode" value="live"><span><b>Live account</b><small>Your real-money Alpaca account.</small></span></label>
             </fieldset>
-            <p class="brk-live-note" id="brkLiveNote" style="display:none">Live account — real money. These keys are validated against your LIVE Alpaca account and stored as the bot's live account. Connecting only stores your keys: the bot stays paused until you resume it on the K1 Agentic page, and it then trades this account for real.</p>
+            <p class="brk-live-note" id="brkLiveNote" style="display:none">Live account — real money. These keys are validated against your LIVE Alpaca account and stored as the bot's live account. Connecting only stores your keys: the bot stays paused until you resume it on the VixionBot Agentic page, and it then trades this account for real.</p>
             <label class="brk-field"><span>API Key ID</span><input id="brkKey" type="text" placeholder="PKXXXXXXXXXXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false"/></label>
             <label class="brk-field"><span>API Secret Key</span><input id="brkSecret" type="password" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="off"/></label>
             <div class="brk-error" id="brkError" role="alert"></div>
@@ -134,7 +134,7 @@
     busy = true; $('brkDisconnect').disabled = true; formError('');
     try {
       await api('/api/kiaan/disconnect', { method: 'POST', body: '{}' });
-      notice('Alpaca disconnected. K1 Agentic no longer has an account to trade.');
+      notice('Alpaca disconnected. VixionBot Agentic no longer has an account to trade.');
       await refresh();
     } catch (error) { formError(error.message); }
     finally { busy = false; $('brkDisconnect').disabled = false; }

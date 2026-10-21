@@ -1,6 +1,6 @@
 /* Automated Trading Agreement gate — client (Johnny 2026-10-19).
  *
- * Renders the mandatory consent modal on the K1 Agentic page. The
+ * Renders the mandatory consent modal on the VixionBot Agentic page. The
  * terms shown here are fetched from GET /api/agreement/state, whose
  * payload is built from the server's canonical module
  * (lib/agreement.js) — the same text an acceptance row stores, so

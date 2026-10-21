@@ -24,9 +24,9 @@ const service = read('../lib/kiaan/service.js');
 test('index.html has the Brokers nav entry (desktop + mobile), page container, and bumped assets', () => {
   assert.ok((html.match(/data-page="brokers"/g) || []).length >= 2, 'desktop and mobile nav both carry Brokers');
   assert.ok(html.includes('id="page-brokers"'), 'page-brokers container exists');
-  assert.ok(html.includes('/js/brokers.js?v=20261019a'), 'brokers.js included with a cache-busting tag');
+  assert.ok(html.includes('/js/brokers.js?v=20261020b'), 'brokers.js included with a cache-busting tag');
   assert.ok(html.includes('/public/css/brokers.css?v=20261018b'), 'brokers.css included with a cache-busting tag');
-  assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the routing change');
+  assert.ok(html.includes('/js/app.js?v=20261020b'), 'app.js tag bumped for the routing change');
 });
 
 test('app.js routes the brokers page through window.brokersPage', () => {
@@ -61,7 +61,7 @@ test('broker cards: Alpaca available, IBKR + Tradier in development with no capt
   assert.ok((brokersJs.match(/In development/g) || []).length >= 2, 'IBKR and Tradier both marked In development');
   assert.ok(brokersJs.includes('Robinhood and Fidelity do not offer an official trading API'), 'honest no-API note present');
   assert.ok(brokersJs.includes('Alpaca Broker API'), 'in-app account-opening (Broker API) noted as planned');
-  assert.ok(brokersJs.includes('Connect a brokerage once; K1 Agentic trades only the account you connect; you can disconnect anytime.'), 'plain-language intro line present');
+  assert.ok(brokersJs.includes('Connect a brokerage once; VixionBot Agentic trades only the account you connect; you can disconnect anytime.'), 'plain-language intro line present');
   // No credential capture or connect path for the in-development brokers.
   for (const bad of ['/api/ibkr', '/api/interactive', '/api/tradier', 'ibkrKey', 'tradierKey']) {
     assert.ok(!brokersJs.includes(bad), `brokers.js must not contain ${bad}`);
@@ -84,7 +84,7 @@ test('how-to-connect instructions module sits in the Alpaca card for every user 
   assert.ok(brokersJs.includes('We verify the keys with Alpaca before saving anything'), 'step 4: verified before anything is saved');
   assert.ok(brokersJs.includes("the pair doesn't match or the Paper/Live choice is wrong"), 'step 4: rejection means mismatched pair or wrong choice');
   assert.ok(brokersJs.includes('Keys are stored encrypted and never shown again'), 'step 5: encrypted, never shown again');
-  assert.ok(brokersJs.includes("Connecting doesn't turn trading on — enable the bot on the K1 Agentic page"), 'step 5: connecting does not enable trading');
+  assert.ok(brokersJs.includes("Connecting doesn't turn trading on — enable the bot on the VixionBot Agentic page"), 'step 5: connecting does not enable trading');
   // Muted design language: styled from brokers.css theme vars, no gradient.
   assert.ok(/\.brk-help\{[^}]*var\(--line\)/.test(brokersCss), 'module styled with the page theme vars');
   assert.ok(!/\.brk-help[^{]*\{[^}]*gradient/.test(brokersCss), 'module uses no gradient');

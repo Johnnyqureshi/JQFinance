@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Countertrend Setup Scanner ──────────────────────
+// ── VixionBot — Countertrend Setup Scanner ──────────────────────
 
 const ctScanner = (() => {
 

@@ -1,4 +1,4 @@
-# QureshiFinance — robots.txt
+# VixionBot — robots.txt
 #
 # Content-Signal policy for this site's content:
 #   ai-train=no
@@ -41,4 +41,4 @@ User-agent: ICC-Crawler
 User-agent: PetalBot
 Disallow: /
 
-Sitemap: https://qureshifinance.com/sitemap.xml
+Sitemap: https://vixionbot.com/sitemap.xml

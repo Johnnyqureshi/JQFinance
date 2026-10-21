@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Verify your email — Qureshi Finance</title>
+<title>Verify your email — VixionBot</title>
 <link rel="stylesheet" href="/public/css/style.css?v=20260927d"/>
 <style>
   .verify-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -38,7 +38,7 @@
     icon.style.color = ok ? '#1dd6a3' : '#e5484d';
     title.textContent = t;
     msg.textContent = m;
-    actions.innerHTML = '<a class="verify-btn" href="/">Go to Qureshi Finance</a>' +
+    actions.innerHTML = '<a class="verify-btn" href="/">Go to VixionBot</a>' +
       (showResend
         ? '<p style="margin-top:16px"><input id="resendEmail" type="email" placeholder="you@example.com" ' +
           'style="padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:inherit;width:100%;max-width:280px;margin-bottom:10px" /></p>' +
@@ -61,7 +61,7 @@
     .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
     .then(function (res) {
       if (res.ok && res.d.ok) {
-        done(true, 'Email verified', 'Your email is confirmed and you are now signed in. Welcome to Qureshi Finance.');
+        done(true, 'Email verified', 'Your email is confirmed and you are now signed in. Welcome to VixionBot.');
       } else if (res.d.code === 'expired') {
         done(false, 'Link expired', 'This verification link has expired. Enter your email and we will send you a fresh one.', true);
       } else if (res.d.code === 'used') {

@@ -1,4 +1,4 @@
-/* ── Johnny Qureshi Finance — Stock Scanner ──────────────────────────────────── */
+/* ── VixionBot — Stock Scanner ──────────────────────────────────── */
 (function () {
   'use strict';
 

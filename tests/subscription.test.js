@@ -104,7 +104,7 @@ test('checkout params: subscription mode with inline price_data (4999 USD, month
   assert.equal(item.price_data.unit_amount, 4999);
   assert.equal(item.price_data.currency, 'usd');
   assert.equal(item.price_data.recurring.interval, 'month');
-  assert.equal(item.price_data.product_data.name, 'QureshiFinance Agentic Trading');
+  assert.equal(item.price_data.product_data.name, 'VixionBot Agentic Trading');
   assert.equal(p.client_reference_id, '7');
 });
 
@@ -231,7 +231,7 @@ test('checkout-session creation with a stubbed key posts the inline price to Str
   assert.ok(body.includes('[unit_amount]=4999'), 'inline price_data amount 4999 sent');
   assert.ok(body.includes('[currency]=usd'), 'usd sent');
   assert.ok(body.includes('[recurring][interval]=month'), 'monthly recurring sent');
-  assert.ok(body.includes('QureshiFinance Agentic Trading'), 'product name sent');
+  assert.ok(body.includes('VixionBot Agentic Trading'), 'product name sent');
 });
 
 test('checkout route without a key records a founding signup and charges nothing', async () => {
@@ -378,7 +378,7 @@ test('index.html carries the trial popup markup and the trial copy (muted theme 
   assert.ok(html.includes('id="trialOverlay"'), 'trial overlay present');
   assert.ok(html.includes('id="trialCta"'), 'trial CTA present');
   assert.ok(html.includes('Your first 14 days are free'), 'headline present');
-  assert.ok(html.includes('14 days of K1 Agentic trading — then $49.99/mo. Cancel anytime.'), 'body copy present');
+  assert.ok(html.includes('14 days of VixionBot Agentic trading — then $49.99/mo. Cancel anytime.'), 'body copy present');
   assert.ok(html.includes('Start my free trial'), 'primary button label present');
   assert.ok(html.includes('First 14 days free, then'), 'plan block trial line present');
   assert.ok(!/guarantee|guaranteed|profit/i.test(html.slice(html.indexOf('id="trialOverlay"'), html.indexOf('id="trialOverlay"') + 1200)), 'no profit promises in the trial popup');
@@ -404,7 +404,7 @@ test('index.html carries the popup markup, ONE $49.99 plan, entry points, bumped
   assert.ok(html.includes('id="subscriptionKiaanBtn"'), 'Kiaan page entry point present');
   assert.ok(html.includes('/js/subscription.js?v=20261020a'), 'subscription.js tag bumped');
   assert.ok(html.includes('/public/css/subscription.css?v=20261020a'), 'subscription.css tag bumped');
-  assert.ok(html.includes('/js/app.js?v=20261018b'), 'app.js tag bumped for the login hook');
+  assert.ok(html.includes('/js/app.js?v=20261020b'), 'app.js tag bumped for the login hook');
   assert.ok(!/paypal/i.test(html), 'no PayPal in this build (phase 2)');
 });
 
@@ -431,7 +431,7 @@ test('annual checkout params: 53989 USD, yearly interval, same product, identica
   assert.equal(item.price_data.unit_amount, 53989);
   assert.equal(item.price_data.currency, 'usd');
   assert.equal(item.price_data.recurring.interval, 'year');
-  assert.equal(item.price_data.product_data.name, 'QureshiFinance Agentic Trading');
+  assert.equal(item.price_data.product_data.name, 'VixionBot Agentic Trading');
   assert.equal(annual.subscription_data.trial_end, monthly.subscription_data.trial_end,
     'trial_end computation is identical for the annual plan');
   assert.equal(annual.metadata.billing_plan, 'annual');

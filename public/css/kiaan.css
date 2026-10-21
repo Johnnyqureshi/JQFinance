@@ -1,4 +1,4 @@
-/* Warrior Bot skin — manual-approval intraday desk, aligned to the Qureshi Finance theme. */
+/* Warrior Bot skin — manual-approval intraday desk, aligned to the VixionBot theme. */
 .war-shell{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--panel:var(--card);--panel2:var(--card2);--mint:var(--teal);--amber:var(--gold);--danger:var(--red);--violet:#b48cff;max-width:1480px;margin:auto;padding:36px clamp(16px,4vw,56px) 84px;font-family:Inter,sans-serif}
 #page-warrior{background:var(--bg);color:var(--t1)}
 .war-hero,.war-head,.war-command{display:flex;justify-content:space-between;gap:24px}

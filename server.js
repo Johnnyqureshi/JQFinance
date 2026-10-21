@@ -937,7 +937,7 @@ async function fetchKalshiSeriesCategory(category) {
   if (cached && Date.now() - cached.at < KALSHI_SERIES_TTL) return cached.series;
   const query = new URLSearchParams({ category, limit: '1000' });
   const response = await fetch(`${KALSHI_API_BASE}/series?${query}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'Qureshi-Finance-Search/1.0' },
+    headers: { Accept: 'application/json', 'User-Agent': 'VixionBot-Search/1.0' },
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) throw new Error(`Kalshi series returned ${response.status}`);
@@ -955,7 +955,7 @@ async function fetchKalshiSeriesMarkets(seriesTicker) {
     mve_filter: 'exclude',
   });
   const response = await fetch(`${KALSHI_API_BASE}/markets?${query}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'Qureshi-Finance-Search/1.0' },
+    headers: { Accept: 'application/json', 'User-Agent': 'VixionBot-Search/1.0' },
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) throw new Error(`Kalshi markets returned ${response.status}`);
@@ -2830,7 +2830,7 @@ const WSB_BLOCKLIST = new Set([
 app.get('/api/wsb', async (req, res) => {
   try {
     const r = await fetch('https://apewisdom.io/api/v1.0/filter/wallstreetbets/page/1', {
-      headers: { 'User-Agent': 'JohnnyQureshiFinance/1.0', 'Accept': 'application/json' },
+      headers: { 'User-Agent': 'VixionBot/1.0', 'Accept': 'application/json' },
     });
     if (!r.ok) return res.json({ tickers: [], risers: [], error: 'ApeWisdom unavailable' });
     const data = await r.json();
@@ -2981,10 +2981,10 @@ app.get('/api/elevenlabs/signed-url', requireAuth, async (req, res) => {
 });
 
 // ── AI Text Chat (AIML API) ────────────────────────────────────────────────────
-const AGENT_SYSTEM_PROMPT = `You are QF Agent — an expert AI financial assistant embedded inside Qureshi Finance, a professional stock research and real-time analysis platform.
+const AGENT_SYSTEM_PROMPT = `You are QF Agent — an expert AI financial assistant embedded inside VixionBot, a professional stock research and real-time analysis platform.
 
 PLATFORM OVERVIEW:
-Qureshi Finance is a single-page application with four main pages:
+VixionBot is a single-page application with four main pages:
 1. HOME / SEARCH: Search any stock ticker. Displays real-time Trading Signals (BUY/HOLD/SELL), RSI gauge, support & resistance levels, direction bias, volume analysis, intraday VWAP console, analyst ratings donut chart, price targets, valuation metrics, and recent news.
 2. MARKETS: Top daily gainers and losers, r/WallStreetBets trending stocks (from ApeWisdom), and a live scrolling ticker tape for major indices and mega-caps.
 3. WATCHLIST: User's personally saved stocks with live prices, plus a Sector Rotation Heatmap showing momentum across 11 major ETF sectors (SPY, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLB, XLRE, XLU).
@@ -6495,12 +6495,12 @@ app.use((error, req, res, next) => {
     });
   }
   return res.status(status).type('html').send(`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><title>Qureshi Finance</title>
+    <html lang="en"><head><meta charset="utf-8"><title>VixionBot</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e7edf7;
     display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
     main{max-width:460px}h1{font-size:1.5rem}p{color:#aebbd0;line-height:1.6}</style>
-    </head><body><main><h1>Qureshi Finance is temporarily unavailable</h1>
+    </head><body><main><h1>VixionBot is temporarily unavailable</h1>
     <p>Please refresh in a moment. Your account and trading records were not changed.</p>
     </main></body></html>`);
 });
@@ -6535,7 +6535,7 @@ process.once('SIGINT', () => { void stopAutomatedState('SIGINT'); });
 
 function startServer() {
   httpServer = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Qureshi Finance on :${PORT}`);
+  console.log(`VixionBot on :${PORT}`);
   // Kiaan Bot first run is delayed by the service itself (~150s). Ships
   // disabled: the loop idles until Johnny enables it.
   kiaanService.start();

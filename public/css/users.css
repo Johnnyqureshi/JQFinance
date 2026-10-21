@@ -1,4 +1,4 @@
-/* USERS admin page (owner only) — aligned to the Qureshi Finance theme
+/* USERS admin page (owner only) — aligned to the VixionBot theme
    vars used by brokers.css/kiaan.css: navy/slate panels, site green the
    only accent, no gradients. */
 .usr-shell{--ink:var(--t1);--muted:var(--t2);--dim:var(--t3);--line:var(--border);--panel:var(--card);--panel2:var(--card2);--mint:var(--teal);--danger:var(--red);max-width:1180px;margin:auto;padding:36px clamp(16px,4vw,56px) 84px;font-family:Inter,sans-serif;color:var(--ink)}

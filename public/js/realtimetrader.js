@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Realtime Trader Console (Intraday) ─────────────────
+// ── VixionBot — Realtime Trader Console (Intraday) ─────────────────
 
 const rtTrader = (() => {
   const REFRESH_SECS = 60;

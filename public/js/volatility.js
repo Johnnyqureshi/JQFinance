@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Volatility Expansion Scanner ────────────────────
+// ── VixionBot — Volatility Expansion Scanner ────────────────────
 
 const veScanner = (() => {
 

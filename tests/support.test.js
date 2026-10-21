@@ -87,8 +87,8 @@ test('GET /contact serves 200 with the support address and the full form', async
   const res = await fetch(`${main.base}/contact`);
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.ok(body.includes('support@qureshifinance.com'), 'support address shown');
-  assert.ok(body.includes('mailto:support@qureshifinance.com'), 'address is a mailto link');
+  assert.ok(body.includes('support@vixionbot.com'), 'support address shown');
+  assert.ok(body.includes('mailto:support@vixionbot.com'), 'address is a mailto link');
   assert.ok(body.includes('Contact us'), 'headline present');
   assert.ok(body.includes('Questions about your account, billing, or the bot'), 'intro line present');
   assert.ok(body.includes('We aim to reply within one business day'), 'reply aim stated, not promised');
@@ -311,7 +311,7 @@ test('wiring: server mounts support; footer, USERS section, and broker help link
   assert.ok(serverJs.includes('mountSupport({ app, db })'), 'server mounts the support routes');
   assert.ok(html.includes('<footer class="site-footer">'), 'site footer rendered by the shell');
   assert.ok(html.includes('<a href="/contact">Contact</a>'), 'footer carries the Contact link');
-  assert.ok(html.includes('support@qureshifinance.com'), 'footer shows the support address');
+  assert.ok(html.includes('support@vixionbot.com'), 'footer shows the support address');
   assert.ok(html.includes('/public/css/contact.css?v=20261019a'), 'contact.css linked with a cache-busting tag');
   assert.ok(usersJs.includes('Support messages'), 'USERS page renders the support section');
   assert.ok(usersJs.includes('supportMessages'), 'USERS page reads the payload supportMessages');

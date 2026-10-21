@@ -1,4 +1,4 @@
-// ── Johnny Qureshi Finance — Explosive Earnings Setup Scanner ────────────────
+// ── VixionBot — Explosive Earnings Setup Scanner ────────────────
 
 const eeScanner = (() => {
 
